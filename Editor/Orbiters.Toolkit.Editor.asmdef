@@ -1,9 +1,9 @@
 {
   "name": "Orbiters.Toolkit.Editor",
   "rootNamespace": "Orbiters.Toolkit.Editor",
-  "references": ["MCPForUnity.Editor"],
+  "references": [],
   "includePlatforms": ["Editor"],
   "overrideReferences": true,
-  "precompiledReferences": ["Newtonsoft.Json.dll"],
+  "precompiledReferences": [],
   "autoReferenced": true
 }

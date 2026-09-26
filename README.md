@@ -1,9 +1,40 @@
 # Orbiters Toolkit
 
-Unity editor utilities exposed through MCP for Unity. Requires a graphical Unity
-2022.3 editor and MCP for Unity 9.7.1 installed in the project (including its
-`MCPForUnity.Editor` assembly). Install MCP for Unity through its documented Git
-URL first; this package does not install or fork the MCP server.
+Unity 2022.3 editor utilities for mirror posing and optional AI integration.
+Mirror posing works without MCP. The screenshot adapter compiles separately when
+MCP for Unity 9.7.1 or newer is installed; this package does not install the server.
+
+## Mirror posing
+
+In XRay Gizmos, select an avatar or one of its bones and enable **Mirror** in the
+Scene-view toolbar or the XRay Gizmos window. Rotate or move one paired bone in
+the Scene view or Inspector; Toolkit mirrors the edited channels to its partner
+across the avatar root's **local X** plane. The mirror remains scoped to that rig
+when selection changes. Toggle it off and on with another avatar selected to switch.
+The window reports the active rig, pair count and selected partner.
+
+Humanoid bone mappings take priority. Generic rigs use matching hierarchy paths
+with `Left`/`Right`, `left`/`right`, `LEFT`/`RIGHT`, or `.L`/`.R`, `_L`/`_R`,
+`-L`/`-R`, and space-separated side markers (including lowercase markers).
+Markers can precede or follow the bone name; namespaced humanoid names also work.
+Ambiguous paths, unpaired bones and center bones are skipped.
+
+The mesh bind pose supplies the reference frames, accounting for different local
+bone axes. Pairs missing complete bind-pose data use the pose at enable time as a
+relative reference, shown in the status. Enabling Mirror never changes the pose.
+Editing one side subsequently replaces the opposite side's edited channels.
+If both partners are edited in the same operation, both explicit edits are kept.
+Mirrored changes join the source Undo operation and record prefab overrides.
+
+Mirror is an edit-mode tool, pauses during animation preview/recording, and turns
+off on play-mode changes, script reload or changes to the captured bone hierarchy.
+It does not mirror scale, solve IK, bake animation or continuously drive bones.
+Bone and ancestor scales must be positive and uniform. Turn Mirror off before
+changing reference scale or rig structure, then enable it again.
+
+Other editor tools can call `Orbiters.Toolkit.Editor.Posing.MirrorPoseService`
+(`Enable(root, renderer)`, `Disable()`, `GetPartner(bone)`, `Changed`).
+Its assembly is `Orbiters.Toolkit.Editor`; it has no XRayGizmos or MCP dependency.
 
 ## Install AI integration
 

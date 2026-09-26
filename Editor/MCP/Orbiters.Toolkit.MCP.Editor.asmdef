@@ -1,0 +1,13 @@
+{
+  "name": "Orbiters.Toolkit.MCP.Editor",
+  "rootNamespace": "Orbiters.Toolkit.Editor",
+  "references": ["MCPForUnity.Editor"],
+  "includePlatforms": ["Editor"],
+  "overrideReferences": true,
+  "precompiledReferences": ["Newtonsoft.Json.dll"],
+  "autoReferenced": true,
+  "defineConstraints": ["ORBITERS_TOOLKIT_MCP"],
+  "versionDefines": [
+    { "name": "com.coplaydev.unity-mcp", "expression": "9.7.1", "define": "ORBITERS_TOOLKIT_MCP" }
+  ]
+}

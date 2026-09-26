@@ -1,9 +1,9 @@
 {
   "name": "orbiters.toolkit",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "displayName": "Orbiters Toolkit",
-  "description": "Editor utilities for inspecting and capturing Unity tool windows through MCP for Unity.",
+  "description": "Unity editor utilities for mirror posing and optional AI-assisted window capture.",
   "unity": "2022.3",
   "author": { "name": "Orbiters", "url": "https://orbiters.cc" },
-  "dependencies": { "com.unity.nuget.newtonsoft-json": "3.0.2" }
+  "dependencies": {}
 }
