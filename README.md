@@ -4,6 +4,22 @@ Unity 2022.3 editor utilities for mirror posing and optional AI integration.
 Mirror posing works without MCP. The screenshot adapter compiles separately when
 MCP for Unity 9.7.1 or newer is installed; this package does not install the server.
 
+## Shared editor services
+
+From 0.2.1, MCB and My Avatar share account storage and Magic Sync through
+`AuthenticationService`, environment/API URL handling through
+`OrbitersEnvironment`, and authenticated requests through `OrbitersApi`.
+The existing per-environment Unity preferences account remains the common store;
+disconnecting in either tool disconnects the shared account.
+
+`OrbitersAccountView`, `OrbitersSignInElement` and `OrbitersAccountElement` provide
+common account controls. `OrbitersGlow` and `OrbitersGlowSurfaceElement` render
+the animated background; `OrbitersVectorLogo` draws absolute SVG M/L/C/Z paths.
+These editor-guarded services live in `Orbiters.Toolkit`, allowing components with
+editor-only helpers to reference them. Player builds contain none of this editor
+logic. `Orbiters.Toolkit.Editor` continues to own posing and screenshot utilities.
+The package also depends on Unity's Newtonsoft JSON package.
+
 ## Mirror posing
 
 In XRay Gizmos, select an avatar or one of its bones and enable **Mirror** in the

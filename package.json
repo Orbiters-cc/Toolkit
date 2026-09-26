@@ -1,9 +1,14 @@
 {
   "name": "orbiters.toolkit",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "displayName": "Orbiters Toolkit",
-  "description": "Unity editor utilities for mirror posing and optional AI-assisted window capture.",
+  "description": "Shared Orbiters account, editor UI, mirror posing and background window capture.",
   "unity": "2022.3",
-  "author": { "name": "Orbiters", "url": "https://orbiters.cc" },
-  "dependencies": {}
+  "author": {
+    "name": "Orbiters",
+    "url": "https://orbiters.cc"
+  },
+  "dependencies": {
+    "com.unity.nuget.newtonsoft-json": "3.2.1"
+  }
 }

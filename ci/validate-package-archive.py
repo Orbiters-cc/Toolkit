@@ -4,7 +4,7 @@ import zipfile
 from pathlib import PurePosixPath
 
 
-PACKAGE_ROOTS = ("Editor",)
+PACKAGE_ROOTS = ("Editor", "Runtime")
 ROOT_FILES = ("README.md", "package.json")
 FORBIDDEN_ROOTS = (".git", ".github", ".idea", ".agents", ".codex")
 
