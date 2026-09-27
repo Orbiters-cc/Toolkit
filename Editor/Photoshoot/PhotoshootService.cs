@@ -138,8 +138,8 @@ namespace Orbiters.Toolkit.Editor.Photoshoot
             private string lastFaceBlendshapeKey;
             private Color? lastAmbient;
             private Transform[] sourceTransforms, copyTransforms;
-            private bool hasHeadRegion, hasTorsoRegion;
-            private Bounds headRegion, torsoRegion;
+            private bool hasHeadRegion, hasTorsoRegion, hasBodyRegion;
+            private Bounds headRegion, torsoRegion, bodyRegion;
             private ShotKind lastPreviewShotKind = ShotKind.Thumbnail;
 
             public Texture PreviewTexture => GetPreviewTexture(lastPreviewShotKind);
@@ -198,9 +198,9 @@ namespace Orbiters.Toolkit.Editor.Photoshoot
                         MeasurePosedGeometry();
                     }
                     lastFaceBlendshapeKey = faceBlendshapeKey;
-                    Bounds bounds = CenterAvatarOnStage(avatarCopy, LiveSceneStageOrigin);
+                    CenterOnStage();
                     ApplyAvatarRotation(avatarCopy, request.avatarYawDegrees);
-                    bounds = CenterAvatarOnStage(avatarCopy, LiveSceneStageOrigin);
+                    Bounds bounds = CenterOnStage();
 
                     LastFrame = MeasureFrame(bounds);
 
@@ -471,7 +471,7 @@ namespace Orbiters.Toolkit.Editor.Photoshoot
             // the vertices each bone moves, in avatar space so turning the avatar keeps them valid.
             private void MeasurePosedGeometry()
             {
-                hasHeadRegion = hasTorsoRegion = false;
+                hasHeadRegion = hasTorsoRegion = hasBodyRegion = false;
                 var animator = avatarCopy.GetComponentInChildren<Animator>(true);
                 bool human = animator != null && animator.isHuman;
                 Transform head = human ? animator.GetBoneTransform(HumanBodyBones.Head) : null;
@@ -501,20 +501,23 @@ namespace Orbiters.Toolkit.Editor.Photoshoot
                     foreach (var renderer in avatarCopy.GetComponentsInChildren<SkinnedMeshRenderer>(true))
                     {
                         if (renderer == null || renderer.sharedMesh == null) continue;
+                        // Nothing ever looks at the photoshoot scene, so only off-screen updates keep skinning current for
+                        // the photoshoot camera. Unity's bounds for those are loose boxes around each bone; framing uses
+                        // the baked vertices instead.
+                        renderer.updateWhenOffscreen = true;
+                        if (!renderer.enabled || !renderer.gameObject.activeInHierarchy) continue;
                         renderer.BakeMesh(baked);
                         var vertices = baked.vertices;
-                        // Unity's own off-screen bounds are loose boxes around each bone; the baked ones are exact and keep
-                        // framing tight.
-                        renderer.updateWhenOffscreen = false;
-                        SkinnedMeshBounds.Refresh(renderer, vertices);
-                        if (!human || !renderer.enabled || !renderer.gameObject.activeInHierarchy) continue;
+                        if (vertices.Length == 0) continue;
+                        Matrix4x4 matrix = toAvatar * SkinnedMeshBounds.BakedToWorld(renderer);
+                        for (int i = 0; i < vertices.Length; i++) Include(ref bodyRegion, ref hasBodyRegion, matrix.MultiplyPoint3x4(vertices[i]));
+                        if (!human) continue;
 
                         var bones = renderer.bones;
                         var weights = renderer.sharedMesh.boneWeights;
                         if (weights.Length != vertices.Length || bones.Length == 0) continue;
                         var boneRegions = new int[bones.Length];
                         for (int i = 0; i < bones.Length; i++) boneRegions[i] = RegionOf(bones[i]);
-                        Matrix4x4 matrix = toAvatar * SkinnedMeshBounds.BakedToWorld(renderer);
                         for (int i = 0; i < vertices.Length; i++)
                         {
                             int bone = weights[i].boneIndex0;
@@ -528,11 +531,36 @@ namespace Orbiters.Toolkit.Editor.Photoshoot
                             else headRegion.Encapsulate(point);
                         }
                     }
+                    // Rigid meshes (accessories, props) count with their own bounds; particles, trails and lines do not.
+                    foreach (var renderer in avatarCopy.GetComponentsInChildren<MeshRenderer>(true))
+                    {
+                        if (!renderer.enabled || !renderer.gameObject.activeInHierarchy || renderer.bounds.size.sqrMagnitude <= 0f) continue;
+                        var local = TransformBounds(toAvatar, renderer.bounds);
+                        Include(ref bodyRegion, ref hasBodyRegion, local.min);
+                        Include(ref bodyRegion, ref hasBodyRegion, local.max);
+                    }
                 }
                 finally
                 {
                     UnityEngine.Object.DestroyImmediate(baked);
                 }
+            }
+
+            private static void Include(ref Bounds bounds, ref bool has, Vector3 point)
+            {
+                if (!has) { bounds = new Bounds(point, Vector3.zero); has = true; }
+                else bounds.Encapsulate(point);
+            }
+
+            // The avatar's outline for centring and framing: the baked geometry when measured, else the renderers' bounds.
+            private Bounds VisibleBounds() =>
+                hasBodyRegion ? TransformBounds(avatarCopy.transform.localToWorldMatrix, bodyRegion) : CalculateVisibleBounds(avatarCopy);
+
+            private Bounds CenterOnStage()
+            {
+                Bounds bounds = VisibleBounds();
+                avatarCopy.transform.position += new Vector3(LiveSceneStageOrigin.x - bounds.center.x, LiveSceneStageOrigin.y - bounds.min.y, LiveSceneStageOrigin.z - bounds.center.z);
+                return VisibleBounds();
             }
 
             private FrameInfo MeasureFrame(Bounds bounds)
@@ -1107,35 +1135,37 @@ namespace Orbiters.Toolkit.Editor.Photoshoot
                 new LightPresetOption
                 {
                     displayName = "Cinematic Rim",
-                    ambientColor = new Color(0.05f, 0.055f, 0.07f),
-                    keyColor = new Color(0.62f, 0.72f, 1f),
-                    keyIntensity = 0.22f,
-                    keyRotation = new Vector3(24f, -20f, 0f),
+                    // Avatar shaders are mostly toon shaders that light a surface by the strongest light whatever its side,
+                    // so a dark, rim-lit look comes from a low side key with softer coloured rims, not strong back lights.
+                    ambientColor = new Color(0.04f, 0.045f, 0.06f),
+                    keyColor = new Color(1f, 0.93f, 0.85f),
+                    keyIntensity = 0.85f,
+                    keyRotation = new Vector3(26f, -80f, 0f),
                     fillColor = new Color(0.4f, 0.5f, 0.8f),
-                    fillIntensity = 0.04f,
+                    fillIntensity = 0.03f,
                     fillPosition = new Vector3(-2.0f, 1.2f, 2.4f),
                     rimColor = new Color(0.35f, 0.85f, 1f),
-                    rimIntensity = 1.9f,
-                    rimRotation = new Vector3(165f, 52f, 0f),
-                    rim2Color = new Color(1f, 0.58f, 0.3f),
-                    rim2Intensity = 1.6f,
-                    rim2Rotation = new Vector3(165f, -52f, 0f)
+                    rimIntensity = 0.55f,
+                    rimRotation = new Vector3(165f, 55f, 0f),
+                    rim2Color = new Color(1f, 0.6f, 0.3f),
+                    rim2Intensity = 0.45f,
+                    rim2Rotation = new Vector3(165f, -55f, 0f)
                 },
                 new LightPresetOption
                 {
                     displayName = "Neon Night",
-                    ambientColor = new Color(0.09f, 0.06f, 0.14f),
-                    keyColor = new Color(0.78f, 0.55f, 1f),
-                    keyIntensity = 0.45f,
-                    keyRotation = new Vector3(30f, -30f, 0f),
+                    ambientColor = new Color(0.07f, 0.05f, 0.12f),
+                    keyColor = new Color(0.85f, 0.5f, 1f),
+                    keyIntensity = 0.7f,
+                    keyRotation = new Vector3(30f, -70f, 0f),
                     fillColor = new Color(0.4f, 0.3f, 0.9f),
-                    fillIntensity = 0.12f,
+                    fillIntensity = 0.08f,
                     fillPosition = new Vector3(-2.0f, 1.2f, 2.4f),
-                    rimColor = new Color(1f, 0.25f, 0.75f),
-                    rimIntensity = 1.5f,
+                    rimColor = new Color(0.2f, 0.9f, 1f),
+                    rimIntensity = 0.6f,
                     rimRotation = new Vector3(160f, 55f, 0f),
-                    rim2Color = new Color(0.2f, 0.9f, 1f),
-                    rim2Intensity = 1.4f,
+                    rim2Color = new Color(1f, 0.3f, 0.7f),
+                    rim2Intensity = 0.5f,
                     rim2Rotation = new Vector3(160f, -55f, 0f)
                 }
             };
@@ -1426,14 +1456,6 @@ namespace Orbiters.Toolkit.Editor.Photoshoot
             {
                 // Older Unity versions may expose the method but reject invocation for render textures.
             }
-        }
-
-        private static Bounds CenterAvatarOnStage(GameObject avatarRoot, Vector3 stageOrigin)
-        {
-            Bounds bounds = CalculateVisibleBounds(avatarRoot);
-            Vector3 offset = new Vector3(stageOrigin.x - bounds.center.x, stageOrigin.y - bounds.min.y, stageOrigin.z - bounds.center.z);
-            avatarRoot.transform.position += offset;
-            return CalculateVisibleBounds(avatarRoot);
         }
 
         private static void ApplyAvatarRotation(GameObject avatarRoot, float yawDegrees)
