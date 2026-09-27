@@ -1,8 +1,8 @@
 {
   "name": "orbiters.toolkit",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "displayName": "Orbiters Toolkit",
-  "description": "Shared Orbiters account, editor UI, mirror posing and background window capture.",
+  "description": "Shared Orbiters account, editor UI, avatar photoshoot, mirror posing and background window capture.",
   "unity": "2022.3",
   "author": {
     "name": "Orbiters",

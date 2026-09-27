@@ -1,0 +1,613 @@
+/* Photoshoot panel shared by Orbiters tools (MCB asset media, My Avatar thumbnails). */
+
+.ps-panel {
+    margin-bottom: 14px;
+}
+
+.ps-panel Button {
+    margin: 0;
+    border-width: 0;
+    -unity-font-style: normal;
+    transition-property: background-color, border-color, color, scale, opacity;
+    transition-duration: 0.14s, 0.14s, 0.14s, 0.2s, 0.14s;
+    transition-timing-function: ease-out, ease-out, ease-out, ease-out-back, ease-out;
+}
+
+.ps-panel Button.ps-pressed {
+    scale: 0.94 0.94;
+}
+
+.ps-panel Button:disabled {
+    opacity: 0.45;
+}
+
+/* ---- Back ---------------------------------------------------------------------------------------- */
+
+.ps-panel .ps-back {
+    align-self: flex-start;
+    height: 28px;
+    padding-left: 12px;
+    padding-right: 14px;
+    margin-bottom: 12px;
+    border-radius: 14px;
+    background-color: rgba(255, 255, 255, 0.06);
+    color: #d9d9d9;
+    font-size: 12px;
+}
+
+.ps-panel .ps-back:hover:enabled {
+    background-color: rgba(255, 255, 255, 0.12);
+    color: #ffffff;
+}
+
+/* ---- Stage --------------------------------------------------------------------------------------- */
+
+.ps-stage {
+    position: relative;
+    height: 240px;
+    margin-bottom: 10px;
+    border-radius: 16px;
+    overflow: hidden;
+    background-color: #161616;
+    border-width: 1px;
+    border-color: rgba(255, 255, 255, 0.06);
+}
+
+.ps-stage__image {
+    position: absolute;
+    left: 0;
+    top: 0;
+    right: 0;
+    bottom: 0;
+}
+
+.ps-stage__tile {
+    position: absolute;
+    left: 14px;
+    bottom: 14px;
+    border-radius: 12px;
+    overflow: hidden;
+    background-color: #161616;
+    border-width: 2px;
+    border-color: rgba(255, 255, 255, 0.85);
+}
+
+.ps-tag {
+    position: absolute;
+    height: 20px;
+    padding-left: 8px;
+    padding-right: 8px;
+    border-radius: 10px;
+    background-color: rgba(10, 10, 10, 0.62);
+    color: #f2f2f2;
+    font-size: 10px;
+    -unity-font-style: bold;
+    -unity-text-align: middle-center;
+    letter-spacing: 0.4px;
+}
+
+.ps-tag--banner {
+    left: 12px;
+    top: 12px;
+}
+
+.ps-tag--tile {
+    left: 6px;
+    top: 6px;
+}
+
+/* ---- Cards --------------------------------------------------------------------------------------- */
+
+.ps-card {
+    margin-bottom: 10px;
+    padding: 12px 14px 12px 14px;
+    border-radius: 14px;
+    background-color: #242424;
+    border-width: 1px;
+    border-color: rgba(255, 255, 255, 0.05);
+}
+
+.ps-card__header {
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 8px;
+}
+
+.ps-card__title {
+    color: #f2f2f2;
+    font-size: 12px;
+    -unity-font-style: bold;
+}
+
+.ps-caption {
+    color: #8f8f8f;
+    font-size: 11px;
+    white-space: normal;
+}
+
+.ps-link {
+    height: 22px;
+    padding-left: 8px;
+    padding-right: 8px;
+    border-radius: 11px;
+    background-color: rgba(0, 0, 0, 0);
+    color: #9a9a9a;
+    font-size: 11px;
+}
+
+.ps-panel .ps-link:hover:enabled {
+    background-color: rgba(255, 255, 255, 0.08);
+    color: #ffffff;
+}
+
+/* ---- Shots --------------------------------------------------------------------------------------- */
+
+.ps-shots {
+    padding-top: 6px;
+    padding-bottom: 6px;
+}
+
+.ps-shot {
+    flex-direction: row;
+    align-items: center;
+    min-height: 40px;
+}
+
+.ps-shot--divided {
+    border-top-width: 1px;
+    border-top-color: rgba(255, 255, 255, 0.05);
+}
+
+.ps-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 4px;
+    margin-right: 10px;
+    background-color: #5c5c5c;
+    transition-property: background-color;
+    transition-duration: 0.2s;
+}
+
+.ps-dot--set {
+    background-color: #00DA6D;
+}
+
+.ps-shot__text {
+    flex-grow: 1;
+    flex-shrink: 1;
+    min-width: 0;
+}
+
+.ps-shot__title {
+    color: #f2f2f2;
+    font-size: 12px;
+    -unity-font-style: bold;
+}
+
+.ps-shot__detail {
+    color: #8f8f8f;
+    font-size: 11px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.ps-pill {
+    height: 28px;
+    min-width: 76px;
+    margin-left: 6px;
+    padding-left: 14px;
+    padding-right: 14px;
+    border-radius: 14px;
+    background-color: #3a3a3a;
+    color: #ffffff;
+    font-size: 12px;
+}
+
+.ps-panel .ps-pill {
+    margin-left: 6px;
+}
+
+.ps-panel .ps-pill:hover:enabled {
+    background-color: #474747;
+}
+
+.ps-pill--accent {
+    background-color: #00DA6D;
+    color: #0b0b0b;
+    -unity-font-style: bold;
+}
+
+.ps-panel .ps-pill--accent {
+    -unity-font-style: bold;
+}
+
+.ps-panel .ps-pill--accent:hover:enabled {
+    background-color: #1ee684;
+}
+
+.ps-pill--ghost {
+    background-color: rgba(0, 0, 0, 0);
+    border-width: 1px;
+    border-color: rgba(255, 255, 255, 0.16);
+    color: #d9d9d9;
+}
+
+.ps-panel .ps-pill--ghost {
+    border-width: 1px;
+}
+
+.ps-panel .ps-pill--ghost:hover:enabled {
+    background-color: rgba(255, 255, 255, 0.06);
+    border-color: rgba(255, 255, 255, 0.28);
+}
+
+.ps-message {
+    margin-top: 2px;
+    margin-bottom: 6px;
+    color: #a9b6c2;
+    font-size: 11px;
+    white-space: normal;
+}
+
+.ps-message--error {
+    color: #ff8c59;
+}
+
+/* ---- Framing ------------------------------------------------------------------------------------- */
+
+.ps-framing__presets {
+    margin-bottom: 10px;
+}
+
+.ps-segmented__indicator--hidden {
+    opacity: 0;
+}
+
+.ps-dial {
+    flex-direction: row;
+    align-items: center;
+    height: 34px;
+}
+
+.ps-dial__label {
+    width: 42px;
+    min-width: 42px;
+    color: #bdbdbd;
+    font-size: 11px;
+}
+
+.ps-dial__strip {
+    position: relative;
+    flex-grow: 1;
+    flex-shrink: 1;
+    min-width: 60px;
+    height: 28px;
+    border-radius: 9px;
+    background-color: #1a1a1a;
+    border-width: 1px;
+    border-color: rgba(255, 255, 255, 0.05);
+    cursor: resize-horizontal;
+    transition-property: border-color, background-color;
+    transition-duration: 0.14s, 0.14s;
+}
+
+.ps-dial__strip:hover,
+.ps-dial__strip:focus {
+    border-color: rgba(255, 255, 255, 0.14);
+}
+
+.ps-dial--active .ps-dial__strip {
+    background-color: #161616;
+    border-color: rgba(0, 218, 109, 0.55);
+}
+
+.ps-dial__mark {
+    position: absolute;
+    left: 50%;
+    top: 3px;
+    bottom: 3px;
+    width: 2px;
+    margin-left: -1px;
+    border-radius: 1px;
+    background-color: #00DA6D;
+    transition-property: top, bottom;
+    transition-duration: 0.18s, 0.18s;
+    transition-timing-function: ease-out-back, ease-out-back;
+}
+
+.ps-dial--active .ps-dial__mark {
+    top: 1px;
+    bottom: 1px;
+}
+
+.ps-dial__value {
+    width: 48px;
+    min-width: 48px;
+    color: #e6e6e6;
+    font-size: 11px;
+    -unity-text-align: middle-right;
+}
+
+.ps-framing__tip {
+    margin-top: 6px;
+    margin-left: 2px;
+}
+
+/* Direct framing on a preview (the stage, or a host element such as My Avatar's card image). */
+
+.ps-surface {
+    cursor: move-arrow;
+}
+
+.ps-surface--turning {
+    cursor: rotate-arrow;
+}
+
+.ps-surface__hint {
+    position: absolute;
+    left: 50%;
+    bottom: 8px;
+    padding: 3px 9px 3px 9px;
+    white-space: nowrap;
+    border-radius: 10px;
+    background-color: rgba(8, 9, 12, 0.72);
+    color: #e6e6e6;
+    font-size: 10px;
+    -unity-text-align: middle-center;
+    opacity: 0;
+    translate: -50% 4px;
+    transition-property: opacity, translate;
+    transition-duration: 0.18s, 0.24s;
+    transition-timing-function: ease-out, ease-out-back;
+}
+
+.ps-surface:hover .ps-surface__hint {
+    opacity: 1;
+    translate: -50% 0;
+}
+
+.ps-surface--dragging .ps-surface__hint,
+.ps-surface--dragging:hover .ps-surface__hint {
+    opacity: 0;
+}
+
+/* ---- Style picker -------------------------------------------------------------------------------- */
+
+.ps-segmented {
+    position: relative;
+    flex-direction: row;
+    height: 32px;
+    padding: 3px;
+    border-radius: 10px;
+    background-color: #1a1a1a;
+}
+
+.ps-segmented__indicator {
+    position: absolute;
+    top: 3px;
+    bottom: 3px;
+    left: 3px;
+    width: 0;
+    border-radius: 8px;
+    background-color: #3d3d3d;
+    transition-property: left, width;
+    transition-duration: 0.32s, 0.32s;
+    transition-timing-function: ease-out-back, ease-out-back;
+}
+
+.ps-segmented__tab {
+    flex-grow: 1;
+    flex-basis: 0;
+    min-width: 0;
+    height: 26px;
+    border-radius: 8px;
+    background-color: rgba(0, 0, 0, 0);
+    color: #9a9a9a;
+    font-size: 12px;
+}
+
+.ps-panel .ps-segmented__tab:hover:enabled {
+    color: #e6e6e6;
+    background-color: rgba(0, 0, 0, 0);
+}
+
+.ps-segmented__tab--selected,
+.ps-panel .ps-segmented__tab--selected:hover:enabled {
+    color: #ffffff;
+    -unity-font-style: bold;
+}
+
+.ps-panel .ps-segmented__tab--selected {
+    -unity-font-style: bold;
+}
+
+.ps-style__caption {
+    margin-top: 10px;
+    margin-bottom: 8px;
+    margin-left: 2px;
+}
+
+.ps-style__content {
+    opacity: 1;
+    translate: 0 0;
+    transition-property: opacity, translate;
+    transition-duration: 0.22s, 0.28s;
+    transition-timing-function: ease-out, ease-out-back;
+}
+
+.ps-style__content--entering {
+    opacity: 0;
+    translate: 0 6px;
+    transition-duration: 0s, 0s;
+}
+
+.ps-grid {
+    flex-direction: row;
+    flex-wrap: wrap;
+    min-width: 0;
+}
+
+.ps-swatch {
+    width: 58px;
+    height: 58px;
+    margin: 0 8px 8px 0;
+    padding: 0;
+    border-radius: 14px;
+    border-width: 2px;
+    border-color: rgba(0, 0, 0, 0);
+    background-color: #2f2f2f;
+    overflow: hidden;
+}
+
+.ps-panel .ps-swatch {
+    margin: 0 8px 8px 0;
+    border-width: 2px;
+}
+
+.ps-panel .ps-swatch:hover:enabled {
+    background-color: #3a3a3a;
+    border-color: rgba(255, 255, 255, 0.22);
+    scale: 1.04 1.04;
+}
+
+.ps-swatch--selected,
+.ps-panel .ps-swatch--selected:hover:enabled {
+    border-color: #00DA6D;
+    background-color: #2f2f2f;
+}
+
+.ps-swatch--background {
+    width: 84px;
+    height: 58px;
+}
+
+.ps-swatch__content {
+    flex-grow: 1;
+    border-radius: 11px;
+}
+
+.ps-swatch__empty {
+    background-color: #1a1a1a;
+}
+
+.ps-chip {
+    height: 26px;
+    margin: 0 6px 6px 0;
+    padding-left: 12px;
+    padding-right: 12px;
+    border-radius: 13px;
+    border-width: 1px;
+    border-color: rgba(255, 255, 255, 0.14);
+    background-color: #1f1f1f;
+    color: #d0d0d0;
+    font-size: 11px;
+}
+
+.ps-panel .ps-chip {
+    margin: 0 6px 6px 0;
+    border-width: 1px;
+}
+
+.ps-panel .ps-chip:hover:enabled {
+    background-color: #2c2c2c;
+    border-color: rgba(255, 255, 255, 0.28);
+}
+
+.ps-chip--selected,
+.ps-panel .ps-chip--selected:hover:enabled {
+    background-color: rgba(0, 218, 109, 0.16);
+    border-color: #00DA6D;
+    color: #ffffff;
+}
+
+/* ---- Colour picker ------------------------------------------------------------------------------- */
+
+.ps-picker {
+    margin-top: 4px;
+    padding: 10px;
+    border-radius: 12px;
+    background-color: #1c1c1c;
+}
+
+.ps-picker__area {
+    position: relative;
+    height: 112px;
+    border-radius: 9px;
+    overflow: hidden;
+    cursor: move-arrow;
+}
+
+.ps-picker__hue {
+    position: relative;
+    height: 12px;
+    margin-top: 10px;
+    border-radius: 6px;
+    overflow: hidden;
+    cursor: resize-horizontal;
+}
+
+.ps-picker__knob {
+    position: absolute;
+    width: 14px;
+    height: 14px;
+    border-radius: 7px;
+    border-width: 2px;
+    border-color: #ffffff;
+}
+
+.ps-picker__knob--hue {
+    top: -1px;
+}
+
+.ps-picker__footer {
+    flex-direction: row;
+    align-items: center;
+    flex-wrap: wrap;
+    margin-top: 10px;
+}
+
+.ps-picker__swatches {
+    flex-direction: row;
+    flex-wrap: wrap;
+    flex-grow: 1;
+    flex-shrink: 1;
+}
+
+.ps-picker__swatch {
+    width: 18px;
+    height: 18px;
+    margin: 2px 6px 2px 0;
+    border-radius: 9px;
+    border-width: 1px;
+    border-color: rgba(255, 255, 255, 0.18);
+    transition-property: scale;
+    transition-duration: 0.16s;
+    transition-timing-function: ease-out-back;
+}
+
+.ps-picker__swatch:hover {
+    scale: 1.18 1.18;
+}
+
+.ps-picker__entry {
+    flex-direction: row;
+    align-items: center;
+}
+
+.ps-picker__hex {
+    width: 76px;
+    margin: 0 4px 0 0;
+}
+
+.ps-picker__hex .unity-base-text-field__input,
+.ps-picker__hex .unity-text-field__input {
+    height: 22px;
+    padding-left: 8px;
+    border-radius: 11px;
+    border-width: 1px;
+    border-color: rgba(255, 255, 255, 0.14);
+    background-color: #151515;
+    color: #e6e6e6;
+    font-size: 11px;
+}
