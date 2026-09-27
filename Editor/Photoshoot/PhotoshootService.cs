@@ -174,6 +174,10 @@ namespace Orbiters.Toolkit.Editor.Photoshoot
                     {
                         DisableAnimationComponents(avatarCopy);
                         lastAmbient = null;
+                        // The photoshoot camera renders right after bones move, outside Unity's frame; without this a
+                        // render can reuse the skinning of the previous pose.
+                        foreach (var renderer in avatarCopy.GetComponentsInChildren<SkinnedMeshRenderer>(true))
+                            renderer.forceMatrixRecalculationPerRender = true;
                     }
                     if (avatarChanged || poseChanged)
                     {
