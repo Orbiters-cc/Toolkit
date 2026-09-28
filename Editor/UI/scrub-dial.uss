@@ -1,0 +1,66 @@
+/* Scrub dial shared by the Orbiters tools (thumbnail framing, My Avatar physics). */
+
+.orb-dial {
+    flex-direction: row;
+    align-items: center;
+    height: 34px;
+}
+
+.orb-dial__label {
+    width: 42px;
+    min-width: 42px;
+    color: #bdbdbd;
+    font-size: 11px;
+}
+
+.orb-dial__strip {
+    position: relative;
+    flex-grow: 1;
+    flex-shrink: 1;
+    min-width: 60px;
+    height: 28px;
+    border-radius: 9px;
+    background-color: #1a1a1a;
+    border-width: 1px;
+    border-color: rgba(255, 255, 255, 0.05);
+    cursor: resize-horizontal;
+    transition-property: border-color, background-color;
+    transition-duration: 0.14s, 0.14s;
+}
+
+.orb-dial__strip:hover,
+.orb-dial__strip:focus {
+    border-color: rgba(255, 255, 255, 0.14);
+}
+
+.orb-dial--active .orb-dial__strip {
+    background-color: #161616;
+    border-color: rgba(0, 218, 109, 0.55);
+}
+
+.orb-dial__mark {
+    position: absolute;
+    left: 50%;
+    top: 3px;
+    bottom: 3px;
+    width: 2px;
+    margin-left: -1px;
+    border-radius: 1px;
+    background-color: #00DA6D;
+    transition-property: top, bottom;
+    transition-duration: 0.18s, 0.18s;
+    transition-timing-function: ease-out-back, ease-out-back;
+}
+
+.orb-dial--active .orb-dial__mark {
+    top: 1px;
+    bottom: 1px;
+}
+
+.orb-dial__value {
+    width: 48px;
+    min-width: 48px;
+    color: #e6e6e6;
+    font-size: 11px;
+    -unity-text-align: middle-right;
+}

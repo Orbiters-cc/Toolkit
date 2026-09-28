@@ -1,0 +1,118 @@
+/* Account connection of the Orbiters tools: two provider buttons, then a waiting row while the browser is open. */
+
+.orb-signin {
+    padding: 14px;
+    border-radius: 14px;
+    background-color: #242424;
+    border-width: 1px;
+    border-color: rgba(255, 255, 255, 0.05);
+}
+
+.orb-signin__buttons {
+    flex-direction: row;
+}
+
+.orb-signin__provider {
+    flex-grow: 1;
+    flex-basis: 0;
+    height: 34px;
+    min-height: 34px;
+    margin: 0 4px;
+    border-width: 0;
+    border-radius: 17px;
+    color: #ffffff;
+    font-size: 12px;
+    -unity-font-style: bold;
+    transition-property: background-color, scale;
+    transition-duration: 0.14s, 0.2s;
+    transition-timing-function: ease-out, ease-out-back;
+}
+
+.orb-signin__provider.pressed {
+    scale: 0.96 0.96;
+}
+
+.orb-signin__provider--discord {
+    background-color: #5865F2;
+}
+
+.orb-signin__provider--discord:hover {
+    background-color: #6d78f5;
+}
+
+.orb-signin__provider--telegram {
+    background-color: #229ED9;
+}
+
+.orb-signin__provider--telegram:hover {
+    background-color: #3aaee4;
+}
+
+.orb-signin__waiting {
+    flex-direction: row;
+    align-items: center;
+    height: 34px;
+    padding: 0 6px 0 14px;
+    border-radius: 17px;
+    background-color: #1a1a1a;
+}
+
+.orb-signin__pulse {
+    width: 8px;
+    height: 8px;
+    border-radius: 4px;
+    margin-right: 10px;
+    background-color: #00DA6D;
+    opacity: 0.35;
+    scale: 0.8 0.8;
+    transition-property: opacity, scale;
+    transition-duration: 0.6s, 0.6s;
+    transition-timing-function: ease-in-out, ease-in-out;
+}
+
+.orb-signin__pulse--on {
+    opacity: 1;
+    scale: 1.15 1.15;
+}
+
+.orb-signin__waiting-label {
+    flex-grow: 1;
+    flex-shrink: 1;
+    color: #e6e6e6;
+    font-size: 12px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.orb-signin__link {
+    height: 24px;
+    margin: 0 0 0 4px;
+    padding: 0 10px;
+    border-width: 0;
+    border-radius: 12px;
+    background-color: rgba(0, 0, 0, 0);
+    color: #9a9a9a;
+    font-size: 11px;
+}
+
+.orb-signin__link:hover {
+    background-color: rgba(255, 255, 255, 0.08);
+    color: #e6e6e6;
+}
+
+.orb-signin__reason {
+    margin: 10px 4px 0 4px;
+    color: #8f8f8f;
+    font-size: 11px;
+    white-space: normal;
+    -unity-text-align: middle-center;
+}
+
+.orb-signin__error {
+    margin: 8px 4px 0 4px;
+    color: #ffb020;
+    font-size: 11px;
+    white-space: normal;
+    -unity-text-align: middle-center;
+}

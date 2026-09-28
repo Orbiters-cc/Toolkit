@@ -260,75 +260,6 @@
     margin-bottom: 10px;
 }
 
-.ps-segmented__indicator--hidden {
-    opacity: 0;
-}
-
-.ps-dial {
-    flex-direction: row;
-    align-items: center;
-    height: 34px;
-}
-
-.ps-dial__label {
-    width: 42px;
-    min-width: 42px;
-    color: #bdbdbd;
-    font-size: 11px;
-}
-
-.ps-dial__strip {
-    position: relative;
-    flex-grow: 1;
-    flex-shrink: 1;
-    min-width: 60px;
-    height: 28px;
-    border-radius: 9px;
-    background-color: #1a1a1a;
-    border-width: 1px;
-    border-color: rgba(255, 255, 255, 0.05);
-    cursor: resize-horizontal;
-    transition-property: border-color, background-color;
-    transition-duration: 0.14s, 0.14s;
-}
-
-.ps-dial__strip:hover,
-.ps-dial__strip:focus {
-    border-color: rgba(255, 255, 255, 0.14);
-}
-
-.ps-dial--active .ps-dial__strip {
-    background-color: #161616;
-    border-color: rgba(0, 218, 109, 0.55);
-}
-
-.ps-dial__mark {
-    position: absolute;
-    left: 50%;
-    top: 3px;
-    bottom: 3px;
-    width: 2px;
-    margin-left: -1px;
-    border-radius: 1px;
-    background-color: #00DA6D;
-    transition-property: top, bottom;
-    transition-duration: 0.18s, 0.18s;
-    transition-timing-function: ease-out-back, ease-out-back;
-}
-
-.ps-dial--active .ps-dial__mark {
-    top: 1px;
-    bottom: 1px;
-}
-
-.ps-dial__value {
-    width: 48px;
-    min-width: 48px;
-    color: #e6e6e6;
-    font-size: 11px;
-    -unity-text-align: middle-right;
-}
-
 .ps-framing__tip {
     margin-top: 6px;
     margin-left: 2px;
@@ -373,54 +304,6 @@
 }
 
 /* ---- Style picker -------------------------------------------------------------------------------- */
-
-.ps-segmented {
-    position: relative;
-    flex-direction: row;
-    height: 32px;
-    padding: 3px;
-    border-radius: 10px;
-    background-color: #1a1a1a;
-}
-
-.ps-segmented__indicator {
-    position: absolute;
-    top: 3px;
-    bottom: 3px;
-    left: 3px;
-    width: 0;
-    border-radius: 8px;
-    background-color: #3d3d3d;
-    transition-property: left, width;
-    transition-duration: 0.32s, 0.32s;
-    transition-timing-function: ease-out-back, ease-out-back;
-}
-
-.ps-segmented__tab {
-    flex-grow: 1;
-    flex-basis: 0;
-    min-width: 0;
-    height: 26px;
-    border-radius: 8px;
-    background-color: rgba(0, 0, 0, 0);
-    color: #9a9a9a;
-    font-size: 12px;
-}
-
-.ps-panel .ps-segmented__tab:hover:enabled {
-    color: #e6e6e6;
-    background-color: rgba(0, 0, 0, 0);
-}
-
-.ps-segmented__tab--selected,
-.ps-panel .ps-segmented__tab--selected:hover:enabled {
-    color: #ffffff;
-    -unity-font-style: bold;
-}
-
-.ps-panel .ps-segmented__tab--selected {
-    -unity-font-style: bold;
-}
 
 .ps-style__caption {
     margin-top: 10px;

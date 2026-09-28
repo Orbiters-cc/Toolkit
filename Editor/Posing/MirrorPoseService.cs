@@ -21,55 +21,108 @@ namespace Orbiters.Toolkit.Editor.Posing
             public bool FromBindPose;
         }
 
+        /// <summary>Finds the rig to mirror from what is selected: its root and the mesh whose bind pose defines rest.</summary>
+        public delegate bool RigResolver(GameObject selected, out Transform root, out SkinnedMeshRenderer renderer);
+
+        private const string EnabledKey = "Orbiters.Toolkit.MirrorPose.Enabled";
+        private const string OffStatus = "Mirror off.";
+        private const string WaitingStatus = "Mirror on · select an avatar or one of its bones.";
         private static readonly Dictionary<Transform, Bone> Bones = new Dictionary<Transform, Bone>();
         private static bool applying;
+
+        /// <summary>Mirror mode is on. It stays on while nothing can be mirrored and binds to the next rig selected.</summary>
+        public static bool Enabled { get; private set; }
+        /// <summary>The rig being mirrored, or null while mirror mode waits for one.</summary>
         public static Transform Root { get; private set; }
-        public static bool Enabled => Root != null && Bones.Count != 0;
+        public static bool IsMirroring => Root != null && Bones.Count != 0;
         public static int PairCount => Bones.Count / 2;
         public static int RelativePairCount { get; private set; }
-        public static string LastStatus { get; private set; } = "Select an avatar or bone, then enable Mirror.";
+        public static string LastStatus { get; private set; } = OffStatus;
         public static event Action Changed;
+        /// <summary>
+        /// How a selection outside any humanoid becomes a rig (props, tails, non-humanoid models). The nearest humanoid
+        /// above the selection always wins, so accessories with their own small armature do not capture it.
+        /// </summary>
+        public static RigResolver ResolveOtherRig;
 
         static MirrorPoseService()
         {
             Undo.postprocessModifications += MirrorEdits;
-            EditorApplication.playModeStateChanged += _ => Disable();
+            Selection.selectionChanged += () => { if (Enabled) BindFromSelection(); };
             EditorApplication.hierarchyChanged += CheckHierarchy;
-            AssemblyReloadEvents.beforeAssemblyReload += Disable;
+            EditorApplication.playModeStateChanged += state =>
+            {
+                if (state == PlayModeStateChange.ExitingEditMode) Unbind(WaitingStatus);
+                else if (state == PlayModeStateChange.EnteredEditMode && Enabled) BindFromSelection();
+            };
+            // Mirror mode survives script reloads; the rig is found again from the selection.
+            Enabled = SessionState.GetBool(EnabledKey, false);
+            if (Enabled)
+            {
+                LastStatus = WaitingStatus;
+                EditorApplication.delayCall += () => { if (Enabled && Root == null) BindFromSelection(); };
+            }
+        }
+
+        /// <summary>Turns mirror mode on, bound to <paramref name="root"/> when given, else to the selected rig.</summary>
+        public static bool Enable(Transform root = null, SkinnedMeshRenderer renderer = null)
+        {
+            SetMode(true);
+            if (root != null) Bind(root, renderer);
+            else BindFromSelection(force: true);
+            return IsMirroring;
         }
 
         public static void Disable()
         {
+            SetMode(false);
+            Unbind(OffStatus);
+        }
+
+        private static void SetMode(bool enabled)
+        {
+            Enabled = enabled;
+            SessionState.SetBool(EnabledKey, enabled);
+        }
+
+        private static void BindFromSelection(bool force = false)
+        {
+            if (EditorApplication.isPlayingOrWillChangePlaymode) return;
+            var selected = Selection.activeGameObject;
+            if (selected == null || !(HumanoidRig(selected, out var root, out var renderer) || ResolveOtherRig != null && ResolveOtherRig(selected, out root, out renderer)) || root == null)
+            {
+                // Keep the current rig while the selection is elsewhere (a light, the Project window...).
+                if (Root == null) Unbind(WaitingStatus);
+                return;
+            }
+            if (force || root != Root) Bind(root, renderer);
+        }
+
+        private static void Unbind(string status)
+        {
             Root = null;
             Bones.Clear();
             RelativePairCount = 0;
-            LastStatus = "Mirror off. Select an avatar or bone to enable it.";
+            LastStatus = status;
             Changed?.Invoke();
             SceneView.RepaintAll();
         }
 
-        public static bool Enable(Transform root, SkinnedMeshRenderer renderer)
+        private static bool Bind(Transform root, SkinnedMeshRenderer renderer)
         {
-            Disable();
+            Root = null;
+            Bones.Clear();
+            RelativePairCount = 0;
+            if (renderer == null && root != null) renderer = BestRenderer(root);
             if (root == null || renderer == null || !root.gameObject.scene.IsValid() ||
                 EditorUtility.IsPersistent(root) || EditorApplication.isPlayingOrWillChangePlaymode)
-                return Fail("Select an editable scene avatar with a skinned mesh.");
-            if (AnimationMode.InAnimationMode())
-                return Fail("Exit animation preview/recording before enabling Mirror.");
+                return Fail("Mirror on · select a scene avatar with a skinned mesh.");
 
             var transforms = root.GetComponentsInChildren<Transform>(true);
             var skinBones = renderer.bones;
             var skeleton = renderer.rootBone != null && renderer.rootBone.IsChildOf(root)
                 ? renderer.rootBone.GetComponentsInChildren<Transform>(true)
                 : skinBones.Where(t => t != null && t.IsChildOf(root)).ToArray();
-            var skeletonFrames = new HashSet<Transform>();
-            foreach (var bone in skeleton)
-                for (var ancestor = bone; ancestor != null; ancestor = ancestor.parent)
-                    skeletonFrames.Add(ancestor);
-            // Reflections of rotations assume orthogonal frames; reject shear and negative scale.
-            var invalidScale = skeletonFrames.FirstOrDefault(t => !UniformPositive(t.localScale));
-            if (invalidScale != null)
-                return Fail($"Mirror cannot start: {invalidScale.name} has non-uniform or non-positive scale. Bones and their ancestors require positive, uniform scale.");
 
             var frames = transforms.ToDictionary(t => t, t => root.worldToLocalMatrix * t.localToWorldMatrix);
             var bound = new HashSet<Transform>();
@@ -111,6 +164,16 @@ namespace Orbiters.Toolkit.Editor.Posing
                 if (opposite != item.Key && paths.TryGetValue(opposite, out var other))
                     AddPair(pairs, item.Value, other, frames);
             }
+
+            // Reflections of rotations assume orthogonal frames: a pair is mirrored only when both bones and all their
+            // ancestors have positive, uniform scale. Scaled props elsewhere in the hierarchy do not matter.
+            int skipped = 0;
+            foreach (var pair in pairs.Where(p => !UniformChain(p.Key, root) || !UniformChain(p.Value, root)).ToList())
+            {
+                if (pairs.Remove(pair.Key)) skipped++;
+                pairs.Remove(pair.Value);
+            }
+
             foreach (var pair in pairs)
             {
                 var t = pair.Key;
@@ -125,8 +188,10 @@ namespace Orbiters.Toolkit.Editor.Posing
                 };
             }
             foreach (var pair in pairs) Bones[pair.Key].Other = Bones[pair.Value];
-            if (Bones.Count == 0) return Fail("No matching left/right bone pairs found on this avatar.");
-            // A pair must share the same reference strategy. Partial bind data uses enable-time pose.
+            if (Bones.Count == 0)
+                return Fail(skipped > 0 ? $"Mirror on · the left and right bones of {root.name} are unevenly scaled and cannot be mirrored."
+                    : $"Mirror on · {root.name} has no left and right bones to mirror.");
+            // A pair must share the same reference strategy. Partial bind data uses the pose at binding time.
             foreach (var bone in Bones.Values)
             {
                 if (bone.FromBindPose && bone.Other.FromBindPose) continue;
@@ -137,11 +202,39 @@ namespace Orbiters.Toolkit.Editor.Posing
             RelativePairCount = Bones.Values.Count(b => !b.FromBindPose || !b.Other.FromBindPose) / 2;
             Root = root;
             LastStatus = $"Mirror: {root.name} · {PairCount} pairs" +
-                (RelativePairCount > 0 ? $" · {RelativePairCount} use the enable-time pose" : " · mesh bind pose");
+                (RelativePairCount > 0 ? $" · {RelativePairCount} use the pose at start" : "") +
+                (skipped > 0 ? $" · {skipped} unevenly scaled pair{(skipped == 1 ? "" : "s")} skipped" : "");
             Changed?.Invoke();
             SceneView.RepaintAll();
             return true;
         }
+
+        private static bool UniformChain(Transform bone, Transform root)
+        {
+            for (var t = bone; t != null && t != root; t = t.parent)
+                if (!UniformPositive(t.localScale)) return false;
+            return true;
+        }
+
+        private static bool HumanoidRig(GameObject selected, out Transform root, out SkinnedMeshRenderer renderer)
+        {
+            root = null; renderer = null;
+            // The nearest humanoid above the selection, or the selection itself.
+            for (var t = selected.transform; t != null; t = t.parent)
+            {
+                var animator = t.GetComponent<Animator>();
+                if (animator == null || !animator.isHuman || animator.avatar == null) continue;
+                root = t;
+                renderer = BestRenderer(t);
+                return renderer != null;
+            }
+            return false;
+        }
+
+        // The skinned mesh with the most bones: the body, whose bind pose defines the rest pose.
+        private static SkinnedMeshRenderer BestRenderer(Transform root) =>
+            root.GetComponentsInChildren<SkinnedMeshRenderer>(true).Where(r => r.sharedMesh != null)
+                .OrderByDescending(r => r.bones.Length).FirstOrDefault();
 
         public static Transform GetPartner(Transform bone)
         {
@@ -150,6 +243,7 @@ namespace Orbiters.Toolkit.Editor.Posing
 
         private static bool Fail(string message)
         {
+            Root = null;
             Bones.Clear();
             LastStatus = message;
             Changed?.Invoke();
@@ -204,12 +298,18 @@ namespace Orbiters.Toolkit.Editor.Posing
         private static void CheckHierarchy()
         {
             if (Bones.Count > 0 && (Root == null || Bones.Values.Any(b => b.Transform == null ||
-                b.Transform.parent != b.Parent || !b.Transform.IsChildOf(Root)))) Disable();
+                b.Transform.parent != b.Parent || !b.Transform.IsChildOf(Root))))
+            {
+                // The rig changed shape: bind it again, or wait for the next one, without leaving mirror mode.
+                var root = Root;
+                Unbind(WaitingStatus);
+                if (Enabled && root != null) Bind(root, null);
+            }
         }
 
         private static UndoPropertyModification[] MirrorEdits(UndoPropertyModification[] modifications)
         {
-            if (!Enabled || applying || EditorApplication.isPlayingOrWillChangePlaymode ||
+            if (!IsMirroring || applying || EditorApplication.isPlayingOrWillChangePlaymode ||
                 AnimationMode.InAnimationMode()) return modifications;
             var edits = new Dictionary<Transform, int>();
             foreach (var modification in modifications)

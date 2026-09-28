@@ -1,0 +1,13 @@
+.orb-budget { flex-direction: column; }
+.orb-budget__bar { flex-direction: row; height: 14px; border-radius: 7px; overflow: hidden; background-color: #333333; }
+.orb-budget__segment { width: 0; height: 100%; }
+.orb-budget__legend { flex-direction: column; margin-top: 8px; }
+.orb-budget__row { flex-direction: row; align-items: center; margin-bottom: 3px; }
+.orb-budget__swatch { width: 10px; height: 10px; border-radius: 3px; margin-right: 8px; flex-shrink: 0; }
+.orb-budget__label { font-size: 11px; color: #cccccc; white-space: normal; flex-shrink: 1; }
+/* Inline legend: small chips in one wrapping row, under a thinner bar. */
+.orb-budget--inline .orb-budget__bar { height: 10px; border-radius: 5px; }
+.orb-budget--inline .orb-budget__legend { flex-direction: row; flex-wrap: wrap; margin-top: 8px; }
+.orb-budget--inline .orb-budget__row { margin: 0 14px 2px 0; }
+.orb-budget--inline .orb-budget__swatch { width: 8px; height: 8px; border-radius: 4px; margin-right: 6px; }
+.orb-budget--inline .orb-budget__label { font-size: 11px; color: #b0b0b0; white-space: nowrap; }

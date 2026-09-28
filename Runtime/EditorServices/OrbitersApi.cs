@@ -12,9 +12,10 @@ public static class OrbitersApi
 {
     internal static readonly HttpClient Client = new HttpClient { Timeout = TimeSpan.FromSeconds(90) };
 
-    public static async Task<T> SendAsync<T>(string url, string token, object payload = null, CancellationToken cancellation = default)
+    /// <summary>GET without a payload, POST with one, unless <paramref name="method"/> says otherwise (e.g. PUT).</summary>
+    public static async Task<T> SendAsync<T>(string url, string token, object payload = null, CancellationToken cancellation = default, HttpMethod method = null)
     {
-        using var request = new HttpRequestMessage(payload == null ? HttpMethod.Get : HttpMethod.Post, url);
+        using var request = new HttpRequestMessage(method ?? (payload == null ? HttpMethod.Get : HttpMethod.Post), url);
         if (!string.IsNullOrEmpty(token)) request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
         if (payload != null) request.Content = new StringContent(JsonConvert.SerializeObject(payload), Encoding.UTF8, "application/json");
         using var response = await Client.SendAsync(request, cancellation);

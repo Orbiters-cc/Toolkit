@@ -1,6 +1,6 @@
 # Orbiters Toolkit
 
-Unity 2022.3 editor utilities for avatar photoshoots, mirror posing and optional AI integration.
+Unity 2022.3 editor utilities for mirror posing and optional AI integration.
 Mirror posing works without MCP. The screenshot adapter compiles separately when
 MCP for Unity 9.7.1 or newer is installed; this package does not install the server.
 
@@ -19,58 +19,6 @@ These editor-guarded services live in `Orbiters.Toolkit`, allowing components wi
 editor-only helpers to reference them. Player builds contain none of this editor
 logic. `Orbiters.Toolkit.Editor` continues to own posing and screenshot utilities.
 The package also depends on Unity's Newtonsoft JSON package.
-
-## Avatar photoshoot
-
-From 0.2.2, `Orbiters.Toolkit.Editor.Photoshoot` holds the photoshoot used by MCB for
-custom base asset thumbnails and banners, and by My Avatar for VRChat avatar
-thumbnails. A host keeps a `PhotoshootState` (selections, live preview scene, icon
-caches) so the photoshoot survives Inspector rebuilds, and adds a `PhotoshootPanel`
-built from `PhotoshootOptions`: the avatar, whether a banner is produced, the
-thumbnail and banner sizes, and callbacks that receive captured or browsed images.
-
-The panel shows a preview (the banner with the thumbnail over it, or the thumbnail
-alone), one row per shot with **Capture**/**Retake** and **Browse**, a framing card and
-one style picker with Pose, Light, Background and Expression tabs. A host that presents
-the thumbnail in its own context sets `ThumbnailPreview`: the panel then shows no
-preview and sends it the thumbnail image, captured or live, whenever it changes.
-Changes are rendered on the next editor tick, so drags and quick picks coalesce into
-one render.
-
-Framing happens on the preview itself: drag to move the avatar, scroll to zoom,
-Shift-drag to turn, double-click to reset. A host showing the thumbnail elsewhere
-calls `AttachFraming` on that element (and `DetachFraming` when it stops following
-the live preview). The framing card offers **Portrait**, **Half body** and
-**Full body**, measured on the posed avatar in any pose: the vertices the head moves
-(ears and hair included, down to the chest), those the spine moves (without forearms
-and hands, down to the hips), or the whole outline, fitted in height and width with
-headroom and kept fitted when the pose or rotation changes. The Turn dial loops all
-the way round and the Zoom dial goes up to 20×; both snap at their rest value, step
-with the arrow keys and reset on double-click; **Reset**
-returns to the default framing. Choosing a preset glides there with a light
-overshoot. Placement pans the camera, so off-centre framings stay undistorted.
-
-Framing input renders in the same event and reuses the posed avatar copy (about 2 ms
-per frame); only a new pose or expression bakes the skinned meshes again, and a new
-pose re-poses the existing copy instead of duplicating the avatar. A render that posed
-the copy or changed its expression is followed by two more on the next editor frames,
-after an editor update, so every skinned mesh (hair, accessories) shows the new pose.
-
-Light presets set their own ambient on the avatar copy (through its light probe data,
-so the user's scene lighting is never touched) and may add a second rim light:
-**Cinematic Rim** and **Neon Night** are dark looks lit from behind on both sides,
-next to **High Key**, **Low Key** and the earlier studio looks. The first background
-is a plain colour chosen with an inline picker (area, hue bar, curated colours, hex
-entry, reset to the default grey).
-
-The live scene is an additive, unsaved scene with the avatar copy, three lights and
-the background. Poses (`BodyPoses/`), backgrounds (`Backgrounds/`) and the banner blur
-shader ship with the package. Framing ignores particle, trail and line renderers, and
-renders compile shaders synchronously, so previews and captures never show the cyan
-placeholder of a shader that is still compiling.
-
-`ButtonInteraction.RegisterImmediateClick` (buttons that act on press) and
-`SkinnedMeshBounds.Refresh` (posed culling bounds) are shared editor helpers.
 
 ## Mirror posing
 

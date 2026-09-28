@@ -50,14 +50,13 @@ namespace Orbiters.Toolkit.Editor.Photoshoot
         private readonly List<Button> swatches = new List<Button>();
         private readonly Dictionary<string, Button> expressionChips = new Dictionary<string, Button>(StringComparer.OrdinalIgnoreCase);
         private readonly Dictionary<PhotoshootService.ShotKind, ShotRow> shotRows = new Dictionary<PhotoshootService.ShotKind, ShotRow>();
-        private readonly List<Button> tabButtons = new List<Button>();
-        private readonly List<Button> presetButtons = new List<Button>();
         private readonly Dictionary<VisualElement, FramingDrag> framingSurfaces = new Dictionary<VisualElement, FramingDrag>();
         private Image bannerImage, thumbnailImage;
         private Button backButton;
         private ScrubDial turnDial, zoomDial;
         private Label styleCaption, message;
-        private VisualElement tabIndicator, presetIndicator, styleContent, colorSwatch;
+        private SegmentedControl styleTabs, presets;
+        private VisualElement styleContent, colorSwatch;
         private InlineColorPicker colorPicker;
         private IVisualElementScheduledItem framingTween;
         private int settleGeneration;
@@ -267,22 +266,10 @@ namespace Orbiters.Toolkit.Editor.Photoshoot
             reset.tooltip = "Default zoom, centred, facing the camera.";
             header.Add(reset);
 
-            var presets = new VisualElement();
-            presets.AddToClassList("ps-segmented");
+            presets = new SegmentedControl(FramingPresets.Select(entry => new SegmentedControl.Option(entry.label, null, entry.tip)),
+                index => ApplyPreset(FramingPresets[index].preset));
             presets.AddToClassList("ps-framing__presets");
             card.Add(presets);
-            presetIndicator = new VisualElement();
-            presetIndicator.AddToClassList("ps-segmented__indicator");
-            presets.Add(presetIndicator);
-            foreach (var entry in FramingPresets)
-            {
-                var preset = entry.preset;
-                var button = CreateButton(entry.label, () => ApplyPreset(preset), "ps-segmented__tab");
-                button.tooltip = entry.tip;
-                presetButtons.Add(button);
-                presets.Add(button);
-            }
-            presets.RegisterCallback<GeometryChangedEvent>(_ => MovePresetIndicator());
 
             turnDial = new ScrubDial("Turn", -180f, 180f, 0f, 5f, 3, 2.2f, 2.5f,
                 value => Mathf.RoundToInt(value) + "°",
@@ -318,24 +305,8 @@ namespace Orbiters.Toolkit.Editor.Photoshoot
             MovePresetIndicator();
         }
 
-        private void MovePresetIndicator()
-        {
-            if (presetIndicator == null) return;
-            int selected = -1;
-            for (int i = 0; i < FramingPresets.Length; i++)
-            {
-                bool on = state.FramingPreset == FramingPresets[i].preset;
-                if (on) selected = i;
-                presetButtons[i].EnableInClassList("ps-segmented__tab--selected", on);
-            }
-            // With no preset the indicator fades out where it was; it slides to a preset when one is chosen.
-            presetIndicator.EnableInClassList("ps-segmented__indicator--hidden", selected < 0);
-            if (selected < 0) return;
-            var target = presetButtons[selected].layout;
-            if (float.IsNaN(target.width) || target.width <= 0f) return;
-            presetIndicator.style.left = target.x;
-            presetIndicator.style.width = target.width;
-        }
+        // With no preset the highlight fades out where it was; it slides to a preset when one is chosen.
+        private void MovePresetIndicator() => presets?.SetIndex(Array.FindIndex(FramingPresets, entry => entry.preset == state.FramingPreset));
 
         // Zoom or placement changed by hand: the framing no longer follows a preset.
         private void ManualFraming()
@@ -543,22 +514,9 @@ namespace Orbiters.Toolkit.Editor.Photoshoot
         private void BuildStyle()
         {
             var card = Card("ps-style");
-            var segmented = new VisualElement();
-            segmented.AddToClassList("ps-segmented");
-            card.Add(segmented);
-            tabIndicator = new VisualElement();
-            tabIndicator.AddToClassList("ps-segmented__indicator");
-            segmented.Add(tabIndicator);
             state.StyleTab = Mathf.Clamp(state.StyleTab, 0, StyleTabs.Length - 1);
-            for (int i = 0; i < StyleTabs.Length; i++)
-            {
-                int tab = i;
-                var button = CreateButton(StyleTabs[i], () => SelectTab(tab), "ps-segmented__tab");
-                tabButtons.Add(button);
-                segmented.Add(button);
-            }
-            // The indicator follows the selected tab; USS transitions animate its position and width.
-            segmented.RegisterCallback<GeometryChangedEvent>(_ => MoveIndicator());
+            styleTabs = new SegmentedControl(StyleTabs, SelectTab);
+            card.Add(styleTabs);
 
             styleCaption = new Label();
             styleCaption.AddToClassList("ps-caption");
@@ -580,19 +538,10 @@ namespace Orbiters.Toolkit.Editor.Photoshoot
             styleContent.schedule.Execute(() => styleContent.RemoveFromClassList("ps-style__content--entering")).StartingIn(16);
         }
 
-        private void MoveIndicator()
-        {
-            if (tabIndicator == null || state.StyleTab >= tabButtons.Count) return;
-            var target = tabButtons[state.StyleTab].layout;
-            if (float.IsNaN(target.width) || target.width <= 0f) return;
-            tabIndicator.style.left = target.x;
-            tabIndicator.style.width = target.width;
-        }
 
         private void BuildStyleContent()
         {
-            for (int i = 0; i < tabButtons.Count; i++) tabButtons[i].EnableInClassList("ps-segmented__tab--selected", i == state.StyleTab);
-            MoveIndicator();
+            styleTabs.SetIndex(state.StyleTab);
             styleContent.Clear();
             swatches.Clear();
             expressionChips.Clear();

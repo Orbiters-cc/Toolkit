@@ -1,0 +1,23 @@
+.orb-icon-button { flex-grow: 1; flex-basis: 0; min-width: 72px; height: 64px; padding: 8px 4px 6px 4px; border-radius: 14px; background-color: #2c2c2c; align-items: center; justify-content: center; cursor: link; transition-property: background-color, scale; transition-duration: 0.12s; }
+.orb-icon-button:hover { background-color: #363636; }
+.orb-icon-button:focus { border-width: 1px; border-color: rgba(0, 218, 109, 0.45); }
+.orb-icon-button--pressed { scale: 0.96 0.96; }
+.orb-icon-button__icon { width: 24px; height: 24px; flex-shrink: 0; --icon-color: #d6d6d6; }
+.orb-icon-button__label { margin: 5px 0 0 0; padding: 0; font-size: 11px; color: #c8c8c8; -unity-text-align: middle-center; white-space: nowrap; }
+.orb-icon-button--on { background-color: #00DA6D; }
+.orb-icon-button--on:hover { background-color: #19e27d; }
+.orb-icon-button--on .orb-icon-button__icon { --icon-color: #06140c; }
+.orb-icon-button--on .orb-icon-button__label { color: #06140c; -unity-font-style: bold; }
+.orb-icon-button:disabled { opacity: 0.4; }
+
+/* Compact round icon-only variant, e.g. a refresh button in a header. */
+.orb-icon-button--small { flex-grow: 0; flex-basis: auto; min-width: 0; width: 26px; height: 26px; padding: 0; border-radius: 13px; background-color: rgba(0, 0, 0, 0); }
+.orb-icon-button--small:hover { background-color: #333333; }
+.orb-icon-button--small .orb-icon-button__icon { width: 16px; height: 16px; --icon-color: #9a9a9a; }
+.orb-icon-button--small:hover .orb-icon-button__icon { --icon-color: #ffffff; }
+.orb-icon-button--small .orb-icon-button__label { display: none; }
+
+/* Inspector lock in the corner of a tool's header. */
+.orb-inspector-lock { position: absolute; top: 6px; right: 6px; }
+.orb-inspector-lock.orb-icon-button--on { background-color: rgba(0, 218, 109, 0.18); }
+.orb-inspector-lock.orb-icon-button--on .orb-icon-button__icon { --icon-color: #00DA6D; }

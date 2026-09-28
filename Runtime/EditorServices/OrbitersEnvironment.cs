@@ -3,7 +3,13 @@ using System;
 using UnityEditor;
 public static class OrbitersEnvironment
 {
-    public static bool IsDevelopment { get => EditorPrefs.GetBool("MCB_DevEnvironment", false); set => EditorPrefs.SetBool("MCB_DevEnvironment", value); }
+    /// <summary>Raised when the server switches between production and development (each has its own account).</summary>
+    public static event Action Changed;
+    public static bool IsDevelopment
+    {
+        get => EditorPrefs.GetBool("MCB_DevEnvironment", false);
+        set { if (value == IsDevelopment) return; EditorPrefs.SetBool("MCB_DevEnvironment", value); Changed?.Invoke(); }
+    }
     public static string ApiUrl(string scope = "", bool? development = null) => ((development ?? IsDevelopment) ? "http://localhost:4100/" : "https://api.orbiters.cc/") + scope.TrimStart('/');
     public static string WebsiteUrl => IsDevelopment ? "https://dev.orbiters.cc/" : "https://orbiters.cc/";
     public static string ResolveApiUrl(string pathOrUrl, string scope = "", string baseUrl = null)

@@ -9,14 +9,17 @@ public sealed class OrbitersAccountElement : VisualElement
 {
     private readonly string endpoint;
     private readonly Action<bool> changed;
+    private readonly string reason;
     private Texture2D picture;
     private CancellationTokenSource lifetime;
     private int revision;
-    public OrbitersAccountElement(string endpoint, Action<bool> changed)
+    /// <param name="endpoint">The tool's connection check, e.g. "myavatar/connection"; its first segment names the tool on the login page.</param>
+    /// <param name="reason">Why connecting helps, shown under the login buttons.</param>
+    public OrbitersAccountElement(string endpoint, Action<bool> changed, string reason = null)
     {
-        this.endpoint = endpoint; this.changed = changed;
-        RegisterCallback<AttachToPanelEvent>(_ => { lifetime = new CancellationTokenSource(); AuthenticationService.Changed += Refresh; Refresh(); });
-        RegisterCallback<DetachFromPanelEvent>(_ => { AuthenticationService.Changed -= Refresh; lifetime?.Cancel(); lifetime?.Dispose(); lifetime = null;
+        this.endpoint = endpoint; this.changed = changed; this.reason = reason;
+        RegisterCallback<AttachToPanelEvent>(_ => { lifetime = new CancellationTokenSource(); AuthenticationService.Changed += Refresh; OrbitersEnvironment.Changed += Refresh; Refresh(); });
+        RegisterCallback<DetachFromPanelEvent>(_ => { AuthenticationService.Changed -= Refresh; OrbitersEnvironment.Changed -= Refresh; lifetime?.Cancel(); lifetime?.Dispose(); lifetime = null;
             if (picture) UnityEngine.Object.DestroyImmediate(picture); picture = null; });
     }
     private async void Refresh()
@@ -25,7 +28,7 @@ public sealed class OrbitersAccountElement : VisualElement
         if (picture) UnityEngine.Object.DestroyImmediate(picture); picture = null;
         Clear(); var auth = AuthenticationService.GetAuth();
         if (string.IsNullOrEmpty(auth?.token)) {
-            changed?.Invoke(false); var host = new VisualElement(); host.AddToClassList("mcb-auth-host"); host.Add(new OrbitersSignInElement(null)); Add(host); return;
+            changed?.Invoke(false); var host = new VisualElement(); host.AddToClassList("mcb-auth-host"); host.Add(new OrbitersSignInElement(null, reason, endpoint.Split('/')[0])); Add(host); return;
         }
         var row = new VisualElement(); row.AddToClassList("mcb-account"); Add(row);
         void Draw(string state) {

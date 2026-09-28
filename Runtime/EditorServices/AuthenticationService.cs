@@ -21,12 +21,20 @@ public static class AuthenticationService
     }
 
     public static event Action Changed;
-    public static Task<bool> RegisterAuth() => RegisterAuthForEnv(OrbitersEnvironment.IsDevelopment);
+    /// <summary>Stores the account a Unity tool signed in with (see <see cref="OrbitersBrowserLogin"/>).</summary>
+    public static void SaveAuth(AuthData auth, bool? forceIsDev = null)
+    {
+        string path = GetAuthFilePath(forceIsDev);
+        Directory.CreateDirectory(Path.GetDirectoryName(path));
+        // Keep the shared store format. This is obfuscation, not a credential vault.
+        File.WriteAllBytes(path, Transform(Encoding.UTF8.GetBytes(JsonConvert.SerializeObject(auth))));
+        Changed?.Invoke();
+    }
+    /// <summary>Magic Sync: reads a website token from the clipboard. Kept for MCB's per-environment developer tools.</summary>
     public static async Task<bool> RegisterAuthForEnv(bool isDev)
     {
         var match = Regex.Match(EditorGUIUtility.systemCopyBuffer ?? "", @"orbit-\w{8}-\w{8}-\w{8}-\d{2}-\d{2}-\d{4}");
         string token = match.Success ? match.Value : "notoken";
-        string path = GetAuthFilePath(isDev);
         string url = OrbitersEnvironment.ApiUrl("mcb/token", isDev) + "?token=" + Uri.EscapeDataString(token);
         try
         {
@@ -37,17 +45,13 @@ public static class AuthenticationService
                 if (!response.IsSuccessStatusCode) return false;
                 var auth = JsonConvert.DeserializeObject<AuthData>(await response.Content.ReadAsStringAsync());
                 if (string.IsNullOrWhiteSpace(auth?.token)) return false;
-                Directory.CreateDirectory(Path.GetDirectoryName(path));
-                // Keep the shared store format. This is obfuscation, not a credential vault.
-                File.WriteAllBytes(path, Transform(Encoding.UTF8.GetBytes(JsonConvert.SerializeObject(auth))));
-                Changed?.Invoke();
+                SaveAuth(auth, isDev);
                 return true;
             }
         }
         catch (Exception) { /* Callers show actionable inline authentication feedback. Never log tokens. */ }
         return false;
     }
-
     public static AuthData GetAuth() => GetAuthForEnv(OrbitersEnvironment.IsDevelopment);
     public static AuthData GetAuthForEnv(bool isDev)
     {

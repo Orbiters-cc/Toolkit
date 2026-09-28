@@ -1,0 +1,142 @@
+/* Segmented control shared by the Orbiters tools (thumbnail studio, My Avatar). */
+
+.orb-segmented {
+    position: relative;
+    flex-direction: row;
+    height: 32px;
+    padding: 3px;
+    border-radius: 10px;
+    background-color: #1a1a1a;
+}
+
+.orb-segmented__indicator {
+    position: absolute;
+    top: 3px;
+    bottom: 3px;
+    left: 3px;
+    width: 0;
+    border-radius: 8px;
+    background-color: #3d3d3d;
+    transition-property: left, width, opacity;
+    transition-duration: 0.32s, 0.32s, 0.14s;
+    transition-timing-function: ease-out-back, ease-out-back, ease-out;
+}
+
+.orb-segmented__indicator--instant {
+    transition-duration: 0s, 0s, 0s;
+}
+
+.orb-segmented__indicator--hidden {
+    opacity: 0;
+}
+
+.orb-segmented__tab {
+    flex-grow: 1;
+    flex-basis: 0;
+    min-width: 0;
+    height: 26px;
+    flex-direction: row;
+    align-items: center;
+    justify-content: center;
+    padding: 0 4px;
+    border-radius: 8px;
+    transition-property: scale, opacity;
+    transition-duration: 0.2s, 0.14s;
+    transition-timing-function: ease-out-back, ease-out;
+    cursor: link;
+}
+
+.orb-segmented__tab--pressed {
+    scale: 0.94 0.94;
+}
+
+.orb-segmented__tab:disabled {
+    opacity: 0.35;
+}
+
+.orb-segmented__tab:focus .orb-segmented__label {
+    color: #e6e6e6;
+}
+
+.orb-segmented__label {
+    margin: 0;
+    padding: 0;
+    color: #9a9a9a;
+    font-size: 12px;
+    -unity-text-align: middle-center;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    transition-property: color;
+    transition-duration: 0.14s;
+}
+
+.orb-segmented__icon {
+    width: 14px;
+    height: 14px;
+    flex-shrink: 0;
+    margin-right: 5px;
+    --icon-color: #8a8a8a;
+}
+
+.orb-segmented__tab:hover .orb-segmented__label {
+    color: #e6e6e6;
+}
+
+.orb-segmented__tab:hover .orb-segmented__icon {
+    --icon-color: #d6d6d6;
+}
+
+.orb-segmented__tab--selected .orb-segmented__label,
+.orb-segmented__tab--selected:hover .orb-segmented__label {
+    color: #ffffff;
+    -unity-font-style: bold;
+}
+
+.orb-segmented__tab--selected .orb-segmented__icon,
+.orb-segmented__tab--selected:hover .orb-segmented__icon {
+    --icon-color: #00DA6D;
+}
+
+/* Tiles: near-square choices with the icon above the label, e.g. who can grab a PhysBone. */
+.orb-segmented--tiles {
+    height: 62px;
+}
+
+.orb-segmented--tiles .orb-segmented__tab {
+    height: 56px;
+    flex-direction: column;
+    padding: 4px 2px;
+}
+
+.orb-segmented--tiles .orb-segmented__icon {
+    width: 20px;
+    height: 20px;
+    margin: 0 0 5px 0;
+}
+
+.orb-segmented--tiles .orb-segmented__label {
+    font-size: 11px;
+}
+
+/* Compact: a dense row for technical tools. */
+.orb-segmented--compact {
+    height: 24px;
+    padding: 2px;
+    border-radius: 7px;
+}
+
+.orb-segmented--compact .orb-segmented__indicator {
+    top: 2px;
+    bottom: 2px;
+    border-radius: 5px;
+}
+
+.orb-segmented--compact .orb-segmented__tab {
+    height: 20px;
+    border-radius: 5px;
+}
+
+.orb-segmented--compact .orb-segmented__label {
+    font-size: 11px;
+}

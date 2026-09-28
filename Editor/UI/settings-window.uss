@@ -1,0 +1,19 @@
+.orb-settings {
+    padding: 16px 18px;
+    background-color: #242424;
+    flex-grow: 1;
+}
+
+.orb-settings__title {
+    margin: 0 0 8px 2px;
+    color: #f2f2f2;
+    font-size: 12px;
+    -unity-font-style: bold;
+}
+
+.orb-settings__caption {
+    margin: 10px 2px 0 2px;
+    color: #8f8f8f;
+    font-size: 11px;
+    white-space: normal;
+}

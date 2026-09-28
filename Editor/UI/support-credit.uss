@@ -1,0 +1,6 @@
+.orb-credit { flex-direction: row; justify-content: center; align-items: center; flex-shrink: 0; margin-top: 10px; padding-top: 8px; cursor: link; }
+.orb-credit:hover { opacity: 0.86; }
+.orb-credit:active, .orb-credit--pressed { opacity: 0.66; }
+.orb-credit__text { color: #b8b8b8; font-size: 10px; margin-left: 4px; margin-right: 4px; white-space: normal; cursor: link; }
+.orb-credit__profile { width: 20px; height: 20px; border-radius: 10px; margin-left: 2px; margin-right: 8px; overflow: hidden; cursor: link; }
+.orb-credit__kofi { width: 22px; height: 18px; margin-left: 2px; cursor: link; }
