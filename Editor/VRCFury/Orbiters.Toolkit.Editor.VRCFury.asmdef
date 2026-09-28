@@ -1,0 +1,28 @@
+{
+  "name": "Orbiters.Toolkit.Editor.VRCFury",
+  "rootNamespace": "Orbiters.Toolkit.Editor.VRCFury",
+  "references": [
+    "Orbiters.Toolkit.Editor.VRChat",
+    "com.vrcfury.api"
+  ],
+  "includePlatforms": [
+    "Editor"
+  ],
+  "autoReferenced": true,
+  "defineConstraints": [
+    "ORBITERS_VRCHAT_AVATARS",
+    "ORBITERS_VRCFURY"
+  ],
+  "versionDefines": [
+    {
+      "name": "com.vrchat.avatars",
+      "expression": "3.5.0",
+      "define": "ORBITERS_VRCHAT_AVATARS"
+    },
+    {
+      "name": "com.vrcfury.vrcfury",
+      "expression": "1.1000.0",
+      "define": "ORBITERS_VRCFURY"
+    }
+  ]
+}

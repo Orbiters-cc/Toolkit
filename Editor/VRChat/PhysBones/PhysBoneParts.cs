@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text.RegularExpressions;
+using Orbiters.Toolkit.Armature;
 using Orbiters.Toolkit.Editor.Posing;
 using UnityEditor;
 using UnityEngine;
@@ -249,8 +250,7 @@ namespace Orbiters.Toolkit.Editor.VRChat.PhysBones
             return created;
         }
 
-        private static bool IsEndBone(Transform bone) =>
-            bone.childCount == 0 && Regex.IsMatch(bone.name, @"(^|[\s._-])end(\.\d+)?$|End(\.\d+)?$", RegexOptions.IgnoreCase);
+        private static bool IsEndBone(Transform bone) => bone.childCount == 0 && BoneNames.IsEnd(bone.name);
 
         private static void Edit(IEnumerable<VRCPhysBone> physBones, string undoName, Action<VRCPhysBone> edit)
         {

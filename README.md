@@ -20,6 +20,19 @@ editor-only helpers to reference them. Player builds contain none of this editor
 logic. `Orbiters.Toolkit.Editor` continues to own posing and screenshot utilities.
 The package also depends on Unity's Newtonsoft JSON package.
 
+## Feature flags and optional packages
+
+Tools register opt-in features with `OrbitersFeatures.Register` (key, product, label,
+description, `FeatureStage`, default; stored per user in EditorPrefs). **Orbiters settings**
+lists them by product with a `StageBadge` (beta, alpha, experimental) and a switch.
+
+`Orbiters.Toolkit.Editor.Vpm` (compiled when the VRChat Package Resolver is present) reads a
+package's VPM dependencies from its package.json: `vpmDependencies` plus an `"orbiters"` block
+with `repositories`, `dependencyDisplayNames` and `optionalVpmDependencies` (`displayName`,
+`version`, `reason`). `VpmDependencies.For("<package>")` reports status and installs, adding
+missing repositories first; `DependencyPrompt` shows "this feature needs X" with an Install
+button and hides once X is installed.
+
 ## Mirror posing
 
 In XRay Gizmos, select an avatar or one of its bones and enable **Mirror** in the
@@ -30,10 +43,9 @@ when selection changes. Toggle it off and on with another avatar selected to swi
 The window reports the active rig, pair count and selected partner.
 
 Humanoid bone mappings take priority. Generic rigs use matching hierarchy paths
-with `Left`/`Right`, `left`/`right`, `LEFT`/`RIGHT`, or `.L`/`.R`, `_L`/`_R`,
-`-L`/`-R`, and space-separated side markers (including lowercase markers).
-Markers can precede or follow the bone name; namespaced humanoid names also work.
-Ambiguous paths, unpaired bones and center bones are skipped.
+whose names differ only by a side word (`Left`/`Right` in any case, or a separate
+`L`/`R`: `upper_arm.L`, `J_Bip_L_Hand`, `LeftArm`, `mixamorig:LeftHand`), see
+`BoneNames.Mirror`. Ambiguous paths, unpaired bones and center bones are skipped.
 
 The mesh bind pose supplies the reference frames, accounting for different local
 bone axes. Pairs missing complete bind-pose data use the pose at enable time as a
@@ -51,6 +63,60 @@ changing reference scale or rig structure, then enable it again.
 Other editor tools can call `Orbiters.Toolkit.Editor.Posing.MirrorPoseService`
 (`Enable(root, renderer)`, `Disable()`, `GetPartner(bone)`, `Changed`).
 Its assembly is `Orbiters.Toolkit.Editor`; it has no XRayGizmos or MCP dependency.
+
+## Bone matching
+
+`Orbiters.Toolkit.Armature` (runtime assembly `Orbiters.Toolkit`) matches clothing and accessory armatures onto an
+avatar. `BoneNames` reads bone names as words: `Normalize`, `Side`, `Mirror`, `IsArmatureContainer`, `IsEnd` and
+`TryInferHumanoid`, which knows Unity/VRChat, Mixamo, Blender/Rigify, VRoid, Rexouium, Biped and Unreal names,
+including fingers, eyes and jaw, and leaves props (`ArmBand.L`, `Chest Pin`), Blender copies (`Hips.001`) and `_end`
+leaves alone. `AvatarBoneIndex.Build` indexes an avatar's bones by name and humanoid role; `BoneMatcher.MatchHierarchy`
+matches parents first by exact name, name without the clothing's affix (`DetectAffixes`: `Hips_Shirt`), humanoid role,
+then contained name, and reports ambiguous matches with their alternatives. `ArmatureRest` gives bind-pose rest frames.
+
+## Attachments
+
+`Orbiters.Toolkit.Editor.VRChat.Attachments` attaches a clothing or accessory object placed under an avatar root, with
+Undo and without changing the avatar. `AttachmentPlanner.Analyze(accessory, avatarRoot)` returns an `AttachmentPlan`:
+
+- **Configured**: the creator's VRCFury Armature Links, Modular Avatar merge/bone proxy components or wired constraints
+  already attach everything it shows. It is kept as is. A VRCFury or Modular Avatar prop that links nothing (dropped in
+  the world, driven by its own controller) counts as configured too.
+- **Clothing**: skinned to an armature of its own. When one recursive VRCFury Armature Link reproduces the bone matcher's
+  result exactly (VRCFury only merges children by exact name, after its derived suffix), the plan uses one; otherwise
+  each matched bone gets a link of the tool's own. Extra bones (hood strings, physics chains) follow their parent.
+- **Rigid**: follows one avatar bone, chosen from its name (hat, hair, ears: head; necklace, pin: chest; bracelet,
+  glove: the hand its name or position says) or the closest humanoid bone (flagged as a guess). Modelled far from the
+  bone, it is placed on it.
+
+Empty Unity constraints named after avatar bones (`Head`, `Left wrist`) get that bone as source, keeping where the object
+stands, and become VRChat constraints. Object names that give instructions (`(open me)`, `Put me in armature`), unknown
+scripts, missing scripts and bones no avatar bone explains become `SetupNote`s.
+
+`AttachmentInstaller.Install(plan, options)` adds `OrbitersAttachment` (runtime assembly `Orbiters.Toolkit.VRChat`,
+`IEditorOnly`) to the accessory root, the VRCFury Armature Link when exact, a saved VRCFury toggle under
+`Accessories/<name>` when the accessory has no toggle or controller of its own, and copies the body's blendshape
+weights to same-named shapes. `Retarget`, `Link` (AI answers), `Remove` and `Installed` complete it. VRCFury components
+are created through VRCFury's public API by the optional `Orbiters.Toolkit.Editor.VRCFury` assembly; `VrcFury` reads
+VRCFury components (including links saved by older VRCFury versions) without referencing it.
+
+At build (`AttachmentBuild`, VRChat preprocess callbacks): at -10100, just before VRCFury, linked bones are placed at
+their rest offset from their avatar bone (from both meshes' bind poses, so the scene pose does not matter) and moved
+under it, and parented props are moved under their bone; VRCFury then keeps the accessory's animations working with the
+paths it recorded earlier. At -8900 animations of body blendshapes also drive the same-named accessory shapes
+(`BlendShapeSync`), and the components are removed. The scene is never changed by a build.
+
+`AttachmentFollow.Links(avatarRoot)` lists, for every accessory, which transform follows which avatar bone and at which
+offset: My Avatar attachments, VRCFury Armature Links, and the bone matcher for clothing nothing links. The build and
+the posing preview share it.
+
+## Accessory posing preview
+
+`Orbiters.Toolkit.Editor.VRChat.Posing.AccessoryPoseSync` (`Enable(avatarRoot)`, `Disable()`, `Sync()`, `Find`,
+`Accessories`, `Changed`) keeps accessories in the avatar's pose as they will be attached once built, including props on
+one bone. It is a preview: accessories go back where they were when it is switched off, before their scene is saved, on
+script reload and on entering Play Mode. Bones driven by constraints are left to them; accessories Modular Avatar
+attaches are shown by name match.
 
 ## Install AI integration
 

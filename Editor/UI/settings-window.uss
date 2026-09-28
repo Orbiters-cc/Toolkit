@@ -1,7 +1,20 @@
 .orb-settings {
-    padding: 16px 18px;
     background-color: #242424;
     flex-grow: 1;
+}
+
+.orb-settings__scroll {
+    flex-grow: 1;
+}
+
+.orb-settings__content {
+    padding: 18px 20px 22px 20px;
+}
+
+.orb-settings__card {
+    padding: 14px 16px 14px 16px;
+    border-radius: 12px;
+    background-color: #1c1c1c;
 }
 
 .orb-settings__title {
@@ -11,8 +24,80 @@
     -unity-font-style: bold;
 }
 
+.orb-settings__title--section {
+    margin-top: 22px;
+}
+
 .orb-settings__caption {
     margin: 10px 2px 0 2px;
+    color: #8f8f8f;
+    font-size: 11px;
+    white-space: normal;
+}
+
+.orb-settings__caption--lead {
+    margin: 0 2px 4px 2px;
+}
+
+.orb-settings__group {
+    margin-top: 10px;
+    padding: 8px 16px;
+    border-radius: 10px;
+    background-color: #1c1c1c;
+}
+
+.orb-settings__product {
+    margin: 6px 0 2px 0;
+    padding: 0;
+    color: #7a7a7a;
+    font-size: 10px;
+    -unity-font-style: bold;
+    letter-spacing: 0.6px;
+}
+
+.orb-settings__feature {
+    flex-direction: row;
+    align-items: center;
+    padding: 10px 0;
+    border-top-width: 1px;
+    border-color: #262626;
+}
+
+.orb-settings__feature--first {
+    border-top-width: 0;
+}
+
+.orb-settings__feature:disabled {
+    opacity: 0.45;
+}
+
+.orb-settings__feature:disabled .orb-switch {
+    opacity: 1;
+}
+
+.orb-settings__feature-texts {
+    flex-grow: 1;
+    flex-shrink: 1;
+    margin-right: 12px;
+}
+
+.orb-settings__feature-head {
+    flex-direction: row;
+    align-items: center;
+    flex-wrap: wrap;
+}
+
+.orb-settings__feature-label {
+    margin: 0;
+    padding: 0;
+    color: #e6e6e6;
+    font-size: 12px;
+    -unity-font-style: bold;
+}
+
+.orb-settings__feature-description {
+    margin: 3px 0 0 0;
+    padding: 0;
     color: #8f8f8f;
     font-size: 11px;
     white-space: normal;

@@ -8,6 +8,7 @@ using Orbiters.Toolkit.Editor.Photoshoot;
 using Orbiters.Toolkit.Editor.Posing;
 using Orbiters.Toolkit.Editor.VRChat.Parameters;
 using Orbiters.Toolkit.Editor.VRChat.PhysBones;
+using Orbiters.Toolkit.Editor.VRChat.Posing;
 using UnityEditor;
 using UnityEngine;
 using VRC.SDK3.Avatars.Components;
@@ -109,14 +110,14 @@ public sealed class AvatarSafetyRegressionTests
         var clothRenderer = Child("ClothMesh", clothing).gameObject.AddComponent<SkinnedMeshRenderer>();
         clothRenderer.rootBone = clothingBone; clothRenderer.bones = new[] { clothingBone };
         clothRenderer.sharedMesh = Skin(clothRenderer, clothingBone);
-        Assert.True(AccessoryPoseSync.Enable(root.transform, body), AccessoryPoseSync.LastStatus);
+        Assert.True(AccessoryPoseSync.Enable(root.transform), AccessoryPoseSync.LastStatus);
         var localOffset = avatarBone.InverseTransformPoint(clothingBone.position);
         root.transform.localScale = new Vector3(x, y, z);
         avatarBone.localRotation = Quaternion.Euler(0, 0, 35);
-        AccessoryPoseSync.Sync(false);
+        AccessoryPoseSync.Sync();
         Assert.Less(Vector3.Distance(avatarBone.TransformPoint(localOffset), clothingBone.position), 0.0001f);
         avatarBone.localScale = new Vector3(1.4f, 0.8f, 1.1f);
-        AccessoryPoseSync.Sync(false);
+        AccessoryPoseSync.Sync();
         Assert.Less(Vector3.Distance(avatarBone.TransformPoint(localOffset), clothingBone.position), 0.0001f);
     }
 

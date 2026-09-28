@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using System.Linq;
+using Orbiters.Toolkit.Armature;
 using UnityEngine;
 
 namespace Orbiters.Toolkit.Editor.Posing
@@ -14,7 +15,7 @@ namespace Orbiters.Toolkit.Editor.Posing
         public static Transform Root(Transform avatarRoot, SkinnedMeshRenderer body = null)
         {
             if (avatarRoot == null) return null;
-            var animator = avatarRoot.GetComponentsInChildren<Animator>(true).FirstOrDefault(a => a.isHuman && a.avatar != null && a.avatar.isValid);
+            var animator = AvatarBoneIndex.FindHumanoid(avatarRoot);
             var start = animator != null ? animator.GetBoneTransform(HumanBodyBones.Hips) : null;
             if (start == null || !start.IsChildOf(avatarRoot)) start = body != null && body.rootBone != null && body.rootBone.IsChildOf(avatarRoot) ? body.rootBone : null;
             if (start == null || start == avatarRoot) return null;
@@ -34,7 +35,7 @@ namespace Orbiters.Toolkit.Editor.Posing
         public static HashSet<Transform> HumanoidBones(Transform avatarRoot)
         {
             var result = new HashSet<Transform>();
-            var animator = avatarRoot != null ? avatarRoot.GetComponentsInChildren<Animator>(true).FirstOrDefault(a => a.isHuman && a.avatar != null && a.avatar.isValid) : null;
+            var animator = AvatarBoneIndex.FindHumanoid(avatarRoot);
             if (animator == null) return result;
             for (var id = HumanBodyBones.Hips; id < HumanBodyBones.LastBone; id++)
             {

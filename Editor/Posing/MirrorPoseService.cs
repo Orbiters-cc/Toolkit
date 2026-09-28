@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using Orbiters.Toolkit.Armature;
 using UnityEditor;
 using UnityEngine;
 
@@ -160,7 +161,7 @@ namespace Orbiters.Toolkit.Editor.Posing
                 .Where(g => g.Count() == 1).ToDictionary(g => g.Key, g => g.First());
             foreach (var item in paths)
             {
-                var opposite = string.Join("/", item.Key.Split('/').Select(MirrorName));
+                var opposite = string.Join("/", item.Key.Split('/').Select(n => BoneNames.Mirror(n) ?? n));
                 if (opposite != item.Key && paths.TryGetValue(opposite, out var other))
                     AddPair(pairs, item.Value, other, frames);
             }
@@ -258,32 +259,6 @@ namespace Orbiters.Toolkit.Editor.Posing
                 left.IsChildOf(right) || right.IsChildOf(left)) return;
             pairs.Add(left, right);
             pairs.Add(right, left);
-        }
-
-        private static string MirrorName(string name)
-        {
-            var sides = new[] { "Left", "Right", "left", "right", "LEFT", "RIGHT" };
-            for (int i = 0; i < sides.Length; i++)
-            {
-                if (name.StartsWith(sides[i], StringComparison.Ordinal))
-                    return sides[i ^ 1] + name.Substring(sides[i].Length);
-                if (name.EndsWith(sides[i], StringComparison.Ordinal))
-                    return name.Substring(0, name.Length - sides[i].Length) + sides[i ^ 1];
-            }
-            foreach (var separator in new[] { '.', '_', '-', ' ' })
-            {
-                foreach (var side in new[] { 'L', 'R', 'l', 'r' })
-                {
-                    char other = side == 'L' ? 'R' : side == 'R' ? 'L' : side == 'l' ? 'r' : 'l';
-                    if (name.EndsWith(separator.ToString() + side, StringComparison.Ordinal))
-                        return name.Substring(0, name.Length - 1) + other;
-                    if (name.StartsWith(side.ToString() + separator, StringComparison.Ordinal))
-                        return other + name.Substring(1);
-                }
-            }
-            // Namespaced rigs such as mixamorig:LeftArm.
-            int colon = name.LastIndexOf(':');
-            return colon >= 0 ? name.Substring(0, colon + 1) + MirrorName(name.Substring(colon + 1)) : name;
         }
 
         private static bool UniformPositive(Vector3 scale)

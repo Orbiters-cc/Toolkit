@@ -50,7 +50,7 @@ namespace Orbiters.Toolkit.Editor.VRChat.Parameters
             bool IsReserved(GameObject go) => go != null && options?.IsReservedSliderHost != null && options.IsReservedSliderHost(go);
             var components = avatarRoot.GetComponentsInChildren(vrcFuryType, true);
             // Compression eligibility depends on the completed animator build. Do not invent savings here.
-            var mode = FindType("VF.Menu.CompressorMenuItem")?.GetMethod("Get")?.Invoke(null, null)?.ToString();
+            var mode = VrcFury.Find("VF.Menu.CompressorMenuItem")?.GetMethod("Get")?.Invoke(null, null)?.ToString();
             budget.CompressionStatus = mode == "Ask" ? "VRCFury asks about compression during build."
                 : mode == "Fail" ? "VRCFury compression is disabled in its global settings."
                 : mode == "Compress" ? "VRCFury compresses automatically when needed during build."
@@ -67,9 +67,9 @@ namespace Orbiters.Toolkit.Editor.VRChat.Parameters
 
         private static void ResolveVrcFury()
         {
-            vrcFuryType ??= FindType("VF.Model.VRCFury");
-            toggleType ??= FindType("VF.Model.Feature.Toggle");
-            fullControllerType ??= FindType("VF.Model.Feature.FullController");
+            vrcFuryType ??= VrcFury.Find("VF.Model.VRCFury");
+            toggleType ??= VrcFury.Find("VF.Model.Feature.Toggle");
+            fullControllerType ??= VrcFury.Find("VF.Model.Feature.FullController");
         }
 
         private static bool IsSynced(VRCExpressionParameters.Parameter parameter)
@@ -98,7 +98,7 @@ namespace Orbiters.Toolkit.Editor.VRChat.Parameters
             return map;
         }
 
-        private static object Content(Component component) => vrcFuryType.GetField("content")?.GetValue(component);
+        private static object Content(Component component) => VrcFury.Content(component);
 
         private static int FullControllerBits(Component[] components, Dictionary<string, VRCExpressionParameters.ValueType> synced)
         {
@@ -115,7 +115,7 @@ namespace Orbiters.Toolkit.Editor.VRChat.Parameters
                 if (!(fullControllerType.GetField("prms")?.GetValue(content) is IEnumerable entries)) continue;
                 foreach (var entry in entries)
                 {
-                    if (!(ObjectReference(entry?.GetType().GetField("parameters")?.GetValue(entry)) is VRCExpressionParameters asset) || asset.parameters == null) continue;
+                    if (!(VrcFury.ObjectReference(entry?.GetType().GetField("parameters")?.GetValue(entry)) is VRCExpressionParameters asset) || asset.parameters == null) continue;
                     foreach (var parameter in asset.parameters)
                     {
                         if (parameter == null || string.IsNullOrEmpty(parameter.name) || !IsSynced(parameter)) continue;
@@ -151,15 +151,6 @@ namespace Orbiters.Toolkit.Editor.VRChat.Parameters
             return global;
         }
 
-        private static UnityEngine.Object ObjectReference(object wrapper)
-        {
-            for (var type = wrapper?.GetType(); type != null; type = type.BaseType)
-            {
-                var field = type.GetField("objRef", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-                if (field != null) return field.GetValue(wrapper) as UnityEngine.Object;
-            }
-            return null;
-        }
 
         private static int ToggleBits(Component[] components, Func<GameObject, bool> isReserved)
         {
@@ -178,20 +169,6 @@ namespace Orbiters.Toolkit.Editor.VRChat.Parameters
             return raw;
         }
 
-        private static Type FindType(string fullName)
-        {
-            foreach (var assembly in new[] { "VRCFury-Runtime", "VRCFury-Editor", "VRCFury" })
-            {
-                var type = Type.GetType(fullName + ", " + assembly);
-                if (type != null) return type;
-            }
-            foreach (var assembly in AppDomain.CurrentDomain.GetAssemblies())
-            {
-                var type = assembly.GetType(fullName);
-                if (type != null) return type;
-            }
-            return null;
-        }
 
     }
 }

@@ -2,6 +2,7 @@
   "name": "Orbiters.Toolkit.Editor.Tests",
   "references": [
     "Orbiters.Toolkit",
+    "Orbiters.Toolkit.VRChat",
     "Orbiters.Toolkit.Editor",
     "Orbiters.Toolkit.Editor.VRChat",
     "VRC.SDK3A",
@@ -29,6 +30,7 @@
     "VRCSDK3A.dll",
     "VRCSDKBase.dll",
     "VRC.Dynamics.dll",
-    "VRC.SDK3.Dynamics.PhysBone.dll"
+    "VRC.SDK3.Dynamics.PhysBone.dll",
+    "VRC.SDK3.Dynamics.Constraint.dll"
   ]
 }

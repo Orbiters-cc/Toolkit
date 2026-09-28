@@ -1,0 +1,10 @@
+.orb-dependency { flex-direction: row; flex-wrap: wrap; align-items: center; margin: 6px 0; padding: 10px 12px; border-radius: 10px; background-color: rgba(255, 176, 32, 0.08); border-width: 1px; border-color: rgba(255, 176, 32, 0.22); }
+.orb-dependency__texts { flex-grow: 1; flex-shrink: 1; flex-basis: 0; min-width: 160px; margin-right: 10px; }
+.orb-dependency__title { margin: 0; padding: 0; font-size: 12px; -unity-font-style: bold; color: #e6e6e6; white-space: normal; }
+.orb-dependency__reason { margin: 3px 0 0 0; padding: 0; font-size: 11px; color: #9a9a9a; white-space: normal; }
+.orb-dependency__error { margin: 5px 0 0 0; padding: 0; font-size: 11px; color: #ff6b6b; white-space: normal; }
+.orb-dependency__install { height: 26px; min-height: 26px; margin: 4px 0; padding: 0 12px; border-width: 0; border-radius: 13px; font-size: 11px; -unity-font-style: bold; color: #06140c; background-color: #00DA6D; flex-shrink: 0; transition-property: background-color, scale; transition-duration: 0.12s; }
+.orb-dependency__install:hover { background-color: #19e27d; }
+.orb-dependency__install:active { scale: 0.96 0.96; }
+.orb-dependency__install:disabled { opacity: 1; color: #9a9a9a; background-color: #3a3a3a; }
+.orb-dependency--installing .orb-dependency__install { scale: 0.96 0.96; }

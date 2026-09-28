@@ -1,0 +1,28 @@
+{
+  "name": "Orbiters.Toolkit.Editor.Vpm",
+  "rootNamespace": "Orbiters.Toolkit.Editor.Vpm",
+  "references": [
+    "Orbiters.Toolkit.Editor",
+    "com.vrchat.core.vpm-resolver.Editor"
+  ],
+  "includePlatforms": [
+    "Editor"
+  ],
+  "overrideReferences": true,
+  "precompiledReferences": [
+    "vpm-core-lib.dll",
+    "SemanticVersioning.dll",
+    "Newtonsoft.Json.dll"
+  ],
+  "autoReferenced": true,
+  "defineConstraints": [
+    "ORBITERS_VPM"
+  ],
+  "versionDefines": [
+    {
+      "name": "com.vrchat.core.vpm-resolver",
+      "expression": "0.1.0",
+      "define": "ORBITERS_VPM"
+    }
+  ]
+}
