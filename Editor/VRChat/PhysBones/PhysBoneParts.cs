@@ -88,17 +88,12 @@ namespace Orbiters.Toolkit.Editor.VRChat.PhysBones
 
             // Chains without physics: bones of the avatar's own armature named like a part, outside every PhysBone,
             // that are not humanoid bones nor driven by something else. Only the first bone of each chain is listed.
-            var covered = new HashSet<Transform>();
-            foreach (var physBone in physBones)
-            {
-                var root = physBone.GetRootTransform();
-                if (root != null) covered.UnionWith(root.GetComponentsInChildren<Transform>(true));
-            }
+            var covered = SimulatedTransforms(physBones);
             var humanoid = AvatarSkeleton.HumanoidBones(avatarRoot);
             foreach (var bone in AvatarSkeleton.Bones(avatarRoot))
             {
                 if (covered.Contains(bone) || humanoid.Contains(bone) || IsEndBone(bone) || !TryClassify(bone.name, out var part)) continue;
-                if (bone.parent != null && !humanoid.Contains(bone.parent) && TryClassify(bone.parent.name, out var parentPart) && parentPart == part) continue;
+                if (bone.parent != null && !covered.Contains(bone.parent) && !humanoid.Contains(bone.parent) && TryClassify(bone.parent.name, out var parentPart) && parentPart == part) continue;
                 if (bone.GetComponents<Component>().Length > 1) continue;
                 // An accessory placed on a bone (its own armature and mesh, maybe with physics inside) is not a chain.
                 if (bone.GetComponentInChildren<Renderer>(true) != null || bone.GetComponentsInChildren<Transform>(true).Any(covered.Contains)) continue;
@@ -113,6 +108,27 @@ namespace Orbiters.Toolkit.Editor.VRChat.PhysBones
                 info.MaxStretch = stretches.Count == 1 ? stretches[0] : (float?)null;
             }
             return parts.Values.OrderBy(i => i.Part).ToList();
+        }
+
+        internal static HashSet<Transform> SimulatedTransforms(IEnumerable<VRCPhysBone> physBones)
+        {
+            var covered = new HashSet<Transform>();
+            foreach (var physBone in physBones)
+            {
+                var root = physBone.GetRootTransform();
+                if (root == null) continue;
+                var ignored = new HashSet<Transform>(physBone.ignoreTransforms ?? new List<Transform>());
+                var pending = new Stack<Transform>();
+                pending.Push(root);
+                while (pending.Count > 0)
+                {
+                    var current = pending.Pop();
+                    if (ignored.Contains(current)) continue; // Ignoring a transform excludes its whole branch.
+                    covered.Add(current);
+                    foreach (Transform child in current) pending.Push(child);
+                }
+            }
+            return covered;
         }
 
         public static void SetGrabbing(IEnumerable<VRCPhysBone> physBones, PhysBoneAccess access)

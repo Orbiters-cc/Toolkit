@@ -89,10 +89,11 @@ namespace Orbiters.Toolkit.Editor.Posing
                     var target = Match(bone, index);
                     if (target == null) continue;
                     // Rest offset from bind poses when both bones are skinned, else from where they stand now.
-                    var avatarFrame = avatarRest.TryGetValue(target, out var a) ? a : Matrix4x4.TRS(target.position, target.rotation, Vector3.one);
-                    var clothingFrame = clothingRest.TryGetValue(bone, out var c) ? c : Matrix4x4.TRS(bone.position, bone.rotation, Vector3.one);
+                    var avatarFrame = avatarRest.TryGetValue(target, out var a) ? a : target.localToWorldMatrix;
+                    var clothingFrame = clothingRest.TryGetValue(bone, out var c) ? c : bone.localToWorldMatrix;
+                    if (Mathf.Abs(avatarFrame.determinant) < 1e-8f) continue;
                     var offset = avatarFrame.inverse * clothingFrame;
-                    Links.Add(new Link { Avatar = target, Clothing = bone, OffsetPosition = offset.GetColumn(3), OffsetRotation = offset.rotation });
+                    Links.Add(new Link { Avatar = target, Clothing = bone, OffsetPosition = offset.GetColumn(3), OffsetRotation = Quaternion.Inverse(avatarFrame.rotation) * clothingFrame.rotation });
                 }
             }
             Found.Clear();
@@ -101,6 +102,8 @@ namespace Orbiters.Toolkit.Editor.Posing
             // Parents first, so each child is placed from its parent's new pose.
             Links.Sort((x, y) => Depth(x.Clothing).CompareTo(Depth(y.Clothing)));
             avatarBones = new HashSet<Transform>(skeleton);
+            foreach (var bone in skeleton)
+                for (var ancestor = bone.parent; ancestor != null; ancestor = ancestor.parent) avatarBones.Add(ancestor);
             Root = avatarRoot;
             LastStatus = $"{Found.Count} accessor{(Found.Count == 1 ? "y" : "ies")} follow the avatar · {Links.Count} bones";
             Sync(recordUndo: true);
@@ -127,7 +130,7 @@ namespace Orbiters.Toolkit.Editor.Posing
             foreach (var link in Links)
             {
                 var rotation = link.Avatar.rotation * link.OffsetRotation;
-                var position = link.Avatar.position + link.Avatar.rotation * link.OffsetPosition;
+                var position = link.Avatar.TransformPoint(link.OffsetPosition);
                 if (link.Clothing.rotation == rotation && link.Clothing.position == position) continue;
                 link.Clothing.SetPositionAndRotation(position, rotation);
                 PrefabUtility.RecordPrefabInstancePropertyModifications(link.Clothing);
@@ -140,7 +143,7 @@ namespace Orbiters.Toolkit.Editor.Posing
             foreach (var modification in modifications)
             {
                 if (modification.currentValue?.target is Transform t && avatarBones.Contains(t) &&
-                    (modification.currentValue.propertyPath.StartsWith("m_LocalRotation") || modification.currentValue.propertyPath.StartsWith("m_LocalPosition")))
+                    (modification.currentValue.propertyPath.StartsWith("m_LocalRotation") || modification.currentValue.propertyPath.StartsWith("m_LocalPosition") || modification.currentValue.propertyPath.StartsWith("m_LocalScale")))
                 {
                     Schedule();
                     break;
@@ -251,7 +254,7 @@ namespace Orbiters.Toolkit.Editor.Posing
                 {
                     if (bones[i] == null || frames.ContainsKey(bones[i]) || Mathf.Abs(bindposes[i].determinant) < 1e-8f) continue;
                     var frame = meshFrame * bindposes[i].inverse;
-                    frames[bones[i]] = Matrix4x4.TRS(frame.GetColumn(3), frame.rotation, Vector3.one);
+                    frames[bones[i]] = frame;
                 }
             }
             return frames;

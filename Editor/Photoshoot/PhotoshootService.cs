@@ -138,6 +138,8 @@ namespace Orbiters.Toolkit.Editor.Photoshoot
             private string lastFaceBlendshapeKey;
             private Color? lastAmbient;
             private Transform[] sourceTransforms, copyTransforms;
+            private int[] sourceAppearance;
+            private int bodyPoseRevision;
             private bool hasHeadRegion, hasTorsoRegion, hasBodyRegion;
             private Bounds headRegion, torsoRegion, bodyRegion;
             private ShotKind lastPreviewShotKind = ShotKind.Thumbnail;
@@ -431,16 +433,20 @@ namespace Orbiters.Toolkit.Editor.Photoshoot
             private bool EnsureAvatarCopy(GameObject avatarRoot, AnimationClip bodyPose, out bool poseChanged)
             {
                 poseChanged = false;
-                if (avatarCopy != null && lastAvatarRoot == avatarRoot && lastBodyPose == bodyPose)
+                int[] currentAppearance = CaptureSourceAppearance(avatarRoot);
+                bool sourceUnchanged = sourceAppearance != null && sourceAppearance.SequenceEqual(currentAppearance);
+                int currentPoseRevision = bodyPose != null ? EditorUtility.GetDirtyCount(bodyPose) : 0;
+                if (avatarCopy != null && lastAvatarRoot == avatarRoot && sourceUnchanged && lastBodyPose == bodyPose && bodyPoseRevision == currentPoseRevision)
                 {
                     return false;
                 }
 
                 // Another pose on the same avatar: put every bone back where the avatar has it, then sample the new pose.
                 // Duplicating a full avatar again takes far longer than copying its transforms.
-                if (avatarCopy != null && lastAvatarRoot == avatarRoot && RestoreSourcePose(avatarRoot))
+                if (avatarCopy != null && lastAvatarRoot == avatarRoot && sourceUnchanged && RestoreSourcePose(avatarRoot))
                 {
                     lastBodyPose = bodyPose;
+                    bodyPoseRevision = currentPoseRevision;
                     poseChanged = true;
                     return false;
                 }
@@ -466,9 +472,60 @@ namespace Orbiters.Toolkit.Editor.Photoshoot
                 copyTransforms = avatarCopy.GetComponentsInChildren<Transform>(true);
 
                 lastAvatarRoot = avatarRoot;
+                sourceAppearance = currentAppearance;
+                bodyPoseRevision = currentPoseRevision;
                 lastBodyPose = bodyPose;
                 lastFaceBlendshapeKey = null;
                 return true;
+            }
+
+            // Compare source state, not the posed clone. Rebuilding only after a source edit keeps camera-only
+            // previews cheap while captures always reflect current meshes, materials, visibility and hierarchy.
+            private static int[] CaptureSourceAppearance(GameObject root)
+            {
+                var values = new List<int>();
+                void ObjectState(UnityEngine.Object value)
+                {
+                    values.Add(value != null ? value.GetInstanceID() : 0);
+                    values.Add(value != null ? EditorUtility.GetDirtyCount(value) : 0);
+                }
+                void Vector(Vector3 value) { values.Add(value.x.GetHashCode()); values.Add(value.y.GetHashCode()); values.Add(value.z.GetHashCode()); }
+                var transforms = root.GetComponentsInChildren<Transform>(true);
+                values.Add(transforms.Length);
+                foreach (var transform in transforms)
+                {
+                    values.Add(transform.GetInstanceID());
+                    values.Add(transform.parent != null ? transform.parent.GetInstanceID() : 0);
+                    values.Add(transform.gameObject.activeSelf ? 1 : 0);
+                    Vector(transform.localPosition);
+                    Vector(transform.localScale);
+                    var rotation = transform.localRotation;
+                    values.Add(rotation.x.GetHashCode()); values.Add(rotation.y.GetHashCode());
+                    values.Add(rotation.z.GetHashCode()); values.Add(rotation.w.GetHashCode());
+                }
+                var renderers = root.GetComponentsInChildren<Renderer>(true);
+                values.Add(renderers.Length);
+                foreach (var renderer in renderers)
+                {
+                    values.Add(renderer.GetInstanceID());
+                    values.Add(renderer.enabled ? 1 : 0);
+                    var materials = renderer.sharedMaterials;
+                    values.Add(materials.Length);
+                    foreach (var material in materials) ObjectState(material);
+                    if (renderer is SkinnedMeshRenderer skinned)
+                    {
+                        ObjectState(skinned.sharedMesh);
+                        ObjectState(skinned.rootBone);
+                        var bones = skinned.bones;
+                        values.Add(bones.Length);
+                        foreach (var bone in bones) values.Add(bone != null ? bone.GetInstanceID() : 0);
+                        int shapes = skinned.sharedMesh != null ? skinned.sharedMesh.blendShapeCount : 0;
+                        values.Add(shapes);
+                        for (int i = 0; i < shapes; i++) values.Add(skinned.GetBlendShapeWeight(i).GetHashCode());
+                    }
+                    else ObjectState(renderer.GetComponent<MeshFilter>()?.sharedMesh);
+                }
+                return values.ToArray();
             }
 
             // One bake per skinned mesh gives both its posed culling bounds and the head and torso regions, measured on

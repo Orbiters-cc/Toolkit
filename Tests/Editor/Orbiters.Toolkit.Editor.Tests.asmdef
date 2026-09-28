@@ -1,0 +1,34 @@
+{
+  "name": "Orbiters.Toolkit.Editor.Tests",
+  "references": [
+    "Orbiters.Toolkit",
+    "Orbiters.Toolkit.Editor",
+    "Orbiters.Toolkit.Editor.VRChat",
+    "VRC.SDK3A",
+    "VRC.SDKBase"
+  ],
+  "includePlatforms": [
+    "Editor"
+  ],
+  "defineConstraints": [
+    "ORBITERS_VRCHAT_AVATARS"
+  ],
+  "versionDefines": [
+    {
+      "name": "com.vrchat.avatars",
+      "expression": "3.5.0",
+      "define": "ORBITERS_VRCHAT_AVATARS"
+    }
+  ],
+  "optionalUnityReferences": [
+    "TestAssemblies"
+  ],
+  "overrideReferences": true,
+  "precompiledReferences": [
+    "nunit.framework.dll",
+    "VRCSDK3A.dll",
+    "VRCSDKBase.dll",
+    "VRC.Dynamics.dll",
+    "VRC.SDK3.Dynamics.PhysBone.dll"
+  ]
+}

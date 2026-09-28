@@ -1,14 +1,16 @@
 {
   "name": "orbiters.toolkit",
-  "version": "0.2.5",
+  "version": "0.2.6",
   "displayName": "Orbiters Toolkit",
   "description": "Shared Orbiters account, editor UI, avatar photoshoot, mirror posing and background window capture.",
   "unity": "2022.3",
   "author": {
     "name": "Orbiters",
-    "url": "https://orbiters.cc"
+    "url": "https://orbiters.cc",
+    "email": "blackorbit.eclaire@gmail.com"
   },
   "dependencies": {
     "com.unity.nuget.newtonsoft-json": "3.2.1"
-  }
+  },
+  "url": "https://github.com/Orbiters-cc/Toolkit/releases/download/0.2.6/Toolkit-0.2.6.zip"
 }
