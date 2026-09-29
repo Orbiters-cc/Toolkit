@@ -20,6 +20,15 @@ editor-only helpers to reference them. Player builds contain none of this editor
 logic. `Orbiters.Toolkit.Editor` continues to own posing and screenshot utilities.
 The package also depends on Unity's Newtonsoft JSON package.
 
+## Mesh comparison
+
+`Orbiters.Toolkit.Editor.Meshes` compares versions of a model without importing them: `FbxReader` reads a binary FBX
+(meshes placed in the file root's space with Unity's axes and scale, blendshape signatures, bones, material names; with
+`FbxReadOptions.Render` UV-split vertices and one submesh per material slot, with `FbxReadOptions.ShapeOffsets` each
+blendshape's offsets). `MeshComparison` measures how far each vertex moved, index by index or to the other version's
+surface when the topology changed, and describes parts as moved, reshaped, re-materialed, added or removed. Unit Git's 3D
+view and MCB's version differences use it.
+
 ## Feature flags and optional packages
 
 Tools register opt-in features with `OrbitersFeatures.Register` (key, product, label,

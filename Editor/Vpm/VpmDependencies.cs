@@ -256,6 +256,14 @@ namespace Orbiters.Toolkit.Editor.Vpm
             {
                 status.Error = ex.Message;
             }
+            if (!status.IsInstalled && LocalDevelopmentCopy(packageId, out string developed))
+            {
+                // A package developed in this project (a git clone in Packages/) is not tracked by VPM, and must not be:
+                // resolving it would replace the clone. It counts as installed whatever its version.
+                status.IsInstalled = true;
+                status.InstalledVersion = developed + " (local development copy)";
+                status.Error = null;
+            }
             if (status.IsInstalled) return status;
 
             try
@@ -318,6 +326,34 @@ namespace Orbiters.Toolkit.Editor.Vpm
         }
 
         private static string ProjectPath => Path.GetFullPath(Path.Combine(Application.dataPath, ".."));
+
+        /// <summary>
+        /// True when <paramref name="packageId"/> is a git clone in the project's Packages folder (a package being developed
+        /// here). VPM never installs a .git folder, so installed copies are not affected.
+        /// </summary>
+        internal static bool LocalDevelopmentCopy(string packageId, out string version)
+        {
+            version = null;
+            string packages = Path.Combine(ProjectPath, "Packages");
+            if (!Directory.Exists(packages)) return false;
+            foreach (string folder in Directory.GetDirectories(packages))
+            {
+                string manifestPath = Path.Combine(folder, "package.json");
+                if (!File.Exists(manifestPath)) continue;
+                if (!Directory.Exists(Path.Combine(folder, ".git")) && !File.Exists(Path.Combine(folder, ".git"))) continue;
+                try
+                {
+                    var package = JsonConvert.DeserializeObject<Dictionary<string, object>>(File.ReadAllText(manifestPath));
+                    if (package == null || !package.TryGetValue("name", out var name) || !string.Equals(name as string, packageId, StringComparison.OrdinalIgnoreCase)) continue;
+                    version = package.TryGetValue("version", out var v) ? v as string : null;
+                    return true;
+                }
+                catch (JsonException)
+                {
+                }
+            }
+            return false;
+        }
 
         private static string Humanize(string packageId)
         {
