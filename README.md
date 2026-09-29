@@ -74,6 +74,10 @@ leaves alone. `AvatarBoneIndex.Build` indexes an avatar's bones by name and huma
 matches parents first by exact name, name without the clothing's affix (`DetectAffixes`: `Hips_Shirt`), humanoid role,
 then contained name, and reports ambiguous matches with their alternatives. `ArmatureRest` gives bind-pose rest frames.
 
+`Orbiters.Toolkit.Meshes.BlendShapeEvaluation.Add` applies a blendshape to mesh data the way Unity's skinning does
+(checked against `BakeMesh`), clamped or not as the project's "Clamp BlendShapes" Player Setting (`ClampWeights`) says, so
+X-Ray and ReFit measure the shape the user sees.
+
 ## Attachments
 
 `Orbiters.Toolkit.Editor.VRChat.Attachments` attaches a clothing or accessory object placed under an avatar root, with
