@@ -25,6 +25,13 @@ public sealed class UnityPackageIndexTests
         Assert.IsNull(index.Entries.Single(e => e.Path.EndsWith(".cs")).Content, "only the requested content is kept");
     }
 
+    // Unity's exporter writes the package icon as a root ".icon.png" entry.
+    [Test] public void PackageIconIsIgnored()
+    {
+        Write((".icon.png", new byte[700]), ("g1/pathname", Encoding.UTF8.GetBytes("Assets/Hat/Hat.prefab")), ("g1/asset", new byte[10]));
+        CollectionAssert.AreEqual(new[] { "Assets/Hat/Hat.prefab" }, UnityPackageIndex.Read(file).Paths.ToArray());
+    }
+
     // A header may declare a huge entry that the file does not contain: it must fail before allocating it.
     [Test] public void HugeDeclaredNameIsRejectedWithoutAllocating()
     {

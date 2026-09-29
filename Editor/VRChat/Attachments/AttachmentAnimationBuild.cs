@@ -41,7 +41,11 @@ namespace Orbiters.Toolkit.Editor.VRChat.Attachments
         static AttachmentAnimationBuild()
         {
             VRCSdkControlPanel.OnSdkPanelEnable += (_, __) => HookBuilder();
-            EditorApplication.delayCall += HookBuilder;
+            EditorApplication.delayCall += () =>
+            {
+                HookBuilder();
+                DeleteStaleCache();
+            };
             EditorApplication.update += () =>
             {
                 if (sdkBuilding || BuildPipeline.isBuildingPlayer || EditorApplication.isCompiling) return;
@@ -61,6 +65,19 @@ namespace Orbiters.Toolkit.Editor.VRChat.Attachments
             sdkBuilder.OnSdkBuildStart += BuildStart;
             sdkBuilder.OnSdkBuildFinish += BuildFinish;
         }
+        // Build data left by a build that never finished (editor closed or crashed, scripts reloaded mid-build). Not while
+        // entering or in play mode: the play mode avatar may still use it.
+        private static void DeleteStaleCache()
+        {
+            if (Builds.Count > 0 || sdkBuilding || EditorApplication.isPlayingOrWillChangePlaymode || !AssetDatabase.IsValidFolder(CacheFolder)) return;
+            foreach (var guid in AssetDatabase.FindAssets("", new[] { CacheFolder }))
+            {
+                var path = AssetDatabase.GUIDToAssetPath(guid);
+                if (System.IO.Path.GetFileName(path).StartsWith("attachment-", StringComparison.Ordinal)) AssetDatabase.DeleteAsset(path);
+            }
+            if (AssetDatabase.FindAssets("", new[] { CacheFolder }).Length == 0) AssetDatabase.DeleteAsset(CacheFolder);
+        }
+
         private static void BuildStart(object sender, object avatar) { sdkBuilding = true; }
         private static void BuildFinish(object sender, string message) { sdkBuilding = false; }
 
@@ -234,12 +251,10 @@ namespace Orbiters.Toolkit.Editor.VRChat.Attachments
             var x = (Vector3)matrix.GetColumn(0); var y = (Vector3)matrix.GetColumn(1); var z = (Vector3)matrix.GetColumn(2);
             var scale = new Vector3(x.magnitude, y.magnitude, z.magnitude);
             if (Vector3.Dot(Vector3.Cross(x, y), z) < 0) scale.x = -scale.x;
-            if (Mathf.Abs(scale.x) < 1e-7f || scale.y < 1e-7f || scale.z < 1e-7f ||
-                Mathf.Abs(Vector3.Dot(x.normalized, y.normalized)) > .001f ||
-                Mathf.Abs(Vector3.Dot(x.normalized, z.normalized)) > .001f || Mathf.Abs(Vector3.Dot(y.normalized, z.normalized)) > .001f)
-                throw new InvalidOperationException("An attachment's parent/bone scale creates a singular or sheared transform. Apply non-uniform armature scale before building this attachment.");
             transform.localPosition = matrix.GetColumn(3);
-            transform.localRotation = Quaternion.LookRotation(z / scale.z, y / scale.y);
+            // A sheared matrix (non-uniform scale above a rotated bone) or a zero scale cannot be a transform: keep the
+            // axes' lengths and main orientation, as Unity's SetParent does when keeping world pose.
+            transform.localRotation = scale.y > 1e-7f && scale.z > 1e-7f ? Quaternion.LookRotation(z, y) : Quaternion.identity;
             transform.localScale = scale;
         }
 
@@ -360,28 +375,44 @@ namespace Orbiters.Toolkit.Editor.VRChat.Attachments
             {
                 foreach (var clip in Copies.Values.OfType<AnimationClip>())
                 {
-                    var floats = AnimationUtility.GetCurveBindings(clip).Select(b => (binding: b, curve: AnimationUtility.GetEditorCurve(clip, b))).ToArray();
-                    var objects = AnimationUtility.GetObjectReferenceCurveBindings(clip).Select(b => (binding: b, curve: AnimationUtility.GetObjectReferenceCurve(clip, b))).ToArray();
-                    foreach (var entry in floats) AnimationUtility.SetEditorCurve(clip, entry.binding, null);
-                    foreach (var entry in objects) AnimationUtility.SetObjectReferenceCurve(clip, entry.binding, null);
-                    foreach (var entry in floats)
+                    // Only the curves of moved objects change: setting curves one by one rebuilds the clip each time, and
+                    // most clips (locomotion, humanoid muscles) animate nothing that moved.
+                    var removed = new List<EditorCurveBinding>();
+                    var added = new List<EditorCurveBinding>();
+                    var addedCurves = new List<AnimationCurve>();
+                    foreach (var binding in AnimationUtility.GetCurveBindings(clip))
                     {
-                        var binding = entry.binding;
-                        binding.path = NewPath(binding.path);
-                        AnimationUtility.SetEditorCurve(clip, binding, entry.curve);
-                        if ((binding.type == typeof(Transform) || binding.type == typeof(GameObject) && binding.propertyName == "m_IsActive") &&
-                            paths.TryGetValue(entry.binding.path, out var target) && activationCopies.TryGetValue(target, out var proxies))
-                            foreach (var proxy in proxies.Where(p => p.IsChildOf(animatorRoot)))
-                            {
-                                binding.path = AnimationUtility.CalculateTransformPath(proxy, animatorRoot);
-                                AnimationUtility.SetEditorCurve(clip, binding, entry.curve);
-                            }
+                        var moved = binding;
+                        moved.path = NewPath(binding.path);
+                        var proxies = (binding.type == typeof(Transform) || binding.type == typeof(GameObject) && binding.propertyName == "m_IsActive") &&
+                                      paths.TryGetValue(binding.path, out var target) && activationCopies.TryGetValue(target, out var copies)
+                            ? copies.Where(p => p.IsChildOf(animatorRoot)).ToList() : null;
+                        if (moved.path == binding.path && (proxies == null || proxies.Count == 0)) continue;
+                        var curve = AnimationUtility.GetEditorCurve(clip, binding);
+                        if (moved.path != binding.path)
+                        {
+                            removed.Add(binding);
+                            added.Add(moved); addedCurves.Add(curve);
+                        }
+                        foreach (var proxy in proxies ?? new List<Transform>())
+                        {
+                            var copy = binding;
+                            copy.path = AnimationUtility.CalculateTransformPath(proxy, animatorRoot);
+                            added.Add(copy); addedCurves.Add(curve);
+                        }
                     }
-                    foreach (var entry in objects)
+                    var objects = new List<(EditorCurveBinding from, EditorCurveBinding to, ObjectReferenceKeyframe[] keys)>();
+                    foreach (var binding in AnimationUtility.GetObjectReferenceCurveBindings(clip))
                     {
-                        var binding = entry.binding; binding.path = NewPath(binding.path);
-                        AnimationUtility.SetObjectReferenceCurve(clip, binding, entry.curve);
+                        var moved = binding;
+                        moved.path = NewPath(binding.path);
+                        if (moved.path != binding.path) objects.Add((binding, moved, AnimationUtility.GetObjectReferenceCurve(clip, binding)));
                     }
+                    if (removed.Count == 0 && added.Count == 0 && objects.Count == 0) continue;
+                    if (removed.Count > 0) AnimationUtility.SetEditorCurves(clip, removed.ToArray(), new AnimationCurve[removed.Count]);
+                    if (added.Count > 0) AnimationUtility.SetEditorCurves(clip, added.ToArray(), addedCurves.ToArray());
+                    foreach (var entry in objects) AnimationUtility.SetObjectReferenceCurve(clip, entry.from, null);
+                    foreach (var entry in objects) AnimationUtility.SetObjectReferenceCurve(clip, entry.to, entry.keys);
                     EditorUtility.SetDirty(clip);
                 }
                 foreach (var mask in Copies.Values.OfType<AvatarMask>())

@@ -108,9 +108,12 @@ VRCFury components (including links saved by older VRCFury versions) without ref
 
 At build (`AttachmentBuild`, VRChat preprocess callbacks): at -10100, just before VRCFury, linked bones are placed at
 their rest offset from their avatar bone (from both meshes' bind poses, so the scene pose does not matter) and parented
-props stay where they are. When VRCFury builds the avatar (it has a VRCFury component) they are moved under their bone
-and VRCFury keeps the accessory's animations working with the paths it recorded earlier; otherwise they stay in place,
-so animation paths do not change, and follow their bone with a VRChat parent constraint (one per linked bone). At -8900
+props stay where they are. Both are then moved under their bone, without adding constraints. When VRCFury builds the
+avatar (it has a VRCFury component), VRCFury keeps the accessory's animations working with the paths it recorded
+earlier. Otherwise (`AttachmentAnimationBuild`) each one goes under an offset frame on its bone, the build copy's
+animator controllers are copied and their paths remapped (with proxy frames keeping animated former parents' motion and
+visibility), and the copies live in `Assets/OrbitersToolkitBuildCache` until the build ends; data left by an
+interrupted build is deleted on the next script reload. At -8900
 animations of body blendshapes also drive the same-named accessory shapes (`BlendShapeSync`, including meshes that moved
 out with their bone), and the components are removed. The scene is never changed by a build.
 

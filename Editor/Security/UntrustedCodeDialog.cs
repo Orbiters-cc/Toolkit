@@ -81,7 +81,8 @@ namespace Orbiters.Toolkit.Editor
             ButtonInteraction.RegisterImmediateClick(cancel, () => Answer(false));
             ButtonInteraction.RegisterImmediateClick(confirm, () => Answer(true));
             buttons.Add(cancel); buttons.Add(confirm);
-            root.RegisterCallback<KeyDownEvent>(OnKeyDown, TrickleDown.TrickleDown);
+            // On the panel's root: clicking the text or the file list clears focus, and key events then target the panel itself.
+            (root.panel?.visualTree ?? root).RegisterCallback<KeyDownEvent>(OnKeyDown, TrickleDown.TrickleDown);
             cancel.Focus();
         }
 

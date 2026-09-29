@@ -93,7 +93,9 @@ namespace Orbiters.Toolkit.Editor
                         if (size != 0 || !(name == "" || name == "." || parts.Length == 1 && IsGuid(parts[0]))) throw new InvalidDataException("Package has an invalid directory record.");
                         continue;
                     }
-                    if (type != 'L')
+                    // Packages exported with an icon carry it as one root entry; it is never imported.
+                    bool icon = type != 'L' && name == ".icon.png";
+                    if (type != 'L' && !icon)
                     {
                         if (name.EndsWith("/", StringComparison.Ordinal) || !IsGuid(guid) || (kind != "pathname" && kind != "asset" && kind != "asset.meta" && kind != "preview.png"))
                             throw new InvalidDataException("Package has an ambiguous asset record name.");

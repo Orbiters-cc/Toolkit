@@ -25,7 +25,9 @@ namespace Orbiters.Toolkit.Editor.VRChat.Attachments
                 // Per axis, like VRCFury's world scale.
                 var world = Vector3.Scale(Target.lossyScale, Scale.Value);
                 var parent = Follower.parent != null ? Follower.parent.lossyScale : Vector3.one;
-                Follower.localScale = new Vector3(world.x / parent.x, world.y / parent.y, world.z / parent.z);
+                var local = new Vector3(world.x / parent.x, world.y / parent.y, world.z / parent.z);
+                // A bone scaled to zero (hidden body parts) has no scale to follow.
+                if (float.IsFinite(local.x) && float.IsFinite(local.y) && float.IsFinite(local.z)) Follower.localScale = local;
             }
             // Rotation composed separately: a non-uniformly scaled avatar would skew the matrix's rotation.
             Follower.SetPositionAndRotation(Target.TransformPoint(Offset.GetColumn(3)), Target.rotation * Offset.rotation);
