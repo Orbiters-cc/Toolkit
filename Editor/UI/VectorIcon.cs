@@ -4,7 +4,7 @@ using UnityEngine.UIElements;
 
 namespace Orbiters.Toolkit.Editor
 {
-    public enum IconGlyph { Bones, Mirror, Clothes, Refresh, Person, PersonOff, People, Robot, RobotOff, Lock, Unlock, Branch }
+    public enum IconGlyph { Bones, Mirror, Clothes, Refresh, Person, PersonOff, People, Robot, RobotOff, Lock, Unlock, Branch, Close, Chevron }
 
     /// <summary>
     /// A small line icon drawn with the vector API, crisp at any size. Its colour comes from the USS custom property
@@ -124,6 +124,16 @@ namespace Orbiters.Toolkit.Editor
                     painter.BeginPath(); painter.MoveTo(P(7f, 3.5f)); painter.LineTo(P(7f, 20.5f)); painter.Stroke();
                     painter.BeginPath(); painter.MoveTo(P(7f, 17f)); painter.BezierCurveTo(P(7f, 12f), P(17f, 13f), P(17f, 8.8f)); painter.Stroke();
                     painter.BeginPath(); painter.Arc(P(17f, 6.2f), 2.6f * scale, 0f, 360f); painter.Stroke();
+                    break;
+                case IconGlyph.Close:
+                    painter.lineWidth = 2.2f * scale;
+                    painter.BeginPath(); painter.MoveTo(P(6.5f, 6.5f)); painter.LineTo(P(17.5f, 17.5f)); painter.Stroke();
+                    painter.BeginPath(); painter.MoveTo(P(17.5f, 6.5f)); painter.LineTo(P(6.5f, 17.5f)); painter.Stroke();
+                    break;
+                case IconGlyph.Chevron:
+                    // Points right: rotate the element (USS rotate) to point down when open.
+                    painter.lineWidth = 2.4f * scale;
+                    painter.BeginPath(); painter.MoveTo(P(9.5f, 5.5f)); painter.LineTo(P(16f, 12f)); painter.LineTo(P(9.5f, 18.5f)); painter.Stroke();
                     break;
             }
         }
