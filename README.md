@@ -126,6 +126,24 @@ offset: My Avatar attachments, VRCFury Armature Links, and the bone matcher for 
 the posing preview share it. Armature Links follow VRCFury's own rules: the first target that resolves on the avatar
 (humanoid bone, object or avatar root, then its offset path), and position, rotation and scale aligned independently.
 
+## Follow body blendshapes (beta)
+
+`OrbitersSurfaceFollow` (runtime assembly `Orbiters.Toolkit.VRChat`, `IEditorOnly`, menu **Orbiters › Follow Body
+Blendshapes (beta)**) keeps rigid accessories on the skin when body blendshapes change: a piercing on a chest that grows
+with "Muscles" moves and tilts with it. On an object it covers that object's meshes; on the avatar root in **Small
+Accessories** mode, every small rigid accessory close to the skin (size and gap are settings). Rigid means a plain mesh
+or a mesh on one or two bones; clothing skinned to more bones bends with the body on its own and is left alone.
+
+`SurfaceFollow` (editor VRChat assembly) anchors each accessory to the closest triangle of the body at its current pose
+and weights. For every body blendshape, the movement and tilt of that triangle (offsets through the same bone blend as
+skinning, so exact at the scene pose) become a blendshape of the accessory with the same name; shapes that move the skin
+there by less than 0.2 mm and 0.3° are left out. At build, after VRCFury and MCB's links (-8950), plain meshes become
+single-bone skinned meshes (except renderers an animation drives, which stay as they are), the accessory's rest shape is
+set so it stays where it is at the body's current weights, and `BlendShapeSync` copies the body's weights and animations
+to the new shapes. The scene is not changed. The component's inspector has **Check**, a dry run listing what will follow
+and which blendshapes move it. ReFit (**Keep rigid pieces on the body**) and MCB (**Keep Small Accessories On The Body**)
+add it for you.
+
 ## Accessory posing preview
 
 `Orbiters.Toolkit.Editor.VRChat.Posing.AccessoryPoseSync` (`Enable(avatarRoot)`, `Disable()`, `Sync()`, `Find`,

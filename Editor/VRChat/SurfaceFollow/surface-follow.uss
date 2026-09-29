@@ -1,0 +1,16 @@
+/* Follow body blendshapes: the Orbiters inspector look. */
+.orb-follow { padding: 6px 2px 8px 2px; }
+.orb-follow .unity-label { margin: 0; padding: 0; }
+.orb-follow .orb-follow__head { flex-direction: row; align-items: center; margin-bottom: 4px; }
+.orb-follow .orb-follow__title { color: #f2f2f2; font-size: 13px; -unity-font-style: bold; margin-right: 6px; }
+.orb-follow .orb-follow__text { margin-bottom: 8px; color: #9a9a9a; font-size: 11px; white-space: normal; }
+.orb-follow .orb-follow__check { height: 26px; min-height: 26px; margin: 8px 0 0 0; border-width: 0; border-radius: 13px; background-color: #00da6d; color: #06140c; -unity-font-style: bold; transition-property: scale, background-color; transition-duration: 0.1s; }
+.orb-follow .orb-follow__check:hover { background-color: #19e27d; }
+.orb-follow .orb-follow__check--pressed { scale: 0.96 0.96; }
+.orb-follow .orb-follow__results { margin-top: 8px; }
+.orb-follow .orb-follow__card { margin-top: 5px; padding: 7px 10px; border-radius: 9px; background-color: #2a2a2a; opacity: 1; translate: 0 0; transition-property: opacity, translate; transition-duration: 0.2s; transition-timing-function: ease-out; }
+.orb-follow .orb-follow__card--enter { opacity: 0; translate: 0 6px; }
+.orb-follow .orb-follow__card-title { color: #eef4ff; font-size: 12px; -unity-font-style: bold; cursor: link; }
+.orb-follow .orb-follow__line { margin-top: 2px; color: #d0d0d0; font-size: 11px; }
+.orb-follow .orb-follow__line--muted { margin-top: 2px; color: #8c8c8c; font-size: 11px; white-space: normal; }
+.orb-follow .orb-follow__line--warning { margin-top: 2px; color: #ffb020; font-size: 11px; white-space: normal; }
