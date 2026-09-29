@@ -1,0 +1,17 @@
+.orb-code { flex-grow: 1; padding: 20px 22px 18px 22px; background-color: #1f1f1f; }
+.orb-code__header { flex-direction: row; align-items: center; }
+.orb-code__icon { width: 30px; height: 30px; margin-right: 12px; flex-shrink: 0; }
+.orb-code__titles { flex-grow: 1; flex-shrink: 1; }
+.orb-code__title { margin: 0; padding: 0; font-size: 15px; -unity-font-style: bold; color: #ffffff; white-space: normal; }
+.orb-code__subject { margin: 3px 0 0 0; padding: 0; font-size: 12px; color: #a8a8a8; white-space: normal; }
+.orb-code__card { margin-top: 16px; padding: 12px 14px; border-radius: 12px; background-color: rgba(255, 176, 32, 0.1); border-width: 1px; border-color: rgba(255, 176, 32, 0.35); }
+.orb-code__message { margin: 0; padding: 0; font-size: 12px; color: #f2d7a6; white-space: normal; }
+.orb-code__count { margin: 16px 2px 6px 2px; padding: 0; font-size: 11px; -unity-font-style: bold; color: #8f8f8f; }
+.orb-code__list { flex-grow: 1; flex-shrink: 1; min-height: 60px; padding: 6px 0; border-radius: 10px; background-color: #171717; }
+.orb-code__file { margin: 0; padding: 2px 12px; font-size: 11px; color: #d0d0d0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.orb-code__buttons { flex-direction: row; justify-content: flex-end; margin-top: 16px; }
+.orb-code__button { height: 32px; min-width: 110px; margin: 0 0 0 8px; padding: 0 16px; border-radius: 16px; border-width: 0; font-size: 12px; -unity-font-style: bold; color: #e6e6e6; background-color: #3a3a3a; }
+.orb-code__button:hover { background-color: #454545; }
+.orb-code__button:active { scale: 0.97 0.97; }
+.orb-code__button--risk { color: #1b1200; background-color: #ffb020; }
+.orb-code__button--risk:hover { background-color: #ffc14d; }

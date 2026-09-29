@@ -12,12 +12,21 @@ namespace Orbiters.Toolkit.Editor.VRChat.Attachments
     {
         public Transform Follower, Target;
         public Matrix4x4 Offset;
+        /// <summary>The follower's world scale as a multiple of the target's, or null to keep its own scale.</summary>
+        public Vector3? Scale;
         /// <summary>Which rule produced the link, for the accessory list ("VRCFury", "My Avatar", "Name match").</summary>
         public string Source;
         public Transform Accessory;
 
         public void Apply()
         {
+            if (Scale.HasValue)
+            {
+                // Per axis, like VRCFury's world scale.
+                var world = Vector3.Scale(Target.lossyScale, Scale.Value);
+                var parent = Follower.parent != null ? Follower.parent.lossyScale : Vector3.one;
+                Follower.localScale = new Vector3(world.x / parent.x, world.y / parent.y, world.z / parent.z);
+            }
             // Rotation composed separately: a non-uniformly scaled avatar would skew the matrix's rotation.
             Follower.SetPositionAndRotation(Target.TransformPoint(Offset.GetColumn(3)), Target.rotation * Offset.rotation);
         }
@@ -60,18 +69,16 @@ namespace Orbiters.Toolkit.Editor.VRChat.Attachments
             foreach (var link in VrcFury.ArmatureLinks(avatarRoot.gameObject))
             {
                 if (link.From == null || handled.Contains(link.From.transform)) continue;
-                var target = link.ToObject != null ? link.ToObject.transform
-                    : link.ToBone != HumanBodyBones.LastBone ? index.Humanoid(link.ToBone)
-                    : !string.IsNullOrEmpty(link.ToPath) ? avatarRoot.Find(link.ToPath) : null;
+                var target = link.Resolve(avatarRoot, index.Humanoid);
                 if (target == null) continue;
-                bool align = link.Align;
                 var accessory = Accessory(link.From.transform, avatarRoot);
                 var from = link.From.transform;
-                result.Add(new FollowLink { Follower = from, Target = target, Offset = align ? Matrix4x4.identity : Current(from, target), Source = "VRCFury", Accessory = accessory });
+                float scaleFactor = link.ScalingFactor(target);
+                result.Add(VrcFuryLink(link, from, target, scaleFactor, accessory));
                 handled.Add(from);
                 if (!link.Recursive) { handled.UnionWith(from.GetComponentsInChildren<Transform>(true)); continue; }
                 // VRCFury merges children with the same name, after removing the suffix the link root adds to its bone name.
-                string suffix = !string.IsNullOrEmpty(link.Suffix) ? link.Suffix : from.name != target.name && from.name.Contains(target.name) ? from.name.Replace(target.name, "") : "";
+                string suffix = !string.IsNullOrWhiteSpace(link.Suffix) ? link.Suffix : from.name != target.name && from.name.Contains(target.name) ? from.name.Replace(target.name, "") : "";
                 var queue = new Queue<(Transform prop, Transform avatar)>();
                 queue.Enqueue((from, target));
                 while (queue.Count > 0)
@@ -80,8 +87,8 @@ namespace Orbiters.Toolkit.Editor.VRChat.Attachments
                     foreach (Transform child in prop)
                     {
                         handled.Add(child);
-                        var match = avatar != null ? avatar.Find(suffix.Length > 0 ? child.name.Replace(suffix, "") : child.name) : null;
-                        if (match != null) result.Add(new FollowLink { Follower = child, Target = match, Offset = align ? Matrix4x4.identity : Current(child, match), Source = "VRCFury", Accessory = accessory });
+                        var match = avatar != null ? avatar.Find(!string.IsNullOrWhiteSpace(suffix) ? child.name.Replace(suffix, "") : child.name) : null;
+                        if (match != null) result.Add(VrcFuryLink(link, child, match, scaleFactor, accessory));
                         queue.Enqueue((child, match));
                     }
                 }
@@ -116,6 +123,24 @@ namespace Orbiters.Toolkit.Editor.VRChat.Attachments
         }
 
         public static Matrix4x4 Current(Transform follower, Transform target) => target.worldToLocalMatrix * follower.localToWorldMatrix;
+
+        // A bone VRCFury links is first put on its avatar bone for each of position, rotation and scale the link aligns
+        // (each bone on its own, ArmatureLinkService.ApplyOne), then stays where it is relative to that bone.
+        private static FollowLink VrcFuryLink(VrcFury.Link link, Transform follower, Transform target, float scaleFactor, Transform accessory)
+        {
+            var position = link.AlignPosition ? target.position : follower.position;
+            var rotation = link.AlignRotation ? target.rotation : follower.rotation;
+            var targetScale = target.lossyScale;
+            var followerScale = follower.lossyScale;
+            return new FollowLink
+            {
+                Follower = follower, Target = target, Source = "VRCFury", Accessory = accessory,
+                Offset = Matrix4x4.TRS(target.InverseTransformPoint(position), Quaternion.Inverse(target.rotation) * rotation, Vector3.one),
+                Scale = link.ForceOneWorldScale ? new Vector3(1 / targetScale.x, 1 / targetScale.y, 1 / targetScale.z)
+                    : link.AlignScale ? Vector3.one * scaleFactor
+                    : new Vector3(followerScale.x / targetScale.x, followerScale.y / targetScale.y, followerScale.z / targetScale.z),
+            };
+        }
 
         // The object directly under the avatar root holding it: what the user calls the accessory.
         private static Transform Accessory(Transform t, Transform avatarRoot)

@@ -10,22 +10,33 @@ namespace Orbiters.Toolkit.Editor.VRChat.Attachments
 {
     /// <summary>
     /// Applies My Avatar attachments to the avatar being built (VRChat's upload copy, VRCFury's play mode or test copy):
-    /// linked bones and props are placed on their avatar bone and moved under it. Runs just before VRCFury, which records
-    /// original paths earlier and so keeps the accessory's animations working after the move.
+    /// linked bones and props are placed on their avatar bone and follow it. Runs just before VRCFury: when VRCFury builds
+    /// the avatar they are moved under their bone, as VRCFury recorded original paths earlier and so keeps their animations
+    /// working; otherwise Toolkit copies the animation graphs and remaps paths itself. Neither path adds constraints.
     /// </summary>
     public static class AttachmentBuild
     {
+        // Each attachment's skinned meshes, taken before Apply moves bones (and meshes under them) out of it: Finish runs
+        // after VRCFury, on the same objects.
+        private static readonly Dictionary<OrbitersAttachment, SkinnedMeshRenderer[]> Skins = new Dictionary<OrbitersAttachment, SkinnedMeshRenderer[]>();
+
         public static void Apply(GameObject avatarRoot)
         {
             var attachments = avatarRoot.GetComponentsInChildren<OrbitersAttachment>(true);
             if (attachments.Length == 0) return;
+            foreach (var gone in Skins.Keys.Where(a => a == null).ToList()) Skins.Remove(gone);
+            foreach (var attachment in attachments) Skins[attachment] = attachment.GetComponentsInChildren<SkinnedMeshRenderer>(true);
             var moves = new List<FollowLink>();
             foreach (var link in AttachmentFollow.Links(avatarRoot.transform, matchUnlinkedClothing: false))
                 if (link.Source == "My Avatar") moves.Add(link);
-            // Parents first: a child is placed from its parent's new pose, then everything is moved under its bone.
+            // Parents first: a child is placed from its parent's new pose, then everything follows its bone.
             moves.Sort((a, b) => Depth(a.Follower).CompareTo(Depth(b.Follower)));
+            bool reparent = VrcFury.Builds(avatarRoot);
+            var animations = reparent ? null : AttachmentAnimationBuild.Prepare(avatarRoot);
             foreach (var move in moves) move.Apply();
-            foreach (var move in moves) move.Follower.SetParent(move.Target, true);
+            if (reparent)
+                foreach (var move in moves) move.Follower.SetParent(move.Target, true);
+            else animations.Move(moves);
         }
 
         /// <summary>After VRCFury built its controllers: body blendshape animations also drive the accessories' shapes.</summary>
@@ -34,7 +45,9 @@ namespace Orbiters.Toolkit.Editor.VRChat.Attachments
             var copies = new List<BlendShapeCopy>();
             foreach (var attachment in avatarRoot.GetComponentsInChildren<OrbitersAttachment>(true))
             {
-                if (attachment.syncBlendShapes) copies.AddRange(AttachmentInstaller.BlendShapeCopies(attachment));
+                if (attachment.syncBlendShapes)
+                    copies.AddRange(AttachmentInstaller.BlendShapeCopies(attachment, Skins.TryGetValue(attachment, out var skins) ? skins : null));
+                Skins.Remove(attachment);
                 Object.DestroyImmediate(attachment);
             }
             if (copies.Count > 0) BlendShapeSync.Apply(avatarRoot, copies, "My Avatar accessories");

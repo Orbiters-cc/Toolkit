@@ -110,13 +110,16 @@ namespace Orbiters.Toolkit.Editor.VRChat.Attachments
         public static List<OrbitersAttachment> Installed(Transform avatarRoot) =>
             avatarRoot == null ? new List<OrbitersAttachment>() : avatarRoot.GetComponentsInChildren<OrbitersAttachment>(true).ToList();
 
-        /// <summary>Every skinned mesh of the accessory paired with the body's same-named blendshapes.</summary>
-        public static List<BlendShapeCopy> BlendShapeCopies(OrbitersAttachment attachment)
+        /// <summary>
+        /// Every skinned mesh of the accessory (those under it, or <paramref name="skins"/> when given) paired with the body's
+        /// same-named blendshapes.
+        /// </summary>
+        public static List<BlendShapeCopy> BlendShapeCopies(OrbitersAttachment attachment, IEnumerable<SkinnedMeshRenderer> skins = null)
         {
             var copies = new List<BlendShapeCopy>();
             if (attachment == null || attachment.body == null || attachment.body.sharedMesh == null) return copies;
-            foreach (var skin in attachment.GetComponentsInChildren<SkinnedMeshRenderer>(true))
-                if (skin != attachment.body && skin.sharedMesh != null && skin.sharedMesh.blendShapeCount > 0)
+            foreach (var skin in skins ?? attachment.GetComponentsInChildren<SkinnedMeshRenderer>(true))
+                if (skin != null && skin != attachment.body && skin.sharedMesh != null && skin.sharedMesh.blendShapeCount > 0)
                     copies.AddRange(BlendShapeSync.Plan(attachment.body, skin));
             return copies;
         }
@@ -129,7 +132,7 @@ namespace Orbiters.Toolkit.Editor.VRChat.Attachments
         }
 
         // Empty constraints named after avatar bones ("Head", "Left wrist") get that bone as source, keeping where the
-        // object stands, and become VRChat constraints.
+        // object stands; Unity ones become VRChat constraints unless an animation drives them.
         private static void WireConstraints(AttachmentPlan plan, OrbitersAttachment attachment)
         {
             var descriptor = plan.Avatar.GetComponent<VRCAvatarDescriptor>();
@@ -157,10 +160,15 @@ namespace Orbiters.Toolkit.Editor.VRChat.Attachments
                         rotation.rotationOffset = (Quaternion.Inverse(source.rotation) * t.rotation).eulerAngles;
                         break;
                     case VRCParentConstraint vrc:
-                        vrc.Sources.Clear();
-                        vrc.Sources.Add(new VRCConstraintSource(source, 1, source.InverseTransformPoint(t.position), (Quaternion.Inverse(source.rotation) * t.rotation).eulerAngles));
-                        vrc.IsActive = true;
-                        vrc.Locked = true;
+                        Replace(vrc, new VRCConstraintSource(source, 1, source.InverseTransformPoint(t.position), (Quaternion.Inverse(source.rotation) * t.rotation).eulerAngles));
+                        break;
+                    case VRCPositionConstraint vrc:
+                        Replace(vrc, new VRCConstraintSource(source, 1));
+                        vrc.PositionOffset = t.position - source.position;
+                        break;
+                    case VRCRotationConstraint vrc:
+                        Replace(vrc, new VRCConstraintSource(source, 1));
+                        vrc.RotationOffset = (Quaternion.Inverse(source.rotation) * t.rotation).eulerAngles;
                         break;
                     default: continue;
                 }
@@ -168,9 +176,40 @@ namespace Orbiters.Toolkit.Editor.VRChat.Attachments
                 if (constraint is IConstraint ic) unity.Add(ic);
             }
             if (unity.Count == 0 || descriptor == null) return;
+            // The SDK rebinds animations of converted constraints only by editing the avatar's clip assets in place, which
+            // other avatars or packages may share: a constraint an animation drives stays a Unity constraint, which works.
+            var animated = Animated(plan.Avatar, unity);
+            foreach (var constraint in animated)
+                plan.Notes.Add(new SetupNote((Component)constraint, "“" + ((Component)constraint).name + "” keeps its Unity constraint: an animation drives it."));
+            var convert = unity.Where(c => !animated.Contains(c)).ToArray();
+            if (convert.Length == 0) return;
             var before = new HashSet<VRCConstraintBase>(plan.Root.GetComponentsInChildren<VRCConstraintBase>(true));
-            AvatarDynamicsSetup.DoConvertUnityConstraints(unity.ToArray(), descriptor, false);
+            AvatarDynamicsSetup.DoConvertUnityConstraints(convert, descriptor, false);
             if (!attachment.created) attachment.added.AddRange(plan.Root.GetComponentsInChildren<VRCConstraintBase>(true).Where(c => !before.Contains(c)));
+        }
+
+        // Unity constraints that animations of the avatar (its layers, animators, VRCFury and Modular Avatar controllers)
+        // bind, by type and object name: the paths depend on where each controller is merged.
+        private static HashSet<IConstraint> Animated(Transform avatarRoot, List<IConstraint> constraints)
+        {
+            var clips = new HashSet<AnimationClip>();
+            foreach (var component in avatarRoot.GetComponentsInChildren<Component>(true))
+            {
+                if (component == null || component is Transform || component is Renderer || component is MeshFilter) continue;
+                using var serialized = new SerializedObject(component);
+                var property = serialized.GetIterator();
+                while (property.Next(true))
+                    if (property.propertyType == SerializedPropertyType.ObjectReference)
+                    {
+                        if (property.objectReferenceValue is AnimationClip clip) clips.Add(clip);
+                        else if (property.objectReferenceValue is RuntimeAnimatorController controller) clips.UnionWith(controller.animationClips);
+                    }
+            }
+            var bound = new HashSet<(Type, string)>();
+            foreach (var clip in clips.Where(c => c != null))
+                foreach (var binding in AnimationUtility.GetCurveBindings(clip))
+                    if (typeof(IConstraint).IsAssignableFrom(binding.type)) bound.Add((binding.type, binding.path.Substring(binding.path.LastIndexOf('/') + 1)));
+            return new HashSet<IConstraint>(constraints.Where(c => bound.Contains((c.GetType(), ((Component)c).name)) || bound.Contains((c.GetType(), ""))));
         }
 
         private static void Replace(IConstraint constraint, Transform source)
@@ -180,6 +219,15 @@ namespace Orbiters.Toolkit.Editor.VRChat.Attachments
             constraint.weight = 1;
             constraint.locked = true;
             constraint.constraintActive = true;
+        }
+
+        private static void Replace(VRCConstraintBase constraint, VRCConstraintSource source)
+        {
+            constraint.Sources.Clear();
+            constraint.Sources.Add(source);
+            constraint.GlobalWeight = 1;
+            constraint.IsActive = true;
+            constraint.Locked = true;
         }
 
         private static void Track(OrbitersAttachment attachment, Component component)

@@ -81,17 +81,23 @@ Undo and without changing the avatar. `AttachmentPlanner.Analyze(accessory, avat
 
 - **Configured**: the creator's VRCFury Armature Links, Modular Avatar merge/bone proxy components or wired constraints
   already attach everything it shows. It is kept as is. A VRCFury or Modular Avatar prop that links nothing (dropped in
-  the world, driven by its own controller) counts as configured too.
+  the world, driven by its own controller) counts as configured too. A constraint only attaches what it holds when it
+  is enabled and active and its source follows the avatar (an avatar object, something already attached, or one of the
+  accessory's skin bones); one held by a locator of the accessory alone does not.
 - **Clothing**: skinned to an armature of its own. When one recursive VRCFury Armature Link reproduces the bone matcher's
   result exactly (VRCFury only merges children by exact name, after its derived suffix), the plan uses one; otherwise
-  each matched bone gets a link of the tool's own. Extra bones (hood strings, physics chains) follow their parent.
+  each matched bone gets a link of the tool's own. Extra bones (hood strings, physics chains) follow their parent. A bone
+  several avatar bones fit equally, and a bone below it whose match only followed that guess, is not linked:
+  `AttachmentPlan.Ambiguous` keeps it with its candidates (named in a note) for AI or the user.
 - **Rigid**: follows one avatar bone, chosen from its name (hat, hair, ears: head; necklace, pin: chest; bracelet,
   glove: the hand its name or position says) or the closest humanoid bone (flagged as a guess). Modelled far from the
   bone, it is placed on it.
 
-Empty Unity constraints named after avatar bones (`Head`, `Left wrist`) get that bone as source, keeping where the object
-stands, and become VRChat constraints. Object names that give instructions (`(open me)`, `Put me in armature`), unknown
-scripts, missing scripts and bones no avatar bone explains become `SetupNote`s.
+Empty parent, position and rotation constraints (Unity or VRChat) named after avatar bones (`Head`, `Left wrist`) get
+that bone as source, keeping where the object stands. Unity ones become VRChat constraints, except those an animation of
+the avatar drives: the SDK could only rebind those animations by editing the clip assets in place, so they stay working
+Unity constraints. Empty aim, look-at and scale constraints, object names that give instructions (`(open me)`,
+`Put me in armature`), unknown scripts, missing scripts and bones no avatar bone explains become `SetupNote`s.
 
 `AttachmentInstaller.Install(plan, options)` adds `OrbitersAttachment` (runtime assembly `Orbiters.Toolkit.VRChat`,
 `IEditorOnly`) to the accessory root, the VRCFury Armature Link when exact, a saved VRCFury toggle under
@@ -101,14 +107,17 @@ are created through VRCFury's public API by the optional `Orbiters.Toolkit.Edito
 VRCFury components (including links saved by older VRCFury versions) without referencing it.
 
 At build (`AttachmentBuild`, VRChat preprocess callbacks): at -10100, just before VRCFury, linked bones are placed at
-their rest offset from their avatar bone (from both meshes' bind poses, so the scene pose does not matter) and moved
-under it, and parented props are moved under their bone; VRCFury then keeps the accessory's animations working with the
-paths it recorded earlier. At -8900 animations of body blendshapes also drive the same-named accessory shapes
-(`BlendShapeSync`), and the components are removed. The scene is never changed by a build.
+their rest offset from their avatar bone (from both meshes' bind poses, so the scene pose does not matter) and parented
+props stay where they are. When VRCFury builds the avatar (it has a VRCFury component) they are moved under their bone
+and VRCFury keeps the accessory's animations working with the paths it recorded earlier; otherwise they stay in place,
+so animation paths do not change, and follow their bone with a VRChat parent constraint (one per linked bone). At -8900
+animations of body blendshapes also drive the same-named accessory shapes (`BlendShapeSync`, including meshes that moved
+out with their bone), and the components are removed. The scene is never changed by a build.
 
 `AttachmentFollow.Links(avatarRoot)` lists, for every accessory, which transform follows which avatar bone and at which
 offset: My Avatar attachments, VRCFury Armature Links, and the bone matcher for clothing nothing links. The build and
-the posing preview share it.
+the posing preview share it. Armature Links follow VRCFury's own rules: the first target that resolves on the avatar
+(humanoid bone, object or avatar root, then its offset path), and position, rotation and scale aligned independently.
 
 ## Accessory posing preview
 

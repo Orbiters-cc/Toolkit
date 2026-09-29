@@ -44,6 +44,18 @@ namespace Orbiters.Toolkit.Editor.VRChat
 
         public static object Content(Component vrcFury) => vrcFury != null ? Component?.GetField("content")?.GetValue(vrcFury) : null;
 
+        /// <summary>
+        /// Whether VRCFury builds this avatar (it has a VRCFury component other than debug info, VRCFuryBuilder.ShouldRun):
+        /// VRCFury then also rewrites the animation paths of objects moved earlier in the build.
+        /// </summary>
+        public static bool Builds(GameObject avatarRoot)
+        {
+            var type = avatarRoot != null ? Find("VF.Component.VRCFuryComponent") : null;
+            if (type == null) return false;
+            var debug = Find("VF.Model.VRCFuryDebugInfo");
+            return avatarRoot.GetComponentsInChildren(type, true).Any(c => debug == null || !debug.IsInstanceOfType(c));
+        }
+
         /// <summary>Each VRCFury component under <paramref name="root"/> with its feature, e.g. "ArmatureLink", "Toggle", "FullController".</summary>
         public static IEnumerable<(Component component, object feature, string kind)> Features(GameObject root)
         {
@@ -80,12 +92,62 @@ namespace Orbiters.Toolkit.Editor.VRChat
         /// <summary>An Armature Link as VRCFury will apply it.</summary>
         public sealed class Link
         {
+            /// <summary>A humanoid bone, an object or else the avatar root; then <see cref="Offset"/>, a path from it.</summary>
+            public struct Target
+            {
+                public bool UseBone, UseObject;
+                public HumanBodyBones Bone;
+                public GameObject Object;
+                public string Offset;
+            }
+
             public Component Component;
             public GameObject From;
-            public HumanBodyBones ToBone = HumanBodyBones.LastBone;
-            public GameObject ToObject;
-            public string ToPath, Suffix;
-            public bool Recursive, Align;
+            /// <summary>In order: the first one found on the avatar is used.</summary>
+            public readonly List<Target> Targets = new List<Target>();
+            public string Suffix;
+            public bool Recursive, AlignPosition, AlignRotation, AlignScale, ForceOneWorldScale;
+            /// <summary>Scale alignment multiplier: fixed, or from both roots' scale when <see cref="AutoScaleFactor"/>.</summary>
+            public float ScaleFactor = 1;
+            public bool AutoScaleFactor, ScaleFactorPowersOf10;
+
+            /// <summary>The avatar object VRCFury links <see cref="From"/> to: the first target that resolves inside the avatar.</summary>
+            public Transform Resolve(Transform avatarRoot, Func<HumanBodyBones, Transform> humanoid)
+            {
+                foreach (var target in Targets)
+                {
+                    var t = target.UseBone ? humanoid(target.Bone) : !target.UseObject ? avatarRoot : target.Object != null ? target.Object.transform : null;
+                    if (t != null && !string.IsNullOrWhiteSpace(target.Offset)) t = FindPath(t, target.Offset);
+                    if (t != null && t.IsChildOf(avatarRoot)) return t;
+                }
+                return null;
+            }
+
+            /// <summary>The multiplier of the target's scale VRCFury gives linked bones when aligning scale (ArmatureLinkService.GetScalingFactor).</summary>
+            public float ScalingFactor(Transform avatarMain)
+            {
+                if (!AutoScaleFactor) return ScaleFactor;
+                if (!Recursive || From == null || avatarMain == null) return 1;
+                float factor = Mathf.Abs(From.transform.lossyScale.x) / Mathf.Abs(avatarMain.lossyScale.x);
+                if (!ScaleFactorPowersOf10) return factor;
+                double log = Math.Log10(factor), fraction = (log % 1 + 1) % 1;
+                return (float)Math.Pow(10, fraction > 0.75 ? Math.Ceiling(log) : Math.Floor(log));
+            }
+
+            // VRCFury's relative paths: "a/b", "..", "." (ClipRewritersService.Join); a leading "/" starts from the scene root.
+            private static Transform FindPath(Transform from, string path)
+            {
+                var t = path.StartsWith("/", StringComparison.Ordinal) ? null : from;
+                bool absolute = t == null;
+                foreach (var part in path.Split('/'))
+                {
+                    if (part.Length == 0 || part == ".") continue;
+                    if (absolute) { t = from.root.name == part ? from.root : null; absolute = false; }
+                    else t = part == ".." ? t.parent : t.Find(part);
+                    if (t == null) return null;
+                }
+                return t;
+            }
         }
 
         // Whether a skin outside the linked object uses its bones: VRCFury's "auto" merge rule.
@@ -107,41 +169,59 @@ namespace Orbiters.Toolkit.Editor.VRChat
             foreach (var (c, feature, kind) in Features(root))
             {
                 if (kind != "ArmatureLink") continue;
+                // Without a Link From object VRCFury skips the link.
                 var link = new Link
                 {
                     Component = c,
-                    From = Field(feature, "propBone") as GameObject ?? c.gameObject,
+                    From = Field(feature, "propBone") as GameObject,
                     Recursive = Field(feature, "recursive") as bool? ?? false,
                     Suffix = Field(feature, "removeBoneSuffix") as string,
+                    ForceOneWorldScale = Field(feature, "forceOneWorldScale") as bool? ?? false,
+                    ScaleFactor = Field(feature, "skinRewriteScalingFactor") as float? ?? 1,
+                    AutoScaleFactor = Field(feature, "autoScaleFactor") as bool? ?? true,
+                    ScaleFactorPowersOf10 = Field(feature, "scalingFactorPowersOf10Only") as bool? ?? true,
                 };
                 // Links saved by older VRCFury versions are only upgraded when VRCFury builds or shows them: read them the
-                // way its upgrade does (Model/Feature/ArmatureLink.cs, versions 6 and 7).
+                // way its upgrade does (Model/Feature/ArmatureLink.cs).
                 int version = Field(feature, "version") as int? ?? -1;
                 if (version >= 0 && version < 7)
                 {
-                    string mode = Field(feature, "linkMode")?.ToString();
-                    link.Recursive = mode == "ReparentRoot" ? false : mode == "Auto" ? ExternalSkinUses(link.From.transform) : true;
-                    string keep = Field(feature, "keepBoneOffsets2")?.ToString();
-                    link.Align = version < 3 ? !(Field(feature, "keepBoneOffsets") as bool? ?? false) : keep == "Auto" || keep == null ? link.Recursive : keep == "No";
+                    string mode = version < 1 ? Field(feature, "useBoneMerging") as bool? == true ? "SkinRewrite" : "MergeAsChildren" : Field(feature, "linkMode")?.ToString();
+                    if (version < 2) link.ScaleFactor = 1;
+                    if (version < 4 && mode != "SkinRewrite") link.ScaleFactor = 0;
+                    if (version < 5 && mode == "MergeAsChildren") link.ScaleFactorPowersOf10 = false;
+                    link.Recursive = mode == "ReparentRoot" ? false : mode == "Auto" ? link.From != null && ExternalSkinUses(link.From.transform) : true;
+                    string keep = version < 3 ? Field(feature, "keepBoneOffsets") as bool? == true ? "Yes" : "No" : Field(feature, "keepBoneOffsets2")?.ToString();
+                    link.AlignPosition = link.AlignRotation = link.AlignScale = keep == "Auto" || keep == null ? link.Recursive : keep == "No";
+                    link.AutoScaleFactor = link.ScaleFactor <= 0 && link.Recursive;
+                    if (link.ScaleFactor <= 0) link.ScaleFactor = 1;
                 }
-                else link.Align = Field(feature, "alignPosition") as bool? ?? link.Recursive;
+                else
+                {
+                    link.AlignPosition = Field(feature, "alignPosition") as bool? ?? link.Recursive;
+                    link.AlignRotation = Field(feature, "alignRotation") as bool? ?? link.Recursive;
+                    link.AlignScale = Field(feature, "alignScale") as bool? ?? link.Recursive;
+                }
                 if (version >= 0 && version < 6)
                 {
                     var path = Field(feature, "bonePathOnAvatar") as string;
-                    if (string.IsNullOrWhiteSpace(path)) link.ToBone = (HumanBodyBones)Field(feature, "boneOnAvatar");
-                    else link.ToPath = path;
-                    yield return link;
-                    continue;
-                }
-                // The first usable target wins, as in VRCFury.
-                if (Field(feature, "linkTo") is System.Collections.IEnumerable targets)
-                    foreach (var target in targets)
+                    if (!string.IsNullOrWhiteSpace(path)) link.Targets.Add(new Link.Target { Offset = path });
+                    else
                     {
-                        if (Field(target, "useBone") as bool? == true) link.ToBone = (HumanBodyBones)Field(target, "bone");
-                        else if (Field(target, "useObj") as bool? == true) link.ToObject = Field(target, "obj") as GameObject;
-                        else link.ToPath = Field(target, "offset") as string;
-                        if (link.ToBone != HumanBodyBones.LastBone || link.ToObject != null || !string.IsNullOrEmpty(link.ToPath)) break;
+                        link.Targets.Add(new Link.Target { UseBone = true, Bone = Field(feature, "boneOnAvatar") as HumanBodyBones? ?? HumanBodyBones.Hips });
+                        if (Field(feature, "fallbackBones") is IEnumerable<HumanBodyBones> fallbacks)
+                            foreach (var bone in fallbacks) link.Targets.Add(new Link.Target { UseBone = true, Bone = bone });
                     }
+                }
+                else if (Field(feature, "linkTo") is System.Collections.IEnumerable targets)
+                    foreach (var target in targets)
+                        if (target != null)
+                            link.Targets.Add(new Link.Target
+                            {
+                                UseBone = Field(target, "useBone") as bool? == true, UseObject = Field(target, "useObj") as bool? == true,
+                                Bone = Field(target, "bone") as HumanBodyBones? ?? HumanBodyBones.Hips, Object = Field(target, "obj") as GameObject,
+                                Offset = Field(target, "offset") as string,
+                            });
                 yield return link;
             }
         }

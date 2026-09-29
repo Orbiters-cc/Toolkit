@@ -10,6 +10,7 @@ using UnityEditor;
 using UnityEngine;
 using UnityEngine.Animations;
 using VRC.Dynamics;
+using VRC.SDK3.Dynamics.Constraint.Components;
 using Object = UnityEngine.Object;
 
 namespace Orbiters.Toolkit.Editor.VRChat.Attachments
@@ -60,19 +61,41 @@ namespace Orbiters.Toolkit.Editor.VRChat.Attachments
             foreach (var c in modular)
                 if (c.GetType().Name == "ModularAvatarMergeArmature" || c.GetType().Name == "ModularAvatarBoneProxy")
                     covered.UnionWith(c.GetComponentsInChildren<Transform>(true));
+            // Skins with bones of their own.
+            var skins = root.GetComponentsInChildren<SkinnedMeshRenderer>(true).Where(r => r.sharedMesh != null && r.bones.Length > 0).ToList();
+            var skinBones = new HashSet<Transform>(skins.SelectMany(r => r.bones).Where(b => b != null && b.IsChildOf(root.transform)));
+            // A constraint attaches what it holds when it is on and its source follows the avatar: an avatar object, something
+            // already attached, or one of the accessory's skin bones (linked below, or following a linked parent). One held
+            // by the accessory alone (a locator, a disabled drop setup) leaves it to the usual attachment.
+            bool Follows(Transform source) => source != null && (!source.IsChildOf(root.transform)
+                ? source.IsChildOf(avatarRoot)
+                : covered.Contains(source) || source.GetComponentsInParent<Transform>(true).Any(skinBones.Contains));
+            var sourced = new List<Component>();
             foreach (var constraint in Constraints(root))
             {
-                if (!Sources(constraint).Any(s => s != null))
+                if (Sources(constraint).Any(s => s != null)) { sourced.Add(constraint); continue; }
+                if (!Wirable(constraint))
                 {
-                    if (!plan.EmptyConstraints.Contains(constraint)) plan.EmptyConstraints.Add(constraint);
-                    // Wired to the bone it is named after at install: it follows through the constraint, not a bone link.
-                    if (EmptyConstraintTarget(constraint, index) == null) continue;
+                    plan.Notes.Add(new SetupNote(constraint, "“" + constraint.name + "” has an empty " + ObjectNames.NicifyVariableName(constraint.GetType().Name) + ": give it a source by hand."));
+                    continue;
                 }
-                covered.UnionWith(constraint.GetComponentsInChildren<Transform>(true));
+                if (!plan.EmptyConstraints.Contains(constraint)) plan.EmptyConstraints.Add(constraint);
+                // Wired to the bone it is named after at install: it follows through the constraint, not a bone link.
+                if (EmptyConstraintTarget(constraint, index) != null && Enabled(constraint)) covered.UnionWith(constraint.GetComponentsInChildren<Transform>(true));
+            }
+            // Constraints can hold one another: until nothing more attaches.
+            for (bool more = true; more;)
+            {
+                more = false;
+                foreach (var constraint in sourced.Where(c => Active(c) && Sources(c).Any(Follows)).ToList())
+                {
+                    covered.UnionWith(constraint.GetComponentsInChildren<Transform>(true));
+                    sourced.Remove(constraint);
+                    more = true;
+                }
             }
 
-            // Skins with bones of their own that nothing attaches yet.
-            var skins = root.GetComponentsInChildren<SkinnedMeshRenderer>(true).Where(r => r.sharedMesh != null && r.bones.Length > 0).ToList();
+            // Skin bones that nothing attaches yet.
             var bones = skins.SelectMany(r => r.bones).Where(b => b != null && !skeleton.Contains(b) && !covered.Contains(b) && b.IsChildOf(root.transform))
                 .Distinct().ToList();
             var loose = root.GetComponentsInChildren<Renderer>(true)
@@ -83,10 +106,25 @@ namespace Orbiters.Toolkit.Editor.VRChat.Attachments
             if (bones.Count > 0)
             {
                 var options = BoneMatcher.DetectAffixes(bones, index);
-                plan.Matches.AddRange(BoneMatcher.MatchHierarchy(bones, index, options));
+                // Several avatar bones fit a bone equally: the matcher's first pick is only a guess, left for AI or the user.
+                // So are matches below it that were chosen next to that pick while another candidate has a bone of that name.
+                // Parents first, so that each match knows its undecided ancestors.
+                var undecided = new Dictionary<Transform, List<Transform>>();
+                foreach (var match in BoneMatcher.MatchHierarchy(bones, index, options).OrderBy(m => Ancestors(m.Source, null).Count()))
+                {
+                    var others = match.Matched ? OtherCandidates(match, undecided, index) : null;
+                    if (others != null && others.Count > 0)
+                    {
+                        undecided[match.Source] = others;
+                        plan.Ambiguous.Add(match);
+                        plan.Matches.Add(new BoneMatch(match.Source, null, BoneMatchKind.None, 0f));
+                    }
+                    else plan.Matches.Add(match);
+                }
                 var matched = new HashSet<Transform>(plan.Matches.Where(m => m.Matched).Select(m => m.Source));
                 foreach (var bone in bones)
-                    if (!matched.Contains(bone) && !Ancestors(bone, root.transform).Any(matched.Contains)) plan.Unmatched.Add(bone);
+                    if (!matched.Contains(bone) && !undecided.ContainsKey(bone) && !Ancestors(bone, root.transform).Any(a => matched.Contains(a) || undecided.ContainsKey(a)))
+                        plan.Unmatched.Add(bone);
             }
 
             if (plan.MatchedCount > 0)
@@ -123,7 +161,8 @@ namespace Orbiters.Toolkit.Editor.VRChat.Attachments
         private static bool VrcFuryCanLink(AttachmentPlan plan, out Transform from, out Transform to)
         {
             from = to = null;
-            if (VrcFury.Writer == null) return false;
+            // Undecided bones are linked later (AI or the user), with the tool's own links.
+            if (VrcFury.Writer == null || plan.Ambiguous.Count > 0) return false;
             var matches = plan.Matches.Where(m => m.Matched).ToDictionary(m => m.Source, m => m.Target);
             var tops = matches.Keys.Where(b => !Ancestors(b, plan.Root.transform).Any(matches.ContainsKey)).ToList();
             if (tops.Count != 1) return false;
@@ -227,6 +266,14 @@ namespace Orbiters.Toolkit.Editor.VRChat.Attachments
             }
             foreach (var bone in plan.Unmatched.Where(b => !plan.Unmatched.Contains(b.parent)).Take(8))
                 plan.Notes.Add(new SetupNote(bone.gameObject, "“" + bone.name + "” matches no avatar bone and will not follow the avatar."));
+            var undecided = new HashSet<Transform>(plan.Ambiguous.Select(m => m.Source));
+            foreach (var match in plan.Ambiguous.Where(m => !Ancestors(m.Source, root.transform).Any(undecided.Contains)).Take(8))
+            {
+                var candidates = new[] { match.Target }.Concat(match.Alternatives ?? Array.Empty<Transform>())
+                    .Select(t => t.parent != null && t.parent != plan.Avatar ? t.parent.name + "/" + t.name : t.name).ToList();
+                plan.Notes.Add(new SetupNote(match.Source.gameObject, "“" + match.Source.name + "” fits several avatar bones (" + string.Join(", ", candidates.Take(4)) +
+                                                                      (candidates.Count > 4 ? "…" : "") + "): not linked until AI or you choose one."));
+            }
         }
 
         /// <summary>
@@ -251,6 +298,27 @@ namespace Orbiters.Toolkit.Editor.VRChat.Attachments
                 for (int i = 0; i < unity.sourceCount; i++) yield return unity.GetSource(i).sourceTransform;
             else if (constraint is VRCConstraintBase vrc)
                 foreach (var source in vrc.Sources) yield return source.SourceTransform;
+        }
+
+        /// <summary>The empty constraints the installer gives a bone as source: those that make an object follow it.</summary>
+        internal static bool Wirable(Component constraint) =>
+            constraint is ParentConstraint || constraint is PositionConstraint || constraint is RotationConstraint ||
+            constraint is VRCParentConstraint || constraint is VRCPositionConstraint || constraint is VRCRotationConstraint;
+
+        private static bool Enabled(Component constraint) => constraint is Behaviour behaviour && behaviour.enabled;
+
+        private static bool Active(Component constraint) => Enabled(constraint) &&
+            (constraint is IConstraint unity ? unity.constraintActive && unity.weight > 0 : constraint is VRCConstraintBase vrc && vrc.IsActive && vrc.GlobalWeight > 0);
+
+        // The avatar bones that fit as well as the match's target: its alternatives or, below an undecided bone, the bones
+        // of the target's name under that bone's other candidates.
+        private static List<Transform> OtherCandidates(BoneMatch match, Dictionary<Transform, List<Transform>> undecided, AvatarBoneIndex index)
+        {
+            if (match.Ambiguous) return match.Alternatives.ToList();
+            var ancestor = Ancestors(match.Source, null).FirstOrDefault(undecided.ContainsKey);
+            if (ancestor == null) return null;
+            var others = undecided[ancestor];
+            return index.WithName(BoneNames.Normalize(match.Target.name)).Where(t => t != match.Target && others.Any(t.IsChildOf)).ToList();
         }
 
         private static bool UsesMissingModularAvatar(GameObject root)

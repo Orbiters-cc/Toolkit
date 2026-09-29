@@ -106,10 +106,12 @@ namespace Orbiters.Toolkit.Editor.Photoshoot
             public int height;
         }
 
+        /// <summary>
+        /// One photoshoot stage in its own preview scene: its camera renders only that scene, so other photoshoots and the
+        /// open scenes never show up in (or light) its images, and its lights never reach the open scenes.
+        /// </summary>
         public sealed class LivePreviewSession : IDisposable
         {
-            private const string SceneName = "Orbiters Photoshoot";
-
             private sealed class PreviewRenderTarget
             {
                 public RenderTexture sceneRenderTexture;
@@ -120,7 +122,6 @@ namespace Orbiters.Toolkit.Editor.Photoshoot
             }
 
             private Scene scene;
-            private Scene previousActiveScene;
             private GameObject avatarCopy;
             private GameObject lastAvatarRoot;
             private GameObject backgroundObject;
@@ -129,7 +130,6 @@ namespace Orbiters.Toolkit.Editor.Photoshoot
             private GameObject rimLightObject;
             private GameObject rim2LightObject;
             private AnimationClip lastBodyPose;
-            private readonly Dictionary<Light, bool> externalSceneLightStates = new Dictionary<Light, bool>();
             private readonly PreviewRenderTarget thumbnailTarget = new PreviewRenderTarget();
             private readonly PreviewRenderTarget bannerTarget = new PreviewRenderTarget();
             private Camera camera;
@@ -167,85 +167,77 @@ namespace Orbiters.Toolkit.Editor.Photoshoot
                 PreviewRenderTarget target = GetRenderTarget(request.shotKind);
                 EnsureRenderTexture(target, request.width, request.height, request.shotKind);
                 EnsureCamera();
+                // A new copy is made for each avatar or pose; framing, light and background changes reuse it as posed.
+                bool avatarChanged = EnsureAvatarCopy(request.avatarRoot, request.bodyPose, out bool poseChanged);
+                if (avatarChanged)
+                {
+                    DisableAnimationComponents(avatarCopy);
+                    lastAmbient = null;
+                    // The photoshoot camera renders right after bones move, outside Unity's frame; without this a
+                    // render can reuse the skinning of the previous pose.
+                    foreach (var renderer in avatarCopy.GetComponentsInChildren<SkinnedMeshRenderer>(true))
+                        renderer.forceMatrixRecalculationPerRender = true;
+                }
+                if (avatarChanged || poseChanged)
+                {
+                    SampleBodyPose(avatarCopy, request.bodyPose);
+                }
+
+                string faceBlendshapeKey = CreateFaceBlendshapeKey(request.selectedFaceBlendshapeNames);
+                bool faceBlendshapesChanged =
+                    request.forceFaceBlendshapeApply ||
+                    avatarChanged ||
+                    !string.Equals(lastFaceBlendshapeKey, faceBlendshapeKey, StringComparison.Ordinal);
+                if (faceBlendshapesChanged)
+                {
+                    ResetAndApplyFaceBlendshapes(avatarCopy, request.selectedFaceBlendshapeNames);
+                }
+                if (faceBlendshapesChanged || poseChanged)
+                {
+                    Unsettled = true;
+                    // Posed geometry is baked from every skinned mesh, by far the slowest step of a render. Culling
+                    // bounds live in root-bone space and body regions in avatar space, so turning and framing never
+                    // need them again.
+                    MeasurePosedGeometry();
+                }
+                lastFaceBlendshapeKey = faceBlendshapeKey;
+                CenterOnStage();
+                ApplyAvatarRotation(avatarCopy, request.avatarYawDegrees);
+                Bounds bounds = CenterOnStage();
+
+                LastFrame = MeasureFrame(bounds);
+
+                ConfigureCamera(camera, bounds, request.shotKind, request.width, request.height, request.zoom, request.placement);
+                camera.backgroundColor = request.backgroundColor;
+                RebuildBackground(camera, bounds, request.background, request.backgroundColor);
+                var lightPreset = request.lightPreset ?? CreateLightPresets()[0];
+                ApplyLiveLightPreset(lightPreset);
+                if (lastAmbient != lightPreset.ambientColor)
+                {
+                    ApplyStageAmbient(avatarCopy, lightPreset.ambientColor);
+                    lastAmbient = lightPreset.ambientColor;
+                }
+
+                camera.targetTexture = target.sceneRenderTexture;
+                // Asynchronous shader compilation draws not-yet-compiled variants as a cyan placeholder;
+                // a photoshoot must show (and capture) the real materials.
+                bool asyncCompilation = ShaderUtil.allowAsyncCompilation;
+                ShaderUtil.allowAsyncCompilation = false;
                 try
                 {
-                    DisableExternalSceneLights();
-                    // A new copy is made for each avatar or pose; framing, light and background changes reuse it as posed.
-                    bool avatarChanged = EnsureAvatarCopy(request.avatarRoot, request.bodyPose, out bool poseChanged);
-                    if (avatarChanged)
-                    {
-                        DisableAnimationComponents(avatarCopy);
-                        lastAmbient = null;
-                        // The photoshoot camera renders right after bones move, outside Unity's frame; without this a
-                        // render can reuse the skinning of the previous pose.
-                        foreach (var renderer in avatarCopy.GetComponentsInChildren<SkinnedMeshRenderer>(true))
-                            renderer.forceMatrixRecalculationPerRender = true;
-                    }
-                    if (avatarChanged || poseChanged)
-                    {
-                        SampleBodyPose(avatarCopy, request.bodyPose);
-                    }
-
-                    string faceBlendshapeKey = CreateFaceBlendshapeKey(request.selectedFaceBlendshapeNames);
-                    bool faceBlendshapesChanged =
-                        request.forceFaceBlendshapeApply ||
-                        avatarChanged ||
-                        !string.Equals(lastFaceBlendshapeKey, faceBlendshapeKey, StringComparison.Ordinal);
                     if (faceBlendshapesChanged)
                     {
-                        ResetAndApplyFaceBlendshapes(avatarCopy, request.selectedFaceBlendshapeNames);
-                    }
-                    if (faceBlendshapesChanged || poseChanged)
-                    {
-                        Unsettled = true;
-                        // Posed geometry is baked from every skinned mesh, by far the slowest step of a render. Culling
-                        // bounds live in root-bone space and body regions in avatar space, so turning and framing never
-                        // need them again.
-                        MeasurePosedGeometry();
-                    }
-                    lastFaceBlendshapeKey = faceBlendshapeKey;
-                    CenterOnStage();
-                    ApplyAvatarRotation(avatarCopy, request.avatarYawDegrees);
-                    Bounds bounds = CenterOnStage();
-
-                    LastFrame = MeasureFrame(bounds);
-
-                    ConfigureCamera(camera, bounds, request.shotKind, request.width, request.height, request.zoom, request.placement);
-                    camera.backgroundColor = request.backgroundColor;
-                    RebuildBackground(camera, bounds, request.background, request.backgroundColor);
-                    var lightPreset = request.lightPreset ?? CreateLightPresets()[0];
-                    ApplyLiveLightPreset(lightPreset);
-                    if (lastAmbient != lightPreset.ambientColor)
-                    {
-                        ApplyStageAmbient(avatarCopy, lightPreset.ambientColor);
-                        lastAmbient = lightPreset.ambientColor;
-                    }
-
-                    camera.targetTexture = target.sceneRenderTexture;
-                    // Asynchronous shader compilation draws not-yet-compiled variants as a cyan placeholder;
-                    // a photoshoot must show (and capture) the real materials.
-                    bool asyncCompilation = ShaderUtil.allowAsyncCompilation;
-                    ShaderUtil.allowAsyncCompilation = false;
-                    try
-                    {
-                        if (faceBlendshapesChanged)
-                        {
-                            camera.Render();
-                        }
                         camera.Render();
                     }
-                    finally
-                    {
-                        ShaderUtil.allowAsyncCompilation = asyncCompilation;
-                    }
-                    ApplyShotPostProcess(request.shotKind, target);
-                    MarkRenderTargetUpdated(target);
-                    lastPreviewShotKind = request.shotKind;
+                    camera.Render();
                 }
                 finally
                 {
-                    RestoreExternalSceneLights();
+                    ShaderUtil.allowAsyncCompilation = asyncCompilation;
                 }
+                ApplyShotPostProcess(request.shotKind, target);
+                MarkRenderTargetUpdated(target);
+                lastPreviewShotKind = request.shotKind;
             }
 
             public Texture2D Capture(RenderRequest request)
@@ -295,15 +287,8 @@ namespace Orbiters.Toolkit.Editor.Photoshoot
 
                 if (scene.IsValid())
                 {
-                    EditorSceneManager.CloseScene(scene, true);
+                    EditorSceneManager.ClosePreviewScene(scene);
                     scene = default(Scene);
-                }
-
-                RestoreExternalSceneLights();
-
-                if (previousActiveScene.IsValid() && previousActiveScene.isLoaded)
-                {
-                    SceneManager.SetActiveScene(previousActiveScene);
                 }
 
                 avatarCopy = null;
@@ -319,66 +304,10 @@ namespace Orbiters.Toolkit.Editor.Photoshoot
 
             private void EnsureScene()
             {
-                if (scene.IsValid() && scene.isLoaded)
+                if (!scene.IsValid() || !scene.isLoaded)
                 {
-                    return;
+                    scene = EditorSceneManager.NewPreviewScene();
                 }
-
-                previousActiveScene = SceneManager.GetActiveScene();
-                scene = EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Additive);
-                scene.name = SceneName;
-                if (previousActiveScene.IsValid() && previousActiveScene.isLoaded)
-                {
-                    SceneManager.SetActiveScene(previousActiveScene);
-                }
-            }
-
-            private void DisableExternalSceneLights()
-            {
-                if (!scene.IsValid())
-                {
-                    return;
-                }
-
-                for (int sceneIndex = 0; sceneIndex < SceneManager.sceneCount; sceneIndex++)
-                {
-                    var loadedScene = SceneManager.GetSceneAt(sceneIndex);
-                    if (!loadedScene.IsValid() || !loadedScene.isLoaded || loadedScene == scene)
-                    {
-                        continue;
-                    }
-
-                    foreach (var root in loadedScene.GetRootGameObjects())
-                    {
-                        foreach (var light in root.GetComponentsInChildren<Light>(true))
-                        {
-                            if (light == null || light.gameObject.scene == scene)
-                            {
-                                continue;
-                            }
-
-                            if (!externalSceneLightStates.ContainsKey(light))
-                            {
-                                externalSceneLightStates[light] = light.enabled;
-                            }
-
-                            light.enabled = false;
-                        }
-                    }
-                }
-            }
-
-            private void RestoreExternalSceneLights()
-            {
-                foreach (var pair in externalSceneLightStates.ToList())
-                {
-                    if (pair.Key != null)
-                    {
-                        pair.Key.enabled = pair.Value;
-                    }
-                }
-
-                externalSceneLightStates.Clear();
             }
 
             private PreviewRenderTarget GetRenderTarget(ShotKind shotKind)
@@ -428,6 +357,9 @@ namespace Orbiters.Toolkit.Editor.Photoshoot
                 var cameraGo = CreateVisibleSceneObject("Photoshoot Camera", scene);
                 camera = cameraGo.AddComponent<Camera>();
                 camera.hideFlags = HideFlags.DontSave;
+                // Renders on demand, and only the objects and lights of this photoshoot's scene.
+                camera.enabled = false;
+                camera.scene = scene;
             }
 
             private bool EnsureAvatarCopy(GameObject avatarRoot, AnimationClip bodyPose, out bool poseChanged)

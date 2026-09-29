@@ -294,8 +294,10 @@ namespace Orbiters.Toolkit.Editor.Vpm
             if (manifest != null && (DateTime.UtcNow - manifestLoadedAt).TotalSeconds < 10) return manifest;
             try
             {
-                // Path.GetFullPath maps the virtual Packages/<name> path to wherever Unity resolved the package.
-                string json = File.ReadAllText(Path.GetFullPath("Packages/" + PackageName + "/package.json"));
+                // Wherever Unity resolved the package: embedded, cache, or a local folder outside the project.
+                string root = UnityEditor.PackageManager.PackageInfo.FindForAssetPath("Packages/" + PackageName)?.resolvedPath;
+                if (string.IsNullOrEmpty(root)) throw new DirectoryNotFoundException(PackageName + " is not a registered package.");
+                string json = File.ReadAllText(Path.Combine(root, "package.json"));
                 manifest = JsonConvert.DeserializeObject<Manifest>(json) ?? new Manifest();
             }
             catch (Exception ex)

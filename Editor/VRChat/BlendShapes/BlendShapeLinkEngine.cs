@@ -45,15 +45,16 @@ namespace Orbiters.Toolkit.Editor.VRChat.BlendShapes
             if (Time.frameCount != buildFrame) BeginBuild();
 
             var controllers = CollectBuiltControllers(avatarRoot);
-            if (controllers.Count == 0) return BlendShapeLinkResult.Fail("No VRCFury temporary AnimatorController found on avatar descriptor.");
+            if (controllers.Count == 0) return BlendShapeLinkResult.Fail("No privately owned build AnimatorController found on avatar descriptor.");
 
             var descriptor = avatarRoot.GetComponentInChildren<VRCAvatarDescriptor>(true);
+            // Clip bindings are relative to the descriptor's object; missing baseline values are read there.
+            var animatorRoot = descriptor != null ? descriptor.gameObject : avatarRoot;
             // VRChat only plays blendshape animations from FX: rewritten layers of other playable layers are copied there.
             var fxController = FindControllerForLayerType(descriptor, VRCAvatarDescriptor.AnimLayerType.FX);
-            if (fxController != null && !IsVrcFuryBuiltController(fxController)) fxController = null;
+            if (fxController != null && !IsBuiltController(fxController)) fxController = null;
             var layersToCopyToFx = new Dictionary<string, (AnimatorController controller, int index, AnimatorControllerLayer layer)>();
             var changedControllers = new HashSet<AnimatorController>();
-            var rewrittenControllers = new HashSet<AnimatorController>();
             int linksProcessed = 0, clipsWrapped = 0, statesRewritten = 0;
 
             foreach (var link in links)
@@ -79,7 +80,7 @@ namespace Orbiters.Toolkit.Editor.VRChat.BlendShapes
                     {
                         var layer = layers[i];
                         if (layer?.stateMachine == null) continue;
-                        if (!RewriteStateMachine(controller, layer.stateMachine, link, clipCache, visitedMachines, visitedTrees, ref clipsWrapped, ref statesRewritten)) continue;
+                        if (!RewriteStateMachine(controller, layer.stateMachine, link, animatorRoot, clipCache, visitedMachines, visitedTrees, ref clipsWrapped, ref statesRewritten)) continue;
                         controllerChanged = true;
                         linkChanged = true;
 
@@ -97,8 +98,9 @@ namespace Orbiters.Toolkit.Editor.VRChat.BlendShapes
                             Trace($"No FX controller found! Cannot copy layer '{layer.name}' for blendshape animations.");
                         }
 
-                        // FX layers with restrictive masks would drop the blendshape curves.
-                        if (layer.avatarMask != null)
+                        // FX layers with restrictive masks would drop the blendshape curves. Gesture/Action layers keep their
+                        // masks: their FX copy has none, and the original must not start moving excluded bones.
+                        if (controller == fxController && layer.avatarMask != null)
                         {
                             Trace($"Clearing mask '{layer.avatarMask.name}' from layer '{layer.name}'.");
                             layer.avatarMask = null;
@@ -110,7 +112,6 @@ namespace Orbiters.Toolkit.Editor.VRChat.BlendShapes
                     if (!controllerChanged) continue;
                     if (layersChanged) controller.layers = layers;
                     changedControllers.Add(controller);
-                    rewrittenControllers.Add(controller);
                     EditorUtility.SetDirty(controller);
 
                     int id = controller.GetInstanceID();
@@ -134,33 +135,23 @@ namespace Orbiters.Toolkit.Editor.VRChat.BlendShapes
             if (changedControllers.Count == 0)
                 return BlendShapeLinkResult.Fail("No matching blendshape curves or animation motions were found in VRCFury temporary controllers.");
 
-            if (descriptor != null)
+            // Same for the descriptor's FX mask; the Gesture/Action masks stay.
+            var descriptorLayers = descriptor != null ? descriptor.baseAnimationLayers : null;
+            if (descriptorLayers != null && fxController != null && changedControllers.Contains(fxController))
             {
                 bool descriptorChanged = false;
-                void ClearMasks(VRCAvatarDescriptor.CustomAnimLayer[] descriptorLayers)
+                for (int i = 0; i < descriptorLayers.Length; i++)
                 {
-                    if (descriptorLayers == null) return;
-                    for (int i = 0; i < descriptorLayers.Length; i++)
-                    {
-                        if (!(descriptorLayers[i].animatorController is AnimatorController ac) || !rewrittenControllers.Contains(ac) || descriptorLayers[i].mask == null) continue;
-                        Trace($"Clearing mask from VRCAvatarDescriptor layer type '{descriptorLayers[i].type}' because its controller '{ac.name}' was modified by a corrective link.");
-                        descriptorLayers[i].mask = null;
-                        descriptorChanged = true;
-                    }
+                    if (descriptorLayers[i].animatorController != fxController || descriptorLayers[i].mask == null) continue;
+                    Trace($"Clearing mask from VRCAvatarDescriptor layer type '{descriptorLayers[i].type}' because its controller '{fxController.name}' plays corrective links.");
+                    descriptorLayers[i].mask = null;
+                    descriptorChanged = true;
                 }
-                if (descriptor.baseAnimationLayers != null)
+                if (descriptorChanged)
                 {
-                    var arr = descriptor.baseAnimationLayers;
-                    ClearMasks(arr);
-                    descriptor.baseAnimationLayers = arr;
+                    descriptor.baseAnimationLayers = descriptorLayers;
+                    EditorUtility.SetDirty(descriptor);
                 }
-                if (descriptor.specialAnimationLayers != null)
-                {
-                    var arr = descriptor.specialAnimationLayers;
-                    ClearMasks(arr);
-                    descriptor.specialAnimationLayers = arr;
-                }
-                if (descriptorChanged) EditorUtility.SetDirty(descriptor);
             }
 
             AssetDatabase.SaveAssets();
@@ -184,7 +175,7 @@ namespace Orbiters.Toolkit.Editor.VRChat.BlendShapes
                 CollectFromLayers(descriptor.specialAnimationLayers, found);
             }
             var animator = avatarRoot.GetComponentInChildren<Animator>(true);
-            if (animator != null && animator.runtimeAnimatorController is AnimatorController fromAnimator && IsVrcFuryBuiltController(fromAnimator))
+            if (animator != null && animator.runtimeAnimatorController is AnimatorController fromAnimator && IsBuiltController(fromAnimator))
                 found.Add(fromAnimator);
             return found.ToList();
         }
@@ -195,13 +186,16 @@ namespace Orbiters.Toolkit.Editor.VRChat.BlendShapes
             return !string.IsNullOrEmpty(path) && path.Replace("\\", "/").IndexOf("com.vrcfury.temp", StringComparison.OrdinalIgnoreCase) >= 0;
         }
 
+        private static bool IsBuiltController(AnimatorController controller) =>
+            IsVrcFuryBuiltController(controller) || Attachments.AttachmentAnimationBuild.Owns(controller);
+
         private static void Trace(string message) => Log?.Invoke(message);
 
         private static void CollectFromLayers(VRCAvatarDescriptor.CustomAnimLayer[] layers, ISet<AnimatorController> found)
         {
             if (layers == null) return;
             foreach (var layer in layers)
-                if (!layer.isDefault && layer.animatorController is AnimatorController controller && IsVrcFuryBuiltController(controller))
+                if (!layer.isDefault && layer.animatorController is AnimatorController controller && IsBuiltController(controller))
                     found.Add(controller);
         }
 
@@ -282,7 +276,7 @@ namespace Orbiters.Toolkit.Editor.VRChat.BlendShapes
         }
 
         private static bool RewriteStateMachine(AnimatorController controller, AnimatorStateMachine machine, BlendShapeLink link,
-            IDictionary<AnimationClip, Motion> clipCache, ISet<AnimatorStateMachine> visitedMachines, ISet<BlendTree> visitedTrees,
+            GameObject animatorRoot, IDictionary<AnimationClip, Motion> clipCache, ISet<AnimatorStateMachine> visitedMachines, ISet<BlendTree> visitedTrees,
             ref int clipsWrapped, ref int statesRewritten)
         {
             if (!visitedMachines.Add(machine)) return false;
@@ -294,7 +288,7 @@ namespace Orbiters.Toolkit.Editor.VRChat.BlendShapes
                 // Wrapped by a previous build: the layer mask still needs clearing.
                 if (ContainsWrapper(state.motion, link.FactorParameter, visitedTrees)) hasExistingWrapper = true;
                 bool motionChanged = false;
-                var rewritten = RewriteMotion(controller, state.motion, link, clipCache, visitedTrees, ref clipsWrapped, ref motionChanged);
+                var rewritten = RewriteMotion(controller, state.motion, link, animatorRoot, clipCache, visitedTrees, ref clipsWrapped, ref motionChanged);
                 if (!motionChanged && (rewritten == null || rewritten == state.motion)) continue;
                 state.motion = rewritten;
                 EditorUtility.SetDirty(state);
@@ -302,7 +296,7 @@ namespace Orbiters.Toolkit.Editor.VRChat.BlendShapes
                 changed = true;
             }
             foreach (var child in machine.stateMachines)
-                if (child.stateMachine != null && RewriteStateMachine(controller, child.stateMachine, link, clipCache, visitedMachines, visitedTrees, ref clipsWrapped, ref statesRewritten))
+                if (child.stateMachine != null && RewriteStateMachine(controller, child.stateMachine, link, animatorRoot, clipCache, visitedMachines, visitedTrees, ref clipsWrapped, ref statesRewritten))
                     changed = true;
             return changed || hasExistingWrapper;
         }
@@ -316,7 +310,7 @@ namespace Orbiters.Toolkit.Editor.VRChat.BlendShapes
             return false;
         }
 
-        private static Motion RewriteMotion(AnimatorController controller, Motion motion, BlendShapeLink link,
+        private static Motion RewriteMotion(AnimatorController controller, Motion motion, BlendShapeLink link, GameObject animatorRoot,
             IDictionary<AnimationClip, Motion> clipCache, ISet<BlendTree> visitedTrees, ref int clipsWrapped, ref bool changed)
         {
             if (motion == null) return null;
@@ -329,7 +323,7 @@ namespace Orbiters.Toolkit.Editor.VRChat.BlendShapes
                     var wrapperChildren = tree.children;
                     var variant = wrapperChildren[1].motion;
                     bool variantChanged = false;
-                    var rewrittenVariant = RewriteMotion(controller, variant, link, clipCache, visitedTrees, ref clipsWrapped, ref variantChanged);
+                    var rewrittenVariant = RewriteMotion(controller, variant, link, animatorRoot, clipCache, visitedTrees, ref clipsWrapped, ref variantChanged);
                     if (variantChanged || (rewrittenVariant != null && rewrittenVariant != variant))
                     {
                         wrapperChildren[1].motion = rewrittenVariant;
@@ -345,7 +339,7 @@ namespace Orbiters.Toolkit.Editor.VRChat.BlendShapes
                 {
                     var childMotion = children[i].motion;
                     bool childChanged = false;
-                    var rewritten = RewriteMotion(controller, childMotion, link, clipCache, visitedTrees, ref clipsWrapped, ref childChanged);
+                    var rewritten = RewriteMotion(controller, childMotion, link, animatorRoot, clipCache, visitedTrees, ref clipsWrapped, ref childChanged);
                     if (!childChanged && (rewritten == null || rewritten == childMotion)) continue;
                     children[i].motion = rewritten;
                     childrenChanged = true;
@@ -361,7 +355,7 @@ namespace Orbiters.Toolkit.Editor.VRChat.BlendShapes
 
             if (!(motion is AnimationClip clip)) return motion;
             if (clipCache.TryGetValue(clip, out var cached)) return cached;
-            var variantClip = TryCreateVariantClip(controller, clip, link);
+            var variantClip = TryCreateVariantClip(controller, clip, link, animatorRoot);
             if (variantClip == null)
             {
                 clipCache[clip] = clip;

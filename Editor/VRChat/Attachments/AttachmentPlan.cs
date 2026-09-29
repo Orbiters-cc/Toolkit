@@ -37,8 +37,14 @@ namespace Orbiters.Toolkit.Editor.VRChat.Attachments
         public bool NeedsModularAvatar;
 
         // Clothing
+        /// <summary>One entry per clothing bone; an ambiguous one is listed unmatched here and kept in <see cref="Ambiguous"/>.</summary>
         public readonly List<BoneMatch> Matches = new List<BoneMatch>();
         public readonly List<Transform> Unmatched = new List<Transform>();
+        /// <summary>
+        /// Bones several avatar bones fit equally (and those below whose match only followed that guess), with the matcher's
+        /// candidates: not linked until AI or the user choose.
+        /// </summary>
+        public readonly List<BoneMatch> Ambiguous = new List<BoneMatch>();
         /// <summary>VrcFury mode: the bone linked recursively and its avatar bone.</summary>
         public Transform LinkFrom, LinkTo;
 

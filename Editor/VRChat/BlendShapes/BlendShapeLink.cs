@@ -111,26 +111,43 @@ namespace Orbiters.Toolkit.Editor.VRChat.BlendShapes
             return new AnimationClipSignature(output.Where(IsDistinctive).ToList());
         }
 
+        /// <summary>
+        /// True when the clip animates every channel of the signature with the same sampled values. Extra channels are
+        /// allowed: VRCFury adds curves to its copies (blendshape links, for one).
+        /// </summary>
         public bool Matches(AnimationClip clip)
         {
             if (clip == null || bindings.Count == 0) return false;
             var candidates = Candidates(clip);
-            if (candidates.Count == 0) return false;
+            if (candidates.Count < bindings.Count) return false;
+            var matches = new List<int>[bindings.Count];
+            int signatureIndex = 0;
             foreach (var sig in bindings)
             {
-                bool hasExactPath = false;
-                foreach (var candidate in candidates)
-                {
-                    if (!SameTypeAndProperty(sig, candidate) || !string.Equals(sig.Path, candidate.Path, StringComparison.Ordinal)) continue;
-                    hasExactPath = true;
-                    if (MatchesSamples(candidate.Curve, sig)) return true;
-                }
-                if (hasExactPath) continue;
-                // VRCFury remaps paths: fall back to the same type/property and sampled values.
-                foreach (var candidate in candidates)
-                    if (SameTypeAndProperty(sig, candidate) && MatchesSamples(candidate.Curve, sig)) return true;
+                var sameChannel = Enumerable.Range(0, candidates.Count).Where(i => SameTypeAndProperty(sig, candidates[i])).ToList();
+                var samePath = sameChannel.Where(i => string.Equals(sig.Path, candidates[i].Path, StringComparison.Ordinal)).ToList();
+                // VRCFury remaps paths: without the same path, any path with the same type/property and sampled values.
+                matches[signatureIndex] = (samePath.Count > 0 ? samePath : sameChannel).Where(i => MatchesSamples(candidates[i].Curve, sig)).ToList();
+                if (matches[signatureIndex++].Count == 0) return false;
             }
-            return false;
+            // A remapped channel still represents only one source channel. Match distinct candidates, allowing
+            // reassignment so an early flexible match cannot consume the only candidate of a later exact match.
+            var owners = Enumerable.Repeat(-1, candidates.Count).ToArray();
+            bool Assign(int index, bool[] visited)
+            {
+                foreach (int candidate in matches[index])
+                {
+                    if (visited[candidate]) continue;
+                    visited[candidate] = true;
+                    if (owners[candidate] >= 0 && !Assign(owners[candidate], visited)) continue;
+                    owners[candidate] = index;
+                    return true;
+                }
+                return false;
+            }
+            for (int i = 0; i < matches.Length; i++)
+                if (!Assign(i, new bool[candidates.Count])) return false;
+            return true;
         }
 
         /// <summary>Case-insensitive, without ".anim" and without non-alphanumeric characters.</summary>
