@@ -128,7 +128,8 @@ animator controllers are copied and their paths remapped (with proxy frames keep
 visibility), and the copies live in `Assets/OrbitersToolkitBuildCache` until the build ends; data left by an
 interrupted build is deleted on the next script reload. At -8900
 animations of body blendshapes also drive the same-named accessory shapes (`BlendShapeSync`, including meshes that moved
-out with their bone), and the components are removed. The scene is never changed by a build.
+out with their bone; shapes a refit already links are left to it), and the components are removed. The scene is never
+changed by a build.
 
 `AttachmentFollow.Links(avatarRoot)` lists, for every accessory, which transform follows which avatar bone and at which
 offset: My Avatar attachments, VRCFury Armature Links, and the bone matcher for clothing nothing links. The build and
@@ -152,6 +153,46 @@ set so it stays where it is at the body's current weights, and `BlendShapeSync` 
 to the new shapes. The scene is not changed. The component's inspector has **Check**, a dry run listing what will follow
 and which blendshapes move it. ReFit (**Keep rigid pieces on the body**) and MCB (**Keep Small Accessories On The Body**)
 add it for you.
+
+## Refits to a custom base
+
+Clothing made for an avatar's original base does not follow the blendshapes a custom base adds (MCB versions: muscles,
+flexing…). The Orbiters tools share one refit layer for it; ReFit (`orbiters.refit`) computes the geometry.
+
+- **Engine** (`Orbiters.Toolkit.Editor.Refit`): `RefitEngine.Current` is the installed engine (`IRefitEngine`); ReFit
+  registers itself when its editor code loads, so a tool never references it and only needs it once the user asks for a
+  refit. A `RefitJob` is one mesh: `Fit` fits it from the original base body to this body and adds the body's shapes,
+  `Shapes` only adds the shapes to a mesh that already fits. `RefitPreferences.Tightness` (0 loose … 1 tight, saved in
+  `ProjectSettings/OrbitersRefit.json`) is shared by MCB's ReFit panel and My Avatar.
+- **Custom bases**: `CustomBases.Describe(avatarRoot)` asks the registered `ICustomBaseProvider`s (MCB registers one) for
+  the avatar's custom base: its body, its blendshapes (the declared ones on the body, then every body shape containing
+  "flex") and, when the provider can, the original base to fit from (`ResolveOriginal`, disposable: it may be a temporary
+  import). `CustomBaseFingerprint` recognises a custom base without a provider: the SHA-256 of the body's model file is
+  looked up on the Orbiters server (`POST mcb/custom-bases/identify`), cached in `Library/Orbiters`. It cannot fit from
+  the original. `CustomBaseDetection.DetectAsync(avatarRoot)` does both once per avatar in the background, then measures
+  where each custom shape moves the body (`BodyShapeMap`, read a few shapes per editor update); it starts over when a
+  provider calls `CustomBases.NotifyChanged` (a version applied) or the body mesh changes.
+- **Fit check**: `FitCheck.CheckAsync(item, state)` says whether an item needs anything: only its skinned meshes lying
+  within 5 cm of skin a custom shape moves count (`RefitRelevance`, on a worker thread), so rigid pieces and far away
+  items are left alone. Shapes a mesh already has, under the same or a normalized name, are its creator's and are never
+  replaced. `FitAdvice`: `AddShapes` (it fits, or its creator adapted part of it), `AskFit` (unknown: ask), `Refit`
+  (`OrbitersFitInfo` says it was made for the original base). An item's creator adds **Orbiters › Fit Info**
+  (`OrbitersFitInfo`) to say which base and custom base it was made for, and which body shapes it must never get.
+- **Records**: `RefitRunner.Run`/`RunAsync(RefitBatch)` refits meshes and records each on its renderer
+  (`OrbitersRefit`, runtime `Orbiters.Toolkit.VRChat`, `IEditorOnly`): the renderer's state before (mesh, bones, pose,
+  weights), the generated mesh and the body shape each generated shape follows. Refitting a refitted mesh starts again
+  from its original instead of stacking; adding shapes to it keeps its fit; a failed refit keeps the previous one. The
+  same inputs (mesh, pose, body and its weights, shapes, tightness) reuse an earlier result from
+  `Assets/Orbiters/ReFit/Cache`. `RefitRecords` restores (`Remove`, `RemoveAll`), lists and syncs them; the record's
+  inspector shows what follows the body and restores the original mesh.
+- **Build**: `RefitBuild` takes the applied records from the build copy at -10110, before attachments and VRCFury move
+  or merge meshes, and at -8960 (after VRCFury and MCB's correctives, before Follow Body Blendshapes and attachments)
+  makes every animation of a body shape also drive its generated shapes, whatever animates it (exact curve copies,
+  `BlendShapeSync`). A generated shape removed during the build while its body shape is animated fails the build.
+  Without VRCFury, the controllers are copied as for attachments. Attachments leave the shapes a refit links alone.
+- `RefitGhost.Show(original, originalBody, avatarBody)` shows the original base see-through over the body, to line
+  clothing up with it before a `Fit`; `RefitCandidates` lists the meshes a refit can adapt (never editor helpers such as
+  X-Ray gizmos).
 
 ## Accessory posing preview
 

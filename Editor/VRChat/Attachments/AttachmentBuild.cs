@@ -39,14 +39,18 @@ namespace Orbiters.Toolkit.Editor.VRChat.Attachments
             else animations.Move(moves);
         }
 
-        /// <summary>After VRCFury built its controllers: body blendshape animations also drive the accessories' shapes.</summary>
+        /// <summary>
+        /// After VRCFury built its controllers: body blendshape animations also drive the accessories' shapes, except those a
+        /// refit already links (<see cref="Refit.RefitBuild"/>).
+        /// </summary>
         public static void Finish(GameObject avatarRoot)
         {
             var copies = new List<BlendShapeCopy>();
             foreach (var attachment in avatarRoot.GetComponentsInChildren<OrbitersAttachment>(true))
             {
                 if (attachment.syncBlendShapes)
-                    copies.AddRange(AttachmentInstaller.BlendShapeCopies(attachment, Skins.TryGetValue(attachment, out var skins) ? skins : null));
+                    copies.AddRange(AttachmentInstaller.BlendShapeCopies(attachment, Skins.TryGetValue(attachment, out var skins) ? skins : null)
+                        .Where(c => !Refit.RefitBuild.IsLinked(avatarRoot, c.Destination, c.DestinationShape)));
                 Skins.Remove(attachment);
                 Object.DestroyImmediate(attachment);
             }

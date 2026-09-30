@@ -1,8 +1,8 @@
 {
   "name": "orbiters.toolkit",
-  "version": "0.3.3",
+  "version": "0.3.4",
   "displayName": "Orbiters Toolkit",
-  "description": "Shared Orbiters account, editor UI, feature flags, VPM dependency prompts, bone matching, accessory attachment and posing preview, blendshape links, avatar photoshoot, mirror posing and background window capture.",
+  "description": "Shared Orbiters account, editor UI, feature flags, VPM dependency prompts, bone matching, accessory attachment and posing preview, blendshape links, custom base refits (records, build-time blendshape links, fit checks), avatar photoshoot, mirror posing and background window capture.",
   "unity": "2022.3",
   "author": {
     "name": "Orbiters",
