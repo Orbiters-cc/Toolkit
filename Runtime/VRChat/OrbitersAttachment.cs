@@ -37,6 +37,12 @@ namespace Orbiters.Toolkit.VRChat
         public bool syncBlendShapes = true;
         public SkinnedMeshRenderer body;
         [HideInInspector] public string source, variant;
+        /// <summary>A short clean name to show for it (AI suggested, e.g. "Glowsticks for Ultipaw"); empty: its object's name.</summary>
+        [HideInInspector] public string displayName;
+        /// <summary>The object name <see cref="displayName"/> was made for: a renamed object gets a new one.</summary>
+        [HideInInspector] public string displayNameFor;
+
+        public string DisplayName => !string.IsNullOrEmpty(displayName) && displayNameFor == name ? displayName : name;
         /// <summary>True when the tool created this object: removing the accessory deletes it.</summary>
         [HideInInspector] public bool created;
         /// <summary>Components the tool added to an object it did not create, removed with the accessory.</summary>

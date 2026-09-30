@@ -65,6 +65,8 @@ namespace Orbiters.Toolkit.Editor.VRChat.Refit
                 Body = body,
                 Shapes = CustomBases.Shapes(answer.shapes, body.sharedMesh),
                 Source = "Orbiters",
+                // Unity's preview of the body's model, loaded in the background by the editor.
+                Thumbnail = () => AssetPreview.GetAssetPreview(AssetDatabase.LoadMainAssetAtPath(meshPath)),
             };
         }
 

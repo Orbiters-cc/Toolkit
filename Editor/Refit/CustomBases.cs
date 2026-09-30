@@ -38,6 +38,8 @@ namespace Orbiters.Toolkit.Editor.Refit
         public string Source;
         /// <summary>Resolves the original base for a full refit (main thread, may import a file). Null when this source can't.</summary>
         public Func<CustomBaseOriginal> ResolveOriginal;
+        /// <summary>A small picture of the custom base, cheap to call again: null while it loads or when there is none.</summary>
+        public Func<Texture2D> Thumbnail;
 
         public bool CanFit => ResolveOriginal != null;
     }
