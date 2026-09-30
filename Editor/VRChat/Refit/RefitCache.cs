@@ -19,6 +19,8 @@ namespace Orbiters.Toolkit.Editor.VRChat.Refit
     internal static class RefitCache
     {
         internal const string Folder = "Assets/Orbiters/ReFit/Cache";
+        // Changes when entries keep something new: older entries are then not found and made again.
+        private const string Format = "2";
 
         /// <summary>What decides the result, hashed; null when an input is not a saved asset (nothing to find it again by).</summary>
         internal static string Key(RefitJob job, Transform avatarRoot, string engine)
@@ -28,14 +30,20 @@ namespace Orbiters.Toolkit.Editor.VRChat.Refit
             string mesh = Identity(renderer.sharedMesh), body = Identity(job.Body.sharedMesh);
             if (mesh == null || body == null) return null;
             var text = new StringBuilder();
-            text.Append(engine).Append('|').Append(job.Mode).Append('|').Append(Mathf.RoundToInt(job.Tightness * 100)).Append('|');
+            text.Append(Format).Append('|').Append(engine).Append('|').Append(job.Mode).Append('|').Append(Mathf.RoundToInt(job.Tightness * 100)).Append('|');
             text.Append(mesh).Append('|').Append(body).Append('|');
             if (job.Mode == RefitMode.Fit)
             {
                 string source = Identity(job.SourceBody != null ? job.SourceBody.sharedMesh : null);
                 if (source == null) return null;
                 text.Append(source).Append('|');
-                AppendPose(text, job.SourceAvatar != null ? job.SourceAvatar.transform : null, job.SourceBody.transform);
+                // The original body as the engine reads it: its place, its bones' pose and its shape, like the avatar's body.
+                var sourceRoot = job.SourceAvatar != null ? job.SourceAvatar.transform : null;
+                AppendPose(text, sourceRoot, job.SourceBody.transform);
+                foreach (var bone in job.SourceBody.bones ?? Array.Empty<Transform>()) AppendPose(text, sourceRoot, bone);
+                for (int i = 0; i < job.SourceBody.sharedMesh.blendShapeCount; i++)
+                    text.Append(Mathf.RoundToInt(job.SourceBody.GetBlendShapeWeight(i) * 10)).Append(',');
+                text.Append('|');
             }
             foreach (string shape in job.Shapes) text.Append(shape).Append(';');
             text.Append('|');
@@ -75,6 +83,7 @@ namespace Orbiters.Toolkit.Editor.VRChat.Refit
             {
                 Success = true, Mesh = entry.mesh, MeshPath = AssetDatabase.GetAssetPath(entry.mesh), PrimaryShape = entry.primaryShape,
                 SourceShapes = entry.shapes.Select(s => s.source).ToArray(), GeneratedShapes = entry.shapes.Select(s => s.generated).ToArray(),
+                Messages = entry.messages?.ToList() ?? new List<RefitMessage>(),
             };
         }
 
@@ -93,6 +102,7 @@ namespace Orbiters.Toolkit.Editor.VRChat.Refit
                 entry.primaryShape = outcome.PrimaryShape;
                 entry.shapes = Pairs(outcome).ToList();
                 entry.metadata = RefitEngine.Current?.SaveMetadata(renderer);
+                entry.messages = outcome.Messages.Where(m => m.Severity != RefitSeverity.Info).ToList();
                 entry.engine = engine;
                 if (created) AssetDatabase.CreateAsset(entry, path);
                 else EditorUtility.SetDirty(entry);

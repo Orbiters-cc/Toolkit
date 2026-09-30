@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using Orbiters.Toolkit.Editor.Refit;
 using Orbiters.Toolkit.VRChat;
 using UnityEngine;
 
@@ -12,6 +13,8 @@ namespace Orbiters.Toolkit.Editor.VRChat.Refit
         public List<RefitShape> shapes = new List<RefitShape>();
         /// <summary>The engine's binding data, for later blendshape passes.</summary>
         public string metadata;
+        /// <summary>The result's warnings and errors (a rough fit stays rough when reused).</summary>
+        public List<RefitMessage> messages = new List<RefitMessage>();
         public string engine;
     }
 }

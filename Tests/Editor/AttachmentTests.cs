@@ -340,6 +340,85 @@ public sealed class AttachmentTests
         Assert.True(hat == null);
     }
 
+    [Test] public void ConstraintsOfAnObjectTheUserPlacedStayTheirsInTheSceneAndGetTheirSourcesBackOnRemoval()
+    {
+        var sticks = Own(new GameObject("Glowsticks"));
+        sticks.transform.SetParent(avatar.transform, false);
+        var wrist = Child("Left wrist", sticks.transform, new Vector3(.5f, 1.4f, 0));
+        GameObject.CreatePrimitive(PrimitiveType.Cube).transform.SetParent(wrist, false);
+        var constraint = wrist.gameObject.AddComponent<ParentConstraint>();
+        constraint.weight = .5f;
+
+        var attachment = AttachmentInstaller.Install(AttachmentPlanner.Analyze(sticks, avatar.transform), new AttachmentOptions { Created = false, AddToggle = false });
+        Assert.AreSame(constraint, wrist.GetComponent<ParentConstraint>(), "not replaced in the scene");
+        Assert.Null(wrist.GetComponent<VRCParentConstraint>());
+        Assert.AreSame(bones["Left wrist"], constraint.GetSource(0).sourceTransform);
+        CollectionAssert.Contains(attachment.convertAtBuild, constraint);
+
+        // The build copy gets a VRChat constraint on the avatar's bone.
+        var clone = Own(Object.Instantiate(avatar));
+        AttachmentBuild.Apply(clone);
+        Assert.IsEmpty(clone.GetComponentsInChildren<ParentConstraint>(true));
+        var built = clone.GetComponentsInChildren<VRCParentConstraint>(true).Single();
+        Assert.AreEqual("Left wrist", built.Sources[0].SourceTransform.name);
+        Assert.True(built.Sources[0].SourceTransform.IsChildOf(clone.transform.Find("Armature")));
+        AttachmentBuild.Finish(clone);
+
+        AttachmentInstaller.Remove(attachment);
+        Assert.AreEqual(0, constraint.sourceCount);
+        Assert.AreEqual(.5f, constraint.weight, 1e-4f);
+        Assert.False(constraint.constraintActive);
+        Assert.False(constraint.locked);
+        Assert.Null(sticks.GetComponent<OrbitersAttachment>());
+        Assert.NotNull(wrist.GetComponent<ParentConstraint>());
+    }
+
+    [Test] public void RemovalPutsBackOnlyWhatTheUserDidNotChangeSince()
+    {
+        var sticks = Own(new GameObject("Glowsticks"));
+        sticks.transform.SetParent(avatar.transform, false);
+        var wrist = Child("Left wrist", sticks.transform, new Vector3(.5f, 1.4f, 0));
+        GameObject.CreatePrimitive(PrimitiveType.Cube).transform.SetParent(wrist, false);
+        var constraint = wrist.gameObject.AddComponent<ParentConstraint>();
+        var hat = GameObject.CreatePrimitive(PrimitiveType.Cube);
+        hat.name = "Cool Hat";
+        hat.transform.SetParent(avatar.transform, false);
+        hat.transform.localPosition = new Vector3(0, 0, .3f);
+
+        var sticksAttachment = AttachmentInstaller.Install(AttachmentPlanner.Analyze(sticks, avatar.transform), new AttachmentOptions { Created = false, AddToggle = false });
+        var hatAttachment = AttachmentInstaller.Install(AttachmentPlanner.Analyze(hat, avatar.transform), new AttachmentOptions { Created = false, AddToggle = false });
+        Assert.Less(Vector3.Distance(AttachmentPlanner.Bounds(hat).center, bones["Head"].position), 1e-4f, "placed on the head");
+
+        // The user changes the constraint's weight; the hat stays where the tool put it.
+        constraint.weight = .3f;
+        AttachmentInstaller.Remove(sticksAttachment);
+        AttachmentInstaller.Remove(hatAttachment);
+        Assert.AreSame(bones["Left wrist"], constraint.GetSource(0).sourceTransform, "changed since: the user's now");
+        Assert.AreEqual(.3f, constraint.weight, 1e-4f);
+        Assert.Less(Vector3.Distance(hat.transform.localPosition, new Vector3(0, 0, .3f)), 1e-4f, "back where the user had it");
+
+        // Moved by the user after the tool placed it: it stays where the user put it.
+        var again = AttachmentInstaller.Install(AttachmentPlanner.Analyze(hat, avatar.transform), new AttachmentOptions { Created = false, AddToggle = false });
+        hat.transform.position += Vector3.right * .1f;
+        var moved = hat.transform.localPosition;
+        AttachmentInstaller.Remove(again);
+        Assert.Less(Vector3.Distance(hat.transform.localPosition, moved), 1e-4f);
+    }
+
+    [Test] public void RemovalPutsBackTheBlendshapeWeightsCopiedFromTheBody()
+    {
+        var body = Smile(avatar.GetComponentsInChildren<SkinnedMeshRenderer>().Single(r => r.name == "Body"));
+        body.SetBlendShapeWeight(0, 70);
+        var shirt = Clothing("Shirt", new[] { ("hips", "", ""), ("spine", "hips", ""), ("chest", "spine", "") });
+        var mesh = Smile(shirt.GetComponentInChildren<SkinnedMeshRenderer>());
+        mesh.SetBlendShapeWeight(0, 10);
+
+        var attachment = AttachmentInstaller.Install(AttachmentPlanner.Analyze(shirt, avatar.transform), new AttachmentOptions { Created = false, AddToggle = false });
+        Assert.AreEqual(70, mesh.GetBlendShapeWeight(0), 1e-3f, "shows the body's shapes right away");
+        AttachmentInstaller.Remove(attachment);
+        Assert.AreEqual(10, mesh.GetBlendShapeWeight(0), 1e-3f);
+    }
+
     private T Own<T>(T value) where T : Object { owned.Add(value); return value; }
 
     private static SkinnedMeshRenderer Smile(SkinnedMeshRenderer renderer)

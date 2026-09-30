@@ -24,6 +24,7 @@ namespace Orbiters.Toolkit.Editor.VRChat.Attachments
         {
             var attachments = avatarRoot.GetComponentsInChildren<OrbitersAttachment>(true);
             if (attachments.Length == 0) return;
+            AttachmentInstaller.ConvertAtBuild(avatarRoot, attachments);
             foreach (var gone in Skins.Keys.Where(a => a == null).ToList()) Skins.Remove(gone);
             foreach (var attachment in attachments) Skins[attachment] = attachment.GetComponentsInChildren<SkinnedMeshRenderer>(true);
             var moves = new List<FollowLink>();

@@ -58,7 +58,7 @@ namespace Orbiters.Toolkit.Editor.VRChat.Attachments
                     break;
                 case OrbitersAttachment.AttachMode.Parent:
                     attachment.parent = plan.Parent;
-                    if (plan.Snap && plan.Parent != null) SnapTo(root, plan.Parent);
+                    if (plan.Snap && plan.Parent != null) AttachmentChanges.Move(attachment, () => SnapTo(root, plan.Parent));
                     break;
             }
 
@@ -68,7 +68,7 @@ namespace Orbiters.Toolkit.Editor.VRChat.Attachments
             var copies = options.SyncBlendShapes && !plan.HasBlendShapeLink ? BlendShapeCopies(attachment) : new List<BlendShapeCopy>();
             attachment.syncBlendShapes = copies.Count > 0;
             // Shows the clothing with the body's current shapes right away; the build keeps them linked.
-            if (copies.Count > 0) BlendShapeSync.CopyWeights(copies, recordUndo: true);
+            if (copies.Count > 0) AttachmentChanges.CopyWeights(attachment, copies);
             Dirty(attachment);
             return attachment;
         }
@@ -80,7 +80,7 @@ namespace Orbiters.Toolkit.Editor.VRChat.Attachments
             attachment.mode = OrbitersAttachment.AttachMode.Parent;
             attachment.links.Clear();
             attachment.parent = bone;
-            if (snap) SnapTo(attachment.gameObject, bone);
+            if (snap) AttachmentChanges.Move(attachment, () => SnapTo(attachment.gameObject, bone));
             Dirty(attachment);
         }
 
@@ -98,14 +98,38 @@ namespace Orbiters.Toolkit.Editor.VRChat.Attachments
             Dirty(attachment);
         }
 
-        /// <summary>Deletes an accessory the tool placed, or takes off what the tool added to one the user placed.</summary>
+        /// <summary>
+        /// Deletes an accessory the tool placed. From one the user placed, takes off what the tool added and puts back what it
+        /// changed (constraints, place, blendshape weights) where the user did not change it since.
+        /// </summary>
         public static void Remove(OrbitersAttachment attachment)
         {
             if (attachment == null) return;
             if (attachment.created) { Undo.DestroyObjectImmediate(attachment.gameObject); return; }
+            AttachmentChanges.Restore(attachment);
             foreach (var component in attachment.added.Where(c => c != null).ToList()) Undo.DestroyObjectImmediate(component);
             Undo.DestroyObjectImmediate(attachment);
         }
+
+        /// <summary>
+        /// Build time, on the build copy: the Unity constraints of objects the tool did not create become VRChat constraints
+        /// (in the scene they stay the user's). One an animation now drives stays a Unity constraint, as at install.
+        /// </summary>
+        internal static void ConvertAtBuild(GameObject avatarRoot, IEnumerable<OrbitersAttachment> attachments)
+        {
+            var descriptor = avatarRoot.GetComponent<VRCAvatarDescriptor>();
+            var constraints = attachments.SelectMany(a => a.convertAtBuild).Where(c => c != null).OfType<IConstraint>().Distinct().ToList();
+            if (descriptor == null || constraints.Count == 0) return;
+            var animated = Animated(avatarRoot.transform, constraints);
+            var convert = constraints.Where(c => !animated.Contains(c)).ToArray();
+            if (convert.Length > 0) AvatarDynamicsSetup.DoConvertUnityConstraints(convert, descriptor, false);
+        }
+
+        // The SDK does not flag the constraints converted at build as needing its own conversion.
+        [InitializeOnLoadMethod]
+        private static void ClaimBuildConversions() => AvatarDynamicsSetup.IsUnityConstraintAutoConverted += constraint =>
+            constraint is Component component && component != null && component.GetComponentInParent<OrbitersAttachment>(true) is OrbitersAttachment attachment &&
+            attachment.convertAtBuild.Contains(component);
 
         public static List<OrbitersAttachment> Installed(Transform avatarRoot) =>
             avatarRoot == null ? new List<OrbitersAttachment>() : avatarRoot.GetComponentsInChildren<OrbitersAttachment>(true).ToList();
@@ -132,7 +156,8 @@ namespace Orbiters.Toolkit.Editor.VRChat.Attachments
         }
 
         // Empty constraints named after avatar bones ("Head", "Left wrist") get that bone as source, keeping where the
-        // object stands; Unity ones become VRChat constraints unless an animation drives them.
+        // object stands; Unity ones become VRChat constraints unless an animation drives them (on the build copy only, for an
+        // object the user placed).
         private static void WireConstraints(AttachmentPlan plan, OrbitersAttachment attachment)
         {
             var descriptor = plan.Avatar.GetComponent<VRCAvatarDescriptor>();
@@ -142,36 +167,10 @@ namespace Orbiters.Toolkit.Editor.VRChat.Attachments
                 if (constraint == null) continue;
                 var source = AttachmentPlanner.EmptyConstraintTarget(constraint, plan.Index);
                 if (source == null) continue;
-                var t = constraint.transform;
+                if (!(constraint is ParentConstraint || constraint is PositionConstraint || constraint is RotationConstraint ||
+                      constraint is VRCParentConstraint || constraint is VRCPositionConstraint || constraint is VRCRotationConstraint)) continue;
                 Undo.RecordObject(constraint, "Wire constraint");
-                switch (constraint)
-                {
-                    case ParentConstraint parent:
-                        Replace(parent, source);
-                        parent.SetTranslationOffset(0, source.InverseTransformPoint(t.position));
-                        parent.SetRotationOffset(0, (Quaternion.Inverse(source.rotation) * t.rotation).eulerAngles);
-                        break;
-                    case PositionConstraint position:
-                        Replace(position, source);
-                        position.translationOffset = t.position - source.position;
-                        break;
-                    case RotationConstraint rotation:
-                        Replace(rotation, source);
-                        rotation.rotationOffset = (Quaternion.Inverse(source.rotation) * t.rotation).eulerAngles;
-                        break;
-                    case VRCParentConstraint vrc:
-                        Replace(vrc, new VRCConstraintSource(source, 1, source.InverseTransformPoint(t.position), (Quaternion.Inverse(source.rotation) * t.rotation).eulerAngles));
-                        break;
-                    case VRCPositionConstraint vrc:
-                        Replace(vrc, new VRCConstraintSource(source, 1));
-                        vrc.PositionOffset = t.position - source.position;
-                        break;
-                    case VRCRotationConstraint vrc:
-                        Replace(vrc, new VRCConstraintSource(source, 1));
-                        vrc.RotationOffset = (Quaternion.Inverse(source.rotation) * t.rotation).eulerAngles;
-                        break;
-                    default: continue;
-                }
+                AttachmentChanges.Constraint(attachment, constraint, () => Wire(constraint, source));
                 PrefabUtility.RecordPrefabInstancePropertyModifications(constraint);
                 if (constraint is IConstraint ic) unity.Add(ic);
             }
@@ -183,9 +182,48 @@ namespace Orbiters.Toolkit.Editor.VRChat.Attachments
                 plan.Notes.Add(new SetupNote((Component)constraint, "“" + ((Component)constraint).name + "” keeps its Unity constraint: an animation drives it."));
             var convert = unity.Where(c => !animated.Contains(c)).ToArray();
             if (convert.Length == 0) return;
-            var before = new HashSet<VRCConstraintBase>(plan.Root.GetComponentsInChildren<VRCConstraintBase>(true));
+            if (!attachment.created)
+            {
+                // The user's own constraints are not replaced in the scene (removal puts their sources back): the build copy
+                // gets VRChat ones.
+                foreach (var constraint in convert.Cast<Component>())
+                    if (!attachment.convertAtBuild.Contains(constraint)) attachment.convertAtBuild.Add(constraint);
+                return;
+            }
             AvatarDynamicsSetup.DoConvertUnityConstraints(convert, descriptor, false);
-            if (!attachment.created) attachment.added.AddRange(plan.Root.GetComponentsInChildren<VRCConstraintBase>(true).Where(c => !before.Contains(c)));
+        }
+
+        // Gives the constraint its bone as only source, keeping where the object stands.
+        private static void Wire(Component constraint, Transform source)
+        {
+            var t = constraint.transform;
+            switch (constraint)
+            {
+                case ParentConstraint parent:
+                    Replace(parent, source);
+                    parent.SetTranslationOffset(0, source.InverseTransformPoint(t.position));
+                    parent.SetRotationOffset(0, (Quaternion.Inverse(source.rotation) * t.rotation).eulerAngles);
+                    break;
+                case PositionConstraint position:
+                    Replace(position, source);
+                    position.translationOffset = t.position - source.position;
+                    break;
+                case RotationConstraint rotation:
+                    Replace(rotation, source);
+                    rotation.rotationOffset = (Quaternion.Inverse(source.rotation) * t.rotation).eulerAngles;
+                    break;
+                case VRCParentConstraint vrc:
+                    Replace(vrc, new VRCConstraintSource(source, 1, source.InverseTransformPoint(t.position), (Quaternion.Inverse(source.rotation) * t.rotation).eulerAngles));
+                    break;
+                case VRCPositionConstraint vrc:
+                    Replace(vrc, new VRCConstraintSource(source, 1));
+                    vrc.PositionOffset = t.position - source.position;
+                    break;
+                case VRCRotationConstraint vrc:
+                    Replace(vrc, new VRCConstraintSource(source, 1));
+                    vrc.RotationOffset = (Quaternion.Inverse(source.rotation) * t.rotation).eulerAngles;
+                    break;
+            }
         }
 
         // Unity constraints that animations of the avatar (its layers, animators, VRCFury and Modular Avatar controllers)

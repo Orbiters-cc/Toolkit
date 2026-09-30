@@ -19,6 +19,8 @@ internal sealed class FakeRefitEngine : IRefitEngine
     public readonly List<Mesh> Inputs = new List<Mesh>();
     public readonly List<Mesh> Created = new List<Mesh>();
     public Func<RefitJob, bool> Fails = _ => false;
+    /// <summary>Messages a successful refit reports, e.g. a rough fit's warning.</summary>
+    public List<RefitMessage> Reports = new List<RefitMessage>();
     public string SaveMeshesIn;
 
     public string Name => "Fake engine";
@@ -52,7 +54,7 @@ internal sealed class FakeRefitEngine : IRefitEngine
         else Created.Add(mesh);
         Undo.RecordObject(job.Renderer, "Fake refit");
         job.Renderer.sharedMesh = mesh;
-        done(new RefitOutcome { Success = true, Mesh = mesh, MeshPath = path, SourceShapes = job.Shapes.ToArray(), GeneratedShapes = generated.ToArray() });
+        done(new RefitOutcome { Success = true, Mesh = mesh, MeshPath = path, SourceShapes = job.Shapes.ToArray(), GeneratedShapes = generated.ToArray(), Messages = Reports.ToList() });
     }
 
     public string SaveMetadata(SkinnedMeshRenderer renderer) => null;
@@ -286,8 +288,14 @@ public sealed class RefitRecordsTests
         try
         {
             second = Object.Instantiate(root);
+            engine.Reports = new List<RefitMessage>
+            {
+                new RefitMessage { Severity = RefitSeverity.Warning, Code = "surface-coverage-limited", Text = "Short of the surface" },
+                new RefitMessage { Severity = RefitSeverity.Info, Code = "phase-timing", Text = "Took a while" },
+            };
             var first = Run(Batch(RefitMode.Shapes, "Flex arms"));
             Assert.That(first.Items[0].Reused, Is.False);
+            Assert.That(first.Rough, Is.True);
             var secondJacket = second.transform.Find("Jacket").GetComponent<SkinnedMeshRenderer>();
             var batch = Batch(RefitMode.Shapes, "Flex arms");
             batch.Avatar = second.transform;
@@ -296,12 +304,60 @@ public sealed class RefitRecordsTests
             var reused = Run(batch);
             Assert.That(reused.Items[0].Reused, Is.True);
             Assert.That(engine.Jobs.Count, Is.EqualTo(1));
+            // A rough fit stays rough when reused: its warnings come with it (not its diagnostics).
+            Assert.That(reused.Rough, Is.True);
+            Assert.That(reused.Items[0].Outcome.Warnings.Select(m => m.Code), Is.EqualTo(new[] { "surface-coverage-limited" }));
+            Assert.That(reused.Items[0].Outcome.Messages.Any(m => m.Severity == RefitSeverity.Info), Is.False);
             Assert.That(secondJacket.sharedMesh, Is.SameAs(jacket.sharedMesh));
             Assert.That(secondJacket.GetComponent<OrbitersRefit>().shapes.Single().generated, Is.EqualTo("Flex arms"));
         }
         finally
         {
             if (second != null) Object.DestroyImmediate(second);
+            if (AssetDatabase.IsValidFolder(RefitCache.Folder))
+                foreach (string guid in AssetDatabase.FindAssets("t:RefitCacheEntry", new[] { RefitCache.Folder }))
+                    if (!before.Contains(guid)) AssetDatabase.DeleteAsset(AssetDatabase.GUIDToAssetPath(guid));
+            for (int i = createdFolders.Count - 1; i >= 0; i--) AssetDatabase.DeleteAsset(createdFolders[i]);
+        }
+    }
+
+    [Test]
+    public void AFitIsReusedOnlyForTheSameOriginalBodyPoseAndShape()
+    {
+        folder = "Assets/RefitTest-" + Guid.NewGuid().ToString("N");
+        AssetDatabase.CreateFolder("Assets", folder.Substring("Assets/".Length));
+        AssetDatabase.CreateAsset(bodyMesh, folder + "/body.asset");
+        AssetDatabase.CreateAsset(jacketMesh, folder + "/jacket.asset");
+        engine.SaveMeshesIn = folder;
+        var createdFolders = new[] { "Assets/Orbiters", "Assets/Orbiters/ReFit", RefitCache.Folder }.Where(f => !AssetDatabase.IsValidFolder(f)).ToList();
+        var before = new HashSet<string>(createdFolders.Count == 0 ? AssetDatabase.FindAssets("t:RefitCacheEntry", new[] { RefitCache.Folder }) : new string[0]);
+        var original = originalBase.GetComponent<SkinnedMeshRenderer>();
+        var hips = new GameObject("Hips").transform;
+        hips.SetParent(originalBase.transform, false);
+        original.bones = new[] { hips };
+        original.rootBone = hips;
+        try
+        {
+            Assert.That(Run(Batch(RefitMode.Fit, "Flex arms")).Items[0].Reused, Is.False);
+            // Fitted again from the same original body: the same inputs, the first result.
+            Assert.That(Run(Batch(RefitMode.Fit, "Flex arms")).Items[0].Reused, Is.True);
+            Assert.That(engine.Jobs.Count, Is.EqualTo(1));
+
+            // The original body posed or shaped differently gives another fit: computed, not reused.
+            hips.localRotation = Quaternion.Euler(0, 0, 30);
+            Assert.That(Run(Batch(RefitMode.Fit, "Flex arms")).Items[0].Reused, Is.False);
+            hips.localRotation = Quaternion.identity;
+            original.SetBlendShapeWeight(1, 50);
+            Assert.That(Run(Batch(RefitMode.Fit, "Flex arms")).Items[0].Reused, Is.False);
+            Assert.That(engine.Jobs.Count, Is.EqualTo(3));
+
+            // Back as it was: the first result again.
+            original.SetBlendShapeWeight(1, 0);
+            Assert.That(Run(Batch(RefitMode.Fit, "Flex arms")).Items[0].Reused, Is.True);
+            Assert.That(engine.Jobs.Count, Is.EqualTo(3));
+        }
+        finally
+        {
             if (AssetDatabase.IsValidFolder(RefitCache.Folder))
                 foreach (string guid in AssetDatabase.FindAssets("t:RefitCacheEntry", new[] { RefitCache.Folder }))
                     if (!before.Contains(guid)) AssetDatabase.DeleteAsset(AssetDatabase.GUIDToAssetPath(guid));

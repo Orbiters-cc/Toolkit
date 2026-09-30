@@ -33,6 +33,7 @@ namespace Orbiters.Toolkit.Editor.Refit
 
     public enum RefitSeverity { Info, Warning, Error }
 
+    [Serializable]
     public struct RefitMessage
     {
         public RefitSeverity Severity;

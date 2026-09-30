@@ -47,5 +47,60 @@ namespace Orbiters.Toolkit.VRChat
         [HideInInspector] public bool created;
         /// <summary>Components the tool added to an object it did not create, removed with the accessory.</summary>
         [HideInInspector] public List<Component> added = new List<Component>();
+        /// <summary>Unity constraints of an object the tool did not create: they become VRChat constraints on the build copy only.</summary>
+        [HideInInspector] public List<Component> convertAtBuild = new List<Component>();
+        /// <summary>What installing changed on an object the tool did not create, put back when the accessory is removed.</summary>
+        [HideInInspector] public InstallChanges changes = new InstallChanges();
+
+        /// <summary>Each value as it was before the tool changed it and as the tool left it: removal puts back only what is still as the tool left it.</summary>
+        [Serializable]
+        public sealed class InstallChanges
+        {
+            public bool moved;
+            public LocalPose poseBefore, poseAfter;
+            public List<ConstraintChange> constraints = new List<ConstraintChange>();
+            public List<WeightChange> weights = new List<WeightChange>();
+        }
+
+        [Serializable]
+        public struct LocalPose
+        {
+            public Vector3 position;
+            public Quaternion rotation;
+            public Vector3 scale;
+        }
+
+        [Serializable]
+        public sealed class ConstraintChange
+        {
+            public Component constraint;
+            public ConstraintState before, after;
+        }
+
+        /// <summary>The part of a Unity or VRChat constraint the tool sets: its sources, offsets, weight and switches.</summary>
+        [Serializable]
+        public sealed class ConstraintState
+        {
+            public float weight;
+            public bool active, locked;
+            public Vector3 positionOffset, rotationOffset;
+            public List<ConstraintSourceState> sources = new List<ConstraintSourceState>();
+        }
+
+        [Serializable]
+        public struct ConstraintSourceState
+        {
+            public Transform transform;
+            public float weight;
+            public Vector3 positionOffset, rotationOffset;
+        }
+
+        [Serializable]
+        public struct WeightChange
+        {
+            public SkinnedMeshRenderer renderer;
+            public string shape;
+            public float before, after;
+        }
     }
 }

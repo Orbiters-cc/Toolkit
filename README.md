@@ -109,13 +109,18 @@ Undo and without changing the avatar. `AttachmentPlanner.Analyze(accessory, avat
 Empty parent, position and rotation constraints (Unity or VRChat) named after avatar bones (`Head`, `Left wrist`) get
 that bone as source, keeping where the object stands. Unity ones become VRChat constraints, except those an animation of
 the avatar drives: the SDK could only rebind those animations by editing the clip assets in place, so they stay working
-Unity constraints. Empty aim, look-at and scale constraints, object names that give instructions (`(open me)`,
+Unity constraints. On an object the tool did not create (`AttachmentOptions.Created = false`) the user's Unity constraints
+stay in the scene and are converted on the build copy only (claimed through the SDK's `IsUnityConstraintAutoConverted`, so
+its build panel does not flag them). Empty aim, look-at and scale constraints, object names that give instructions (`(open me)`,
 `Put me in armature`), unknown scripts, missing scripts and bones no avatar bone explains become `SetupNote`s.
 
 `AttachmentInstaller.Install(plan, options)` adds `OrbitersAttachment` (runtime assembly `Orbiters.Toolkit.VRChat`,
 `IEditorOnly`) to the accessory root, the VRCFury Armature Link when exact, a saved VRCFury toggle under
 `Accessories/<name>` when the accessory has no toggle or controller of its own, and copies the body's blendshape
-weights to same-named shapes. `Retarget`, `Link` (AI answers), `Remove` and `Installed` complete it. VRCFury components
+weights to same-named shapes. `Retarget`, `Link` (AI answers), `Remove` and `Installed` complete it. `Remove` deletes an
+object the tool created; from one it did not create, it removes what it added and puts back what it changed (wired
+constraints, the place it was moved to, blendshape weights copied from the body), recorded on the attachment, where
+the user did not change it since. VRCFury components
 are created through VRCFury's public API by the optional `Orbiters.Toolkit.Editor.VRCFury` assembly; `VrcFury` reads
 VRCFury components (including links saved by older VRCFury versions) without referencing it.
 
@@ -182,8 +187,8 @@ flexing…). The Orbiters tools share one refit layer for it; ReFit (`orbiters.r
   (`OrbitersRefit`, runtime `Orbiters.Toolkit.VRChat`, `IEditorOnly`): the renderer's state before (mesh, bones, pose,
   weights), the generated mesh and the body shape each generated shape follows. Refitting a refitted mesh starts again
   from its original instead of stacking; adding shapes to it keeps its fit; a failed refit keeps the previous one. The
-  same inputs (mesh, pose, body and its weights, shapes, tightness) reuse an earlier result from
-  `Assets/Orbiters/ReFit/Cache`. `RefitRecords` restores (`Remove`, `RemoveAll`), lists and syncs them; the record's
+  same inputs (mesh, pose, body and its weights, the original body's pose and weights when fitting from it, shapes,
+  tightness) reuse an earlier result from `Assets/Orbiters/ReFit/Cache`, with its warnings (a rough fit stays rough). `RefitRecords` restores (`Remove`, `RemoveAll`), lists and syncs them; the record's
   inspector shows what follows the body and restores the original mesh.
 - **Build**: `RefitBuild` takes the applied records from the build copy at -10110, before attachments and VRCFury move
   or merge meshes, and at -8960 (after VRCFury and MCB's correctives, before Follow Body Blendshapes and attachments)
