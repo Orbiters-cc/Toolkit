@@ -51,6 +51,18 @@ namespace Orbiters.Toolkit.VRChat
         [HideInInspector] public List<Component> convertAtBuild = new List<Component>();
         /// <summary>What installing changed on an object the tool did not create, put back when the accessory is removed.</summary>
         [HideInInspector] public InstallChanges changes = new InstallChanges();
+        /// <summary>
+        /// The transforms moved or resized to fit the avatar's armature (clothing made for another avatar), as they were and as
+        /// the fit left them: cancelling the fit puts back those still as it left them.
+        /// </summary>
+        [HideInInspector] public List<FittedPose> fitted = new List<FittedPose>();
+
+        [Serializable]
+        public struct FittedPose
+        {
+            public Transform transform;
+            public LocalPose before, after;
+        }
 
         /// <summary>Each value as it was before the tool changed it and as the tool left it: removal puts back only what is still as the tool left it.</summary>
         [Serializable]

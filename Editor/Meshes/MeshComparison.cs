@@ -23,6 +23,11 @@ namespace Orbiters.Toolkit.Editor.Meshes
         public int Bones;
         // Created for the comparison (read from a file), destroyed with it.
         public bool Owned;
+        // The geometry the comparison reads, so it can run off the main thread (Unity's meshes cannot be read there).
+        public Vector3[] Points;
+        public int[] Triangles;
+
+        public int VertexCount => Points?.Length ?? (Mesh != null ? Mesh.vertexCount : 0);
     }
 
     public sealed class ModelInfo
@@ -56,33 +61,94 @@ namespace Orbiters.Toolkit.Editor.Meshes
         public static readonly Color Unchanged = new Color(0.6f, 0.62f, 0.66f), Added = new Color(0.1f, 0.85f, 0.45f),
             Moved = new Color(1f, 0.6f, 0.2f), Materials = new Color(0.62f, 0.5f, 1f), Shapes = new Color(0.3f, 0.78f, 1f);
 
-        /// <summary>The meshes of a model file, read without Unity's importer (main thread: it creates the meshes).</summary>
-        public static ModelInfo FromFile(string path, byte[] bytes, List<FbxMesh> parsed)
+        /// <summary>
+        /// The parts of a model file, read without Unity's importer. Any thread: the parts have no Unity mesh yet,
+        /// <see cref="CreateMesh"/> makes them on the main thread.
+        /// </summary>
+        public static ModelInfo FromFile(long fileBytes, List<FbxMesh> parsed)
         {
-            var info = new ModelInfo { FileBytes = bytes.LongLength };
+            var info = new ModelInfo { FileBytes = fileBytes };
             bool hasBounds = false;
             foreach (var source in parsed)
             {
-                var mesh = new Mesh { name = source.Path, hideFlags = HideFlags.HideAndDontSave, indexFormat = source.Points.Length > 65000 ? UnityEngine.Rendering.IndexFormat.UInt32 : UnityEngine.Rendering.IndexFormat.UInt16 };
-                mesh.vertices = source.Points;
-                mesh.triangles = source.Triangles;
-                mesh.RecalculateNormals();
-                mesh.RecalculateBounds();
                 info.Parts.Add(new ModelPart
                 {
                     Path = source.Path,
-                    Mesh = mesh,
+                    Points = source.Points,
+                    Triangles = source.Triangles,
                     Materials = source.Materials,
                     BlendShapes = source.Shapes.Keys.ToArray(),
                     ShapeSignatures = source.Shapes,
                     Bones = source.Bones,
                     Owned = true
                 });
-                if (hasBounds) info.Bounds.Encapsulate(mesh.bounds);
-                else { info.Bounds = mesh.bounds; hasBounds = true; }
+                if (source.Points.Length == 0) continue;
+                var bounds = BoundsOf(source.Points);
+                if (hasBounds) info.Bounds.Encapsulate(bounds);
+                else { info.Bounds = bounds; hasBounds = true; }
             }
             if (!hasBounds) info.Bounds = new Bounds(Vector3.zero, Vector3.one);
             return info;
+        }
+
+        /// <summary>A Unity mesh of a part read from a file (main thread), with these vertex colours when given.</summary>
+        public static Mesh CreateMesh(ModelPart part, Color[] colors = null)
+        {
+            var mesh = new Mesh { name = part.Path, hideFlags = HideFlags.HideAndDontSave, indexFormat = part.Points.Length > 65000 ? UnityEngine.Rendering.IndexFormat.UInt32 : UnityEngine.Rendering.IndexFormat.UInt16 };
+            mesh.vertices = part.Points;
+            mesh.triangles = part.Triangles;
+            if (colors != null && colors.Length == part.Points.Length) mesh.colors = colors;
+            mesh.RecalculateNormals();
+            mesh.RecalculateBounds();
+            return mesh;
+        }
+
+        /// <summary>
+        /// Copies what the comparison reads out of the Unity meshes of a described prefab (main thread), so that
+        /// <see cref="Compare"/> can then run on any thread.
+        /// </summary>
+        public static void Snapshot(ModelInfo info)
+        {
+            foreach (var part in info.Parts)
+            {
+                if (part.Points != null || part.Mesh == null) continue;
+                part.Points = part.Mesh.vertices;
+                part.Triangles = part.Mesh.triangles;
+                part.ShapeSignatures = ShapeSignaturesOf(part.Mesh);
+            }
+        }
+
+        // Blendshape name → a signature of its last frame's offsets: equal signatures, same shape.
+        private static Dictionary<string, long> ShapeSignaturesOf(Mesh mesh)
+        {
+            var result = new Dictionary<string, long>();
+            if (mesh.blendShapeCount == 0) return result;
+            var deltas = new Vector3[mesh.vertexCount];
+            for (int i = 0; i < mesh.blendShapeCount; i++)
+            {
+                int last = mesh.GetBlendShapeFrameCount(i) - 1;
+                if (last < 0) continue;
+                mesh.GetBlendShapeFrameVertices(i, last, deltas, null, null);
+                unchecked
+                {
+                    long hash = 1469598103934665603L;
+                    foreach (var d in deltas)
+                    {
+                        hash = (hash ^ Mathf.RoundToInt(d.x * 1e5f)) * 1099511628211L;
+                        hash = (hash ^ Mathf.RoundToInt(d.y * 1e5f)) * 1099511628211L;
+                        hash = (hash ^ Mathf.RoundToInt(d.z * 1e5f)) * 1099511628211L;
+                    }
+                    result[mesh.GetBlendShapeName(i)] = hash;
+                }
+            }
+            return result;
+        }
+
+        private static Bounds BoundsOf(Vector3[] points)
+        {
+            var bounds = new Bounds(points[0], Vector3.zero);
+            for (int i = 1; i < points.Length; i++) bounds.Encapsulate(points[i]);
+            return bounds;
         }
 
         /// <summary>Reads a model file off the main thread: binary FBX or OBJ.</summary>
@@ -171,6 +237,7 @@ namespace Orbiters.Toolkit.Editor.Meshes
         /// <summary>
         /// What each part of <paramref name="side"/> changed compared to <paramref name="reference"/>: moved vertices as a
         /// heat map (grey unchanged, yellow to red by distance), whole parts moved, re-materialed, added or removed.
+        /// Any thread once every part has its geometry (read from a file, or <see cref="Snapshot"/>).
         /// </summary>
         public static List<PartDiff> Compare(ModelInfo reference, ModelInfo side)
         {
@@ -180,26 +247,27 @@ namespace Orbiters.Toolkit.Editor.Meshes
             float threshold = Mathf.Max(size * 2e-5f, 1e-6f);
             foreach (var part in side.Parts)
             {
-                var diff = new PartDiff { Path = part.Path, VerticesAfter = part.Mesh.vertexCount };
+                var diff = new PartDiff { Path = part.Path, VerticesAfter = part.VertexCount };
                 result.Add(diff);
                 if (!before.TryGetValue(part.Path, out var old))
                 {
                     diff.Change = PartChange.Added;
-                    diff.Colors = Fill(part.Mesh.vertexCount, Added);
+                    diff.Colors = Fill(part.VertexCount, Added);
                     continue;
                 }
-                diff.VerticesBefore = old.Mesh.vertexCount;
+                diff.VerticesBefore = old.VertexCount;
                 diff.ShapesAdded.AddRange(part.BlendShapes.Except(old.BlendShapes));
                 diff.ShapesRemoved.AddRange(old.BlendShapes.Except(part.BlendShapes));
-                diff.ShapesChanged.AddRange(old.ShapeSignatures != null && part.ShapeSignatures != null
-                    ? part.ShapeSignatures.Where(pair => old.ShapeSignatures.TryGetValue(pair.Key, out long before) && before != pair.Value).Select(pair => pair.Key)
-                    : ChangedShapes(old.Mesh, part.Mesh));
+                if (old.ShapeSignatures != null && part.ShapeSignatures != null)
+                    diff.ShapesChanged.AddRange(part.ShapeSignatures.Where(pair => old.ShapeSignatures.TryGetValue(pair.Key, out long before) && before != pair.Value).Select(pair => pair.Key));
                 diff.BonesChanged = old.Bones != part.Bones;
 
-                bool sameTopology = old.Mesh.vertexCount == part.Mesh.vertexCount;
+                var oldPoints = old.Points ?? old.Mesh.vertices;
+                var points = part.Points ?? part.Mesh.vertices;
+                bool sameTopology = oldPoints.Length == points.Length;
                 var distances = sameTopology
-                    ? Distances(old.Mesh.vertices, part.Mesh.vertices, size)
-                    : SurfaceDistances(old.Mesh.vertices, old.Mesh.triangles, part.Mesh.vertices, size);
+                    ? Distances(oldPoints, points, size)
+                    : SurfaceDistances(oldPoints, old.Triangles ?? old.Mesh.triangles, points, size);
                 // With new topology, points are measured to the old surface: allow for the smoothing of a re-export.
                 float moved = sameTopology ? threshold : Mathf.Max(threshold, size * 5e-4f);
                 diff.MaxDistance = distances.Length == 0 ? 0f : distances.Max();
@@ -212,23 +280,23 @@ namespace Orbiters.Toolkit.Editor.Meshes
                 else if (!Same(old.Placement, part.Placement, threshold))
                 {
                     diff.Change = PartChange.Moved;
-                    diff.Colors = Fill(part.Mesh.vertexCount, Moved);
+                    diff.Colors = Fill(part.VertexCount, Moved);
                 }
                 else if (!old.Materials.SequenceEqual(part.Materials))
                 {
                     diff.Change = PartChange.Materials;
-                    diff.Colors = Fill(part.Mesh.vertexCount, Materials);
+                    diff.Colors = Fill(part.VertexCount, Materials);
                 }
                 else
                 {
                     // Same surface, but its blendshapes or bones changed.
                     diff.Change = diff.ShapesAdded.Count + diff.ShapesRemoved.Count + diff.ShapesChanged.Count > 0 || diff.BonesChanged ? PartChange.Shapes : PartChange.Same;
-                    diff.Colors = Fill(part.Mesh.vertexCount, diff.Change == PartChange.Same ? Unchanged : Shapes);
+                    diff.Colors = Fill(part.VertexCount, diff.Change == PartChange.Same ? Unchanged : Shapes);
                 }
             }
             var now = new HashSet<string>(side.Parts.Select(p => p.Path));
             foreach (var old in reference.Parts.Where(p => !now.Contains(p.Path)))
-                result.Add(new PartDiff { Path = old.Path, Change = PartChange.Removed, VerticesBefore = old.Mesh.vertexCount });
+                result.Add(new PartDiff { Path = old.Path, Change = PartChange.Removed, VerticesBefore = old.VertexCount });
             return result;
         }
 
@@ -360,25 +428,6 @@ namespace Orbiters.Toolkit.Editor.Meshes
             if (va <= 0f && d4 - d3 >= 0f && d5 - d6 >= 0f) return b + (c - b) * ((d4 - d3) / ((d4 - d3) + (d5 - d6)));
             float denominator = 1f / (va + vb + vc);
             return a + ab * (vb * denominator) + ac * (vc * denominator);
-        }
-
-        private static IEnumerable<string> ChangedShapes(Mesh before, Mesh after)
-        {
-            if (before.vertexCount != after.vertexCount) yield break;
-            var a = new Vector3[before.vertexCount];
-            var b = new Vector3[after.vertexCount];
-            for (int i = 0; i < after.blendShapeCount; i++)
-            {
-                string name = after.GetBlendShapeName(i);
-                int j = before.GetBlendShapeIndex(name);
-                if (j < 0) continue;
-                int last = after.GetBlendShapeFrameCount(i) - 1, lastBefore = before.GetBlendShapeFrameCount(j) - 1;
-                if (last < 0 || lastBefore < 0) continue;
-                after.GetBlendShapeFrameVertices(i, last, b, null, null);
-                before.GetBlendShapeFrameVertices(j, lastBefore, a, null, null);
-                for (int v = 0; v < a.Length; v++)
-                    if ((a[v] - b[v]).sqrMagnitude > 1e-10f) { yield return name; break; }
-            }
         }
 
         private static Color[] Heat(float[] distances, float threshold, float max)

@@ -1,0 +1,8 @@
+{
+  "name": "Orbiters.Toolkit.Editor.Processes.Tests",
+  "references": ["Orbiters.Toolkit.Editor"],
+  "includePlatforms": ["Editor"],
+  "optionalUnityReferences": ["TestAssemblies"],
+  "overrideReferences": true,
+  "precompiledReferences": ["nunit.framework.dll"]
+}

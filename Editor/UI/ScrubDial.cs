@@ -19,7 +19,7 @@ namespace Orbiters.Toolkit.Editor
         private readonly VisualElement strip;
         private readonly Label readout;
         private float value, dragStartX, dragStartValue;
-        private int pointer = -1;
+        private readonly PointerDragCapture drag;
 
         public ScrubDial(string label, float min, float max, float rest, float tick, int majorEvery, float pixelsPerUnit, float snapRange,
             Func<float, string> format, Action<float> changed, bool loops = false)
@@ -46,8 +46,7 @@ namespace Orbiters.Toolkit.Editor
 
             strip.RegisterCallback<PointerDownEvent>(OnPointerDown);
             strip.RegisterCallback<PointerMoveEvent>(OnPointerMove);
-            strip.RegisterCallback<PointerUpEvent>(evt => EndDrag(evt.pointerId));
-            strip.RegisterCallback<PointerCaptureOutEvent>(_ => EndDrag(pointer));
+            drag = new PointerDragCapture(strip, () => RemoveFromClassList("orb-dial--active"));
             strip.RegisterCallback<KeyDownEvent>(OnKeyDown);
         }
 
@@ -76,30 +75,22 @@ namespace Orbiters.Toolkit.Editor
             if (evt.button != 0) return;
             strip.Focus();
             if (evt.clickCount == 2) { Set(rest); evt.StopPropagation(); return; }
-            pointer = evt.pointerId;
             dragStartX = evt.position.x;
             dragStartValue = value;
-            strip.CapturePointer(pointer);
+            drag.Begin(evt.pointerId);
             AddToClassList("orb-dial--active");
             evt.StopPropagation();
         }
 
         private void OnPointerMove(PointerMoveEvent evt)
         {
-            if (evt.pointerId != pointer || !strip.HasPointerCapture(pointer)) return;
+            if (!drag.Owns(evt.pointerId)) return;
             // Dragging the ruler left brings higher values under the mark. Near rest the value holds, like a detent.
             float raw = dragStartValue - (evt.position.x - dragStartX) / pixelsPerUnit;
             if (Mathf.Abs(FromRest(raw)) < snapRange) raw = rest;
-            Set(raw);
+            try { Set(raw); }
+            catch { drag.End(); throw; }
             evt.StopPropagation();
-        }
-
-        private void EndDrag(int pointerId)
-        {
-            if (pointerId < 0 || pointerId != pointer) return;
-            if (strip.HasPointerCapture(pointer)) strip.ReleasePointer(pointer);
-            pointer = -1;
-            RemoveFromClassList("orb-dial--active");
         }
 
         private void OnKeyDown(KeyDownEvent evt)

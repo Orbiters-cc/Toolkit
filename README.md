@@ -9,8 +9,9 @@ MCP for Unity 9.7.1 or newer is installed; this package does not install the ser
 From 0.2.1, MCB and My Avatar share account storage and Magic Sync through
 `AuthenticationService`, environment/API URL handling through
 `OrbitersEnvironment`, and authenticated requests through `OrbitersApi`.
-The existing per-environment Unity preferences account remains the common store;
-disconnecting in either tool disconnects the shared account.
+The per-environment account in the Unity preferences folder is the common store, readable by the signed-in OS user only
+(DPAPI on Windows, a `chmod 600` file elsewhere); disconnecting in either tool disconnects the shared account. A browser
+login saves only if it is still the newest, uncancelled one and the tools are still on the server it started on.
 
 `OrbitersAccountView`, `OrbitersSignInElement` and `OrbitersAccountElement` provide
 common account controls. `OrbitersGlow` and `OrbitersGlowSurfaceElement` render

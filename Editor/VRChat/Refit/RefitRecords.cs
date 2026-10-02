@@ -67,11 +67,26 @@ namespace Orbiters.Toolkit.Editor.VRChat.Refit
                 state.bones.Add(bone);
                 state.bonePaths.Add(PathUnder(avatarRoot, bone));
             }
-            var captured = new HashSet<string>(StringComparer.Ordinal);
+            var captured = new HashSet<Transform>();
             CaptureTransform(avatarRoot, renderer.transform, state.transforms, captured);
             CaptureTransform(avatarRoot, renderer.rootBone, state.transforms, captured);
             foreach (var bone in bones) CaptureTransform(avatarRoot, bone, state.transforms, captured);
+            CaptureSiblingOrdinals(avatarRoot, state);
             return state;
+        }
+
+        /// <summary>
+        /// Gives each path of the state the sibling ordinals of the scene object it refers to, so objects that share a name
+        /// (two "Jacket" accessories) stay apart once only the paths remain (<see cref="Persistent"/>). The paths of objects
+        /// already gone keep plain names.
+        /// </summary>
+        public static void CaptureSiblingOrdinals(Transform avatarRoot, RefitRendererState state)
+        {
+            state.rootBoneSiblingOrdinals = SiblingOrdinals(avatarRoot, state.rootBone);
+            state.boneSiblingOrdinals = state.bones.Select(bone => new RefitSiblingOrdinals { ordinals = SiblingOrdinals(avatarRoot, bone) }).ToList();
+            if (state.boneSiblingOrdinals.All(bone => bone.ordinals.Count == 0)) state.boneSiblingOrdinals.Clear();
+            foreach (var transformState in state.transforms)
+                if (transformState != null) transformState.siblingOrdinals = SiblingOrdinals(avatarRoot, transformState.transform);
         }
 
         /// <summary>
@@ -96,17 +111,14 @@ namespace Orbiters.Toolkit.Editor.VRChat.Refit
         {
             if (avatarRoot == null || renderer == null || state == null) return false;
             bool restored = false;
-            var statesByPath = new Dictionary<string, RefitTransformState>(StringComparer.Ordinal);
-            foreach (var transformState in state.transforms)
-                if (transformState != null && !string.IsNullOrEmpty(transformState.path) && !statesByPath.ContainsKey(transformState.path))
-                    statesByPath.Add(transformState.path, transformState);
+            var poses = SavedPoses(state);
 
             foreach (var transformState in state.transforms)
             {
                 if (transformState == null) continue;
                 var transform = transformState.transform != null
                     ? transformState.transform
-                    : ResolveOrCreate(avatarRoot, transformState.path, statesByPath, undoName);
+                    : ResolveOrCreate(avatarRoot, transformState.path, transformState.siblingOrdinals, poses, undoName);
                 if (transform == null) continue;
                 Undo.RecordObject(transform, undoName);
                 transform.localPosition = transformState.localPosition;
@@ -129,13 +141,16 @@ namespace Orbiters.Toolkit.Editor.VRChat.Refit
                 for (int i = 0; i < count; i++)
                     bones[i] = i < state.bones.Count && state.bones[i] != null
                         ? state.bones[i]
-                        : ResolveOrCreate(avatarRoot, i < state.bonePaths.Count ? state.bonePaths[i] : null, statesByPath, undoName);
+                        : ResolveOrCreate(avatarRoot, i < state.bonePaths.Count ? state.bonePaths[i] : null, BoneSiblingOrdinals(state, i),
+                            poses, undoName);
                 renderer.bones = bones;
                 restored = true;
             }
             if (state.rootBoneCaptured)
             {
-                renderer.rootBone = state.rootBone != null ? state.rootBone : ResolveOrCreate(avatarRoot, state.rootBonePath, statesByPath, undoName);
+                renderer.rootBone = state.rootBone != null
+                    ? state.rootBone
+                    : ResolveOrCreate(avatarRoot, state.rootBonePath, state.rootBoneSiblingOrdinals, poses, undoName);
                 restored = true;
             }
             if (state.rendererCaptured)
@@ -149,6 +164,33 @@ namespace Orbiters.Toolkit.Editor.VRChat.Refit
             EditorUtility.SetDirty(renderer);
             PrefabUtility.RecordPrefabInstancePropertyModifications(renderer);
             return restored;
+        }
+
+        /// <summary>
+        /// True when <see cref="Restore"/> can bind every bone of a state saved by path: each bone exists, or can be created
+        /// again from its saved pose under an existing parent, in its saved place among same-named siblings.
+        /// </summary>
+        public static bool CanResolve(Transform avatarRoot, RefitRendererState state)
+        {
+            if (avatarRoot == null || state == null || state.bonePaths.Any(path => path == null)) return false;
+            var saved = SavedPoses(state);
+            for (int bone = -1; bone < state.bonePaths.Count; bone++)
+            {
+                string path = bone < 0 ? state.rootBonePath : state.bonePaths[bone];
+                var ordinals = bone < 0 ? state.rootBoneSiblingOrdinals : BoneSiblingOrdinals(state, bone);
+                if (string.IsNullOrEmpty(path)) continue;
+                string[] names = path.Split('/');
+                var parent = avatarRoot;
+                for (int segment = 0; segment < names.Length; segment++)
+                {
+                    int ordinal = Ordinal(ordinals, segment);
+                    var child = parent != null ? Child(parent, names[segment], ordinal) : null;
+                    if (child == null && (!saved.ContainsKey(PathKey(names, ordinals, segment + 1)) ||
+                                          (parent != null ? Count(parent, names[segment]) : 0) != ordinal)) return false;
+                    parent = child;
+                }
+            }
+            return true;
         }
 
         private static bool RestoreWeights(SkinnedMeshRenderer renderer, RefitRendererState state)
@@ -288,45 +330,122 @@ namespace Orbiters.Toolkit.Editor.VRChat.Refit
             return AnimationUtility.CalculateTransformPath(transform, root);
         }
 
-        private static void CaptureTransform(Transform root, Transform transform, List<RefitTransformState> states, HashSet<string> captured)
+        /// <summary>
+        /// For each segment of the transform's <see cref="PathUnder"/>, its position among same-named siblings (0 for the
+        /// first); empty when each is the first of its name, so paths without duplicates stay plain names.
+        /// </summary>
+        public static List<int> SiblingOrdinals(Transform root, Transform transform)
         {
-            if (transform == null) return;
-            string path = PathUnder(root, transform);
-            if (!captured.Add(path ?? "instance:" + transform.GetInstanceID())) return;
+            var ordinals = new List<int>();
+            if (root == null || transform == null || !transform.IsChildOf(root)) return ordinals;
+            for (var current = transform; current != root; current = current.parent)
+            {
+                string name = current.name;
+                int ordinal = 0, index = current.GetSiblingIndex();
+                for (int i = 0; i < index; i++)
+                    if (current.parent.GetChild(i).name == name) ordinal++;
+                ordinals.Insert(0, ordinal);
+            }
+            if (ordinals.All(ordinal => ordinal == 0)) ordinals.Clear();
+            return ordinals;
+        }
+
+        /// <summary>The transform at a path under the root, each segment taken at its sibling ordinal (the first without one).</summary>
+        public static Transform FindUnder(Transform root, string path, IReadOnlyList<int> siblingOrdinals)
+        {
+            if (root == null || path == null) return null;
+            if (path.Length == 0) return root;
+            var current = root;
+            string[] names = path.Split('/');
+            for (int segment = 0; segment < names.Length && current != null; segment++)
+                current = Child(current, names[segment], Ordinal(siblingOrdinals, segment));
+            return current;
+        }
+
+        /// <summary>A path and its sibling ordinals as one key: the plain path when each segment is the first of its name.</summary>
+        public static string PathKey(string path, IReadOnlyList<int> siblingOrdinals) =>
+            siblingOrdinals != null && siblingOrdinals.Any(ordinal => ordinal != 0) ? path + "|" + string.Join(",", siblingOrdinals) : path;
+
+        private static string PathKey(string[] names, IReadOnlyList<int> siblingOrdinals, int segments) =>
+            PathKey(string.Join("/", names, 0, segments),
+                siblingOrdinals == null || siblingOrdinals.Count <= segments ? siblingOrdinals : siblingOrdinals.Take(segments).ToList());
+
+        private static int Ordinal(IReadOnlyList<int> siblingOrdinals, int segment) =>
+            siblingOrdinals != null && segment < siblingOrdinals.Count ? siblingOrdinals[segment] : 0;
+
+        private static IReadOnlyList<int> BoneSiblingOrdinals(RefitRendererState state, int bone) =>
+            state.boneSiblingOrdinals != null && bone < state.boneSiblingOrdinals.Count ? state.boneSiblingOrdinals[bone]?.ordinals : null;
+
+        // The child of that name at that ordinal among same-named siblings.
+        private static Transform Child(Transform parent, string name, int ordinal)
+        {
+            for (int i = 0, seen = 0; i < parent.childCount; i++)
+            {
+                var child = parent.GetChild(i);
+                if (child.name == name && seen++ == ordinal) return child;
+            }
+            return null;
+        }
+
+        private static int Count(Transform parent, string name)
+        {
+            int count = 0;
+            for (int i = 0; i < parent.childCount; i++)
+                if (parent.GetChild(i).name == name) count++;
+            return count;
+        }
+
+        // Saved poses by path and sibling ordinals, for the transforms Restore creates again.
+        private static Dictionary<string, RefitTransformState> SavedPoses(RefitRendererState state)
+        {
+            var poses = new Dictionary<string, RefitTransformState>(StringComparer.Ordinal);
+            foreach (var transformState in state.transforms)
+                if (transformState != null && !string.IsNullOrEmpty(transformState.path))
+                {
+                    string key = PathKey(transformState.path, transformState.siblingOrdinals);
+                    if (!poses.ContainsKey(key)) poses.Add(key, transformState);
+                }
+            return poses;
+        }
+
+        private static void CaptureTransform(Transform root, Transform transform, List<RefitTransformState> states, HashSet<Transform> captured)
+        {
+            if (transform == null || !captured.Add(transform)) return;
             states.Add(new RefitTransformState
             {
-                transform = transform, path = path,
+                transform = transform, path = PathUnder(root, transform),
                 localPosition = transform.localPosition, localRotation = transform.localRotation, localScale = transform.localScale
             });
         }
 
-        // A bone deleted since the capture (a replaced armature) is created again under its old parents.
-        private static Transform ResolveOrCreate(Transform root, string path, Dictionary<string, RefitTransformState> states, string undoName)
+        // A bone deleted since the capture (a replaced armature) is created again under its old parents, at its saved pose,
+        // only where it takes its saved place among same-named siblings. Existing objects never change places.
+        private static Transform ResolveOrCreate(Transform root, string path, IReadOnlyList<int> siblingOrdinals,
+            Dictionary<string, RefitTransformState> states, string undoName)
         {
             if (root == null || path == null) return null;
             if (path.Length == 0) return root;
-            var existing = root.Find(path);
-            if (existing != null) return existing;
             var parent = root;
-            string current = string.Empty;
-            foreach (string part in path.Split('/'))
+            string[] names = path.Split('/');
+            for (int segment = 0; segment < names.Length; segment++)
             {
-                if (string.IsNullOrEmpty(part)) return null;
-                current = current.Length == 0 ? part : current + "/" + part;
-                var child = parent.Find(part);
+                string name = names[segment];
+                int ordinal = Ordinal(siblingOrdinals, segment);
+                if (name.Length == 0) return null;
+                var child = Child(parent, name, ordinal);
                 if (child == null)
                 {
-                    var go = new GameObject(part);
+                    if (Count(parent, name) != ordinal) return null;
+                    var go = new GameObject(name);
                     Undo.RegisterCreatedObjectUndo(go, undoName);
                     child = go.transform;
                     child.SetParent(parent, false);
-                }
-                if (states.TryGetValue(current, out var state))
-                {
-                    Undo.RecordObject(child, undoName);
-                    child.localPosition = state.localPosition;
-                    child.localRotation = state.localRotation;
-                    child.localScale = state.localScale;
+                    if (states.TryGetValue(PathKey(names, siblingOrdinals, segment + 1), out var state))
+                    {
+                        child.localPosition = state.localPosition;
+                        child.localRotation = state.localRotation;
+                        child.localScale = state.localScale;
+                    }
                 }
                 parent = child;
             }

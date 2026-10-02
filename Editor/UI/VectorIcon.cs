@@ -4,7 +4,7 @@ using UnityEngine.UIElements;
 
 namespace Orbiters.Toolkit.Editor
 {
-    public enum IconGlyph { Bones, Mirror, Clothes, Refresh, Person, PersonOff, People, Robot, RobotOff, Lock, Unlock, Branch, Close, Chevron }
+    public enum IconGlyph { Bones, Mirror, Clothes, Refresh, Person, PersonOff, People, Robot, RobotOff, Lock, Unlock, Branch, Close, Chevron, Gauge, Sliders, Sound }
 
     /// <summary>
     /// A small line icon drawn with the vector API, crisp at any size. Its colour comes from the USS custom property
@@ -134,6 +134,31 @@ namespace Orbiters.Toolkit.Editor
                     // Points right: rotate the element (USS rotate) to point down when open.
                     painter.lineWidth = 2.4f * scale;
                     painter.BeginPath(); painter.MoveTo(P(9.5f, 5.5f)); painter.LineTo(P(16f, 12f)); painter.LineTo(P(9.5f, 18.5f)); painter.Stroke();
+                    break;
+                case IconGlyph.Gauge:
+                    // A speedometer with its needle high: optimization.
+                    painter.lineWidth = 1.9f * scale;
+                    painter.BeginPath(); painter.Arc(P(12f, 15f), 8.5f * scale, 165f, 375f); painter.Stroke();
+                    painter.lineWidth = 2.2f * scale;
+                    painter.BeginPath(); painter.MoveTo(P(12f, 15f)); painter.LineTo(P(16.6f, 9.4f)); painter.Stroke();
+                    painter.BeginPath(); painter.Arc(P(12f, 15f), 1.9f * scale, 0f, 360f); painter.Fill();
+                    break;
+                case IconGlyph.Sliders:
+                    // Three sliders at different values: a body shaped by its settings.
+                    painter.lineWidth = 1.8f * scale;
+                    foreach (var (y, knob) in new[] { (6f, 15f), (12f, 8f), (18f, 13f) })
+                    {
+                        painter.BeginPath(); painter.MoveTo(P(3.5f, y)); painter.LineTo(P(20.5f, y)); painter.Stroke();
+                        painter.BeginPath(); painter.Arc(P(knob, y), 2.5f * scale, 0f, 360f); painter.Fill();
+                    }
+                    break;
+                case IconGlyph.Sound:
+                    // Bars of an audio spectrum.
+                    painter.lineWidth = 2.4f * scale;
+                    foreach (var (x, half) in new[] { (4f, 2.5f), (8f, 6f), (12f, 8.5f), (16f, 5f), (20f, 3f) })
+                    {
+                        painter.BeginPath(); painter.MoveTo(P(x, 12f - half)); painter.LineTo(P(x, 12f + half)); painter.Stroke();
+                    }
                     break;
             }
         }

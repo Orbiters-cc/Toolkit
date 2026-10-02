@@ -12,9 +12,21 @@ namespace Orbiters.Toolkit.VRChat
         public Transform transform;
         /// <summary>Path under the avatar root, used when the reference is gone (a saved copy, a reloaded scene).</summary>
         public string path;
+        /// <summary>
+        /// For each segment of <see cref="path"/>, its position among same-named siblings: tells apart objects that share a
+        /// name. Empty when each is the first of its name.
+        /// </summary>
+        public List<int> siblingOrdinals = new List<int>();
         public Vector3 localPosition;
         public Quaternion localRotation = Quaternion.identity;
         public Vector3 localScale = Vector3.one;
+    }
+
+    /// <summary>The sibling ordinals of one saved path (see <see cref="RefitTransformState.siblingOrdinals"/>).</summary>
+    [Serializable]
+    public sealed class RefitSiblingOrdinals
+    {
+        public List<int> ordinals = new List<int>();
     }
 
     /// <summary>A skinned renderer's mesh, skinning, pose and blendshape weights, as captured before or after a refit.</summary>
@@ -25,9 +37,12 @@ namespace Orbiters.Toolkit.VRChat
         public List<Transform> bones = new List<Transform>();
         /// <summary>Bone paths under the avatar root; null for a bone outside it.</summary>
         public List<string> bonePaths = new List<string>();
+        /// <summary>The sibling ordinals of each bone path; empty when no bone path has a duplicate name in it.</summary>
+        public List<RefitSiblingOrdinals> boneSiblingOrdinals = new List<RefitSiblingOrdinals>();
         public bool rootBoneCaptured;
         public Transform rootBone;
         public string rootBonePath;
+        public List<int> rootBoneSiblingOrdinals = new List<int>();
         public List<RefitTransformState> transforms = new List<RefitTransformState>();
         public List<string> blendShapeNames = new List<string>();
         public List<float> blendShapeWeights = new List<float>();

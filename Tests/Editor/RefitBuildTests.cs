@@ -157,7 +157,7 @@ public sealed class RefitBuildTests
     }
 
     [Test]
-    public void AGeneratedShapeRemovedDuringTheBuildFailsItWhenItsBodyShapeIsAnimated()
+    public void AGeneratedShapeRemovedDuringTheBuildIsReportedWithoutStoppingTheUpload()
     {
         GameObject clone = null;
         Mesh stripped = null;
@@ -169,13 +169,17 @@ public sealed class RefitBuildTests
             stripped = RefitRecordsTests.MakeMesh("Stripped", "orbit muscles", "FLEX left");
             clone.transform.Find("Accessory").GetComponent<SkinnedMeshRenderer>().sharedMesh = stripped;
             var controller = CreateController(true, clone);
-            Assert.That(RefitBuild.Apply(clone).Success, Is.True, "Nothing animates the removed shape's body shape: nothing is lost.");
+            var warnings = new System.Collections.Generic.List<string>();
+            Assert.That(RefitBuild.Apply(clone, warnings).Success, Is.True, "Nothing animates the removed shape's body shape: nothing is lost.");
+            Assert.That(warnings, Is.Empty);
             var clip = new AnimationClip { name = "Source" };
             AssetDatabase.CreateAsset(clip, folder + "/flex.anim");
             AnimationUtility.SetEditorCurve(clip, EditorCurveBinding.FloatCurve("Body", typeof(SkinnedMeshRenderer), "blendShape.biceps flex right"),
                 AnimationCurve.Linear(0, 0, 1, 100));
             controller.layers[0].stateMachine.AddState("Flex").motion = clip;
-            Assert.Throws<InvalidOperationException>(() => RefitBuild.Apply(clone));
+            Assert.DoesNotThrow(() => RefitBuild.Apply(clone, warnings));
+            Assert.That(warnings, Has.Some.Contains("biceps flex right"), "The lost link is reported.");
+            Assert.That(new RefitLinkHook().OnPreprocessAvatar(clone), Is.True, "The upload goes on.");
         }
         finally
         {

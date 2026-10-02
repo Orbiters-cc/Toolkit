@@ -209,6 +209,54 @@ public sealed class RefitRecordsTests
     }
 
     [Test]
+    public void SameNamedAccessoriesComeBackOnTheirOwnBonesWithoutMovingEachOther()
+    {
+        // Two accessories called "Jacket", each skinned to its own "Bone": restored from paths only, each one gets its own.
+        var second = AddRenderer("Jacket", jacketMesh);
+        var bones = new[] { jacket, second }.Select(renderer =>
+        {
+            var own = new GameObject("Bone").transform;
+            own.SetParent(renderer.transform, false);
+            renderer.bones = new[] { own };
+            renderer.rootBone = own;
+            return own;
+        }).ToArray();
+        jacket.transform.localPosition = Vector3.right;
+        second.transform.localPosition = Vector3.right * 2;
+        bones[1].localPosition = Vector3.up * 2;
+        var saved = RefitRecords.Persistent(RefitRecords.Capture(root.transform, second));
+        Assert.That(saved.rootBoneSiblingOrdinals, Is.EqualTo(new[] { 1, 0 }));
+        Assert.That(RefitRecords.FindUnder(root.transform, saved.rootBonePath, saved.rootBoneSiblingOrdinals), Is.SameAs(bones[1]));
+        Assert.That(RefitRecords.Capture(root.transform, jacket).transforms.Select(t => t.siblingOrdinals), Has.All.Empty,
+            "The first of each name keeps plain paths.");
+
+        var order = root.GetComponentsInChildren<Transform>(true);
+        second.transform.localPosition = Vector3.zero;
+        bones[1].localPosition = Vector3.zero;
+        second.bones = new[] { bones[0] };
+        second.rootBone = bones[0];
+        Assert.That(RefitRecords.CanResolve(root.transform, saved), Is.True);
+        Assert.That(RefitRecords.Restore(root.transform, second, saved, "Test"), Is.True);
+        Assert.That(second.bones, Is.EqualTo(new[] { bones[1] }));
+        Assert.That(second.rootBone, Is.SameAs(bones[1]));
+        Assert.That(second.transform.localPosition, Is.EqualTo(Vector3.right * 2));
+        Assert.That(bones[1].localPosition, Is.EqualTo(Vector3.up * 2));
+        Assert.That(jacket.transform.localPosition, Is.EqualTo(Vector3.right), "The first jacket is not moved.");
+        Assert.That(bones[0].localPosition, Is.EqualTo(Vector3.zero));
+        Assert.That(root.GetComponentsInChildren<Transform>(true), Is.EqualTo(order), "Nothing changes places.");
+
+        // Deleted since, the second jacket's bone is created again under it, not taken from the first.
+        Object.DestroyImmediate(bones[1].gameObject);
+        Assert.That(RefitRecords.CanResolve(root.transform, saved), Is.True);
+        Assert.That(RefitRecords.Restore(root.transform, second, saved, "Test"), Is.True);
+        Assert.That(second.rootBone, Is.Not.Null);
+        Assert.That(second.rootBone.parent, Is.SameAs(second.transform));
+        Assert.That(second.rootBone.localPosition, Is.EqualTo(Vector3.up * 2));
+        Assert.That(second.bones, Is.EqualTo(new[] { second.rootBone }));
+        Assert.That(jacket.transform.childCount, Is.EqualTo(1));
+    }
+
+    [Test]
     public void RunnerFitsOnceAndRefitsFromTheOriginalWithoutStacking()
     {
         var result = Run(Batch(RefitMode.Fit, "Flex arms", "Muscles", "Smile"));

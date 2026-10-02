@@ -145,7 +145,7 @@ namespace Orbiters.Toolkit.Editor.Photoshoot
         internal Vector2 PlacementPerFrame(PhotoshootService.ShotKind shotKind, Vector2Int size) =>
             PhotoshootService.PlacementPerFrame(previewSession != null ? previewSession.LastFrame : default, shotKind, size, Zoom);
 
-        internal Texture2D Capture(GameObject avatarRoot, PhotoshootService.ShotKind shotKind, Vector2Int size)
+        internal Texture2D Capture(GameObject avatarRoot, PhotoshootService.ShotKind shotKind, Vector2Int size, bool withShotEffect = true)
         {
             var request = BuildRequest(avatarRoot, shotKind, size, false);
             if (previewSession == null)
@@ -153,7 +153,7 @@ namespace Orbiters.Toolkit.Editor.Photoshoot
                 previewSession = new PhotoshootService.LivePreviewSession();
             }
 
-            var texture = previewSession.Capture(request);
+            var texture = previewSession.Capture(request, withShotEffect);
             if (texture == null)
             {
                 throw new InvalidOperationException("Photoshoot image was not captured.");

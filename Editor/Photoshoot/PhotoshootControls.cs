@@ -128,26 +128,21 @@ namespace Orbiters.Toolkit.Editor.Photoshoot
         // Pointer drag with capture that reports the local position on press and while moving.
         private static void Drag(VisualElement target, Action<Vector2> moved)
         {
-            int pointer = -1;
+            var drag = new PointerDragCapture(target);
             target.RegisterCallback<PointerDownEvent>(evt =>
             {
                 if (evt.button != 0) return;
-                pointer = evt.pointerId;
-                target.CapturePointer(pointer);
-                moved(evt.localPosition);
+                drag.Begin(evt.pointerId);
+                try { moved(evt.localPosition); }
+                catch { drag.End(); throw; }
                 evt.StopPropagation();
             });
             target.RegisterCallback<PointerMoveEvent>(evt =>
             {
-                if (evt.pointerId != pointer || !target.HasPointerCapture(pointer)) return;
-                moved(evt.localPosition);
+                if (!drag.Owns(evt.pointerId)) return;
+                try { moved(evt.localPosition); }
+                catch { drag.End(); throw; }
                 evt.StopPropagation();
-            });
-            target.RegisterCallback<PointerUpEvent>(evt =>
-            {
-                if (evt.pointerId != pointer) return;
-                if (target.HasPointerCapture(pointer)) target.ReleasePointer(pointer);
-                pointer = -1;
             });
         }
 

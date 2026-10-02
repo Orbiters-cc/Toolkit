@@ -240,15 +240,28 @@ namespace Orbiters.Toolkit.Editor.Photoshoot
                 lastPreviewShotKind = request.shotKind;
             }
 
-            public Texture2D Capture(RenderRequest request)
+            /// <param name="withShotEffect">False: the shot as rendered, without the banner effect (for a server that applies it).</param>
+            public Texture2D Capture(RenderRequest request, bool withShotEffect = true)
             {
                 ValidateRequest(request);
                 UpdatePreview(request);
 
+                var target = GetRenderTarget(request.shotKind);
                 RenderTexture previousActiveTexture = RenderTexture.active;
+                RenderTexture resolved = null;
                 try
                 {
-                    RenderTexture.active = GetRenderTarget(request.shotKind).renderTexture;
+                    if (withShotEffect)
+                    {
+                        RenderTexture.active = target.renderTexture;
+                    }
+                    else
+                    {
+                        // The scene render is multisampled: resolved into a plain texture before it is read.
+                        resolved = RenderTexture.GetTemporary(request.width, request.height, 0, RenderTextureFormat.ARGB32);
+                        Graphics.Blit(target.sceneRenderTexture, resolved);
+                        RenderTexture.active = resolved;
+                    }
                     var texture = new Texture2D(request.width, request.height, TextureFormat.RGBA32, false, false)
                     {
                         name = "Orbiters Photoshoot Capture"
@@ -260,6 +273,7 @@ namespace Orbiters.Toolkit.Editor.Photoshoot
                 finally
                 {
                     RenderTexture.active = previousActiveTexture;
+                    if (resolved != null) RenderTexture.ReleaseTemporary(resolved);
                 }
             }
 
@@ -719,7 +733,8 @@ namespace Orbiters.Toolkit.Editor.Photoshoot
                 if (shotKind == ShotKind.Banner && EnsureBannerEffectMaterial())
                 {
                     bannerEffectMaterial.SetColor("_OverlayColor", BannerEffectOverlayColor);
-                    bannerEffectMaterial.SetFloat("_MaxBlurTexels", BannerEffectMaxBlurTexels);
+                    // The same blur at every size (48 texels at 1600 wide): the smaller live preview looks like the capture.
+                    bannerEffectMaterial.SetFloat("_MaxBlurTexels", BannerEffectMaxBlurTexels * output.width / 1600f);
                     Graphics.Blit(target.sceneRenderTexture, output, bannerEffectMaterial);
                     SwapPreviewRenderTexture(target);
                     return;
@@ -864,6 +879,44 @@ namespace Orbiters.Toolkit.Editor.Photoshoot
         public static readonly Color DefaultBackgroundColor = PreviewClearColor;
         private static readonly Color BannerEffectOverlayColor = new Color(0x30 / 255f, 0x30 / 255f, 0x30 / 255f, 1f);
         private static readonly string[] FaceKeywords = { "smile", "happy", "sad", "wink", "grin", "angry" };
+
+        private static Material sharedBannerEffectMaterial;
+
+        /// <summary>
+        /// A copy of <paramref name="source"/> with the banner effect (blur and fade toward #303030 over the lower third), the
+        /// same one the Orbiters server applies to uploaded banners: a local stand-in until the server's image arrives. The
+        /// blur scales with the image (48 texels at 1600 wide). The caller owns the texture.
+        /// </summary>
+        public static Texture2D ApplyBannerEffect(Texture source)
+        {
+            if (source == null) return null;
+            if (sharedBannerEffectMaterial == null)
+            {
+                Shader shader = Shader.Find(BannerEffectShaderName) ?? AssetDatabase.LoadAssetAtPath<Shader>(BannerEffectShaderPath);
+                if (shader == null) return null;
+                sharedBannerEffectMaterial = new Material(shader) { hideFlags = HideFlags.HideAndDontSave };
+            }
+
+            int width = source.width, height = source.height;
+            sharedBannerEffectMaterial.SetColor("_OverlayColor", BannerEffectOverlayColor);
+            sharedBannerEffectMaterial.SetFloat("_MaxBlurTexels", BannerEffectMaxBlurTexels * width / 1600f);
+            RenderTexture previous = RenderTexture.active;
+            RenderTexture output = RenderTexture.GetTemporary(width, height, 0, RenderTextureFormat.ARGB32);
+            try
+            {
+                Graphics.Blit(source, output, sharedBannerEffectMaterial);
+                RenderTexture.active = output;
+                var texture = new Texture2D(width, height, TextureFormat.RGBA32, false, false) { name = "Orbiters Banner Effect Preview" };
+                texture.ReadPixels(new Rect(0, 0, width, height), 0, 0, false);
+                texture.Apply(false, false);
+                return texture;
+            }
+            finally
+            {
+                RenderTexture.active = previous;
+                RenderTexture.ReleaseTemporary(output);
+            }
+        }
 
         public static Catalog BuildCatalog(GameObject avatarRoot)
         {

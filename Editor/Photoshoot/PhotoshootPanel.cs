@@ -15,6 +15,11 @@ namespace Orbiters.Toolkit.Editor.Photoshoot
         public bool IncludeBanner = true;
         public Vector2Int ThumbnailSize = new Vector2Int(512, 512);
         public Vector2Int BannerSize = new Vector2Int(1600, 900);
+        /// <summary>
+        /// The host uploads banners to a server that applies the banner effect itself: <see cref="SetShot"/> then gets the
+        /// banner as rendered (or browsed), and the panel shows it with the effect, as it will look once uploaded.
+        /// </summary>
+        public bool ServerAppliesBannerEffect;
         /// <summary>Whether a live preview or capture may run now (for example, not while the host uploads).</summary>
         public Func<bool> CanGenerate = () => true;
         /// <summary>Whether Set/Browse/Back are temporarily disabled by host work (saving, submitting).</summary>
@@ -52,6 +57,8 @@ namespace Orbiters.Toolkit.Editor.Photoshoot
         private readonly Dictionary<PhotoshootService.ShotKind, ShotRow> shotRows = new Dictionary<PhotoshootService.ShotKind, ShotRow>();
         private readonly Dictionary<VisualElement, FramingDrag> framingSurfaces = new Dictionary<VisualElement, FramingDrag>();
         private Image bannerImage, thumbnailImage;
+        private Texture effectPreviewSource;
+        private Texture2D effectPreview;
         private Button backButton;
         private ScrubDial turnDial, zoomDial;
         private Label styleCaption, message;
@@ -72,6 +79,12 @@ namespace Orbiters.Toolkit.Editor.Photoshoot
         {
             this.state = state ?? throw new ArgumentNullException(nameof(state));
             this.options = options ?? throw new ArgumentNullException(nameof(options));
+            RegisterCallback<DetachFromPanelEvent>(_ =>
+            {
+                if (effectPreview != null) UnityEngine.Object.DestroyImmediate(effectPreview);
+                effectPreview = null;
+                effectPreviewSource = null;
+            });
             var sheet = AssetDatabase.LoadAssetAtPath<StyleSheet>(StyleSheetPath);
             if (sheet) styleSheets.Add(sheet);
             AddToClassList("ps-panel");
@@ -424,7 +437,7 @@ namespace Orbiters.Toolkit.Editor.Photoshoot
             private readonly Func<Vector2> frameSize;
             private StyleSheet addedSheet;
             private Label hint;
-            private int pointer = -1;
+            private PointerDragCapture drag;
             private Vector2 last;
 
             public FramingDrag(PhotoshootPanel owner, PhotoshootService.ShotKind kind, Func<Vector2> frameSize)
@@ -442,17 +455,15 @@ namespace Orbiters.Toolkit.Editor.Photoshoot
                 target.Add(hint);
                 target.RegisterCallback<PointerDownEvent>(OnDown);
                 target.RegisterCallback<PointerMoveEvent>(OnMove);
-                target.RegisterCallback<PointerUpEvent>(OnUp);
-                target.RegisterCallback<PointerCaptureOutEvent>(OnCaptureOut);
+                drag = new PointerDragCapture(target, End);
                 target.RegisterCallback<WheelEvent>(OnWheel);
             }
 
             protected override void UnregisterCallbacksFromTarget()
             {
+                drag.Dispose();
                 target.UnregisterCallback<PointerDownEvent>(OnDown);
                 target.UnregisterCallback<PointerMoveEvent>(OnMove);
-                target.UnregisterCallback<PointerUpEvent>(OnUp);
-                target.UnregisterCallback<PointerCaptureOutEvent>(OnCaptureOut);
                 target.UnregisterCallback<WheelEvent>(OnWheel);
                 hint?.RemoveFromHierarchy();
                 target.RemoveFromClassList("ps-surface");
@@ -465,9 +476,8 @@ namespace Orbiters.Toolkit.Editor.Photoshoot
             {
                 if (evt.button != 0) return;
                 if (evt.clickCount == 2) { owner.ResetFraming(); evt.StopPropagation(); return; }
-                pointer = evt.pointerId;
                 last = evt.position;
-                target.CapturePointer(pointer);
+                drag.Begin(evt.pointerId);
                 target.AddToClassList("ps-surface--dragging");
                 target.EnableInClassList("ps-surface--turning", evt.shiftKey);
                 evt.StopPropagation();
@@ -475,27 +485,21 @@ namespace Orbiters.Toolkit.Editor.Photoshoot
 
             private void OnMove(PointerMoveEvent evt)
             {
-                if (evt.pointerId != pointer || !target.HasPointerCapture(pointer)) return;
+                if (!drag.Owns(evt.pointerId)) return;
                 Vector2 delta = (Vector2)evt.position - last;
                 last = evt.position;
                 target.EnableInClassList("ps-surface--turning", evt.shiftKey);
-                if (evt.shiftKey) owner.TurnBy(delta.x);
-                else owner.MoveBy(delta, frameSize(), kind);
+                try
+                {
+                    if (evt.shiftKey) owner.TurnBy(delta.x);
+                    else owner.MoveBy(delta, frameSize(), kind);
+                }
+                catch { drag.End(); throw; }
                 evt.StopPropagation();
             }
 
-            private void OnUp(PointerUpEvent evt)
-            {
-                if (evt.pointerId != pointer) return;
-                if (target.HasPointerCapture(pointer)) target.ReleasePointer(pointer);
-                End();
-            }
-
-            private void OnCaptureOut(PointerCaptureOutEvent evt) => End();
-
             private void End()
             {
-                pointer = -1;
                 target.RemoveFromClassList("ps-surface--dragging");
                 target.RemoveFromClassList("ps-surface--turning");
             }
@@ -734,7 +738,16 @@ namespace Orbiters.Toolkit.Editor.Photoshoot
         private Texture DisplayTexture(PhotoshootService.ShotKind shotKind)
         {
             Texture chosen = GetShot(shotKind);
-            return chosen != null ? chosen : state.GetPreviewTexture(shotKind);
+            if (chosen == null) return state.GetPreviewTexture(shotKind);
+            if (!options.ServerAppliesBannerEffect || shotKind != PhotoshootService.ShotKind.Banner) return chosen;
+            // The chosen banner is the plain image the server will process: shown as it will come back.
+            if (effectPreviewSource != chosen)
+            {
+                if (effectPreview != null) UnityEngine.Object.DestroyImmediate(effectPreview);
+                effectPreview = PhotoshootService.ApplyBannerEffect(chosen);
+                effectPreviewSource = chosen;
+            }
+            return effectPreview != null ? effectPreview : chosen;
         }
 
         private void RefreshImages()
@@ -769,7 +782,8 @@ namespace Orbiters.Toolkit.Editor.Photoshoot
             try
             {
                 var size = CaptureSize(shotKind);
-                var texture = state.Capture(AvatarRoot, shotKind, size);
+                bool plain = options.ServerAppliesBannerEffect && shotKind == PhotoshootService.ShotKind.Banner;
+                var texture = state.Capture(AvatarRoot, shotKind, size, withShotEffect: !plain);
                 options.SetShot?.Invoke(shotKind, texture);
                 // A host that keeps following the live preview after a capture gets a confirmation instead of a Retake.
                 state.Status = IsFixed(shotKind) ? null : $"{DisplayName(shotKind)} captured";

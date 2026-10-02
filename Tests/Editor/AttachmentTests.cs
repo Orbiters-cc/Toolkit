@@ -110,6 +110,42 @@ public sealed class AttachmentTests
         Assert.AreEqual(70, clonedBadge.GetBlendShapeWeight(0), 1e-3f, "still synced with the body");
     }
 
+    // Clothing made for a bigger avatar, standing too high: resized and moved onto the armature, each key bone on its
+    // avatar bone; cancelling puts every transform back.
+    [Test] public void ClothingMadeForAnotherBodyIsFittedAndTheFitCanBeCancelled()
+    {
+        var shirt = Clothing("Shirt", new[] { ("hips", "", ""), ("spine", "hips", ""), ("chest", "spine", ""), ("neck", "chest", ""),
+            ("shoulder.L", "chest", ""), ("upper_arm.L", "shoulder.L", ""), ("forearm.L", "upper_arm.L", "") });
+        shirt.transform.localScale = Vector3.one * 1.3f;
+        shirt.transform.position += Vector3.up * .4f;
+        var before = shirt.GetComponentsInChildren<Transform>().ToDictionary(t => t, t => (t.localPosition, t.localScale));
+        var attachment = AttachmentInstaller.Install(AttachmentPlanner.Analyze(shirt, avatar.transform), new AttachmentOptions { Created = true, AddToggle = false });
+
+        var fit = AttachmentFit.Fit(attachment, avatar.transform);
+        Assert.NotNull(fit, "a 30% bigger shirt 40 cm too high needs fitting");
+        Assert.AreEqual(1f / 1.3f, fit.Scale, .02f);
+        foreach (var (name, avatarBone) in new[] { ("hips", "Hips"), ("chest", "Chest"), ("upper_arm.L", "Left arm"), ("forearm.L", "Left elbow") })
+            Assert.Less(Vector3.Distance(shirt.GetComponentsInChildren<Transform>().Single(t => t.name == name).position, bones[avatarBone].position), 1e-3f, name);
+        Assert.Null(AttachmentFit.Fit(attachment, avatar.transform), "fitted once, nothing left to fit");
+
+        AttachmentFit.Cancel(attachment);
+        foreach (var pair in before)
+        {
+            Assert.Less(Vector3.Distance(pair.Key.localPosition, pair.Value.localPosition), 1e-4f, pair.Key.name);
+            Assert.Less(Vector3.Distance(pair.Key.localScale, pair.Value.localScale), 1e-4f, pair.Key.name);
+        }
+        Assert.False(AttachmentFit.Fitted(attachment));
+    }
+
+    // Clothing already made for this avatar is left alone.
+    [Test] public void ClothingMadeForThisBodyIsNotFitted()
+    {
+        var shirt = Clothing("Shirt", new[] { ("hips", "", ""), ("spine", "hips", ""), ("chest", "spine", ""), ("shoulder.L", "chest", ""), ("upper_arm.L", "shoulder.L", "") });
+        var attachment = AttachmentInstaller.Install(AttachmentPlanner.Analyze(shirt, avatar.transform), new AttachmentOptions { Created = true, AddToggle = false });
+        Assert.Null(AttachmentFit.Fit(attachment, avatar.transform));
+        Assert.False(AttachmentFit.Fitted(attachment));
+    }
+
     [Test] public void PropNamedAfterItsPlaceFollowsThatBoneAndIsPlacedOnItWhenFar()
     {
         var hat = GameObject.CreatePrimitive(PrimitiveType.Cube);
@@ -463,6 +499,8 @@ public sealed class AttachmentTests
         foreach (var (bone, parent, _) in chain)
         {
             var match = bones.Values.FirstOrDefault(b => Orbiters.Toolkit.Armature.BoneNames.Normalize(b.name) == Orbiters.Toolkit.Armature.BoneNames.Normalize(bone));
+            if (match == null && Orbiters.Toolkit.Armature.BoneNames.TryInferHumanoid(bone, out var role))
+                match = bones.Values.FirstOrDefault(b => Orbiters.Toolkit.Armature.BoneNames.TryInferHumanoid(b.name, out var avatarRole) && avatarRole == role);
             var t = Child(bone, parent == "" ? armature : made[parent], Vector3.zero);
             t.position = (match != null ? match.position : made[parent].position + Vector3.up * .05f) + new Vector3(0, 0, .02f);
             made[bone] = t;

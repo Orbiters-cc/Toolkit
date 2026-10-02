@@ -59,29 +59,40 @@ namespace Orbiters.Toolkit.Editor.VRChat.Refit
         }
 
         /// <summary>
-        /// Links the captured shapes and copies the body's weights. A generated shape removed during the build (a blendshape
-        /// optimizer) while its body shape is animated fails the build: the clothing would stop following the body.
+        /// Links the captured shapes and copies the body's weights. Never stops the upload: what another build step took away
+        /// (a mesh merged or removed, a blendshape optimized out) is left unlinked and reported in <paramref name="warnings"/>,
+        /// because a piece of clothing that does not follow one body shape is better than an avatar that cannot be uploaded.
+        /// A refitted mesh merged into another or renamed is found again by its generated blendshapes.
         /// </summary>
-        public static BlendShapeSyncResult Apply(GameObject avatarRoot)
+        public static BlendShapeSyncResult Apply(GameObject avatarRoot, List<string> warnings = null)
         {
-            var links = avatarRoot != null && Captured.TryGetValue(avatarRoot, out var captured) ? captured : Collect(avatarRoot);
+            warnings ??= new List<string>();
+            if (avatarRoot == null) return new BlendShapeSyncResult { Message = "ReFit: no avatar." };
+            var links = Captured.TryGetValue(avatarRoot, out var captured) ? captured : Collect(avatarRoot);
             var copies = new List<BlendShapeCopy>();
+            var renderers = avatarRoot.GetComponentsInChildren<SkinnedMeshRenderer>(true);
             foreach (var link in links)
             {
-                if (link.Body == null || link.Mesh == null || link.Body.sharedMesh == null || link.Mesh.sharedMesh == null ||
-                    !link.Body.transform.IsChildOf(avatarRoot.transform) || !link.Mesh.transform.IsChildOf(avatarRoot.transform))
-                    throw new InvalidOperationException("A refitted mesh or its body was removed during the build; its blendshapes cannot follow the body.");
+                if (link.Body == null || link.Body.sharedMesh == null || !link.Body.transform.IsChildOf(avatarRoot.transform))
+                {
+                    warnings.Add("the body a refitted mesh was made for was removed during the build: its blendshapes do not follow the body.");
+                    continue;
+                }
+                bool meshKept = link.Mesh != null && link.Mesh.sharedMesh != null && link.Mesh.transform.IsChildOf(avatarRoot.transform);
                 foreach (var shape in link.Shapes)
                 {
                     if (link.Body.sharedMesh.GetBlendShapeIndex(shape.source) < 0) continue;
-                    if (link.Mesh.sharedMesh.GetBlendShapeIndex(shape.generated) < 0)
+                    var destination = meshKept && link.Mesh.sharedMesh.GetBlendShapeIndex(shape.generated) >= 0 ? link.Mesh
+                        : renderers.FirstOrDefault(r => r != null && r != link.Body && r.sharedMesh != null && r.sharedMesh.GetBlendShapeIndex(shape.generated) >= 0);
+                    if (destination == null)
                     {
                         if (Animated(avatarRoot, link.Body, shape.source))
-                            throw new InvalidOperationException("Blendshape '" + shape.generated + "' of " + link.Mesh.name +
-                                " was removed during the build, but '" + shape.source + "' of the body is animated. Keep refitted blendshapes when optimizing blendshapes.");
+                            warnings.Add("blendshape '" + shape.generated + "' of " + (link.Mesh != null ? link.Mesh.name : "a refitted mesh") +
+                                " was removed during the build (a mesh or blendshape optimizer?) while the body's '" + shape.source +
+                                "' is animated: that part will not follow the body. Keep refitted blendshapes when optimizing.");
                         continue;
                     }
-                    copies.Add(new BlendShapeCopy { Source = link.Body, SourceShape = shape.source, Destination = link.Mesh, DestinationShape = shape.generated });
+                    copies.Add(new BlendShapeCopy { Source = link.Body, SourceShape = shape.source, Destination = destination, DestinationShape = shape.generated });
                 }
             }
             var linked = new HashSet<(SkinnedMeshRenderer, string)>(copies.Select(c => (c.Destination, c.DestinationShape)));
@@ -110,16 +121,10 @@ namespace Orbiters.Toolkit.Editor.VRChat.Refit
 
         public bool OnPreprocessAvatar(GameObject avatarRoot)
         {
-            try
-            {
-                RefitBuild.Capture(avatarRoot);
-                return true;
-            }
-            catch (Exception ex)
-            {
-                Debug.LogError("[Orbiters] Refitted blendshapes: " + ex.Message);
-                return false;
-            }
+            // Never stops the upload: without the capture, the links are collected again from the build copy later.
+            try { RefitBuild.Capture(avatarRoot); }
+            catch (Exception ex) { Debug.LogWarning("[Orbiters] ReFit could not prepare its blendshape links: " + ex.Message); }
+            return true;
         }
     }
 
@@ -131,17 +136,16 @@ namespace Orbiters.Toolkit.Editor.VRChat.Refit
 
         public bool OnPreprocessAvatar(GameObject avatarRoot)
         {
+            // Never stops the upload: what cannot be linked is reported, the rest is linked.
+            var warnings = new List<string>();
             try
             {
-                var result = RefitBuild.Apply(avatarRoot);
+                var result = RefitBuild.Apply(avatarRoot, warnings);
                 if (result.Success) Debug.Log("[Orbiters] " + result.Message);
-                return true;
             }
-            catch (Exception ex)
-            {
-                Debug.LogError("[Orbiters] Refitted blendshapes: " + ex.Message);
-                return false;
-            }
+            catch (Exception ex) { warnings.Add(ex.Message); }
+            foreach (var warning in warnings.Distinct()) Debug.LogWarning("[Orbiters] ReFit: " + warning, avatarRoot);
+            return true;
         }
     }
 }
