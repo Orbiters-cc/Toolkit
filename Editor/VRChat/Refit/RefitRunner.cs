@@ -23,6 +23,7 @@ namespace Orbiters.Toolkit.Editor.VRChat.Refit
         /// <summary>Per-mesh blendshapes when they differ (those near each mesh); replaces <see cref="Shapes"/> for that mesh.</summary>
         public Dictionary<SkinnedMeshRenderer, List<string>> ShapesByRenderer = new Dictionary<SkinnedMeshRenderer, List<string>>();
         public RefitMode Mode;
+        public bool CoverDifferentBaseBody;
         /// <summary>The original base, for <see cref="RefitMode.Fit"/>.</summary>
         public CustomBaseOriginal Original;
         public string BaseKey, BaseName, Tool;
@@ -126,6 +127,7 @@ namespace Orbiters.Toolkit.Editor.VRChat.Refit
                 var job = new RefitJob
                 {
                     Renderer = renderer, Avatar = root.gameObject, Body = batch.Body, Mode = mode, Tightness = batch.Tightness,
+                    CoverDifferentBaseBody = batch.CoverDifferentBaseBody,
                     SourceAvatar = batch.Original?.Avatar, SourceBody = batch.Original?.Body,
                     Shapes = Missing(renderer.sharedMesh, requested),
                 };

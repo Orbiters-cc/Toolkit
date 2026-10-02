@@ -27,6 +27,8 @@ namespace Orbiters.Toolkit.Editor.Refit
         /// <summary>Body blendshapes the mesh gets, under the same names.</summary>
         public List<string> Shapes = new List<string>();
         public RefitMode Mode;
+        /// <summary>Expand residual clipped fabric on clothing detected on a different avatar base.</summary>
+        public bool CoverDifferentBaseBody;
         /// <summary>0: loose, best for accessories; 1: tight, best for clothing.</summary>
         public float Tightness = RefitPreferences.DefaultTightness;
     }

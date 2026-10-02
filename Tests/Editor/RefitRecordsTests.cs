@@ -329,6 +329,10 @@ public sealed class RefitRecordsTests
         AssetDatabase.CreateFolder("Assets", folder.Substring("Assets/".Length));
         AssetDatabase.CreateAsset(bodyMesh, folder + "/body.asset");
         AssetDatabase.CreateAsset(jacketMesh, folder + "/jacket.asset");
+        var coverageJob = new RefitJob { Renderer = jacket, Body = body, Mode = RefitMode.Shapes };
+        string normalKey = RefitCache.Key(coverageJob, root.transform, "test-engine");
+        coverageJob.CoverDifferentBaseBody = true;
+        Assert.That(RefitCache.Key(coverageJob, root.transform, "test-engine"), Is.Not.EqualTo(normalKey), "Coverage requests must not reuse normal geometry.");
         engine.SaveMeshesIn = folder;
         var createdFolders = new[] { "Assets/Orbiters", "Assets/Orbiters/ReFit", RefitCache.Folder }.Where(f => !AssetDatabase.IsValidFolder(f)).ToList();
         var before = new HashSet<string>(createdFolders.Count == 0 ? AssetDatabase.FindAssets("t:RefitCacheEntry", new[] { RefitCache.Folder }) : new string[0]);

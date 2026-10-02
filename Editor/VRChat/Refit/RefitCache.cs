@@ -31,6 +31,7 @@ namespace Orbiters.Toolkit.Editor.VRChat.Refit
             if (mesh == null || body == null) return null;
             var text = new StringBuilder();
             text.Append(Format).Append('|').Append(engine).Append('|').Append(job.Mode).Append('|').Append(Mathf.RoundToInt(job.Tightness * 100)).Append('|');
+            text.Append(job.CoverDifferentBaseBody).Append('|');
             text.Append(mesh).Append('|').Append(body).Append('|');
             if (job.Mode == RefitMode.Fit)
             {
