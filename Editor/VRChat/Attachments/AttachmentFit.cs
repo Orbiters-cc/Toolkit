@@ -52,8 +52,10 @@ namespace Orbiters.Toolkit.Editor.VRChat.Attachments
             /// <summary>How far its first key bone stands from the avatar's, as a share of the avatar's height.</summary>
             public float Offset;
             public int Segments;
+            public float PoseAngle;
+            internal readonly Dictionary<Transform, (Transform source, Transform target)> Tips = new Dictionary<Transform, (Transform, Transform)>();
 
-            public bool NeedsFit => Pairs.Count > 0 && (Segments > 0 && Mathf.Abs(Scale - 1f) > ScaleThreshold || Offset > OffsetThreshold);
+            public bool NeedsFit => Pairs.Count > 0 && (Segments > 0 && Mathf.Abs(Scale - 1f) > ScaleThreshold || Offset > OffsetThreshold || PoseAngle > 2f);
         }
 
         /// <summary>Compares the armature of <paramref name="root"/> (under the avatar) with the avatar's; null without key bones in common.</summary>
@@ -78,6 +80,23 @@ namespace Orbiters.Toolkit.Editor.VRChat.Attachments
 
             var measure = new Measure();
             measure.Pairs.AddRange(byRole.Values.OrderBy(p => Depth(p.source)));
+            // Exported terminal limbs often retain only an unweighted *_end marker (a sleeve has no hand).
+            // Use it for direction only; never move or link the marker to the avatar.
+            foreach (var role in byRole)
+            {
+                var pair = role.Value;
+                var next = NextLimb(role.Key);
+                var targetTip = next != HumanBodyBones.LastBone ? index.Humanoid(next) : null;
+                if (targetTip == null || pair.source.childCount != 1) continue;
+                var tip = pair.source.GetChild(0);
+                if (tip.name.EndsWith("_end", System.StringComparison.OrdinalIgnoreCase)) measure.Tips[pair.source] = (tip, targetTip);
+            }
+            foreach (var pair in measure.Pairs)
+            {
+                var child = ChildPair(measure, pair.source);
+                if (child.source != null)
+                    measure.PoseAngle = Mathf.Max(measure.PoseAngle, Vector3.Angle(child.source.position - pair.source.position, child.target.position - pair.target.position));
+            }
             float avatarLength = 0f, ownLength = 0f;
             foreach (var (from, to) in Segments)
             {
@@ -112,9 +131,21 @@ namespace Orbiters.Toolkit.Editor.VRChat.Attachments
             if (measure.Segments > 0) root.localScale *= measure.Scale;
             var (anchor, anchorTarget) = measure.Pairs[0];
             root.position += anchorTarget.position - anchor.position;
-            // Then the proportions: each key bone where its avatar bone is, parents first so a child lands after its parent moved.
+            // Aim along the anatomical segment, not the target's local axes (exporters use different bone rolls).
+            // Read the child before moving it. Parent rotation carries terminal and unmatched extra bones naturally.
             foreach (var (source, target) in measure.Pairs)
-                if (source != root) source.position = target.position;
+            {
+                if (source == root) continue;
+                var child = ChildPair(measure, source);
+                if (child.source != null)
+                {
+                    var from = child.source.position - source.position;
+                    var to = child.target.position - target.position;
+                    if (from.sqrMagnitude > 1e-8f && to.sqrMagnitude > 1e-8f)
+                        source.rotation = Quaternion.FromToRotation(from, to) * source.rotation;
+                }
+                source.position = target.position;
+            }
 
             Undo.RecordObject(attachment, "Fit " + attachment.name + " to the avatar");
             foreach (var t in touched)
@@ -130,6 +161,32 @@ namespace Orbiters.Toolkit.Editor.VRChat.Attachments
         }
 
         public static bool Fitted(OrbitersAttachment attachment) => attachment != null && attachment.fitted.Count > 0;
+
+        // Prefer the nearest matched descendant. At a branch, the central spine/neck wins over shoulders or legs.
+        private static (Transform source, Transform target) ChildPair(Measure measure, Transform source)
+        {
+            var child = measure.Pairs.Where(p => p.source != source && p.source.IsChildOf(source))
+                .OrderBy(p => Depth(p.source))
+                .ThenBy(p => Mathf.Abs(source.InverseTransformPoint(p.source.position).x))
+                .FirstOrDefault();
+            return child.source != null ? child : measure.Tips.TryGetValue(source, out var tip) ? tip : default;
+        }
+
+        private static HumanBodyBones NextLimb(HumanBodyBones bone)
+        {
+            switch (bone)
+            {
+                case HumanBodyBones.LeftUpperArm: return HumanBodyBones.LeftLowerArm;
+                case HumanBodyBones.RightUpperArm: return HumanBodyBones.RightLowerArm;
+                case HumanBodyBones.LeftLowerArm: return HumanBodyBones.LeftHand;
+                case HumanBodyBones.RightLowerArm: return HumanBodyBones.RightHand;
+                case HumanBodyBones.LeftUpperLeg: return HumanBodyBones.LeftLowerLeg;
+                case HumanBodyBones.RightUpperLeg: return HumanBodyBones.RightLowerLeg;
+                case HumanBodyBones.LeftLowerLeg: return HumanBodyBones.LeftFoot;
+                case HumanBodyBones.RightLowerLeg: return HumanBodyBones.RightFoot;
+                default: return HumanBodyBones.LastBone;
+            }
+        }
 
         /// <summary>Puts back what the fit changed, with Undo, where it is still as the fit left it.</summary>
         public static void Cancel(OrbitersAttachment attachment)

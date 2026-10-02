@@ -58,7 +58,7 @@ namespace Orbiters.Toolkit.Editor.VRChat.Attachments
                     var rest = ArmatureRest.Frames(attachment.GetComponentsInChildren<SkinnedMeshRenderer>(true));
                     foreach (var link in attachment.links)
                         if (link.from != null && link.to != null)
-                            result.Add(new FollowLink { Follower = link.from, Target = link.to, Offset = RestOffset(link.from, link.to, rest, avatarRest), Source = "My Avatar", Accessory = root });
+                            result.Add(new FollowLink { Follower = link.from, Target = link.to, Offset = AttachmentFit.Fitted(attachment) ? Current(link.from, link.to) : RestOffset(link.from, link.to, rest, avatarRest), Source = "My Avatar", Accessory = root });
                     handled.UnionWith(root.GetComponentsInChildren<Transform>(true));
                 }
                 else if (attachment.mode == OrbitersAttachment.AttachMode.Parent && attachment.parent != null)

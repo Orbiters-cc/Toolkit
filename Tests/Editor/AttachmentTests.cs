@@ -137,6 +137,60 @@ public sealed class AttachmentTests
         Assert.False(AttachmentFit.Fitted(attachment));
     }
 
+    [Test] public void PoseOnlyFitRotatesSleevesWithDifferentBoneAxesAndRestoresThem()
+    {
+        var shirt = Clothing("Shirt", new[] { ("hips", "", ""), ("spine", "hips", ""), ("chest", "spine", ""), ("neck", "chest", ""),
+            ("shoulder.L", "chest", ""), ("upper_arm.L", "shoulder.L", ""), ("forearm.L", "upper_arm.L", ""), ("hand.L", "forearm.L", "") });
+        var arm = shirt.GetComponentsInChildren<Transform>().Single(t => t.name == "upper_arm.L");
+        var elbow = shirt.GetComponentsInChildren<Transform>().Single(t => t.name == "forearm.L");
+        var hand = shirt.GetComponentsInChildren<Transform>().Single(t => t.name == "hand.L");
+        // Preserve the T-pose geometry while giving the exported bone a different roll.
+        var elbowPosition = elbow.position;
+        arm.rotation = Quaternion.Euler(90, 0, 0);
+        elbow.position = elbowPosition;
+        var before = shirt.GetComponentsInChildren<Transform>().ToDictionary(t => t, t => (t.localPosition, t.localRotation));
+        var initial = arm.rotation;
+        bones["Left arm"].rotation = Quaternion.Euler(0, 0, -35);
+        var attachment = AttachmentInstaller.Install(AttachmentPlanner.Analyze(shirt, avatar.transform), new AttachmentOptions { Created = true, AddToggle = false });
+        Assert.NotNull(AttachmentFit.Fit(attachment, avatar.transform), "equal size but different pose needs fitting");
+        Assert.Less(Quaternion.Angle(Quaternion.Euler(0, 0, -35) * initial, arm.rotation), .1f, "sleeve rotates, preserving its own axes");
+        Assert.Less(Vector3.Distance(elbow.position, bones["Left elbow"].position), .001f);
+        Assert.Less(Vector3.Distance(hand.position, bones["Left wrist"].position), .001f);
+        Assert.Null(AttachmentFit.Fit(attachment, avatar.transform), "repeat is stable");
+        var fittedRotation = arm.rotation;
+        var fittedPosition = arm.position;
+        foreach (var link in AttachmentFollow.Links(avatar.transform, false).Where(l => l.Source == "My Avatar")) link.Apply();
+        Assert.Less(Quaternion.Angle(fittedRotation, arm.rotation), .1f, "preview keeps the fitted pose");
+        Assert.Less(Vector3.Distance(fittedPosition, arm.position), .001f);
+        var clone = Own(Object.Instantiate(avatar));
+        AttachmentBuild.Apply(clone);
+        var builtArm = clone.GetComponentsInChildren<Transform>().Single(t => t.name == "upper_arm.L");
+        Assert.Less(Quaternion.Angle(fittedRotation, builtArm.rotation), .1f, "build keeps the fitted pose");
+        AttachmentBuild.Finish(clone);
+        AttachmentFit.Cancel(attachment);
+        foreach (var pair in before)
+        {
+            Assert.Less(Vector3.Distance(pair.Key.localPosition, pair.Value.localPosition), .001f);
+            Assert.Less(Quaternion.Angle(pair.Key.localRotation, pair.Value.localRotation), .1f);
+        }
+    }
+
+    [Test] public void SleeveEndMarkerAimsAtTheWristWithoutBeingMovedOrLinked()
+    {
+        var shirt = Clothing("Sleeve", new[] { ("hips", "", ""), ("spine", "hips", ""), ("chest", "spine", ""), ("neck", "chest", ""),
+            ("shoulder.L", "chest", ""), ("upper_arm.L", "shoulder.L", ""), ("forearm.L", "upper_arm.L", "") });
+        var elbow = shirt.GetComponentsInChildren<Transform>().Single(t => t.name == "forearm.L");
+        var tip = Child("forearm.L_end", elbow, Vector3.right * .18f);
+        var tipPosition = tip.localPosition;
+        bones["Left elbow"].localRotation = Quaternion.Euler(0, 0, -40);
+        var attachment = AttachmentInstaller.Install(AttachmentPlanner.Analyze(shirt, avatar.transform), new AttachmentOptions { Created = true, AddToggle = false });
+        Assert.NotNull(AttachmentFit.Fit(attachment, avatar.transform));
+        Assert.Less(Vector3.Angle(tip.position - elbow.position, bones["Left wrist"].position - bones["Left elbow"].position), .01f);
+        Assert.AreEqual(tipPosition, tip.localPosition);
+        Assert.False(attachment.links.Any(l => l.from == tip));
+        Assert.Null(AttachmentFit.Fit(attachment, avatar.transform));
+    }
+
     // Clothing already made for this avatar is left alone.
     [Test] public void ClothingMadeForThisBodyIsNotFitted()
     {
