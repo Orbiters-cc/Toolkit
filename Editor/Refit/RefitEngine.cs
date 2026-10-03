@@ -29,6 +29,8 @@ namespace Orbiters.Toolkit.Editor.Refit
         public RefitMode Mode;
         /// <summary>Expand residual clipped fabric on clothing detected on a different avatar base.</summary>
         public bool CoverDifferentBaseBody;
+        /// <summary>Already fitted inner garments from the same outfit, in target-avatar space.</summary>
+        public List<SkinnedMeshRenderer> CoverageLayers = new List<SkinnedMeshRenderer>();
         /// <summary>0: loose, best for accessories; 1: tight, best for clothing.</summary>
         public float Tightness = RefitPreferences.DefaultTightness;
     }

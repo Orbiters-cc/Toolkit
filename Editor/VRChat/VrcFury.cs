@@ -19,6 +19,8 @@ namespace Orbiters.Toolkit.Editor.VRChat
             Component ArmatureLink(GameObject host, GameObject from, HumanBodyBones toBone, GameObject toObject);
             /// <summary>A saved menu toggle turning <paramref name="target"/> on and off.</summary>
             Component Toggle(GameObject host, string menuPath, GameObject target, bool defaultOn);
+            /// <summary>Merges a prop's controller, menu and parameters without changing the avatar's authored assets.</summary>
+            Component FullController(GameObject host, RuntimeAnimatorController controller, ScriptableObject menu, ScriptableObject parameters);
         }
 
         public static IWriter Writer { get; set; }

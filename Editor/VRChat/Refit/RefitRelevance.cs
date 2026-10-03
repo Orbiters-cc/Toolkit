@@ -42,12 +42,12 @@ namespace Orbiters.Toolkit.Editor.VRChat.Refit
             Vector3[] positions;
             try
             {
-                body.BakeMesh(baked, true);
+                body.BakeMesh(baked);
                 positions = baked.vertices;
                 // A renderer without a skeleton bakes nothing: its mesh as it stands.
                 if (positions.Length != mesh.vertexCount)
                 {
-                    positions = mesh.vertices;
+                    positions = mesh.vertices.Select(v => Vector3.Scale(v, body.transform.lossyScale)).ToArray();
                     baked.vertices = positions;
                 }
                 // BakeMesh leaves the bounds empty.
@@ -56,7 +56,7 @@ namespace Orbiters.Toolkit.Editor.VRChat.Refit
                 var raw = mesh.bounds.size;
                 float scale = Mathf.Max(baked.bounds.size.x, baked.bounds.size.y, baked.bounds.size.z) /
                               Mathf.Max(1e-6f, Mathf.Max(raw.x, Mathf.Max(raw.y, raw.z)));
-                var toWorld = Matrix4x4.TRS(body.transform.position, body.transform.rotation, Vector3.one);
+                var toWorld = SkinnedMeshBounds.BakedToWorld(body);
                 for (int i = 0; i < positions.Length; i++) positions[i] = toWorld.MultiplyPoint3x4(positions[i]);
                 map.scale = scale;
             }
@@ -129,7 +129,7 @@ namespace Orbiters.Toolkit.Editor.VRChat.Refit
             var baked = new Mesh();
             try
             {
-                renderer.BakeMesh(baked, true);
+                renderer.BakeMesh(baked);
                 var vertices = baked.vertices;
                 if (vertices.Length != renderer.sharedMesh.vertexCount)
                 {
@@ -137,7 +137,7 @@ namespace Orbiters.Toolkit.Editor.VRChat.Refit
                     var scale = renderer.transform.lossyScale;
                     for (int i = 0; i < vertices.Length; i++) vertices[i] = Vector3.Scale(vertices[i], scale);
                 }
-                var toWorld = Matrix4x4.TRS(renderer.transform.position, renderer.transform.rotation, Vector3.one);
+                var toWorld = SkinnedMeshBounds.BakedToWorld(renderer);
                 int step = Mathf.Max(1, vertices.Length / MaxMeshPoints);
                 var points = new Vector3[(vertices.Length + step - 1) / step];
                 for (int i = 0, j = 0; i < vertices.Length; i += step, j++) points[j] = toWorld.MultiplyPoint3x4(vertices[i]);

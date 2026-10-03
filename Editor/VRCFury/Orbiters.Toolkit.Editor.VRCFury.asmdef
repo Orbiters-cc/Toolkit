@@ -3,7 +3,8 @@
   "rootNamespace": "Orbiters.Toolkit.Editor.VRCFury",
   "references": [
     "Orbiters.Toolkit.Editor.VRChat",
-    "com.vrcfury.api"
+    "com.vrcfury.api",
+    "VRC.SDK3A"
   ],
   "includePlatforms": [
     "Editor"

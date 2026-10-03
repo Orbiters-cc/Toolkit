@@ -20,7 +20,7 @@ namespace Orbiters.Toolkit.Editor.VRChat.Refit
     {
         internal const string Folder = "Assets/Orbiters/ReFit/Cache";
         // Changes when entries keep something new: older entries are then not found and made again.
-        private const string Format = "2";
+        private const string Format = "3";
 
         /// <summary>What decides the result, hashed; null when an input is not a saved asset (nothing to find it again by).</summary>
         internal static string Key(RefitJob job, Transform avatarRoot, string engine)
@@ -32,6 +32,15 @@ namespace Orbiters.Toolkit.Editor.VRChat.Refit
             var text = new StringBuilder();
             text.Append(Format).Append('|').Append(engine).Append('|').Append(job.Mode).Append('|').Append(Mathf.RoundToInt(job.Tightness * 100)).Append('|');
             text.Append(job.CoverDifferentBaseBody).Append('|');
+            foreach (var layer in job.CoverageLayers)
+            {
+                string identity = layer != null ? Identity(layer.sharedMesh) : null;
+                if (identity == null) return null;
+                text.Append(identity).Append('|');
+                AppendPose(text, avatarRoot, layer.transform);
+                foreach (var bone in layer.bones) AppendPose(text, avatarRoot, bone);
+                for (int s = 0; s < layer.sharedMesh.blendShapeCount; s++) text.Append(Mathf.RoundToInt(layer.GetBlendShapeWeight(s) * 10)).Append(',');
+            }
             text.Append(mesh).Append('|').Append(body).Append('|');
             if (job.Mode == RefitMode.Fit)
             {

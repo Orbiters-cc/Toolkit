@@ -40,6 +40,32 @@ public sealed class PhotoshootIsolationTests
         }
     }
 
+    [TestCase(typeof(TrailRenderer), true)]
+    [TestCase(typeof(TrailRenderer), false)]
+    [TestCase(typeof(LineRenderer), true)]
+    [TestCase(typeof(LineRenderer), false)]
+    [TestCase(typeof(MeshRenderer), true)]
+    [TestCase(typeof(MeshRenderer), false)]
+    public void RenderersWithoutMeshFiltersDoNotBreakCapture(System.Type rendererType, bool active)
+    {
+        var avatar = Avatar("Unlit/Color", Color.red, 1f);
+        var ink = new GameObject("Ink");
+        ink.transform.SetParent(avatar.transform, false);
+        var renderer = (Renderer)ink.AddComponent(rendererType);
+        renderer.sharedMaterial = Own(new Material(Shader.Find("Unlit/Color")));
+        ink.SetActive(active);
+        using (var session = new PhotoshootService.LivePreviewSession())
+        {
+            session.UpdatePreview(Request(avatar));
+            var pixels = Own(session.Capture(Request(avatar))).GetPixels32();
+            Assert.That(pixels.Count(p => p.r > 200 && p.b < 50), Is.GreaterThan(0));
+            // Invalidate the source snapshot and exercise the subsequent live-preview refresh too.
+            ink.SetActive(!active);
+            Assert.DoesNotThrow(() => session.UpdatePreview(Request(avatar)));
+            Assert.That(ink.GetComponent<MeshFilter>() == null, Is.True, "The source remains untouched.");
+        }
+    }
+
     [Test]
     public void StageLightsAndOpenSceneLightsStayApart()
     {

@@ -54,6 +54,7 @@ namespace Orbiters.Toolkit.Editor.VRChat.Attachments
             public int Segments;
             public float PoseAngle;
             internal readonly Dictionary<Transform, (Transform source, Transform target)> Tips = new Dictionary<Transform, (Transform, Transform)>();
+            internal readonly Dictionary<Transform, HumanBodyBones> Roles = new Dictionary<Transform, HumanBodyBones>();
 
             public bool NeedsFit => Pairs.Count > 0 && (Segments > 0 && Mathf.Abs(Scale - 1f) > ScaleThreshold || Offset > OffsetThreshold || PoseAngle > 2f);
         }
@@ -80,6 +81,7 @@ namespace Orbiters.Toolkit.Editor.VRChat.Attachments
 
             var measure = new Measure();
             measure.Pairs.AddRange(byRole.Values.OrderBy(p => Depth(p.source)));
+            foreach (var role in byRole) measure.Roles[role.Value.source] = role.Key;
             // Exported terminal limbs often retain only an unweighted *_end marker (a sleeve has no hand).
             // Use it for direction only; never move or link the marker to the avatar.
             foreach (var role in byRole)
@@ -157,6 +159,7 @@ namespace Orbiters.Toolkit.Editor.VRChat.Attachments
                 PrefabUtility.RecordPrefabInstancePropertyModifications(t);
             }
             AttachmentInstaller.Dirty(attachment);
+            AttachmentVolumeFit.Apply(attachment, avatarRoot, measure);
             return measure;
         }
 
@@ -192,6 +195,7 @@ namespace Orbiters.Toolkit.Editor.VRChat.Attachments
         public static void Cancel(OrbitersAttachment attachment)
         {
             if (!Fitted(attachment)) return;
+            AttachmentVolumeFit.Cancel(attachment);
             var still = attachment.fitted.Where(f => f.transform != null && Same(Pose(f.transform), f.after)).ToList();
             if (still.Count > 0) Undo.RecordObjects(still.Select(f => (Object)f.transform).ToArray(), "Cancel the fit of " + attachment.name);
             // Children first: each is put back in its own parent's space, so the order does not matter for local values.

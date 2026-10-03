@@ -1,5 +1,12 @@
 # Orbiters Toolkit
 
+## 0.3.10 — 2026-10-03
+
+- Preserve clothing pose, proportions and skinning across attachment, ReFit, previews and avatar builds; improve residual body coverage.
+- Repair broken imported materials, map roughness and smoothness correctly, preserve authored packed maps, and default missing surface maps to matte.
+- Add the shared drawing pen installer and Play Mode mirror overrides; capture thumbnails safely with trail and line renderers.
+- Cache original-body preparation and reduce repeated fitting work.
+
 Unity 2022.3 editor utilities for mirror posing and optional AI integration.
 Mirror posing works without MCP. The screenshot adapter compiles separately when
 MCP for Unity 9.7.1 or newer is installed; this package does not install the server.

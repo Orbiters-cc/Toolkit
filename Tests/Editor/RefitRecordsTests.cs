@@ -8,7 +8,9 @@ using Orbiters.Toolkit.Editor.Refit;
 using Orbiters.Toolkit.Editor.VRChat.Refit;
 using Orbiters.Toolkit.VRChat;
 using UnityEditor;
+using UnityEditor.SceneManagement;
 using UnityEngine;
+using UnityEngine.SceneManagement;
 using Object = UnityEngine.Object;
 
 /// <summary>Stands in for ReFit: gives the mesh a copy with the requested shapes, or fails when told to.</summary>
@@ -72,14 +74,25 @@ public sealed class RefitRecordsTests
     private IRefitEngine previousEngine;
     private FakeRefitEngine engine;
     private string folder;
+    private Scene scene;
+    private int undoGroup;
+    private Scene userScene;
+    private int[] userRoots;
 
     [SetUp]
     public void SetUp()
     {
+        Undo.IncrementCurrentGroup();
+        undoGroup = Undo.GetCurrentGroup();
+        userScene = SceneManager.GetActiveScene();
+        userRoots = userScene.GetRootGameObjects().Select(o => o.GetInstanceID()).ToArray();
+        scene = EditorSceneManager.NewPreviewScene();
+        folder = null;
         previousEngine = RefitEngine.Current;
         engine = new FakeRefitEngine();
         RefitEngine.Register(engine);
         root = new GameObject("Refit test avatar");
+        SceneManager.MoveGameObjectToScene(root, scene);
         bone = new GameObject("Bone").transform;
         bone.SetParent(root.transform, false);
         bodyMesh = MakeMesh("Body", "Flex arms", "Muscles", "Smile", "Flex legs");
@@ -89,6 +102,7 @@ public sealed class RefitRecordsTests
         jacket.bones = new[] { bone };
         jacket.rootBone = bone;
         originalBase = new GameObject("Original base");
+        SceneManager.MoveGameObjectToScene(originalBase, scene);
         originalBase.AddComponent<SkinnedMeshRenderer>().sharedMesh = bodyMesh;
     }
 
@@ -96,11 +110,18 @@ public sealed class RefitRecordsTests
     public void TearDown()
     {
         RefitEngine.Register(previousEngine);
+        // Discard this fixture's Undo records before destroying their meshes and hierarchy.
+        // Otherwise the test runner's later Undo can resurrect empty Jacket objects in the user's scene.
+        Undo.FlushUndoRecordObjects();
+        Undo.RevertAllDownToGroup(undoGroup);
         Object.DestroyImmediate(root);
         Object.DestroyImmediate(originalBase);
         foreach (var mesh in engine.Created.Concat(new[] { bodyMesh, jacketMesh }))
             if (mesh != null && !EditorUtility.IsPersistent(mesh)) Object.DestroyImmediate(mesh);
         if (folder != null) AssetDatabase.DeleteAsset(folder);
+        if (scene.IsValid()) EditorSceneManager.ClosePreviewScene(scene);
+        Assert.That(userScene.GetRootGameObjects().Select(o => o.GetInstanceID()), Is.EquivalentTo(userRoots),
+            "ReFit fixtures must not leave or restore objects in the user's scene.");
     }
 
     [Test]
@@ -333,6 +354,13 @@ public sealed class RefitRecordsTests
         string normalKey = RefitCache.Key(coverageJob, root.transform, "test-engine");
         coverageJob.CoverDifferentBaseBody = true;
         Assert.That(RefitCache.Key(coverageJob, root.transform, "test-engine"), Is.Not.EqualTo(normalKey), "Coverage requests must not reuse normal geometry.");
+        string bodyOnly = RefitCache.Key(coverageJob, root.transform, "test-engine");
+        var inner = AddRenderer("Shirt", jacketMesh);
+        coverageJob.CoverageLayers.Add(inner);
+        string layered = RefitCache.Key(coverageJob, root.transform, "test-engine");
+        Assert.That(layered, Is.Not.EqualTo(bodyOnly), "Inner garments participate in cache identity.");
+        inner.transform.localPosition = Vector3.forward * .01f;
+        Assert.That(RefitCache.Key(coverageJob, root.transform, "test-engine"), Is.Not.EqualTo(layered), "Moving an inner garment invalidates the outer fit.");
         engine.SaveMeshesIn = folder;
         var createdFolders = new[] { "Assets/Orbiters", "Assets/Orbiters/ReFit", RefitCache.Folder }.Where(f => !AssetDatabase.IsValidFolder(f)).ToList();
         var before = new HashSet<string>(createdFolders.Count == 0 ? AssetDatabase.FindAssets("t:RefitCacheEntry", new[] { RefitCache.Folder }) : new string[0]);
@@ -340,6 +368,7 @@ public sealed class RefitRecordsTests
         try
         {
             second = Object.Instantiate(root);
+            SceneManager.MoveGameObjectToScene(second, scene);
             engine.Reports = new List<RefitMessage>
             {
                 new RefitMessage { Severity = RefitSeverity.Warning, Code = "surface-coverage-limited", Text = "Short of the surface" },
@@ -365,7 +394,8 @@ public sealed class RefitRecordsTests
         }
         finally
         {
-            if (second != null) Object.DestroyImmediate(second);
+            // TearDown first clears Undo while this clone and its parents still exist,
+            // then closes their preview scene. Destroying it here lets Undo resurrect its Jacket child.
             if (AssetDatabase.IsValidFolder(RefitCache.Folder))
                 foreach (string guid in AssetDatabase.FindAssets("t:RefitCacheEntry", new[] { RefitCache.Folder }))
                     if (!before.Contains(guid)) AssetDatabase.DeleteAsset(AssetDatabase.GUIDToAssetPath(guid));
@@ -415,6 +445,23 @@ public sealed class RefitRecordsTests
                     if (!before.Contains(guid)) AssetDatabase.DeleteAsset(AssetDatabase.GUIDToAssetPath(guid));
             for (int i = createdFolders.Count - 1; i >= 0; i--) AssetDatabase.DeleteAsset(createdFolders[i]);
         }
+    }
+
+    [Test] public void MixedOutfitFitsInnerLayersFirstAndKeepsPropsOutOfCoverage()
+    {
+        var shirt = AddRenderer("Shirt", jacketMesh);
+        var prop = AddRenderer("FishingRod", jacketMesh);
+        var batch = Batch(RefitMode.Fit, "Flex arms");
+        batch.Renderers = new List<SkinnedMeshRenderer> { jacket, prop, shirt };
+        batch.CoverageByRenderer[jacket] = true;
+        batch.CoverageByRenderer[shirt] = true;
+        batch.CoverageByRenderer[prop] = false;
+        var result = Run(batch);
+        Assert.That(result.Failed, Is.Empty);
+        var jacketJob = engine.Jobs.Single(j => j.Renderer == jacket);
+        Assert.That(engine.Jobs.IndexOf(engine.Jobs.Single(j => j.Renderer == shirt)), Is.LessThan(engine.Jobs.IndexOf(jacketJob)));
+        Assert.That(jacketJob.CoverageLayers, Is.EqualTo(new[] { shirt }));
+        Assert.That(engine.Jobs.Single(j => j.Renderer == prop).CoverDifferentBaseBody, Is.False);
     }
 
     private RefitBatch Batch(RefitMode mode, params string[] shapes) => new RefitBatch

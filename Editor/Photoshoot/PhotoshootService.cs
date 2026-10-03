@@ -469,7 +469,13 @@ namespace Orbiters.Toolkit.Editor.Photoshoot
                         values.Add(shapes);
                         for (int i = 0; i < shapes; i++) values.Add(skinned.GetBlendShapeWeight(i).GetHashCode());
                     }
-                    else ObjectState(renderer.GetComponent<MeshFilter>()?.sharedMesh);
+                    else if (renderer is MeshRenderer)
+                    {
+                        // Unity's missing-component wrapper is not CLR null, so ?. can still throw.
+                        // Trails, lines and particles have no MeshFilter; retain their state above.
+                        var filter = renderer.GetComponent<MeshFilter>();
+                        ObjectState(filter != null ? filter.sharedMesh : null);
+                    }
                 }
                 return values.ToArray();
             }

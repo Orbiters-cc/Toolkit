@@ -106,6 +106,7 @@ namespace Orbiters.Toolkit.Editor.VRChat.Attachments
         {
             if (attachment == null) return;
             if (attachment.created) { Undo.DestroyObjectImmediate(attachment.gameObject); return; }
+            AttachmentFit.Cancel(attachment);
             AttachmentChanges.Restore(attachment);
             foreach (var component in attachment.added.Where(c => c != null).ToList()) Undo.DestroyObjectImmediate(component);
             Undo.DestroyObjectImmediate(attachment);

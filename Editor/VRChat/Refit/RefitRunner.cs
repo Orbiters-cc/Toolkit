@@ -24,6 +24,8 @@ namespace Orbiters.Toolkit.Editor.VRChat.Refit
         public Dictionary<SkinnedMeshRenderer, List<string>> ShapesByRenderer = new Dictionary<SkinnedMeshRenderer, List<string>>();
         public RefitMode Mode;
         public bool CoverDifferentBaseBody;
+        /// <summary>Optional per-renderer coverage policy for packs containing both garments and props.</summary>
+        public Dictionary<SkinnedMeshRenderer, bool> CoverageByRenderer = new Dictionary<SkinnedMeshRenderer, bool>();
         /// <summary>The original base, for <see cref="RefitMode.Fit"/>.</summary>
         public CustomBaseOriginal Original;
         public string BaseKey, BaseName, Tool;
@@ -84,7 +86,10 @@ namespace Orbiters.Toolkit.Editor.VRChat.Refit
             var engine = RefitEngine.Current;
             string engineName = engine?.Name ?? "none";
             var root = batch.Avatar;
-            var renderers = batch.Renderers.Where(r => r != null).Distinct().ToList();
+            Func<SkinnedMeshRenderer, bool> coverageFor = r => batch.Mode == RefitMode.Fit &&
+                (batch.CoverageByRenderer.TryGetValue(r, out var enabled) ? enabled : batch.CoverDifferentBaseBody);
+            var renderers = batch.Renderers.Where(r => r != null).Distinct()
+                .OrderBy(r => coverageFor(r) ? ClothingCoverage.Layer(r) : 0).ToList();
             for (int i = 0; i < renderers.Count; i++)
             {
                 if (cancellation.IsCancellationRequested) { result.Cancelled = true; break; }
@@ -127,11 +132,15 @@ namespace Orbiters.Toolkit.Editor.VRChat.Refit
                 var job = new RefitJob
                 {
                     Renderer = renderer, Avatar = root.gameObject, Body = batch.Body, Mode = mode, Tightness = batch.Tightness,
-                    CoverDifferentBaseBody = batch.CoverDifferentBaseBody,
+                    CoverDifferentBaseBody = batch.CoverageByRenderer.TryGetValue(renderer, out var cover) ? cover : batch.CoverDifferentBaseBody,
                     SourceAvatar = batch.Original?.Avatar, SourceBody = batch.Original?.Body,
                     Shapes = Missing(renderer.sharedMesh, requested),
                 };
                 item.Job = job;
+                if (job.CoverDifferentBaseBody)
+                    job.CoverageLayers = result.Items.Where(previous => previous != item && coverageFor(previous.Renderer) &&
+                        previous.Outcome != null && previous.Outcome.Success && ClothingCoverage.Layer(previous.Renderer) < ClothingCoverage.Layer(renderer))
+                        .Select(previous => previous.Renderer).ToList();
                 if (mode == RefitMode.Shapes && job.Shapes.Count == 0)
                 {
                     item.Skipped = true;

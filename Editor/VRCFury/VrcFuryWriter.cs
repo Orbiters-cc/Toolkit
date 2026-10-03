@@ -35,6 +35,17 @@ namespace Orbiters.Toolkit.Editor.VRCFury
         }
 
         // The public API adds components without Undo: register the new one so Undo removes it.
+        public Component FullController(GameObject host, RuntimeAnimatorController controller, ScriptableObject menu, ScriptableObject parameters)
+        {
+            return Created(host, () =>
+            {
+                var full = FuryComponents.CreateFullController(host);
+                full.AddController(controller);
+                full.AddMenu((VRC.SDK3.Avatars.ScriptableObjects.VRCExpressionsMenu)menu);
+                full.AddParams((VRC.SDK3.Avatars.ScriptableObjects.VRCExpressionParameters)parameters);
+            });
+        }
+
         private static Component Created(GameObject host, System.Action create)
         {
             var before = host.GetComponents(VRChat.VrcFury.Component).ToList();

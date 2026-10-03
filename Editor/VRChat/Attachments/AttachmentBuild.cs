@@ -27,12 +27,24 @@ namespace Orbiters.Toolkit.Editor.VRChat.Attachments
             AttachmentInstaller.ConvertAtBuild(avatarRoot, attachments);
             foreach (var gone in Skins.Keys.Where(a => a == null).ToList()) Skins.Remove(gone);
             foreach (var attachment in attachments) Skins[attachment] = attachment.GetComponentsInChildren<SkinnedMeshRenderer>(true);
-            var moves = new List<FollowLink>();
-            foreach (var link in AttachmentFollow.Links(avatarRoot.transform, matchUnlinkedClothing: false))
-                if (link.Source == "My Avatar") moves.Add(link);
+            var links = AttachmentFollow.Links(avatarRoot.transform, matchUnlinkedClothing: false);
+            var creatorLinks = VrcFury.ArmatureLinks(avatarRoot).ToArray();
+            // Other configured attachments may belong to constraints or another build tool.
+            // Only take over the fitted skeleton whose recursive VRCFury link we replace.
+            var fittedRoots = new HashSet<Transform>(links.Where(l => l.Source == "Fitted clothing")
+                .GroupBy(l => l.Accessory).Where(group => creatorLinks.Any(c => c.Recursive && c.From != null &&
+                    group.Any(l => l.Follower == c.From.transform))).Select(group => group.Key));
+            var moves = links.Where(l => l.Source == "My Avatar" ||
+                l.Source == "Fitted clothing" && fittedRoots.Contains(l.Accessory)).ToList();
+            bool reparent = VrcFury.Builds(avatarRoot);
+            // A recursive creator link would align the fitted bones again, and only match identical
+            // child names. Replace that link on this build copy; keep toggles and unrelated prop links.
+            var fitted = new HashSet<Transform>(moves.Where(l => l.Source == "Fitted clothing").Select(l => l.Follower));
+            foreach (var link in creatorLinks)
+                if (link.Recursive && link.From != null && fitted.Contains(link.From.transform))
+                    Object.DestroyImmediate(link.Component);
             // Parents first: a child is placed from its parent's new pose, then everything follows its bone.
             moves.Sort((a, b) => Depth(a.Follower).CompareTo(Depth(b.Follower)));
-            bool reparent = VrcFury.Builds(avatarRoot);
             var animations = reparent ? null : AttachmentAnimationBuild.Prepare(avatarRoot);
             foreach (var move in moves) move.Apply();
             if (reparent)

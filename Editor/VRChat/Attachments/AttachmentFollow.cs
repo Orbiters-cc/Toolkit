@@ -53,6 +53,26 @@ namespace Orbiters.Toolkit.Editor.VRChat.Attachments
             foreach (var attachment in avatarRoot.GetComponentsInChildren<OrbitersAttachment>(true))
             {
                 var root = attachment.transform;
+                // A creator's recursive link only recognizes exact child names. A garment fitted to a
+                // different base needs the same anatomical matches used by the fit, including its arms.
+                // Use the same fitted offsets in the preview and on the build copy.
+                if (AttachmentFit.Fitted(attachment) &&
+                    (attachment.mode == OrbitersAttachment.AttachMode.Configured || attachment.mode == OrbitersAttachment.AttachMode.VrcFury))
+                {
+                    var fit = AttachmentFit.Compare(attachment.gameObject, avatarRoot);
+                    if (fit != null)
+                    {
+                        foreach (var pair in fit.Pairs)
+                        {
+                            result.Add(new FollowLink { Follower = pair.source, Target = pair.target,
+                                Offset = Current(pair.source, pair.target), Source = "Fitted clothing", Accessory = root });
+                            handled.Add(pair.source);
+                        }
+                        // Hood strings, tentacle chains and other unmatched deforming bones inherit their
+                        // fitted parents. Do not reinterpret them as a second unlinked humanoid armature.
+                        handled.UnionWith(attachment.GetComponentsInChildren<SkinnedMeshRenderer>(true).Select(r => r.transform));
+                    }
+                }
                 if (attachment.mode == OrbitersAttachment.AttachMode.Merge)
                 {
                     var rest = ArmatureRest.Frames(attachment.GetComponentsInChildren<SkinnedMeshRenderer>(true));

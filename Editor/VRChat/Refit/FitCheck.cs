@@ -63,7 +63,16 @@ namespace Orbiters.Toolkit.Editor.VRChat.Refit
                 if (missing.Count < shapes.Count) suggestion.CreatorAdapted = true;
                 if (missing.Count > 0) suggestion.Missing[mesh] = missing;
             }
-            if (suggestion.Missing.Count == 0) return suggestion;
+            if (suggestion.Missing.Count == 0)
+            {
+                // Armature fitting cannot establish surface fit. A garment adapted from another rig
+                // still deserves the fit question even when no nearby custom shape is missing.
+                var attachment = item.GetComponent<OrbitersAttachment>();
+                if (info.CanFit && Attachments.AttachmentFit.Fitted(attachment) && !RefitCandidates.Refitted(meshes) &&
+                    !(fitInfo != null && fitInfo.MadeForCustomBase && fitInfo.customBaseAssetId == info.AssetId))
+                    suggestion.Advice = FitAdvice.AskFit;
+                return suggestion;
+            }
 
             if (fitInfo != null && fitInfo.MadeForCustomBase && fitInfo.customBaseAssetId == info.AssetId)
                 suggestion.Advice = FitAdvice.AddShapes;

@@ -57,6 +57,16 @@ namespace Orbiters.Toolkit.VRChat
         /// </summary>
         [HideInInspector] public List<FittedPose> fitted = new List<FittedPose>();
 
+        [HideInInspector] public List<FittedMesh> fittedMeshes = new List<FittedMesh>();
+
+        [Serializable]
+        public sealed class FittedMesh
+        {
+            public SkinnedMeshRenderer renderer;
+            public Mesh before, after;
+            public Bounds beforeBounds, afterBounds;
+        }
+
         [Serializable]
         public struct FittedPose
         {

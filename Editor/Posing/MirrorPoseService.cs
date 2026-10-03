@@ -53,8 +53,8 @@ namespace Orbiters.Toolkit.Editor.Posing
             EditorApplication.hierarchyChanged += CheckHierarchy;
             EditorApplication.playModeStateChanged += state =>
             {
-                if (state == PlayModeStateChange.ExitingEditMode) Unbind(WaitingStatus);
-                else if (state == PlayModeStateChange.EnteredEditMode && Enabled) BindFromSelection();
+                if (state == PlayModeStateChange.ExitingEditMode || state == PlayModeStateChange.ExitingPlayMode) Unbind(WaitingStatus);
+                else if ((state == PlayModeStateChange.EnteredEditMode || state == PlayModeStateChange.EnteredPlayMode) && Enabled) BindFromSelection();
             };
             // Mirror mode survives script reloads; the rig is found again from the selection.
             Enabled = SessionState.GetBool(EnabledKey, false);
@@ -88,7 +88,7 @@ namespace Orbiters.Toolkit.Editor.Posing
 
         private static void BindFromSelection(bool force = false)
         {
-            if (EditorApplication.isPlayingOrWillChangePlaymode) return;
+            if (EditorApplication.isPlayingOrWillChangePlaymode && !EditorApplication.isPlaying) return;
             var selected = Selection.activeGameObject;
             if (selected == null || !(HumanoidRig(selected, out var root, out var renderer) || ResolveOtherRig != null && ResolveOtherRig(selected, out root, out renderer)) || root == null)
             {
@@ -101,6 +101,7 @@ namespace Orbiters.Toolkit.Editor.Posing
 
         private static void Unbind(string status)
         {
+            PlayModePoseOverrides.Clear();
             Root = null;
             Bones.Clear();
             RelativePairCount = 0;
@@ -111,12 +112,13 @@ namespace Orbiters.Toolkit.Editor.Posing
 
         private static bool Bind(Transform root, SkinnedMeshRenderer renderer)
         {
+            PlayModePoseOverrides.Clear();
             Root = null;
             Bones.Clear();
             RelativePairCount = 0;
             if (renderer == null && root != null) renderer = BestRenderer(root);
             if (root == null || renderer == null || !root.gameObject.scene.IsValid() ||
-                EditorUtility.IsPersistent(root) || EditorApplication.isPlayingOrWillChangePlaymode)
+                EditorUtility.IsPersistent(root))
                 return Fail("Mirror on · select a scene avatar with a skinned mesh.");
 
             var transforms = root.GetComponentsInChildren<Transform>(true);
@@ -203,6 +205,7 @@ namespace Orbiters.Toolkit.Editor.Posing
             RelativePairCount = Bones.Values.Count(b => !b.FromBindPose || !b.Other.FromBindPose) / 2;
             Root = root;
             LastStatus = $"Mirror: {root.name} · {PairCount} pairs" +
+                (EditorApplication.isPlaying ? " · Play Mode: turn off to release posed bones" : "") +
                 (RelativePairCount > 0 ? $" · {RelativePairCount} use the pose at start" : "") +
                 (skipped > 0 ? $" · {skipped} unevenly scaled pair{(skipped == 1 ? "" : "s")} skipped" : "");
             Changed?.Invoke();
@@ -284,7 +287,7 @@ namespace Orbiters.Toolkit.Editor.Posing
 
         private static UndoPropertyModification[] MirrorEdits(UndoPropertyModification[] modifications)
         {
-            if (!IsMirroring || applying || EditorApplication.isPlayingOrWillChangePlaymode ||
+            if (!IsMirroring || applying ||
                 AnimationMode.InAnimationMode()) return modifications;
             var edits = new Dictionary<Transform, int>();
             foreach (var modification in modifications)
@@ -300,13 +303,17 @@ namespace Orbiters.Toolkit.Editor.Posing
             applying = true;
             try
             {
+                // Multi-selection edits are explicit too: preserve both sides instead of an older pose hold.
+                if (EditorApplication.isPlaying)
+                    foreach (var edit in edits)
+                        if (edit.Value != 0) PlayModePoseOverrides.Hold(edit.Key, edit.Value);
                 foreach (var edit in edits)
                 {
                     var source = Bones[edit.Key];
                     var target = source.Other;
                     if (edit.Value == 0 || target.Transform == null || edits.ContainsKey(target.Transform)) continue;
                     // Complete-object snapshots avoid recursively generating transform modifications.
-                    Undo.RegisterCompleteObjectUndo(target.Transform, "Mirror pose");
+                    if (!EditorApplication.isPlaying) Undo.RegisterCompleteObjectUndo(target.Transform, "Mirror pose");
                     if ((edit.Value & 1) != 0)
                     {
                         var basis = source.ParentFrame.rotation;
@@ -321,7 +328,13 @@ namespace Orbiters.Toolkit.Editor.Posing
                         delta.x = -delta.x;
                         target.Transform.localPosition = target.Position + target.ParentFrame.inverse.MultiplyVector(delta);
                     }
-                    PrefabUtility.RecordPrefabInstancePropertyModifications(target.Transform);
+                    if (EditorApplication.isPlaying)
+                    {
+                        // Hold explicit edits after animation/IK each frame, without freezing the rest of the avatar.
+                        PlayModePoseOverrides.Hold(source.Transform, edit.Value);
+                        PlayModePoseOverrides.Hold(target.Transform, edit.Value);
+                    }
+                    else PrefabUtility.RecordPrefabInstancePropertyModifications(target.Transform);
                 }
             }
             finally { applying = false; }

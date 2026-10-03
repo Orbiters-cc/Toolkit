@@ -405,19 +405,113 @@ public sealed class AttachmentTests
         Assert.Less(Vector3.Distance(before * 2, prop.lossyScale), 1e-4f, "VRCFury reparents the prop, so subsequent target scale is inherited");
     }
 
+    [Test] public void FittedConfiguredClothingFollowsRenamedArmsWithoutLosingItsFit()
+    {
+        if (VrcFury.Writer == null) Assert.Ignore("VRCFury is not installed.");
+        var shirt = Clothing("Shirt", new[] { ("Hips", "", ""), ("Spine", "Hips", ""), ("Chest", "Spine", ""),
+            ("shoulder.L", "Chest", ""), ("upper_arm.L", "shoulder.L", ""), ("forearm.L", "upper_arm.L", "") });
+        var hips = shirt.GetComponentsInChildren<Transform>().Single(t => t.name == "Hips");
+        VrcFury.Writer.ArmatureLink(shirt, hips.gameObject, HumanBodyBones.LastBone, bones["Hips"].gameObject);
+        var attachment = AttachmentInstaller.Install(AttachmentPlanner.Analyze(shirt, avatar.transform), new AttachmentOptions { Created = true, AddToggle = false });
+        Assert.AreEqual(OrbitersAttachment.AttachMode.Configured, attachment.mode);
+        shirt.transform.localScale *= 1.3f;
+        bones["Left arm"].localRotation = Quaternion.Euler(0, 0, -30);
+        Assert.NotNull(AttachmentFit.Fit(attachment, avatar.transform));
+        var arm = shirt.GetComponentsInChildren<Transform>().Single(t => t.name == "upper_arm.L");
+        var initial = arm.rotation;
+        var rest = arm.localPosition;
+        var offset = Quaternion.Inverse(bones["Left arm"].rotation) * initial;
+        var links = AttachmentFollow.Links(avatar.transform);
+        Assert.AreEqual(1, links.Count(l => l.Follower == arm));
+        Assert.True(AccessoryPoseSync.Enable(avatar.transform));
+        Assert.Less(Quaternion.Angle(initial, arm.rotation), .01f, "enabling preserves fitted bone axes");
+        bones["Left arm"].localRotation = Quaternion.Euler(15, 0, -70);
+        AccessoryPoseSync.Sync();
+        Assert.Less(Quaternion.Angle(bones["Left arm"].rotation * offset, arm.rotation), .01f);
+        AccessoryPoseSync.Disable();
+        Assert.Less(Quaternion.Angle(initial, arm.rotation), .01f);
+        Assert.Less(Vector3.Distance(rest, arm.localPosition), .0001f);
+    }
+
+    [Test] public void FittedCreatorLinkBuildFollowsRenamedArmsAndKeepsTheSceneSetup()
+    {
+        if (VrcFury.Writer == null) Assert.Ignore("VRCFury is not installed.");
+        var shirt = Clothing("Shirt", new[] { ("Hips", "", ""), ("Spine", "Hips", ""), ("Chest", "Spine", ""),
+            ("ChestUp", "Chest", ""), ("shoulder.L", "ChestUp", ""), ("upper_arm.L", "shoulder.L", ""), ("forearm.L", "upper_arm.L", "") });
+        var hips = shirt.GetComponentsInChildren<Transform>().Single(t => t.name == "Hips");
+        var creatorLink = VrcFury.Writer.ArmatureLink(shirt, hips.gameObject, HumanBodyBones.LastBone, bones["Hips"].gameObject);
+        var attachment = AttachmentInstaller.Install(AttachmentPlanner.Analyze(shirt, avatar.transform), new AttachmentOptions { Created = true });
+        shirt.transform.localScale *= 1.3f;
+        bones["Left arm"].localRotation = Quaternion.Euler(0, 0, -30);
+        Assert.NotNull(AttachmentFit.Fit(attachment, avatar.transform));
+        var originalArm = shirt.GetComponentsInChildren<Transform>().Single(t => t.name == "upper_arm.L");
+        var originalPosition = originalArm.position;
+        var clone = Own(Object.Instantiate(avatar));
+        var copyArm = clone.GetComponentsInChildren<Transform>().Single(t => t.name == "upper_arm.L");
+        var copyTarget = clone.GetComponentsInChildren<Transform>().Single(t => t.name == "Left arm");
+        var position = copyArm.position;
+        var rotation = copyArm.rotation;
+        AttachmentBuild.Apply(clone);
+        Assert.AreSame(copyTarget, copyArm.parent, "build uses the anatomical match through extra chest bones");
+        Assert.Less(Vector3.Distance(position, copyArm.position), .0001f, "the fit does not move during build");
+        Assert.Less(Quaternion.Angle(rotation, copyArm.rotation), .01f);
+        Assert.IsEmpty(VrcFury.ArmatureLinks(clone), "the recursive link cannot align the fitted bones a second time");
+        Assert.True(VrcFury.Any(clone, "Toggle"), "creator/menu features survive");
+        var offset = Quaternion.Inverse(copyTarget.rotation) * copyArm.rotation;
+        copyTarget.localRotation = Quaternion.Euler(15, 0, -80);
+        Assert.Less(Quaternion.Angle(copyTarget.rotation * offset, copyArm.rotation), .01f);
+        AttachmentBuild.Apply(clone); // A repeated callback must not move the already-linked bones again.
+        Assert.AreSame(copyTarget, copyArm.parent);
+        Assert.NotNull(creatorLink);
+        Assert.Less(Vector3.Distance(originalPosition, originalArm.position), .0001f);
+    }
+
+    [Test] public void FittedConfiguredClothingWithoutARecursiveCreatorLinkKeepsItsOwnBuildSetup()
+    {
+        var shirt = Clothing("Shirt", new[] { ("Hips", "", ""), ("Spine", "Hips", ""), ("Chest", "Spine", ""),
+            ("shoulder.L", "Chest", ""), ("upper_arm.L", "shoulder.L", "") });
+        var attachment = shirt.AddComponent<OrbitersAttachment>();
+        attachment.mode = OrbitersAttachment.AttachMode.Configured;
+        shirt.transform.localScale *= 1.3f;
+        Assert.NotNull(AttachmentFit.Fit(attachment, avatar.transform));
+        var clone = Own(Object.Instantiate(avatar));
+        var arm = clone.GetComponentsInChildren<Transform>().Single(t => t.name == "upper_arm.L");
+        var parent = arm.parent;
+        var position = arm.position;
+        AttachmentBuild.Apply(clone);
+        Assert.AreSame(parent, arm.parent, "a different attachment system still owns this skeleton");
+        Assert.Less(Vector3.Distance(position, arm.position), .0001f);
+    }
+
     [Test] public void PosePreviewFollowsTheAvatarAndPutsEverythingBack()
     {
         var shirt = Clothing("Shirt", new[] { ("hips", "", ""), ("spine", "hips", ""), ("chest", "spine", ""), ("shoulder.L", "chest", ""), ("upper_arm.L", "shoulder.L", "") });
         AttachmentInstaller.Install(AttachmentPlanner.Analyze(shirt, avatar.transform), new AttachmentOptions { Created = true, AddToggle = false });
         var arm = shirt.GetComponentsInChildren<Transform>().Single(t => t.name == "upper_arm.L");
         var rest = arm.position;
+        var renderer = shirt.GetComponentInChildren<SkinnedMeshRenderer>();
+        var matrixRefresh = renderer.forceMatrixRecalculationPerRender;
         var offset = bones["Left arm"].InverseTransformPoint(arm.position);
         Assert.True(AccessoryPoseSync.Enable(avatar.transform), AccessoryPoseSync.LastStatus);
+        Assert.True(renderer.forceMatrixRecalculationPerRender, "live clothing must not retain cached skinning matrices");
         bones["Left shoulder"].localRotation = Quaternion.Euler(0, 0, 50);
         AccessoryPoseSync.Sync();
         Assert.Less(Vector3.Distance(bones["Left arm"].TransformPoint(offset), arm.position), 1e-4f);
         AccessoryPoseSync.Disable();
         Assert.Less(Vector3.Distance(rest, arm.position), 1e-4f);
+        Assert.AreEqual(matrixRefresh, renderer.forceMatrixRecalculationPerRender);
+    }
+
+    [UnityEngine.TestTools.UnityTest] public IEnumerator PosePreviewFollowsEditsWithoutUndoPropertyNotifications()
+    {
+        var shirt = Clothing("Shirt", new[] { ("hips", "", ""), ("spine", "hips", ""), ("chest", "spine", ""), ("shoulder.L", "chest", ""), ("upper_arm.L", "shoulder.L", "") });
+        AttachmentInstaller.Install(AttachmentPlanner.Analyze(shirt, avatar.transform), new AttachmentOptions { Created = true, AddToggle = false });
+        var arm = shirt.GetComponentsInChildren<Transform>().Single(t => t.name == "upper_arm.L");
+        Assert.True(AccessoryPoseSync.Enable(avatar.transform));
+        var offset = bones["Left arm"].InverseTransformPoint(arm.position);
+        bones["Left shoulder"].localRotation = Quaternion.Euler(0, 0, 50);
+        for (int frame = 0; frame < 10; frame++) yield return null;
+        Assert.Less(Vector3.Distance(bones["Left arm"].TransformPoint(offset), arm.position), .0001f);
     }
 
     [Test] public void RemovingAnAccessoryTheToolPlacedDeletesIt()

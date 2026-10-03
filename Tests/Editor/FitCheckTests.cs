@@ -86,6 +86,52 @@ public sealed class FitCheckTests
     }
 
     [UnityTest]
+    public IEnumerator AnArmatureFittedItemStillNeedsASurfaceFitQuestionWhenNoShapeIsNear()
+    {
+        var jacket = Item("Jacket", new Vector3(0, 2, 0));
+        var attachment = jacket.AddComponent<OrbitersAttachment>();
+        attachment.fitted.Add(new OrbitersAttachment.FittedPose { transform = jacket.transform });
+        var suggestion = Check(jacket, State(canFit: true));
+        yield return Wait(suggestion);
+        Assert.That(suggestion.Result.Advice, Is.EqualTo(FitAdvice.AskFit));
+        Assert.That(suggestion.Result.ShapeCount, Is.Zero);
+
+        jacket.AddComponent<OrbitersFitInfo>().customBaseAssetId = 14;
+        suggestion = Check(jacket, State(canFit: true));
+        yield return Wait(suggestion);
+        Assert.That(suggestion.Result.Advice, Is.EqualTo(FitAdvice.None), "An explicit creator fit for this custom base remains authoritative.");
+    }
+
+    [UnityTest]
+    public IEnumerator ArmatureFitWithoutAnOriginalBaseDoesNotOfferAnUnavailableRefit()
+    {
+        var jacket = Item("Jacket", new Vector3(0, 2, 0));
+        jacket.AddComponent<OrbitersAttachment>().fitted.Add(new OrbitersAttachment.FittedPose { transform = jacket.transform });
+        var suggestion = Check(jacket, State(canFit: false));
+        yield return Wait(suggestion);
+        Assert.That(suggestion.Result.Advice, Is.EqualTo(FitAdvice.None));
+    }
+
+    [Test]
+    public void SkinnedRelevancePointsApplyImportAndRendererScaleOnce()
+    {
+        var jacket = Item("Scaled jacket", new Vector3(1, 0, 0));
+        var renderer = jacket.GetComponentInChildren<SkinnedMeshRenderer>();
+        var bone = Own(new GameObject("Scale test bone")).transform;
+        bone.SetParent(avatar.transform, false);
+        renderer.bones = new[] { bone }; renderer.rootBone = bone;
+        renderer.sharedMesh.bindposes = new[] { bone.worldToLocalMatrix * renderer.localToWorldMatrix };
+        renderer.sharedMesh.boneWeights = Enumerable.Repeat(new BoneWeight { boneIndex0 = 0, weight0 = 1 }, renderer.sharedMesh.vertexCount).ToArray();
+        renderer.transform.localScale = new Vector3(0.88f, 0.88f, 0.88f);
+        avatar.transform.localScale = Vector3.one * 1.3f;
+        avatar.transform.SetPositionAndRotation(new Vector3(2, 3, -1), Quaternion.Euler(10, 30, 5));
+        var points = RefitRelevance.WorldPoints(renderer);
+        var expected = bone.localToWorldMatrix * renderer.sharedMesh.bindposes[0];
+        for (int i = 0; i < points.Length; i++)
+            Assert.That(Vector3.Distance(points[i], expected.MultiplyPoint3x4(renderer.sharedMesh.vertices[i])), Is.LessThan(0.0001f));
+    }
+
+    [UnityTest]
     public IEnumerator WithoutTheOriginalBaseOnlyShapesAreOffered()
     {
         var jacket = Item("Jacket", new Vector3(1.02f, 0, 0));

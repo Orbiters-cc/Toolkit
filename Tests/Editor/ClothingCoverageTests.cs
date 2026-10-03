@@ -7,6 +7,8 @@ public class ClothingCoverageTests
 {
     [TestCase("Hoodie", true)]
     [TestCase("Rex_Pants", true)]
+    [TestCase("Rex_Shorts", true)]
+    [TestCase("Jacket_V1.1", true)]
     [TestCase("T-Shirt", true)]
     [TestCase("Underwear", true)]
     [TestCase("Glowsticks", false)]
@@ -27,5 +29,27 @@ public class ClothingCoverageTests
             Assert.AreEqual(eligible, ClothingCoverage.Eligible(item));
         }
         finally { Object.DestroyImmediate(go); }
+    }
+
+    [Test] public void OutfitInspectsEachGarmentWithoutExpandingItsProps()
+    {
+        var scene = UnityEditor.SceneManagement.EditorSceneManager.NewPreviewScene();
+        var root = new GameObject("[P.0.E] - FishingOutfit - Rex");
+        UnityEngine.SceneManagement.SceneManager.MoveGameObjectToScene(root, scene);
+        try
+        {
+            var item = root.AddComponent<OrbitersAttachment>();
+            foreach (string name in new[] { "Jacket", "Shirt", "Shorts", "FishingRod", "ShirtButton" })
+            {
+                var go = new GameObject(name); go.transform.SetParent(root.transform, false);
+                go.AddComponent<SkinnedMeshRenderer>();
+            }
+            Assert.IsFalse(ClothingCoverage.Eligible(item));
+            Assert.IsTrue(ClothingCoverage.Eligible(item, true));
+            foreach (var renderer in root.GetComponentsInChildren<SkinnedMeshRenderer>())
+                Assert.AreEqual(renderer.name == "Jacket" || renderer.name == "Shirt" || renderer.name == "Shorts",
+                    ClothingCoverage.Eligible(item, renderer, true), renderer.name);
+        }
+        finally { Object.DestroyImmediate(root); UnityEditor.SceneManagement.EditorSceneManager.ClosePreviewScene(scene); }
     }
 }

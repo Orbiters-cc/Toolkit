@@ -39,6 +39,8 @@ namespace Orbiters.Toolkit.Editor.VRChat.Posing
         private static readonly List<FollowLink> Links = new List<FollowLink>();
         private static readonly List<Snapshot> Snapshots = new List<Snapshot>();
         private static readonly List<Accessory> Found = new List<Accessory>();
+        private static readonly Dictionary<Transform, Matrix4x4> TargetFrames = new Dictionary<Transform, Matrix4x4>();
+        private static readonly Dictionary<SkinnedMeshRenderer, bool> RendererFrames = new Dictionary<SkinnedMeshRenderer, bool>();
         private static HashSet<Transform> avatarBones = new HashSet<Transform>();
         private static bool pending, saving;
 
@@ -51,6 +53,7 @@ namespace Orbiters.Toolkit.Editor.VRChat.Posing
         static AccessoryPoseSync()
         {
             Undo.postprocessModifications += Follow;
+            EditorApplication.update += FollowChangedPose;
             Undo.undoRedoPerformed += () => { if (Enabled) Schedule(); };
             EditorApplication.playModeStateChanged += state => { if (state == PlayModeStateChange.ExitingEditMode) Disable(); };
             AssemblyReloadEvents.beforeAssemblyReload += Disable;
@@ -98,6 +101,8 @@ namespace Orbiters.Toolkit.Editor.VRChat.Posing
             Links.Sort((x, y) => Depth(x.Follower).CompareTo(Depth(y.Follower)));
             foreach (var t in Links.Select(l => l.Follower).Distinct())
                 Snapshots.Add(new Snapshot { Transform = t, Position = t.localPosition, Rotation = t.localRotation, Scale = t.localScale });
+            foreach (var renderer in avatarRoot.GetComponentsInChildren<SkinnedMeshRenderer>(true))
+                RendererFrames[renderer] = renderer.forceMatrixRecalculationPerRender;
             var skeleton = AvatarSkeleton.Bones(avatarRoot, AttachmentPlanner.Body(avatarRoot));
             avatarBones = new HashSet<Transform>(skeleton);
             foreach (var bone in skeleton)
@@ -117,6 +122,8 @@ namespace Orbiters.Toolkit.Editor.VRChat.Posing
             Links.Clear();
             Snapshots.Clear();
             Found.Clear();
+            TargetFrames.Clear();
+            RendererFrames.Clear();
             LastStatus = "Off";
             Changed?.Invoke();
         }
@@ -127,11 +134,32 @@ namespace Orbiters.Toolkit.Editor.VRChat.Posing
             if (!Enabled) return;
             Links.RemoveAll(l => l.Target == null || l.Follower == null);
             foreach (var link in Links) link.Apply();
+            foreach (var link in Links) TargetFrames[link.Target] = link.Target.localToWorldMatrix;
+            foreach (var renderer in RendererFrames.Keys)
+                if (renderer != null) renderer.forceMatrixRecalculationPerRender = true;
+            // Repainting alone can retain the previous GPU skinning result in edit mode.
+            EditorApplication.QueuePlayerLoopUpdate();
+        }
+
+        // Scene handles, complete-object Undo and other pose tools do not all emit property modifications.
+        // Observe the target frames without consuming Transform.hasChanged (other tools use it too).
+        private static void FollowChangedPose()
+        {
+            if (!Enabled || saving || EditorApplication.isPlayingOrWillChangePlaymode) return;
+            foreach (var link in Links)
+                if (link.Target != null && (!TargetFrames.TryGetValue(link.Target, out var frame) || frame != link.Target.localToWorldMatrix))
+                {
+                    Sync();
+                    SceneView.RepaintAll();
+                    break;
+                }
         }
 
         // The preview is not an edit: the accessories get their own transforms back, and their prefab overrides with them.
         private static void Restore()
         {
+            foreach (var renderer in RendererFrames)
+                if (renderer.Key != null) renderer.Key.forceMatrixRecalculationPerRender = renderer.Value;
             foreach (var snapshot in Snapshots)
             {
                 if (snapshot.Transform == null) continue;
