@@ -451,6 +451,11 @@ public sealed class RefitRecordsTests
     {
         var shirt = AddRenderer("Shirt", jacketMesh);
         var prop = AddRenderer("FishingRod", jacketMesh);
+        foreach (var renderer in new[] { shirt, prop })
+        {
+            renderer.bones = new[] { bone };
+            renderer.rootBone = bone;
+        }
         var batch = Batch(RefitMode.Fit, "Flex arms");
         batch.Renderers = new List<SkinnedMeshRenderer> { jacket, prop, shirt };
         batch.CoverageByRenderer[jacket] = true;
