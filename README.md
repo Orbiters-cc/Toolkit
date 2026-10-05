@@ -2,8 +2,8 @@
 
 ## 0.3.13 — 2026-10-05
 
-- `AvatarBudget` and `AvatarBudgetPanel`: an avatar's parameters, bones, PhysBones and contacts against VRChat's PC limits, read from the SDK's performance levels, split between the avatar and its custom base. Custom base providers describe what they add and what their build changes with `CustomBaseFootprint`.
-- Parameter estimates count the bits of the custom base's objects separately.
+- `AvatarBudget`: an avatar's parameters, bones, PhysBones and contacts against VRChat's PC limits, read from the SDK's performance levels, split between the avatar and its custom base. Custom base providers describe what they add and what their build changes with `CustomBaseFootprint`. XRay Gizmos shows it over the Scene view.
+- Parameter estimates count the bits of the custom base's objects separately, and estimate what VRCFury's parameter compression leaves after build: which parameters it compresses, the bits they take and the time a full sync takes.
 - Build copies: `AttachmentAnimationBuild.Keep` makes objects created during a build assets until it is released; `Moved` keeps the animations of bones a tool moved before the build.
 
 ## 0.3.12 — 2026-10-05

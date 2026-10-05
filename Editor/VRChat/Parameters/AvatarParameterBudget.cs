@@ -9,29 +9,50 @@ using VRC.SDK3.Avatars.ScriptableObjects;
 
 namespace Orbiters.Toolkit.Editor.VRChat.Parameters
 {
-    /// <summary>Estimated synced parameter memory before VRCFury's build-time compression.</summary>
+    /// <summary>Estimated synced parameter memory, before and after VRCFury's build-time compression.</summary>
     public struct ParameterBudget
     {
         public const int MaxSyncedBits = 256;
-        public int DescriptorBits, ToggleBits, FullControllerBits, WithoutAdded, Added, TotalBeforeCompression;
-        /// <summary>Bits of the custom base's objects (Options.IsCustomBase), its planned sliders included.</summary>
+        public int DescriptorBits, ToggleBits, FullControllerBits, TotalBeforeCompression;
+        /// <summary>Bits of the custom base's objects (Options.IsCustomBase).</summary>
         public int CustomBaseBits;
         public int AvatarBits => TotalBeforeCompression - CustomBaseBits;
         public bool VrcFuryPresent;
         public string CompressionStatus;
-        public int Free => Mathf.Max(0, MaxSyncedBits - TotalBeforeCompression);
-        public bool OverBudget => TotalBeforeCompression > MaxSyncedBits;
+        /// <summary>True when VRCFury will compress at build: over the limit, with compression allowed (or asked and accepted).</summary>
+        public bool Compresses;
+        /// <summary>Bits once VRCFury compressed them, when <see cref="Compresses"/>.</summary>
+        public int CompressedBits;
+        /// <summary>How many parameters VRCFury compresses, and how long a full sync of them takes.</summary>
+        public int CompressedParameters;
+        public float SyncSeconds;
+        /// <summary>The bits that count against the limit once built.</summary>
+        public int BuiltBits => Compresses ? CompressedBits : TotalBeforeCompression;
+        public int Free => Mathf.Max(0, MaxSyncedBits - BuiltBits);
+        public bool OverBudget => BuiltBits > MaxSyncedBits;
     }
 
     public static class AvatarParameterBudget
     {
         public sealed class Options
         {
-            public Func<GameObject, bool> IsReservedSliderHost;
-            public int PlannedSliders;
             /// <summary>Objects a custom base owns: their toggles and controllers count as the custom base's.</summary>
             public Func<GameObject, bool> IsCustomBase;
         }
+
+        // The menu control a synced parameter drives, in VRCFury's compressor priority order: a parameter several controls
+        // use counts as the last of them. Radials, toggles and puppets can be compressed; buttons and sub-menus cannot.
+        private enum MenuUse { None = -1, Radial = 0, Toggle = 1, TwoAxis = 2, FourAxis = 3, Button = 4, SubMenu = 5 }
+
+        private struct Synced
+        {
+            public int Cost;
+            public bool Bool;
+            public MenuUse Menu;
+        }
+
+        // VRCFury's ParameterCompressorService: seconds per batch, plus half a frame at 30 fps.
+        private const float BatchSeconds = .1f + .5f / 30f;
 
         private static Type vrcFuryType, toggleType, fullControllerType;
         private static System.Reflection.FieldInfo networkSyncedField;
@@ -43,33 +64,146 @@ namespace Orbiters.Toolkit.Editor.VRChat.Parameters
             var descriptor = avatarRoot.GetComponent<VRCAvatarDescriptor>();
             if (descriptor == null) return budget;
 
-            budget.DescriptorBits = DescriptorBits(descriptor);
-            ResolveVrcFury();
-            if (vrcFuryType == null)
+            var parameters = new List<Synced>();
+            var synced = new Dictionary<string, VRCExpressionParameters.ValueType>();
+            if (descriptor.customExpressions)
             {
-                budget.WithoutAdded = budget.TotalBeforeCompression = budget.DescriptorBits;
-                return budget;
+                var uses = MenuUses(descriptor.expressionsMenu);
+                foreach (var parameter in SyncedParameters(descriptor.expressionParameters))
+                {
+                    if (synced.ContainsKey(parameter.name)) continue;
+                    synced[parameter.name] = parameter.valueType;
+                    budget.DescriptorBits += Add(parameters, parameter.valueType, uses, parameter.name);
+                }
             }
+            budget.TotalBeforeCompression = budget.DescriptorBits;
+            ResolveVrcFury();
+            if (vrcFuryType == null) return budget;
             budget.VrcFuryPresent = true;
 
-            bool IsReserved(GameObject go) => go != null && options?.IsReservedSliderHost != null && options.IsReservedSliderHost(go);
             bool IsCustomBase(GameObject go) => go != null && options?.IsCustomBase != null && options.IsCustomBase(go);
             var components = avatarRoot.GetComponentsInChildren(vrcFuryType, true);
-            // Compression eligibility depends on the completed animator build. Do not invent savings here.
+            budget.FullControllerBits = FullControllerBits(components, synced, parameters, IsCustomBase, out int customControllers);
+            budget.ToggleBits = ToggleBits(components, parameters, IsCustomBase, out int customToggles);
+            budget.TotalBeforeCompression = budget.DescriptorBits + budget.ToggleBits + budget.FullControllerBits;
+            budget.CustomBaseBits = customControllers + customToggles;
+
             var mode = VrcFury.Find("VF.Menu.CompressorMenuItem")?.GetMethod("Get")?.Invoke(null, null)?.ToString();
             budget.CompressionStatus = mode == "Ask" ? "VRCFury asks about compression during build."
                 : mode == "Fail" ? "VRCFury compression is disabled in its global settings."
                 : mode == "Compress" ? "VRCFury compresses automatically when needed during build."
                 : "Compression is controlled by VRCFury during build.";
-            var synced = descriptor.customExpressions ? SyncedTypes(descriptor.expressionParameters)
-                : new Dictionary<string, VRCExpressionParameters.ValueType>();
-            budget.FullControllerBits = FullControllerBits(components, synced, IsCustomBase, out int customControllers);
-            budget.ToggleBits = ToggleBits(components, IsReserved, IsCustomBase, out int customToggles);
-            budget.WithoutAdded = budget.DescriptorBits + budget.ToggleBits + budget.FullControllerBits;
-            budget.Added = Mathf.Max(0, options?.PlannedSliders ?? 0) * 8;
-            budget.TotalBeforeCompression = budget.WithoutAdded + budget.Added;
-            budget.CustomBaseBits = customControllers + customToggles + budget.Added;
+            if (budget.TotalBeforeCompression > ParameterBudget.MaxSyncedBits && mode != "Fail") Compress(ref budget, parameters);
             return budget;
+        }
+
+        // VRCFury's ParameterCompressorSolverService: from the least to the most aggressive set of menu controls, the first
+        // set that fits; a more aggressive one only when it at least halves the sync time.
+        private static void Compress(ref ParameterBudget budget, List<Synced> parameters)
+        {
+            var attempts = new[]
+            {
+                new[] { MenuUse.Radial }, new[] { MenuUse.Toggle }, new[] { MenuUse.Radial, MenuUse.Toggle },
+                new[] { MenuUse.TwoAxis, MenuUse.FourAxis }, new[] { MenuUse.Radial, MenuUse.TwoAxis, MenuUse.FourAxis },
+                new[] { MenuUse.Toggle, MenuUse.TwoAxis, MenuUse.FourAxis }, new[] { MenuUse.Radial, MenuUse.Toggle, MenuUse.TwoAxis, MenuUse.FourAxis },
+            };
+            int original = budget.TotalBeforeCompression, bestCost = original, bestCount = 0, bestBatches = 0;
+            bool bestFits = false;
+            foreach (var attempt in attempts)
+            {
+                var eligible = parameters.Where(p => attempt.Contains(p.Menu)).ToList();
+                if (eligible.Count == 0) continue;
+                int bools = eligible.Count(p => p.Bool);
+                var (cost, batches) = Optimize(original, eligible.Sum(p => p.Cost), bools, eligible.Count - bools);
+                if (bestFits)
+                {
+                    if (batches > bestBatches / 2f || cost > ParameterBudget.MaxSyncedBits) continue;
+                }
+                else if (cost >= bestCost) continue;
+                bestCost = cost; bestCount = eligible.Count; bestBatches = batches;
+                bestFits = cost <= ParameterBudget.MaxSyncedBits;
+                if (bestFits && batches * .1f <= 1f) break;
+            }
+            if (bestCount == 0) return;
+            budget.Compresses = true;
+            budget.CompressedBits = bestCost;
+            budget.CompressedParameters = bestCount;
+            budget.SyncSeconds = bestBatches * BatchSeconds;
+        }
+
+        // VRCFury's OptimizationDecision: one bool and one number slot, then more while they fit, keeping batch counts even.
+        private static (int cost, int batches) Optimize(int original, int removed, int bools, int numbers)
+        {
+            int Batches(int n, int b) => Math.Max(n > 0 ? (numbers + n - 1) / n : 0, b > 0 ? (bools + b - 1) / b : 0);
+            int Cost(int n, int b) => original + IndexBits(Batches(n, b)) + n * 8 + b - removed;
+            int numberSlots = numbers > 0 ? 1 : 0, boolSlots = bools > 0 ? 1 : 0;
+            while (true)
+            {
+                if (numberSlots < numbers && Cost(numberSlots + 1, boolSlots) <= ParameterBudget.MaxSyncedBits
+                    && (bools == 0 || (float)numberSlots / numbers < (float)boolSlots / bools)) numberSlots++;
+                else if (boolSlots < bools && Cost(numberSlots, boolSlots + 1) <= ParameterBudget.MaxSyncedBits) boolSlots++;
+                else break;
+            }
+            return (Cost(numberSlots, boolSlots), Batches(numberSlots, boolSlots));
+        }
+
+        private static int IndexBits(int batchCount)
+        {
+            int bits = 1;
+            while ((1 << bits) < batchCount + 1) bits++;
+            return bits;
+        }
+
+        private static int Add(List<Synced> parameters, VRCExpressionParameters.ValueType type, Dictionary<string, MenuUse> uses, string name)
+        {
+            int cost = VRCExpressionParameters.TypeCost(type);
+            parameters.Add(new Synced { Cost = cost, Bool = type == VRCExpressionParameters.ValueType.Bool,
+                Menu = name != null && uses.TryGetValue(name, out var use) ? use : MenuUse.None });
+            return cost;
+        }
+
+        // Which control of the menu (and its sub-menus) each parameter drives.
+        private static Dictionary<string, MenuUse> MenuUses(VRCExpressionsMenu menu)
+        {
+            var uses = new Dictionary<string, MenuUse>();
+            var visited = new HashSet<VRCExpressionsMenu>();
+            void Use(VRCExpressionsMenu.Control.Parameter parameter, MenuUse use)
+            {
+                if (string.IsNullOrEmpty(parameter?.name)) return;
+                if (!uses.TryGetValue(parameter.name, out var previous) || use > previous) uses[parameter.name] = use;
+            }
+            void Walk(VRCExpressionsMenu current)
+            {
+                if (current?.controls == null || !visited.Add(current)) return;
+                foreach (var control in current.controls)
+                {
+                    if (control == null) continue;
+                    var sub = control.subParameters ?? Array.Empty<VRCExpressionsMenu.Control.Parameter>();
+                    switch (control.type)
+                    {
+                        case VRCExpressionsMenu.Control.ControlType.Toggle: Use(control.parameter, MenuUse.Toggle); break;
+                        case VRCExpressionsMenu.Control.ControlType.Button: Use(control.parameter, MenuUse.Button); break;
+                        case VRCExpressionsMenu.Control.ControlType.RadialPuppet:
+                            Use(control.parameter, MenuUse.SubMenu);
+                            if (sub.Length > 0) Use(sub[0], MenuUse.Radial);
+                            break;
+                        case VRCExpressionsMenu.Control.ControlType.TwoAxisPuppet:
+                            Use(control.parameter, MenuUse.SubMenu);
+                            foreach (var p in sub.Take(2)) Use(p, MenuUse.TwoAxis);
+                            break;
+                        case VRCExpressionsMenu.Control.ControlType.FourAxisPuppet:
+                            Use(control.parameter, MenuUse.SubMenu);
+                            foreach (var p in sub.Take(4)) Use(p, MenuUse.FourAxis);
+                            break;
+                        case VRCExpressionsMenu.Control.ControlType.SubMenu:
+                            Use(control.parameter, MenuUse.SubMenu);
+                            Walk(control.subMenu);
+                            break;
+                    }
+                }
+            }
+            Walk(menu);
+            return uses;
         }
 
         private static void ResolveVrcFury()
@@ -86,29 +220,14 @@ namespace Orbiters.Toolkit.Editor.VRChat.Parameters
             return networkSyncedField == null || (bool)networkSyncedField.GetValue(parameter);
         }
 
-        private static int DescriptorBits(VRCAvatarDescriptor descriptor)
-        {
-            if (!descriptor.customExpressions || descriptor.expressionParameters?.parameters == null) return 0;
-            int total = 0;
-            foreach (var parameter in descriptor.expressionParameters.parameters)
-                if (parameter != null && IsSynced(parameter)) total += VRCExpressionParameters.TypeCost(parameter.valueType);
-            return total;
-        }
-
-        private static Dictionary<string, VRCExpressionParameters.ValueType> SyncedTypes(VRCExpressionParameters parameters)
-        {
-            var map = new Dictionary<string, VRCExpressionParameters.ValueType>();
-            if (parameters?.parameters == null) return map;
-            foreach (var parameter in parameters.parameters)
-                if (parameter != null && !string.IsNullOrEmpty(parameter.name) && IsSynced(parameter) && !map.ContainsKey(parameter.name))
-                    map[parameter.name] = parameter.valueType;
-            return map;
-        }
+        private static IEnumerable<VRCExpressionParameters.Parameter> SyncedParameters(VRCExpressionParameters parameters) =>
+            parameters?.parameters == null ? Enumerable.Empty<VRCExpressionParameters.Parameter>()
+                : parameters.parameters.Where(p => p != null && !string.IsNullOrEmpty(p.name) && IsSynced(p));
 
         private static object Content(Component component) => VrcFury.Content(component);
 
         private static int FullControllerBits(Component[] components, Dictionary<string, VRCExpressionParameters.ValueType> synced,
-            Func<GameObject, bool> isCustomBase, out int custom)
+            List<Synced> parameters, Func<GameObject, bool> isCustomBase, out int custom)
         {
             custom = 0;
             if (fullControllerType == null) return 0;
@@ -121,20 +240,25 @@ namespace Orbiters.Toolkit.Editor.VRChat.Parameters
                 // VRCFury gives each Full Controller its own namespace. Only explicit globals share names.
                 var localNames = new HashSet<string>();
                 var globals = fullControllerType.GetField("globalParams")?.GetValue(content) as IEnumerable<string>;
+                var uses = new Dictionary<string, MenuUse>();
+                if (fullControllerType.GetField("menus")?.GetValue(content) is IEnumerable menus)
+                    foreach (var entry in menus)
+                        if (VrcFury.ObjectReference(entry?.GetType().GetField("menu")?.GetValue(entry)) is VRCExpressionsMenu menu)
+                            foreach (var pair in MenuUses(menu))
+                                if (!uses.TryGetValue(pair.Key, out var previous) || pair.Value > previous) uses[pair.Key] = pair.Value;
                 if (!(fullControllerType.GetField("prms")?.GetValue(content) is IEnumerable entries)) continue;
                 foreach (var entry in entries)
                 {
-                    if (!(VrcFury.ObjectReference(entry?.GetType().GetField("parameters")?.GetValue(entry)) is VRCExpressionParameters asset) || asset.parameters == null) continue;
-                    foreach (var parameter in asset.parameters)
+                    if (!(VrcFury.ObjectReference(entry?.GetType().GetField("parameters")?.GetValue(entry)) is VRCExpressionParameters asset)) continue;
+                    foreach (var parameter in SyncedParameters(asset))
                     {
-                        if (parameter == null || string.IsNullOrEmpty(parameter.name) || !IsSynced(parameter)) continue;
                         if (IsGlobal(parameter.name, globals))
                         {
                             if (synced.ContainsKey(parameter.name)) continue;
                             synced[parameter.name] = parameter.valueType;
                         }
                         else if (!localNames.Add(parameter.name)) continue;
-                        int cost = VRCExpressionParameters.TypeCost(parameter.valueType);
+                        int cost = Add(parameters, parameter.valueType, uses, parameter.name);
                         added += cost;
                         if (isCustomBase(component.gameObject)) custom += cost;
                     }
@@ -162,8 +286,8 @@ namespace Orbiters.Toolkit.Editor.VRChat.Parameters
             return global;
         }
 
-
-        private static int ToggleBits(Component[] components, Func<GameObject, bool> isReserved, Func<GameObject, bool> isCustomBase, out int custom)
+        // A toggle is a menu toggle, a radial when it is a slider, or a button when held.
+        private static int ToggleBits(Component[] components, List<Synced> parameters, Func<GameObject, bool> isCustomBase, out int custom)
         {
             custom = 0;
             if (toggleType == null) return 0;
@@ -175,14 +299,13 @@ namespace Orbiters.Toolkit.Editor.VRChat.Parameters
                 if (content == null || !toggleType.IsInstanceOfType(content)) continue;
                 bool slider = (bool)(toggleType.GetField("slider")?.GetValue(content) ?? false);
                 bool integer = (bool)(toggleType.GetField("useInt")?.GetValue(content) ?? false);
-                if (slider && isReserved(component.gameObject)) continue;
+                bool held = (bool)(toggleType.GetField("holdButton")?.GetValue(content) ?? false);
                 int cost = slider || integer ? 8 : 1;
+                parameters.Add(new Synced { Cost = cost, Bool = cost == 1, Menu = held ? MenuUse.Button : slider ? MenuUse.Radial : MenuUse.Toggle });
                 raw += cost;
                 if (isCustomBase(component.gameObject)) custom += cost;
             }
             return raw;
         }
-
-
     }
 }

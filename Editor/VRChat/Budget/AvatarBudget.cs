@@ -33,7 +33,7 @@ namespace Orbiters.Toolkit.Editor.VRChat.Budget
         /// <summary>The custom base as users know it, or null when the avatar has none.</summary>
         public string CustomBase;
 
-        public static AvatarBudget Estimate(GameObject avatarRoot, AvatarParameterBudget.Options options = null)
+        public static AvatarBudget Estimate(GameObject avatarRoot)
         {
             var budget = new AvatarBudget();
             if (avatarRoot == null) return budget;
@@ -44,12 +44,7 @@ namespace Orbiters.Toolkit.Editor.VRChat.Budget
             budget.CustomBase = info?.Name;
             bool Owned(Transform t) => footprint != null && footprint.Owns(t);
 
-            budget.Parameters = AvatarParameterBudget.Estimate(avatarRoot, new AvatarParameterBudget.Options
-            {
-                IsReservedSliderHost = options?.IsReservedSliderHost,
-                PlannedSliders = options?.PlannedSliders ?? 0,
-                IsCustomBase = go => Owned(go.transform) || (options?.IsCustomBase?.Invoke(go) ?? false),
-            });
+            budget.Parameters = AvatarParameterBudget.Estimate(avatarRoot, new AvatarParameterBudget.Options { IsCustomBase = go => Owned(go.transform) });
 
             // VRChat counts the transforms skinned meshes use as bones.
             var bones = new HashSet<Transform>();
@@ -76,9 +71,27 @@ namespace Orbiters.Toolkit.Editor.VRChat.Budget
         private static readonly PerformanceRating[] Ratings =
             { PerformanceRating.Excellent, PerformanceRating.Good, PerformanceRating.Medium, PerformanceRating.Poor };
 
+        /// <summary>
+        /// False until the VRChat SDK has loaded its performance levels: it does on the first editor update after a
+        /// script reload, and its lookups throw before that.
+        /// </summary>
+        public static bool Ready
+        {
+            get
+            {
+                try { return AvatarPerformanceStats.GetStatLevelForRating(PerformanceRating.Poor, false) != null; }
+                catch (NullReferenceException) { return false; }
+            }
+        }
+
         /// <summary>VRChat's PC limit of a stat for a rating, from the SDK's own performance levels.</summary>
-        public static int Limit(Func<AvatarPerformanceStatsLevel, int> stat, PerformanceRating rating) =>
-            stat(AvatarPerformanceStats.GetStatLevelForRating(rating, false));
+        /// <exception cref="InvalidOperationException">The SDK has not loaded its levels yet, as early in an editor reload.</exception>
+        public static int Limit(Func<AvatarPerformanceStatsLevel, int> stat, PerformanceRating rating)
+        {
+            var level = AvatarPerformanceStats.GetStatLevelForRating(rating, false)
+                ?? throw new InvalidOperationException("The VRChat SDK has not loaded its performance levels yet.");
+            return stat(level);
+        }
 
         /// <summary>The PC rating a value gets: the best rating whose limit it does not exceed.</summary>
         public static PerformanceRating Rate(Func<AvatarPerformanceStatsLevel, int> stat, int value)
