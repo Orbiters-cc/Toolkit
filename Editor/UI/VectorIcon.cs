@@ -4,7 +4,7 @@ using UnityEngine.UIElements;
 
 namespace Orbiters.Toolkit.Editor
 {
-    public enum IconGlyph { Bones, Mirror, Clothes, Refresh, Person, PersonOff, People, Robot, RobotOff, Lock, Unlock, Branch, Close, Chevron, Gauge, Sliders, Sound }
+    public enum IconGlyph { Bones, Mirror, Clothes, Refresh, Person, PersonOff, People, Robot, RobotOff, Lock, Unlock, Branch, Close, Chevron, Gauge, Sliders, Sound, Check, Sparkle, Male, Female }
 
     /// <summary>
     /// A small line icon drawn with the vector API, crisp at any size. Its colour comes from the USS custom property
@@ -160,6 +160,23 @@ namespace Orbiters.Toolkit.Editor
                         painter.BeginPath(); painter.MoveTo(P(x, 12f - half)); painter.LineTo(P(x, 12f + half)); painter.Stroke();
                     }
                     break;
+                case IconGlyph.Check:
+                    painter.lineWidth = 2.6f * scale;
+                    painter.BeginPath(); painter.MoveTo(P(5f, 12.5f)); painter.LineTo(P(10f, 17.5f)); painter.LineTo(P(19f, 7f)); painter.Stroke();
+                    break;
+                case IconGlyph.Male:
+                    // A figure with shoulders and legs.
+                    Figure(painter, P, scale, 12.5f, new[] { (9.5f, 14.41f), (9.5f, 7f), (15.5f, 7f), (15.5f, 14.41f), (13.5f, 14.41f), (13.5f, 21f), (11.5f, 21f), (11.5f, 14.41f) });
+                    break;
+                case IconGlyph.Female:
+                    // A figure in a dress.
+                    Figure(painter, P, scale, 11.5f, new[] { (10.5f, 21f), (10.5f, 15.5f), (8f, 15.5f), (10.22f, 7f), (12.78f, 7f), (15f, 15.5f), (12.5f, 15.5f), (12.5f, 21f) });
+                    break;
+                case IconGlyph.Sparkle:
+                    // A four-point star with a small companion: a mode that changes the avatar.
+                    Star(painter, P, 10f, 13f, 8f);
+                    Star(painter, P, 18.5f, 5.5f, 3.5f);
+                    break;
             }
         }
 
@@ -174,6 +191,32 @@ namespace Orbiters.Toolkit.Editor
             painter.BezierCurveTo(P(X(-7f), Y(15f)), P(X(-3.5f), Y(13.4f)), P(x, Y(13.4f)));
             painter.BezierCurveTo(P(X(3.5f), Y(13.4f)), P(X(7f), Y(15f)), P(X(7f), Y(20.5f)));
             painter.Stroke();
+        }
+
+        // A filled, round-joined outline with a head above it.
+        private static void Figure(Painter2D painter, Func<float, float, Vector2> P, float scale, float headX, (float x, float y)[] body)
+        {
+            painter.lineWidth = 1.5f * scale;
+            painter.BeginPath(); painter.Arc(P(headX, 2.5f), 1.75f * scale, 0f, 360f); painter.Fill(); painter.Stroke();
+            painter.BeginPath();
+            painter.MoveTo(P(body[0].x, body[0].y));
+            for (int i = 1; i < body.Length; i++) painter.LineTo(P(body[i].x, body[i].y));
+            painter.ClosePath();
+            painter.Fill();
+            painter.Stroke();
+        }
+
+        private static void Star(Painter2D painter, Func<float, float, Vector2> P, float x, float y, float r)
+        {
+            float k = r * 0.22f;
+            painter.BeginPath();
+            painter.MoveTo(P(x, y - r));
+            painter.BezierCurveTo(P(x + k, y - k), P(x + k, y - k), P(x + r, y));
+            painter.BezierCurveTo(P(x + k, y + k), P(x + k, y + k), P(x, y + r));
+            painter.BezierCurveTo(P(x - k, y + k), P(x - k, y + k), P(x - r, y));
+            painter.BezierCurveTo(P(x - k, y - k), P(x - k, y - k), P(x, y - r));
+            painter.ClosePath();
+            painter.Fill();
         }
 
         private static void Slash(Painter2D painter, Func<float, float, Vector2> P)

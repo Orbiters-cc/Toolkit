@@ -1,5 +1,11 @@
 # Orbiters Toolkit
 
+## 0.3.11 — 2026-10-05
+
+- Add the shared searchable dropdown field and the blendshape picker used by MCB and ReFit (labels, search tooltip, selection refresh).
+- Add Check, Sparkle, Male and Female icons.
+- Keep notice boxes and status hosts from shrinking under long content.
+
 ## 0.3.10 — 2026-10-03
 
 - Preserve clothing pose, proportions and skinning across attachment, ReFit, previews and avatar builds; improve residual body coverage.
