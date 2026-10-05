@@ -4,7 +4,7 @@ using UnityEngine.UIElements;
 
 namespace Orbiters.Toolkit.Editor
 {
-    public enum IconGlyph { Bones, Mirror, Clothes, Refresh, Person, PersonOff, People, Robot, RobotOff, Lock, Unlock, Branch, Close, Chevron, Gauge, Sliders, Sound, Check, Sparkle, Male, Female }
+    public enum IconGlyph { Bones, Mirror, Clothes, Refresh, Person, PersonOff, People, Robot, RobotOff, Lock, Unlock, Branch, Close, Chevron, Gauge, Sliders, Sound, Check, Sparkle, Male, Female, Key, External, Grid, Download, Broom, Plus }
 
     /// <summary>
     /// A small line icon drawn with the vector API, crisp at any size. Its colour comes from the USS custom property
@@ -176,6 +176,42 @@ namespace Orbiters.Toolkit.Editor
                     // A four-point star with a small companion: a mode that changes the avatar.
                     Star(painter, P, 10f, 13f, 8f);
                     Star(painter, P, 18.5f, 5.5f, 3.5f);
+                    break;
+                case IconGlyph.Key:
+                    // A license key: a ring and a bit with two teeth.
+                    painter.lineWidth = 2f * scale;
+                    painter.BeginPath(); painter.Arc(P(8f, 15f), 4.2f * scale, 0f, 360f); painter.Stroke();
+                    painter.BeginPath(); painter.MoveTo(P(11f, 12f)); painter.LineTo(P(20f, 3f)); painter.Stroke();
+                    painter.BeginPath(); painter.MoveTo(P(17f, 6f)); painter.LineTo(P(19.5f, 8.5f)); painter.Stroke();
+                    painter.BeginPath(); painter.MoveTo(P(14.5f, 8.5f)); painter.LineTo(P(16.5f, 10.5f)); painter.Stroke();
+                    break;
+                case IconGlyph.External:
+                    // Opens a web page: a box with an arrow leaving it.
+                    painter.lineWidth = 2f * scale;
+                    painter.BeginPath(); painter.MoveTo(P(10f, 5f)); painter.LineTo(P(5f, 5f)); painter.LineTo(P(5f, 19f)); painter.LineTo(P(19f, 19f)); painter.LineTo(P(19f, 14f)); painter.Stroke();
+                    painter.BeginPath(); painter.MoveTo(P(12f, 12f)); painter.LineTo(P(19.5f, 4.5f)); painter.Stroke();
+                    painter.BeginPath(); painter.MoveTo(P(14f, 4.5f)); painter.LineTo(P(19.5f, 4.5f)); painter.LineTo(P(19.5f, 10f)); painter.Stroke();
+                    break;
+                case IconGlyph.Grid:
+                    // A gallery: four rounded tiles.
+                    foreach (var (x, y) in new[] { (3.5f, 3.5f), (13f, 3.5f), (3.5f, 13f), (13f, 13f) }) { RoundRect(painter, P, x, y, 7.5f, 7.5f, 2.2f); painter.Fill(); }
+                    break;
+                case IconGlyph.Download:
+                    painter.lineWidth = 2.2f * scale;
+                    painter.BeginPath(); painter.MoveTo(P(12f, 3.5f)); painter.LineTo(P(12f, 15f)); painter.Stroke();
+                    painter.BeginPath(); painter.MoveTo(P(7f, 10.5f)); painter.LineTo(P(12f, 15.5f)); painter.LineTo(P(17f, 10.5f)); painter.Stroke();
+                    painter.BeginPath(); painter.MoveTo(P(4.5f, 19.5f)); painter.LineTo(P(19.5f, 19.5f)); painter.Stroke();
+                    break;
+                case IconGlyph.Broom:
+                    // Cleanup: a broom sweeping.
+                    painter.lineWidth = 2f * scale;
+                    painter.BeginPath(); painter.MoveTo(P(19.5f, 3.5f)); painter.LineTo(P(11.5f, 11.5f)); painter.Stroke();
+                    painter.BeginPath(); painter.MoveTo(P(9f, 10f)); painter.LineTo(P(14f, 15f)); painter.LineTo(P(9.5f, 20.5f)); painter.LineTo(P(3.5f, 14.5f)); painter.ClosePath(); painter.Fill();
+                    break;
+                case IconGlyph.Plus:
+                    painter.lineWidth = 2.4f * scale;
+                    painter.BeginPath(); painter.MoveTo(P(12f, 5f)); painter.LineTo(P(12f, 19f)); painter.Stroke();
+                    painter.BeginPath(); painter.MoveTo(P(5f, 12f)); painter.LineTo(P(19f, 12f)); painter.Stroke();
                     break;
             }
         }

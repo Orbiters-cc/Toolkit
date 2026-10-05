@@ -59,6 +59,23 @@ namespace Orbiters.Toolkit.VRChat
 
         [HideInInspector] public List<FittedMesh> fittedMeshes = new List<FittedMesh>();
 
+        /// <summary>
+        /// Set when it was installed from My Avatar's asset gallery: the asset, release and package it came from, so the
+        /// gallery can show it as installed, offer its update and remove it.
+        /// </summary>
+        [HideInInspector] public GalleryReceipt gallery = new GalleryReceipt();
+
+        [Serializable]
+        public sealed class GalleryReceipt
+        {
+            public int assetId, releaseId, variantId;
+            public string assetName, version, setup, sha256, creatorName;
+            /// <summary>The installation journal entry that placed it (retries find it instead of adding a copy).</summary>
+            public string installId;
+            public long installedAtTicks;
+            public bool Installed => assetId > 0;
+        }
+
         [Serializable]
         public sealed class FittedMesh
         {

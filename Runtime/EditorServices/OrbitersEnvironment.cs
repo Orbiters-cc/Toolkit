@@ -10,7 +10,9 @@ public static class OrbitersEnvironment
         get => EditorPrefs.GetBool("MCB_DevEnvironment", false);
         set { if (value == IsDevelopment) return; EditorPrefs.SetBool("MCB_DevEnvironment", value); Changed?.Invoke(); }
     }
-    public static string ApiUrl(string scope = "", bool? development = null) => ((development ?? IsDevelopment) ? "http://localhost:4100/" : "https://api.orbiters.cc/") + scope.TrimStart('/');
+    // The local server by address: "localhost" tries IPv6 first on Windows, which a server listening on IPv4 refuses,
+    // and every connection then waits about 200 ms before falling back.
+    public static string ApiUrl(string scope = "", bool? development = null) => ((development ?? IsDevelopment) ? "http://127.0.0.1:4100/" : "https://api.orbiters.cc/") + scope.TrimStart('/');
     public static string WebsiteUrl => IsDevelopment ? "https://dev.orbiters.cc/" : "https://orbiters.cc/";
     public static string ResolveApiUrl(string pathOrUrl, string scope = "", string baseUrl = null)
     {
@@ -42,7 +44,7 @@ public static class OrbitersEnvironment
 
     private static string NormalizeApiOrigin(Uri uri, Uri apiRoot)
     {
-        bool sameHost = string.Equals(uri.Host, apiRoot.Host, StringComparison.OrdinalIgnoreCase);
+        bool sameHost = string.Equals(uri.Host, apiRoot.Host, StringComparison.OrdinalIgnoreCase) || (IsLoopback(uri.Host) && IsLoopback(apiRoot.Host));
         bool compatiblePort = uri.Port == apiRoot.Port || (uri.IsDefaultPort && apiRoot.IsDefaultPort);
         if (!sameHost || !compatiblePort)
         {
@@ -57,6 +59,9 @@ public static class OrbitersEnvironment
         };
         return builder.Uri.ToString();
     }
+
+    public static bool IsLoopback(string host) =>
+        string.Equals(host, "localhost", StringComparison.OrdinalIgnoreCase) || host == "127.0.0.1" || host == "[::1]" || host == "::1";
 
     private static string EnsureTrailingSlash(string value)
     {

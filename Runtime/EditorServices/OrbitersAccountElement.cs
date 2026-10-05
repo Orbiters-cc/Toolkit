@@ -52,7 +52,7 @@ public sealed class OrbitersAccountElement : VisualElement
             catch (Exception) { if (source.IsCancellationRequested || current != revision) return; }
             if (picture || string.IsNullOrWhiteSpace(auth.avatarUrl)) return;
             string url = OrbitersEnvironment.ResolveApiUrl(auth.avatarUrl);
-            if (!Uri.TryCreate(url, UriKind.Absolute, out var uri) || (uri.Scheme != "https" && uri.Host != "localhost")) return;
+            if (!Uri.TryCreate(url, UriKind.Absolute, out var uri) || (uri.Scheme != "https" && !OrbitersEnvironment.IsLoopback(uri.Host))) return;
             using var req = UnityWebRequestTexture.GetTexture(url); req.timeout = 8;
             var operation = req.SendWebRequest();
             while (!operation.isDone) { if (source.IsCancellationRequested) { req.Abort(); return; } await System.Threading.Tasks.Task.Yield(); }

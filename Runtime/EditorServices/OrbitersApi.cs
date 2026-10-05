@@ -13,7 +13,9 @@ public static class OrbitersApi
     internal static readonly HttpClient Client = new HttpClient { Timeout = TimeSpan.FromSeconds(90) };
 
     /// <summary>GET without a payload, POST with one, unless <paramref name="method"/> says otherwise (e.g. PUT).</summary>
-    public static async Task<T> SendAsync<T>(string url, string token, object payload = null, CancellationToken cancellation = default, HttpMethod method = null)
+    /// <param name="failure">The message when the server gives no reason; {0} is the HTTP status code.</param>
+    public static async Task<T> SendAsync<T>(string url, string token, object payload = null, CancellationToken cancellation = default, HttpMethod method = null,
+        string failure = null)
     {
         using var request = new HttpRequestMessage(method ?? (payload == null ? HttpMethod.Get : HttpMethod.Post), url);
         if (!string.IsNullOrEmpty(token)) request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
@@ -22,11 +24,11 @@ public static class OrbitersApi
         string body = await response.Content.ReadAsStringAsync();
         if (!response.IsSuccessStatusCode)
         {
-            string message = $"Orbiters returned HTTP {(int)response.StatusCode}. Offline matching is still available.";
+            string message = string.Format(failure ?? "Orbiters returned HTTP {0}. Offline matching is still available.", (int)response.StatusCode);
             try { message = JObject.Parse(body).Value<string>("error") ?? message; } catch (JsonException) { }
             throw new InvalidOperationException(message);
         }
-        return JsonConvert.DeserializeObject<T>(body);
+        return string.IsNullOrWhiteSpace(body) ? default : JsonConvert.DeserializeObject<T>(body);
     }
 }
 #endif

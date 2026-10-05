@@ -8,3 +8,22 @@
 .orb-dependency__install:active { scale: 0.96 0.96; }
 .orb-dependency__install:disabled { opacity: 1; color: #9a9a9a; background-color: #3a3a3a; }
 .orb-dependency--installing .orb-dependency__install { scale: 0.96 0.96; }
+
+/* Dependency plan: what will be installed or updated, shown before anything changes. */
+.orb-plan { margin: 6px 0; padding: 12px 14px; border-radius: 12px; background-color: #1c1c1c; }
+.orb-plan__title { margin: 0 0 8px 0; padding: 0; font-size: 12px; -unity-font-style: bold; color: #f2f2f2; white-space: normal; }
+.orb-plan__row { flex-direction: row; align-items: flex-start; margin-bottom: 6px; }
+.orb-plan__dot { width: 8px; height: 8px; border-radius: 4px; margin: 4px 8px 0 2px; flex-shrink: 0; background-color: #6f6f6f; }
+.orb-plan__dot--install { background-color: #00DA6D; }
+.orb-plan__dot--upgrade { background-color: #8a7dff; }
+.orb-plan__dot--blocked, .orb-plan__dot--missing { background-color: #ff6b6b; }
+.orb-plan__texts { flex-grow: 1; flex-shrink: 1; min-width: 0; }
+.orb-plan__name { margin: 0; padding: 0; font-size: 11px; color: #e6e6e6; white-space: normal; }
+.orb-plan__detail { margin: 1px 0 0 0; padding: 0; font-size: 10px; color: #8c8c8c; white-space: normal; }
+.orb-plan__note { margin: 4px 0 0 0; padding: 0; font-size: 10px; color: #9a9a9a; white-space: normal; }
+.orb-plan__note--warning { color: #ffb020; }
+.orb-plan__actions { flex-direction: row; justify-content: flex-end; align-items: center; margin-top: 10px; }
+.orb-plan__cancel { height: 26px; min-height: 26px; margin: 4px 8px 4px 0; padding: 0 12px; border-width: 0; border-radius: 13px; font-size: 11px; color: #d6d6d6; background-color: #2e2e2e; }
+.orb-plan__cancel:hover { background-color: #3a3a3a; }
+.orb-plan__confirm { margin-right: 0; }
+.orb-dependency__plan { flex-basis: 100%; margin: 8px 0 2px 0; background-color: rgba(0, 0, 0, 0.25); }

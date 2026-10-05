@@ -63,6 +63,25 @@ namespace Orbiters.Toolkit.Editor.Vpm
         /// <summary>Raised when an install starts or ends and when cached statuses are dropped.</summary>
         public static event Action StatusChanged;
 
+        // Plan installs (VpmPlanInstaller) share the one-at-a-time lock and the status notifications.
+        internal static void BeginInstall() { IsInstalling = true; StatusChanged?.Invoke(); }
+        internal static void EndInstall() { IsInstalling = false; Invalidate(); }
+
+        /// <summary>
+        /// The complete plan for these dependencies (their own dependencies included), read from the repositories they come
+        /// from before anything changes. <paramref name="known"/> adds versions already known (Orbiters' known VPM packages).
+        /// </summary>
+        public static async System.Threading.Tasks.Task<VpmDependencyPlan> PlanAsync(IEnumerable<VpmDependencyStatus> statuses, string requiredBy,
+            IEnumerable<VpmCandidate> known = null, System.Threading.CancellationToken cancellation = default)
+        {
+            var list = (statuses ?? Enumerable.Empty<VpmDependencyStatus>()).Where(s => s != null).ToList();
+            var candidates = new List<VpmCandidate>(known ?? Enumerable.Empty<VpmCandidate>());
+            foreach (string url in list.Select(s => s.RepositoryUrl).Where(u => !string.IsNullOrWhiteSpace(u)).Distinct(StringComparer.OrdinalIgnoreCase))
+                candidates.AddRange(await VpmListingReader.ReadAsync(url, cancellation));
+            return VpmDependencyPlan.Resolve(list.Select(s => new VpmDependencyPlan.Requirement(s.Id, s.VersionRange, requiredBy)),
+                new VpmProjectCatalog(candidates));
+        }
+
         private VpmDependencies(string packageName) { PackageName = packageName; }
 
         public static VpmDependencies For(string packageName)
@@ -207,6 +226,13 @@ namespace Orbiters.Toolkit.Editor.Vpm
             if (names.Count == 0) return "Install dependencies";
             if (names.Count == 1) return "Install " + names[0];
             return "Install " + string.Join(", ", names.Take(names.Count - 1)) + " and " + names[names.Count - 1];
+        }
+
+        /// <summary>True when the user's VPM settings already list this repository.</summary>
+        public static bool RepositoryAdded(string url)
+        {
+            try { return Uri.TryCreate(url, UriKind.Absolute, out var uri) && Repos.UserRepoExists(uri); }
+            catch (Exception) { return false; }
         }
 
         private static void AddMissingRepositories(IEnumerable<VpmDependencyStatus> dependencies, VpmDependencyInstallResult result)

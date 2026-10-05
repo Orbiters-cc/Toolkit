@@ -1,0 +1,25 @@
+/* Version timeline shared by MCB's version list and My Avatar's gallery releases (VersionTimeline.cs). */
+.orb-version-timeline { width: 26px; min-width: 26px; margin-right: 6px; flex-shrink: 0; align-items: center; align-self: stretch; }
+.orb-version-timeline__line { width: 2px; flex-grow: 1; background-color: #00DA6D; }
+.orb-version-timeline__line--hidden { background-color: rgba(0, 0, 0, 0); }
+.orb-version-timeline__marker-shell { width: 20px; height: 20px; min-width: 20px; min-height: 20px; border-radius: 10px; border-width: 0; border-color: #00DA6D; justify-content: center; align-items: center; }
+.orb-version-timeline__marker-shell--selected { border-width: 1px; }
+.orb-version-timeline__marker { width: 8px; height: 8px; border-radius: 4px; background-color: #00DA6D; }
+.orb-version-timeline--disabled .orb-version-timeline__line,
+.orb-version-timeline--disabled .orb-version-timeline__marker { background-color: #777777; }
+.orb-version-timeline--disabled .orb-version-timeline__marker-shell { border-color: #777777; }
+.orb-version-timeline--connector { justify-content: center; }
+.orb-version-timeline__connector-line { width: 2px; flex-grow: 1; background-color: #00DA6D; }
+.orb-version-timeline__connector-dots { flex-grow: 1; align-items: center; justify-content: center; }
+.orb-version-timeline__connector-dot { width: 2px; height: 6px; min-height: 6px; margin-top: 2px; margin-bottom: 2px; background-color: #00DA6D; }
+
+/* Outline chip: scope (public, beta, alpha) or state (installed, current). Colour set in code. */
+.orb-version-chip { height: 18px; min-height: 18px; border-radius: 9px; border-width: 1px; background-color: rgba(0, 0, 0, 0); padding-left: 8px; padding-right: 8px; margin-left: 5px; margin-top: 0; margin-bottom: 0; -unity-text-align: middle-center; }
+
+/* Read-only list (VersionTimeline.List). */
+.orb-version-list__row { flex-direction: row; align-items: stretch; min-height: 34px; }
+.orb-version-list__body { flex-grow: 1; flex-shrink: 1; min-width: 0; padding: 7px 0 9px 0; }
+.orb-version-list__header { flex-direction: row; align-items: center; flex-wrap: wrap; }
+.orb-version-list__name { flex-shrink: 1; margin: 0 2px 0 0; padding: 0; font-size: 12px; color: #ffffff; -unity-font-style: bold; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.orb-version-list__date { margin: 2px 0 0 0; padding: 0; font-size: 10px; color: #8a8a8a; }
+.orb-version-list__changelog { margin: 5px 0 0 0; padding: 0; font-size: 11px; color: #bdbdbd; white-space: normal; }

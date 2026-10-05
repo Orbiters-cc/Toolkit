@@ -6,7 +6,8 @@
     "Orbiters.Toolkit.Editor",
     "Orbiters.Toolkit.Editor.VRChat",
     "VRC.SDK3A",
-    "VRC.SDKBase"
+    "VRC.SDKBase",
+    "Orbiters.Toolkit.Editor.Vpm"
   ],
   "includePlatforms": [
     "Editor"
@@ -19,6 +20,11 @@
       "name": "com.vrchat.avatars",
       "expression": "3.7.0",
       "define": "ORBITERS_VRCHAT_AVATARS"
+    },
+    {
+      "name": "com.vrchat.core.vpm-resolver",
+      "expression": "0.1.0",
+      "define": "ORBITERS_VPM"
     }
   ],
   "optionalUnityReferences": [

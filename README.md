@@ -1,5 +1,14 @@
 # Orbiters Toolkit
 
+## 0.3.12 — 2026-10-05
+
+- Shared building blocks for asset galleries and versioned content, moved out of MCB: version records and the version timeline, gallery card styles, safe archive extraction with size budgets, `.unitypackage` hashing, copying and import previews, content trust prompts, and resumable transfers checked against their SHA-256.
+- Recognise original avatar bases as well as custom ones from a model fingerprint.
+- The drawing pen is an avatar-independent prefab (`DrawingPenInstaller.CreatePrefab`) that fits itself to the avatar it is attached to; `AttachmentHooks` lets props adapt when a tool attaches them.
+- VPM dependency plans: the complete transitive plan, conflicts included, is shown before any package changes; VRChat SDK packages and unrelated tools are never upgraded silently.
+- Other packages can add sections to the Orbiters settings window; add Key, External, Grid, Download, Broom and Plus icons.
+- The local development API uses 127.0.0.1 (faster than localhost on Windows); Orbiters inspectors no longer cause a horizontal scrollbar; sizes under 1 MB read in KB.
+
 ## 0.3.11 — 2026-10-05
 
 - Add the shared searchable dropdown field and the blendshape picker used by MCB and ReFit (labels, search tooltip, selection refresh).

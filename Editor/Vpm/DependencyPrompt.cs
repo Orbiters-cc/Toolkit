@@ -15,6 +15,7 @@ namespace Orbiters.Toolkit.Editor.Vpm
         private readonly Label title, reason, error;
         private readonly Button install;
         private bool installing;
+        private DependencyPlanView plan;
 
         public VpmDependencies Owner { get; }
         public string PackageId { get; }
@@ -56,22 +57,42 @@ namespace Orbiters.Toolkit.Editor.Vpm
             reason.text = Status?.Reason ?? string.Empty;
             reason.style.display = string.IsNullOrEmpty(reason.text) ? DisplayStyle.None : DisplayStyle.Flex;
             if (Status == null) ShowError(PackageId + " is not declared as an optional dependency" + (Owner != null ? " of " + Owner.PackageName : string.Empty) + ".");
-            install.style.display = Status == null ? DisplayStyle.None : DisplayStyle.Flex;
+            install.style.display = Status == null || plan != null ? DisplayStyle.None : DisplayStyle.Flex;
             ShowBusy();
             style.display = IsInstalled ? DisplayStyle.None : DisplayStyle.Flex;
         }
 
-        private void Install()
+        // The first press reads the complete plan (the package's own dependencies included) and shows it; nothing changes
+        // until the user confirms it.
+        private async void Install()
         {
-            if (installing || Status == null || IsInstalled) return;
+            if (installing || Status == null || IsInstalled || plan != null) return;
             installing = true;
             ShowError(null);
+            ShowBusy();
+            install.text = "Checking " + (Status.DisplayName ?? PackageId) + "…";
+            VpmDependencyPlan resolved;
+            try { resolved = await VpmDependencies.PlanAsync(new[] { Status }, Owner?.PackageName ?? "This tool"); }
+            catch (Exception ex) { installing = false; Refresh(true); ShowError("Could not read the packages to install: " + ex.Message); return; }
+            installing = false;
+            if (panel == null) return;
+            ShowBusy();
+            plan = new DependencyPlanView(resolved, "Before installing " + (Status.DisplayName ?? PackageId), Apply, () => { plan.RemoveFromHierarchy(); plan = null; Refresh(); });
+            plan.AddToClassList("orb-dependency__plan");
+            install.style.display = DisplayStyle.None;
+            Add(plan);
+        }
+
+        private void Apply(VpmDependencyPlan accepted)
+        {
+            installing = true;
             ShowBusy();
             // Installing blocks the editor: let the pressed state paint first.
             schedule.Execute(() =>
             {
-                var result = Owner.InstallOptional(PackageId);
+                var result = VpmPlanInstaller.Apply(accepted);
                 installing = false;
+                plan?.RemoveFromHierarchy(); plan = null;
                 Refresh(true);
                 if (!result.Success) { ShowError(result.ErrorMessage ?? "The install failed."); return; }
                 style.display = DisplayStyle.None;

@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using UnityEditor;
@@ -13,6 +14,14 @@ namespace Orbiters.Toolkit.Editor
         private SegmentedControl server;
         private Label caption;
         private readonly Dictionary<string, (ToggleSwitch toggle, VisualElement row)> featureRows = new Dictionary<string, (ToggleSwitch, VisualElement)>();
+        private static readonly List<(string title, Func<VisualElement> build)> sections = new List<(string, Func<VisualElement>)>();
+
+        /// <summary>A tool's own settings card ("My Avatar · Asset gallery files"), shown after the server card.</summary>
+        public static void RegisterSection(string title, Func<VisualElement> build)
+        {
+            if (string.IsNullOrEmpty(title) || build == null || sections.Any(s => s.title == title)) return;
+            sections.Add((title, build));
+        }
 
         public static void Open()
         {
@@ -38,6 +47,14 @@ namespace Orbiters.Toolkit.Editor
             server = new SegmentedControl(new[] { "Production", "Development" }, index => OrbitersEnvironment.IsDevelopment = index == 1);
             serverCard.Add(server);
             caption = new Label(); caption.AddToClassList("orb-settings__caption"); serverCard.Add(caption);
+
+            foreach (var (title, build) in sections)
+            {
+                var card = new VisualElement(); card.AddToClassList("orb-settings__card"); content.Add(card);
+                card.Add(Title(title));
+                try { card.Add(build()); }
+                catch (Exception ex) { card.Add(new Label("This section could not be shown: " + ex.Message)); }
+            }
 
             BuildFeatures(content);
 

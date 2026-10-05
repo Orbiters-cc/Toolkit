@@ -25,6 +25,19 @@ public sealed class OrbitersInspectorShell : VisualElement
         Account = new VisualElement(); Header.Add(Account);
         Glow.SendToBack();
         RegisterCallback<PointerMoveEvent>(_ => Glow.WakeForSeconds(20));
+        // Edge to edge: cancel exactly the Inspector's own side padding (15 px left, 6 px right in 2022.3), never more,
+        // or the Inspector shows a horizontal scrollbar.
+        RegisterCallback<GeometryChangedEvent>(_ => FitParent());
+        RegisterCallback<AttachToPanelEvent>(_ => FitParent());
+    }
+
+    private void FitParent()
+    {
+        if (parent == null) return;
+        float left = -parent.resolvedStyle.paddingLeft, right = -parent.resolvedStyle.paddingRight;
+        if (float.IsNaN(left) || float.IsNaN(right)) return;
+        if (!Mathf.Approximately(resolvedStyle.marginLeft, left)) style.marginLeft = left;
+        if (!Mathf.Approximately(resolvedStyle.marginRight, right)) style.marginRight = right;
     }
 }
 #endif
