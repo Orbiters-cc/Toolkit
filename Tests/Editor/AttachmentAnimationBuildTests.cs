@@ -249,6 +249,23 @@ public sealed class AttachmentAnimationBuildTests
         Assert.False(Sleeve(copy).gameObject.activeInHierarchy, "Evaluate the real Animator with its mask, not just SampleAnimation.");
     }
 
+    // A tool moved a bone before the build (MCB applying a version's skeleton): clips written for the original hierarchy
+    // keep animating it and its children, and the authored clip keeps its path.
+    [Test] public void AnimationsOfABoneMovedBeforeTheBuildFollowItsFormerPath()
+    {
+        Child(bone, "Tip");
+        AnimationUtility.SetEditorCurve(clip, EditorCurveBinding.FloatCurve("Old/Bone/Tip", typeof(Transform), "m_LocalPosition.y"), AnimationCurve.Constant(0, 1, .25f));
+        var copy = Object.Instantiate(avatar);
+        SceneManager.MoveGameObjectToScene(copy, scene);
+        builds.Add(copy);
+        AttachmentAnimationBuild.Prepare(copy).Moved(new[] { (copy.transform.Find("Bone"), "Old/Bone") });
+        var bindings = AnimationUtility.GetCurveBindings(Clip(copy));
+        Assert.True(bindings.Any(b => b.path == "Bone/Tip" && b.propertyName == "m_LocalPosition.y"));
+        Assert.False(bindings.Any(b => b.path.StartsWith("Old/", StringComparison.Ordinal)));
+        Assert.True(bindings.Any(b => b.path == "Coat/Sleeve"), "paths that exist are left alone");
+        Assert.True(AnimationUtility.GetCurveBindings(clip).Any(b => b.path == "Old/Bone/Tip"), "the authored clip is unchanged");
+    }
+
     [Test] public void TargetPhysBoneDoesNotAcquireTheNewAttachmentBranch()
     {
         var physics = bone.gameObject.AddComponent<VRCPhysBone>();

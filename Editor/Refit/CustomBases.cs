@@ -40,8 +40,32 @@ namespace Orbiters.Toolkit.Editor.Refit
         public Func<CustomBaseOriginal> ResolveOriginal;
         /// <summary>A small picture of the custom base, cheap to call again: null while it loads or when there is none.</summary>
         public Func<Texture2D> Thumbnail;
+        /// <summary>What the custom base adds to the avatar, for budgets (main thread, cheap). Null when the tool can't tell.</summary>
+        public Func<CustomBaseFootprint> Footprint;
 
         public bool CanFit => ResolveOriginal != null;
+    }
+
+    /// <summary>
+    /// The part of an avatar a custom base accounts for: its objects (logic, sliders), the bones it added to the original
+    /// skeleton, and what its build will add or remove that the scene does not show yet.
+    /// </summary>
+    public sealed class CustomBaseFootprint
+    {
+        /// <summary>Hierarchy roots the custom base owns: parameters, PhysBones and contacts under them are the custom base's.</summary>
+        public List<GameObject> Objects = new List<GameObject>();
+        /// <summary>Bones the custom base added to the original skeleton.</summary>
+        public HashSet<Transform> Bones = new HashSet<Transform>();
+        /// <summary>Build-time changes: PhysBones (and the transforms they simulate) it adds, and bones it removes.</summary>
+        public int BuildPhysBones, BuildPhysBoneTransforms, BuildRemovedBones;
+
+        public bool Owns(Transform transform)
+        {
+            if (transform == null) return false;
+            foreach (var root in Objects)
+                if (root != null && transform.IsChildOf(root.transform)) return true;
+            return false;
+        }
     }
 
     /// <summary>A tool that knows which custom base an avatar uses (MCB registers one).</summary>

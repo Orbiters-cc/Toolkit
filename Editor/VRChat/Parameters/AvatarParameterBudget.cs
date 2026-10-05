@@ -14,6 +14,9 @@ namespace Orbiters.Toolkit.Editor.VRChat.Parameters
     {
         public const int MaxSyncedBits = 256;
         public int DescriptorBits, ToggleBits, FullControllerBits, WithoutAdded, Added, TotalBeforeCompression;
+        /// <summary>Bits of the custom base's objects (Options.IsCustomBase), its planned sliders included.</summary>
+        public int CustomBaseBits;
+        public int AvatarBits => TotalBeforeCompression - CustomBaseBits;
         public bool VrcFuryPresent;
         public string CompressionStatus;
         public int Free => Mathf.Max(0, MaxSyncedBits - TotalBeforeCompression);
@@ -26,6 +29,8 @@ namespace Orbiters.Toolkit.Editor.VRChat.Parameters
         {
             public Func<GameObject, bool> IsReservedSliderHost;
             public int PlannedSliders;
+            /// <summary>Objects a custom base owns: their toggles and controllers count as the custom base's.</summary>
+            public Func<GameObject, bool> IsCustomBase;
         }
 
         private static Type vrcFuryType, toggleType, fullControllerType;
@@ -48,6 +53,7 @@ namespace Orbiters.Toolkit.Editor.VRChat.Parameters
             budget.VrcFuryPresent = true;
 
             bool IsReserved(GameObject go) => go != null && options?.IsReservedSliderHost != null && options.IsReservedSliderHost(go);
+            bool IsCustomBase(GameObject go) => go != null && options?.IsCustomBase != null && options.IsCustomBase(go);
             var components = avatarRoot.GetComponentsInChildren(vrcFuryType, true);
             // Compression eligibility depends on the completed animator build. Do not invent savings here.
             var mode = VrcFury.Find("VF.Menu.CompressorMenuItem")?.GetMethod("Get")?.Invoke(null, null)?.ToString();
@@ -57,11 +63,12 @@ namespace Orbiters.Toolkit.Editor.VRChat.Parameters
                 : "Compression is controlled by VRCFury during build.";
             var synced = descriptor.customExpressions ? SyncedTypes(descriptor.expressionParameters)
                 : new Dictionary<string, VRCExpressionParameters.ValueType>();
-            budget.FullControllerBits = FullControllerBits(components, synced);
-            budget.ToggleBits = ToggleBits(components, IsReserved);
+            budget.FullControllerBits = FullControllerBits(components, synced, IsCustomBase, out int customControllers);
+            budget.ToggleBits = ToggleBits(components, IsReserved, IsCustomBase, out int customToggles);
             budget.WithoutAdded = budget.DescriptorBits + budget.ToggleBits + budget.FullControllerBits;
             budget.Added = Mathf.Max(0, options?.PlannedSliders ?? 0) * 8;
             budget.TotalBeforeCompression = budget.WithoutAdded + budget.Added;
+            budget.CustomBaseBits = customControllers + customToggles + budget.Added;
             return budget;
         }
 
@@ -100,8 +107,10 @@ namespace Orbiters.Toolkit.Editor.VRChat.Parameters
 
         private static object Content(Component component) => VrcFury.Content(component);
 
-        private static int FullControllerBits(Component[] components, Dictionary<string, VRCExpressionParameters.ValueType> synced)
+        private static int FullControllerBits(Component[] components, Dictionary<string, VRCExpressionParameters.ValueType> synced,
+            Func<GameObject, bool> isCustomBase, out int custom)
         {
+            custom = 0;
             if (fullControllerType == null) return 0;
             int added = 0;
             foreach (var component in components)
@@ -125,7 +134,9 @@ namespace Orbiters.Toolkit.Editor.VRChat.Parameters
                             synced[parameter.name] = parameter.valueType;
                         }
                         else if (!localNames.Add(parameter.name)) continue;
-                        added += VRCExpressionParameters.TypeCost(parameter.valueType);
+                        int cost = VRCExpressionParameters.TypeCost(parameter.valueType);
+                        added += cost;
+                        if (isCustomBase(component.gameObject)) custom += cost;
                     }
                 }
             }
@@ -152,8 +163,9 @@ namespace Orbiters.Toolkit.Editor.VRChat.Parameters
         }
 
 
-        private static int ToggleBits(Component[] components, Func<GameObject, bool> isReserved)
+        private static int ToggleBits(Component[] components, Func<GameObject, bool> isReserved, Func<GameObject, bool> isCustomBase, out int custom)
         {
+            custom = 0;
             if (toggleType == null) return 0;
             int raw = 0;
             foreach (var component in components)
@@ -164,7 +176,9 @@ namespace Orbiters.Toolkit.Editor.VRChat.Parameters
                 bool slider = (bool)(toggleType.GetField("slider")?.GetValue(content) ?? false);
                 bool integer = (bool)(toggleType.GetField("useInt")?.GetValue(content) ?? false);
                 if (slider && isReserved(component.gameObject)) continue;
-                raw += slider || integer ? 8 : 1;
+                int cost = slider || integer ? 8 : 1;
+                raw += cost;
+                if (isCustomBase(component.gameObject)) custom += cost;
             }
             return raw;
         }

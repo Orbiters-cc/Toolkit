@@ -141,6 +141,23 @@ namespace Orbiters.Toolkit.Editor.VRChat.Attachments
             return layers;
         }
 
+        /// <summary>Makes an object created for this build copy (a mesh, a clip) an asset until the build is released.</summary>
+        public void Keep(Object value) => Persist(value);
+
+        /// <summary>
+        /// Animations written before a tool moved these transforms keep animating them: bindings to each former path
+        /// (avatar-relative, its own name included) and to its children's are rewritten to where they are now.
+        /// </summary>
+        public void Moved(IReadOnlyList<(Transform target, string formerPath)> moves)
+        {
+            if (moves == null || moves.Count == 0) return;
+            foreach (var graph in graphs)
+                foreach (var (target, formerPath) in moves)
+                    if (target != null && !string.IsNullOrEmpty(formerPath)) graph.Alias(target, formerPath, root.transform);
+            foreach (var graph in graphs) graph.Rewrite(activationCopies);
+            if (container != null) AssetDatabase.SaveAssetIfDirty(container);
+        }
+
         private void Persist(Object value)
         {
             if (container == null)
@@ -349,6 +366,19 @@ namespace Orbiters.Toolkit.Editor.VRChat.Attachments
                 }
                 EditorUtility.SetDirty(copy);
                 return copy;
+            }
+
+            // A former path resolves to the moved transform, unless something else lives there now.
+            internal void Alias(Transform target, string formerPath, Transform avatarRoot)
+            {
+                string prefix = animatorRoot == avatarRoot ? "" : AnimationUtility.CalculateTransformPath(animatorRoot, avatarRoot) + "/";
+                if (!formerPath.StartsWith(prefix, StringComparison.Ordinal)) return;
+                string former = formerPath.Substring(prefix.Length);
+                foreach (var t in target.GetComponentsInChildren<Transform>(true))
+                {
+                    string path = t == target ? former : former + "/" + AnimationUtility.CalculateTransformPath(t, target);
+                    if (!paths.ContainsKey(path)) paths.Add(path, t);
+                }
             }
 
             private string NewPath(string path)

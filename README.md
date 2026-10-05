@@ -1,5 +1,11 @@
 # Orbiters Toolkit
 
+## 0.3.13 — 2026-10-05
+
+- `AvatarBudget` and `AvatarBudgetPanel`: an avatar's parameters, bones, PhysBones and contacts against VRChat's PC limits, read from the SDK's performance levels, split between the avatar and its custom base. Custom base providers describe what they add and what their build changes with `CustomBaseFootprint`.
+- Parameter estimates count the bits of the custom base's objects separately.
+- Build copies: `AttachmentAnimationBuild.Keep` makes objects created during a build assets until it is released; `Moved` keeps the animations of bones a tool moved before the build.
+
 ## 0.3.12 — 2026-10-05
 
 - Shared building blocks for asset galleries and versioned content, moved out of MCB: version records and the version timeline, gallery card styles, safe archive extraction with size budgets, `.unitypackage` hashing, copying and import previews, content trust prompts, and resumable transfers checked against their SHA-256.
