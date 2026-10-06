@@ -60,7 +60,9 @@ namespace Orbiters.Toolkit.Editor.Photoshoot
         private Texture effectPreviewSource;
         private Texture2D effectPreview;
         private Button backButton;
-        private ScrubDial turnDial, zoomDial;
+        private ScrubDial zoomDial, lookDial;
+        private OrbitSphere orbit;
+        private ToggleSwitch lookSwitch;
         private Label styleCaption, message;
         private SegmentedControl styleTabs, presets;
         private VisualElement styleContent, colorSwatch;
@@ -284,15 +286,24 @@ namespace Orbiters.Toolkit.Editor.Photoshoot
             presets.AddToClassList("ps-framing__presets");
             card.Add(presets);
 
-            turnDial = new ScrubDial("Turn", -180f, 180f, 0f, 5f, 3, 2.2f, 2.5f,
-                value => Mathf.RoundToInt(value) + "°",
-                value =>
-                {
-                    framingTween?.Pause();
-                    state.RotationDegrees = value;
-                    RenderNow();
-                }, loops: true);
-            card.Add(turnDial);
+            // The sphere turns and tilts the avatar; beside it, zoom and where the avatar looks.
+            var body = new VisualElement();
+            body.AddToClassList("ps-framing__body");
+            card.Add(body);
+            orbit = new OrbitSphere(PhotoshootState.MaxTilt, (yaw, tilt) =>
+            {
+                framingTween?.Pause();
+                state.RotationDegrees = yaw;
+                state.TiltDegrees = tilt;
+                RenderTurn();
+            }, state.BeginTurn, () => AnimateFraming(state.Zoom, state.Placement, 0f, state.FramingPreset));
+            orbit.tooltip = "Drag to turn the avatar, up and down to tilt it. It turns around whichever of its hips, chest and head is in the middle of the view. Double-click to face the camera again.";
+            orbit.AddToClassList("ps-framing__orbit");
+            body.Add(orbit);
+            var controls = new VisualElement();
+            controls.AddToClassList("ps-framing__controls");
+            body.Add(controls);
+
             zoomDial = new ScrubDial("Zoom", Mathf.Log(PhotoshootState.MinZoom, 2f), Mathf.Log(PhotoshootState.MaxZoom, 2f), Mathf.Log(PhotoshootState.DefaultZoom, 2f),
                 0.1f, 5, 70f, 0.04f,
                 value => Mathf.Pow(2f, value).ToString("0.00") + "×",
@@ -302,9 +313,32 @@ namespace Orbiters.Toolkit.Editor.Photoshoot
                     state.Zoom = Mathf.Pow(2f, value);
                     ManualFraming();
                 });
-            card.Add(zoomDial);
+            controls.Add(zoomDial);
 
-            var tip = new Label("On the preview: drag to move, scroll to zoom, Shift-drag to turn");
+            var look = new VisualElement();
+            look.AddToClassList("ps-look");
+            var lookLabel = new Label("Look at the camera");
+            lookLabel.AddToClassList("ps-look__label");
+            look.Add(lookLabel);
+            lookSwitch = new ToggleSwitch(state.LookAtCamera, on =>
+            {
+                state.LookAtCamera = on;
+                SyncLook();
+                RenderNow();
+            }) { tooltip = "The avatar looks straight at the camera." };
+            look.Add(lookSwitch);
+            controls.Add(look);
+            lookDial = new ScrubDial("Look", 0f, 100f, 50f, 10f, 5, 2.4f, 3f,
+                value => value < .5f ? "Head" : value > 99.5f ? "Eyes" : $"Eyes {value:0}%",
+                value =>
+                {
+                    state.LookWithEyes = value / 100f;
+                    RenderNow();
+                });
+            lookDial.tooltip = "The avatar always looks straight at the camera: this splits the turn between the head (left) and the eyes (right).";
+            controls.Add(lookDial);
+
+            var tip = new Label("On the preview: drag to move, scroll to zoom, Shift-drag to turn and tilt");
             tip.AddToClassList("ps-caption");
             tip.AddToClassList("ps-framing__tip");
             card.Add(tip);
@@ -313,9 +347,18 @@ namespace Orbiters.Toolkit.Editor.Photoshoot
 
         private void SyncFraming()
         {
-            turnDial?.SetValueWithoutNotify(state.RotationDegrees);
+            orbit?.SetValueWithoutNotify(state.RotationDegrees, state.TiltDegrees);
             zoomDial?.SetValueWithoutNotify(Mathf.Log(state.Zoom, 2f));
             MovePresetIndicator();
+            SyncLook();
+        }
+
+        private void SyncLook()
+        {
+            lookSwitch?.SetValueWithoutNotify(state.LookAtCamera);
+            if (lookDial == null) return;
+            lookDial.SetValueWithoutNotify(state.LookWithEyes * 100f);
+            lookDial.style.display = state.LookAtCamera ? DisplayStyle.Flex : DisplayStyle.None;
         }
 
         // With no preset the highlight fades out where it was; it slides to a preset when one is chosen.
@@ -337,6 +380,13 @@ namespace Orbiters.Toolkit.Editor.Photoshoot
             if (CanGenerate()) RenderPreviews(false);
         }
 
+        // Turning and tilting keep the zoom and placement: a framing preset is not fitted again to the turned outline.
+        private void RenderTurn()
+        {
+            ++state.RefreshTicket;
+            if (CanGenerate()) RenderPreviews(false, false);
+        }
+
         private void ApplyPreset(PhotoshootService.FramingPreset preset)
         {
             var kind = PhotoshootService.ShotKind.Thumbnail;
@@ -354,7 +404,7 @@ namespace Orbiters.Toolkit.Editor.Photoshoot
             MovePresetIndicator();
             float fromZoom = Mathf.Log(state.Zoom), targetZoom = Mathf.Log(Mathf.Clamp(toZoom, PhotoshootState.MinZoom, PhotoshootState.MaxZoom));
             Vector2 fromPlacement = state.Placement;
-            float fromRotation = state.RotationDegrees;
+            float fromRotation = state.RotationDegrees, fromTilt = state.TiltDegrees;
             double start = EditorApplication.timeSinceStartup;
             framingTween = schedule.Execute(() =>
             {
@@ -367,6 +417,7 @@ namespace Orbiters.Toolkit.Editor.Photoshoot
                 {
                     // The short way round.
                     state.RotationDegrees = fromRotation + Mathf.DeltaAngle(fromRotation, toRotation.Value) * eased;
+                    state.TiltDegrees = Mathf.LerpUnclamped(fromTilt, 0f, eased);
                 }
                 SyncFraming();
                 RenderPreviews(false, false);
@@ -392,12 +443,13 @@ namespace Orbiters.Toolkit.Editor.Photoshoot
             ManualFraming();
         }
 
-        private void TurnBy(float deltaX)
+        private void TurnBy(Vector2 delta)
         {
             framingTween?.Pause();
-            state.RotationDegrees -= deltaX * TurnDegreesPerPixel;
+            state.RotationDegrees -= delta.x * TurnDegreesPerPixel;
+            state.TiltDegrees += delta.y * TurnDegreesPerPixel;
             SyncFraming();
-            RenderNow();
+            RenderTurn();
         }
 
         private void ZoomBy(float wheel)
@@ -439,6 +491,7 @@ namespace Orbiters.Toolkit.Editor.Photoshoot
             private Label hint;
             private PointerDragCapture drag;
             private Vector2 last;
+            private bool turning;
 
             public FramingDrag(PhotoshootPanel owner, PhotoshootService.ShotKind kind, Func<Vector2> frameSize)
             {
@@ -450,7 +503,7 @@ namespace Orbiters.Toolkit.Editor.Photoshoot
                 var sheet = AssetDatabase.LoadAssetAtPath<StyleSheet>(StyleSheetPath);
                 if (sheet && !target.styleSheets.Contains(sheet)) { target.styleSheets.Add(sheet); addedSheet = sheet; }
                 target.AddToClassList("ps-surface");
-                hint = new Label("Drag to move · Scroll to zoom · Shift-drag to turn") { pickingMode = PickingMode.Ignore };
+                hint = new Label("Drag to move · Scroll to zoom · Shift-drag to turn and tilt") { pickingMode = PickingMode.Ignore };
                 hint.AddToClassList("ps-surface__hint");
                 target.Add(hint);
                 target.RegisterCallback<PointerDownEvent>(OnDown);
@@ -491,8 +544,17 @@ namespace Orbiters.Toolkit.Editor.Photoshoot
                 target.EnableInClassList("ps-surface--turning", evt.shiftKey);
                 try
                 {
-                    if (evt.shiftKey) owner.TurnBy(delta.x);
-                    else owner.MoveBy(delta, frameSize(), kind);
+                    if (evt.shiftKey)
+                    {
+                        // A turn starts around the bone nearest the middle of the view.
+                        if (!turning) { turning = true; owner.state.BeginTurn(); }
+                        owner.TurnBy(delta);
+                    }
+                    else
+                    {
+                        turning = false;
+                        owner.MoveBy(delta, frameSize(), kind);
+                    }
                 }
                 catch { drag.End(); throw; }
                 evt.StopPropagation();
@@ -500,6 +562,7 @@ namespace Orbiters.Toolkit.Editor.Photoshoot
 
             private void End()
             {
+                turning = false;
                 target.RemoveFromClassList("ps-surface--dragging");
                 target.RemoveFromClassList("ps-surface--turning");
             }

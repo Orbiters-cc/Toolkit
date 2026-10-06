@@ -1,5 +1,10 @@
 # Orbiters Toolkit
 
+## 0.3.14 — 2026-10-06
+
+- Photoshoot: **Look at the camera** makes the avatar look straight at the camera; a dial splits the turn between the head and the eyes, from the head alone to the eyes alone. Eyes skinned partly to the head turn further, so what shows still meets the camera.
+- Photoshoot: a sphere turns and tilts the avatar (`OrbitSphere`, also for other tools). The avatar turns around whichever of its hips, chest and head is nearest the middle of the view, and the camera is framed on the unturned avatar, so turning no longer slides it around or changes the zoom. Eyes are the humanoid eye bones, else the ones set in the VRChat Avatar Descriptor's eye look (`PhotoshootLook.EyeFallback`).
+
 ## 0.3.13 — 2026-10-05
 
 - `AvatarBudget`: an avatar's parameters, bones, PhysBones and contacts against VRChat's PC limits, read from the SDK's performance levels, split between the avatar and its custom base. Custom base providers describe what they add and what their build changes with `CustomBaseFootprint`. XRay Gizmos shows it over the Scene view.

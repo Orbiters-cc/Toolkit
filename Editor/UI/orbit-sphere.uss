@@ -1,0 +1,36 @@
+/* Orbit sphere: turns and tilts what it stands for (the photoshoot's avatar). */
+
+.orb-sphere {
+    align-items: center;
+    flex-shrink: 0;
+}
+
+.orb-sphere__ball {
+    width: 112px;
+    height: 112px;
+    border-radius: 56px;
+    cursor: orbit;
+    transition-property: scale;
+    transition-duration: 0.14s;
+    transition-timing-function: ease-out;
+}
+
+.orb-sphere__ball:hover {
+    scale: 1.03 1.03;
+}
+
+.orb-sphere--active .orb-sphere__ball {
+    scale: 1.05 1.05;
+}
+
+.orb-sphere__ball:focus {
+    outline-width: 0;
+}
+
+.orb-sphere__readout {
+    margin-top: 6px;
+    padding: 0;
+    color: #e6e6e6;
+    font-size: 11px;
+    -unity-text-align: middle-center;
+}

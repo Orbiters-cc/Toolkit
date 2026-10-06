@@ -32,11 +32,22 @@ namespace Orbiters.Toolkit.Editor.Photoshoot
             FullBody
         }
 
+        /// <summary>The bone the avatar turns around: the one nearest the middle of the view when a turn starts.</summary>
+        public enum TurnPivot
+        {
+            Hips,
+            Chest,
+            Head
+        }
+
         /// <summary>Where the posed avatar stands in the last rendered frame; used to suggest framings.</summary>
         public struct FrameInfo
         {
             public bool valid;
+            /// <summary>The avatar as turned.</summary>
             public Bounds bounds;
+            /// <summary>The avatar before it is turned: the camera is placed from it, so turning never moves the camera.</summary>
+            public Bounds stage;
             /// <summary>Everything skinned to the head and its children (ears, hair, jaw), when the avatar is humanoid.</summary>
             public bool hasHead;
             public Bounds head;
@@ -102,6 +113,13 @@ namespace Orbiters.Toolkit.Editor.Photoshoot
             public float zoom;
             public Vector2 placement;
             public float avatarYawDegrees;
+            /// <summary>Tilt of the avatar toward (positive) or away from the camera, after its turn.</summary>
+            public float avatarTiltDegrees;
+            public TurnPivot pivot;
+            /// <summary>The head and eyes turn toward the camera.</summary>
+            public bool lookAtCamera;
+            /// <summary>Who looks at the camera: 0 the head alone, 1 the eyes alone.</summary>
+            public float lookWithEyes = .5f;
             public int width;
             public int height;
         }
@@ -136,6 +154,12 @@ namespace Orbiters.Toolkit.Editor.Photoshoot
             private Material backgroundMaterial;
             private Material bannerEffectMaterial;
             private string lastFaceBlendshapeKey;
+            private PhotoshootLook.Rig lookRig;
+            // The last turn and what it was measured on, to switch pivots without moving the avatar on screen.
+            private Quaternion lastTurn = Quaternion.identity;
+            private TurnPivot lastPivot;
+            private readonly Dictionary<TurnPivot, Vector3> stagePivots = new Dictionary<TurnPivot, Vector3>();
+            private RenderRequest lastRequest;
             private Color? lastAmbient;
             private Transform[] sourceTransforms, copyTransforms;
             private int[] sourceAppearance;
@@ -178,9 +202,12 @@ namespace Orbiters.Toolkit.Editor.Photoshoot
                     foreach (var renderer in avatarCopy.GetComponentsInChildren<SkinnedMeshRenderer>(true))
                         renderer.forceMatrixRecalculationPerRender = true;
                 }
+                // Which way the head and eyes face is read before posing; the look starts from each new pose.
+                if (avatarChanged) lookRig = PhotoshootLook.Prepare(avatarCopy);
                 if (avatarChanged || poseChanged)
                 {
                     SampleBodyPose(avatarCopy, request.bodyPose);
+                    PhotoshootLook.Capture(lookRig);
                 }
 
                 string faceBlendshapeKey = CreateFaceBlendshapeKey(request.selectedFaceBlendshapeNames);
@@ -201,15 +228,25 @@ namespace Orbiters.Toolkit.Editor.Photoshoot
                     MeasurePosedGeometry();
                 }
                 lastFaceBlendshapeKey = faceBlendshapeKey;
-                CenterOnStage();
-                ApplyAvatarRotation(avatarCopy, request.avatarYawDegrees);
-                Bounds bounds = CenterOnStage();
+                // Placed unturned, then turned around the pivot bone: the camera is framed on the unturned avatar, so a
+                // turn neither moves the camera nor slides the avatar to re-centre its changing outline.
+                avatarCopy.transform.rotation = Quaternion.identity;
+                Bounds stage = CenterOnStage();
+                MeasureStagePivots(stage);
+                Vector3 pivot = stagePivots[request.pivot];
+                Quaternion turn = Quaternion.AngleAxis(request.avatarTiltDegrees, Vector3.right) * Quaternion.AngleAxis(request.avatarYawDegrees, Vector3.up);
+                avatarCopy.transform.SetPositionAndRotation(pivot + turn * (avatarCopy.transform.position - pivot), turn);
+                lastTurn = turn;
+                lastPivot = request.pivot;
+                lastRequest = request;
+                Bounds bounds = VisibleBounds();
 
-                LastFrame = MeasureFrame(bounds);
+                LastFrame = MeasureFrame(bounds, stage);
 
-                ConfigureCamera(camera, bounds, request.shotKind, request.width, request.height, request.zoom, request.placement);
+                ConfigureCamera(camera, stage, request.shotKind, request.width, request.height, request.zoom, request.placement);
+                PhotoshootLook.Apply(lookRig, camera.transform.position, request.lookAtCamera, request.lookWithEyes);
                 camera.backgroundColor = request.backgroundColor;
-                RebuildBackground(camera, bounds, request.background, request.backgroundColor);
+                RebuildBackground(camera, stage, request.background, request.backgroundColor);
                 var lightPreset = request.lightPreset ?? CreateLightPresets()[0];
                 ApplyLiveLightPreset(lightPreset);
                 if (lastAmbient != lightPreset.ambientColor)
@@ -314,6 +351,7 @@ namespace Orbiters.Toolkit.Editor.Photoshoot
                 rim2LightObject = null;
                 camera = null;
                 lastFaceBlendshapeKey = null;
+                lookRig = null;
             }
 
             private void EnsureScene()
@@ -576,13 +614,58 @@ namespace Orbiters.Toolkit.Editor.Photoshoot
                 return VisibleBounds();
             }
 
-            private FrameInfo MeasureFrame(Bounds bounds)
+            // Hips, chest and head of the unturned avatar; the middle of its outline stands in for a missing bone.
+            private void MeasureStagePivots(Bounds stage)
+            {
+                var animator = avatarCopy.GetComponentInChildren<Animator>(true);
+                bool human = animator != null && animator.isHuman;
+                Vector3 Position(HumanBodyBones bone, HumanBodyBones fallback, float height)
+                {
+                    var t = human ? animator.GetBoneTransform(bone) ?? animator.GetBoneTransform(fallback) : null;
+                    return t != null ? t.position : new Vector3(stage.center.x, stage.min.y + stage.size.y * height, stage.center.z);
+                }
+                stagePivots[TurnPivot.Hips] = Position(HumanBodyBones.Hips, HumanBodyBones.Hips, .5f);
+                stagePivots[TurnPivot.Chest] = Position(HumanBodyBones.UpperChest, HumanBodyBones.Chest, .7f);
+                stagePivots[TurnPivot.Head] = Position(HumanBodyBones.Head, HumanBodyBones.Neck, .88f);
+            }
+
+            /// <summary>
+            /// The pivot nearest the middle of the last frame, and the placement change that keeps the avatar where it is on
+            /// screen when the turn moves to that pivot.
+            /// </summary>
+            public TurnPivot NearestPivot(out Vector2 placementShift)
+            {
+                placementShift = Vector2.zero;
+                if (camera == null || avatarCopy == null || lastRequest == null || stagePivots.Count == 0) return lastPivot;
+                TurnPivot nearest = lastPivot;
+                float best = float.MaxValue;
+                foreach (var pair in stagePivots)
+                {
+                    // Where each pivot shows now, as turned.
+                    Vector3 shown = stagePivots[lastPivot] + lastTurn * (pair.Value - stagePivots[lastPivot]);
+                    Vector3 viewport = camera.WorldToViewportPoint(shown);
+                    float distance = viewport.z <= 0f ? float.MaxValue : new Vector2(viewport.x - .5f, viewport.y - .5f).sqrMagnitude;
+                    if (distance < best) { best = distance; nearest = pair.Key; }
+                }
+                if (nearest == lastPivot) return nearest;
+                // Turning around another point moves everything by (I - R)(new - old); the camera follows it on screen.
+                Vector3 offset = stagePivots[nearest] - stagePivots[lastPivot];
+                Vector3 moved = offset - lastTurn * offset;
+                var frame = FrameFor(LastFrame.stage, lastRequest.shotKind, lastRequest.width, lastRequest.height, lastRequest.zoom);
+                placementShift = new Vector2(
+                    -Vector3.Dot(moved, Vector3.left) / (frame.baseHorizontalSpan * PlacementFrameStrength),
+                    -Vector3.Dot(moved, Vector3.up) / (frame.baseVerticalSpan * PlacementFrameStrength));
+                return nearest;
+            }
+
+            private FrameInfo MeasureFrame(Bounds bounds, Bounds stage)
             {
                 float height = bounds.size.y;
                 var frame = new FrameInfo
                 {
                     valid = true,
                     bounds = bounds,
+                    stage = stage,
                     chest = new Vector3(bounds.center.x, bounds.min.y + height * 0.70f, bounds.center.z),
                     hips = new Vector3(bounds.center.x, bounds.min.y + height * 0.50f, bounds.center.z)
                 };
@@ -1510,16 +1593,6 @@ namespace Orbiters.Toolkit.Editor.Photoshoot
             }
         }
 
-        private static void ApplyAvatarRotation(GameObject avatarRoot, float yawDegrees)
-        {
-            if (avatarRoot == null)
-            {
-                return;
-            }
-
-            avatarRoot.transform.rotation = Quaternion.Euler(0f, yawDegrees, 0f);
-        }
-
         private static Bounds CalculateVisibleBounds(GameObject avatarRoot)
         {
             bool hasBounds = false;
@@ -1653,14 +1726,14 @@ namespace Orbiters.Toolkit.Editor.Photoshoot
             for (int i = 0; i < 32; i++)
             {
                 float middle = Mathf.Sqrt(low * high);
-                var candidate = FrameFor(frame.bounds, shotKind, size.x, size.y, middle);
+                var candidate = FrameFor(frame.stage, shotKind, size.x, size.y, middle);
                 float visible = 2f * (candidate.distance - candidate.clearance + behindFront) * tangent;
                 if (visible > wanted) low = middle;
                 else high = middle;
             }
 
             zoom = Mathf.Sqrt(low * high);
-            var cameraFrame = FrameFor(frame.bounds, shotKind, size.x, size.y, zoom);
+            var cameraFrame = FrameFor(frame.stage, shotKind, size.x, size.y, zoom);
             // The camera looks along -Z, so screen right is world -X: placement.x moves the look point towards +X.
             float centreX = region.center.x, centreY = (top + bottom) * 0.5f;
             placement = new Vector2(
@@ -1673,7 +1746,7 @@ namespace Orbiters.Toolkit.Editor.Photoshoot
         public static Vector2 PlacementPerFrame(FrameInfo frame, ShotKind shotKind, Vector2Int size, float zoom)
         {
             if (!frame.valid) return new Vector2(1.25f, 1.25f);
-            var cameraFrame = FrameFor(frame.bounds, shotKind, size.x, size.y, zoom);
+            var cameraFrame = FrameFor(frame.stage, shotKind, size.x, size.y, zoom);
             // Measured at the avatar's front, the surface the pointer drags.
             float visibleHeight = 2f * (cameraFrame.distance - cameraFrame.clearance) * Mathf.Tan(ReferenceCameraFieldOfView * Mathf.Deg2Rad * 0.5f);
             return new Vector2(

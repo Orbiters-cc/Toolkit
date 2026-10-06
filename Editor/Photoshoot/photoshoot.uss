@@ -494,3 +494,42 @@
     color: #e6e6e6;
     font-size: 11px;
 }
+
+/* Look at the camera: a switch, then the head-to-eyes balance while it is on. */
+
+.ps-look {
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+    height: 34px;
+    margin-top: 2px;
+}
+
+.ps-look__label {
+    color: #bdbdbd;
+    font-size: 11px;
+}
+
+/* The sphere beside zoom and look: one row, no empty column. */
+
+.ps-framing__body {
+    flex-direction: row;
+    align-items: center;
+}
+
+.ps-framing__orbit {
+    margin-right: 16px;
+    margin-left: 2px;
+}
+
+.ps-framing__controls {
+    flex-grow: 1;
+    flex-shrink: 1;
+    min-width: 0;
+    justify-content: center;
+}
+
+.ps-framing__controls .orb-dial__value {
+    width: 58px;
+    min-width: 58px;
+}

@@ -33,6 +33,16 @@ namespace Orbiters.Toolkit.Editor.Photoshoot
         /// <summary>Turn of the avatar around itself, all the way round, kept between -180 and 180.</summary>
         public float RotationDegrees { get => rotationDegrees; set => rotationDegrees = Mathf.DeltaAngle(0f, value); }
         private float rotationDegrees;
+        public const float MaxTilt = 80f;
+        /// <summary>Tilt of the avatar toward (positive) or away from the camera, after its turn.</summary>
+        public float TiltDegrees { get => tiltDegrees; set => tiltDegrees = Mathf.Clamp(value, -MaxTilt, MaxTilt); }
+        private float tiltDegrees;
+        /// <summary>The bone the avatar turns around, chosen by <see cref="BeginTurn"/>.</summary>
+        public PhotoshootService.TurnPivot Pivot { get; set; } = PhotoshootService.TurnPivot.Hips;
+        /// <summary>The avatar looks at the camera, with its head and eyes balanced by <see cref="LookWithEyes"/>.</summary>
+        public bool LookAtCamera { get; set; }
+        /// <summary>Who looks at the camera: 0 the head alone, 1 the eyes alone.</summary>
+        public float LookWithEyes { get; set; } = .5f;
         public HashSet<string> SelectedFaceBlendshapes { get; } = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         /// <summary>The style picker tab shown in the panel (pose, light, background or expression); survives host rebuilds.</summary>
         public int StyleTab { get; set; }
@@ -51,6 +61,10 @@ namespace Orbiters.Toolkit.Editor.Photoshoot
             Zoom = DefaultZoom;
             Placement = Vector2.zero;
             RotationDegrees = 0f;
+            TiltDegrees = 0f;
+            Pivot = PhotoshootService.TurnPivot.Hips;
+            LookAtCamera = false;
+            LookWithEyes = .5f;
             BackgroundColor = PhotoshootService.DefaultBackgroundColor;
             FramingPreset = null;
             SelectedFaceBlendshapes.Clear();
@@ -141,6 +155,21 @@ namespace Orbiters.Toolkit.Editor.Photoshoot
             return previewSession != null && PhotoshootService.TrySuggestFraming(previewSession.LastFrame, shotKind, size, preset, out zoom, out placement);
         }
 
+        /// <summary>
+        /// Before turning or tilting: the avatar turns around whichever of its hips, chest and head is nearest the middle of
+        /// the view, so what is framed stays in place. Switching pivots shifts the placement so nothing moves on screen.
+        /// </summary>
+        internal void BeginTurn()
+        {
+            if (previewSession == null) return;
+            var pivot = previewSession.NearestPivot(out Vector2 shift);
+            if (pivot == Pivot) return;
+            Pivot = pivot;
+            Vector2 placement = Placement + shift;
+            Placement = new Vector2(Mathf.Clamp(placement.x, -PhotoshootService.MaxPlacement, PhotoshootService.MaxPlacement),
+                Mathf.Clamp(placement.y, -PhotoshootService.MaxPlacement, PhotoshootService.MaxPlacement));
+        }
+
         /// <summary>How far placement moves for a drag across the whole frame, so a dragged avatar follows the pointer.</summary>
         internal Vector2 PlacementPerFrame(PhotoshootService.ShotKind shotKind, Vector2Int size) =>
             PhotoshootService.PlacementPerFrame(previewSession != null ? previewSession.LastFrame : default, shotKind, size, Zoom);
@@ -205,6 +234,10 @@ namespace Orbiters.Toolkit.Editor.Photoshoot
                 zoom = Zoom,
                 placement = Placement,
                 avatarYawDegrees = RotationDegrees,
+                avatarTiltDegrees = TiltDegrees,
+                pivot = Pivot,
+                lookAtCamera = LookAtCamera,
+                lookWithEyes = LookWithEyes,
                 width = size.x,
                 height = size.y
             };
