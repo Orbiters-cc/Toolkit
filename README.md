@@ -1,5 +1,9 @@
 # Orbiters Toolkit
 
+## 0.3.15 — 2026-10-06
+
+- Photoshoot: changing where the avatar looks no longer zooms in when a framing preset is chosen; like turning, it keeps the zoom and placement.
+
 ## 0.3.14 — 2026-10-06
 
 - Photoshoot: **Look at the camera** makes the avatar look straight at the camera; a dial splits the turn between the head and the eyes, from the head alone to the eyes alone. Eyes skinned partly to the head turn further, so what shows still meets the camera.

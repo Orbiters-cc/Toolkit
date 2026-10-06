@@ -295,7 +295,7 @@ namespace Orbiters.Toolkit.Editor.Photoshoot
                 framingTween?.Pause();
                 state.RotationDegrees = yaw;
                 state.TiltDegrees = tilt;
-                RenderTurn();
+                RenderKeepingFraming();
             }, state.BeginTurn, () => AnimateFraming(state.Zoom, state.Placement, 0f, state.FramingPreset));
             orbit.tooltip = "Drag to turn the avatar, up and down to tilt it. It turns around whichever of its hips, chest and head is in the middle of the view. Double-click to face the camera again.";
             orbit.AddToClassList("ps-framing__orbit");
@@ -324,7 +324,7 @@ namespace Orbiters.Toolkit.Editor.Photoshoot
             {
                 state.LookAtCamera = on;
                 SyncLook();
-                RenderNow();
+                RenderKeepingFraming();
             }) { tooltip = "The avatar looks straight at the camera." };
             look.Add(lookSwitch);
             controls.Add(look);
@@ -333,7 +333,7 @@ namespace Orbiters.Toolkit.Editor.Photoshoot
                 value =>
                 {
                     state.LookWithEyes = value / 100f;
-                    RenderNow();
+                    RenderKeepingFraming();
                 });
             lookDial.tooltip = "The avatar always looks straight at the camera: this splits the turn between the head (left) and the eyes (right).";
             controls.Add(lookDial);
@@ -380,8 +380,9 @@ namespace Orbiters.Toolkit.Editor.Photoshoot
             if (CanGenerate()) RenderPreviews(false);
         }
 
-        // Turning and tilting keep the zoom and placement: a framing preset is not fitted again to the turned outline.
-        private void RenderTurn()
+        // Turning, tilting and where the avatar looks keep the zoom and placement: a framing preset is not fitted again to
+        // the changed outline.
+        private void RenderKeepingFraming()
         {
             ++state.RefreshTicket;
             if (CanGenerate()) RenderPreviews(false, false);
@@ -449,7 +450,7 @@ namespace Orbiters.Toolkit.Editor.Photoshoot
             state.RotationDegrees -= delta.x * TurnDegreesPerPixel;
             state.TiltDegrees += delta.y * TurnDegreesPerPixel;
             SyncFraming();
-            RenderTurn();
+            RenderKeepingFraming();
         }
 
         private void ZoomBy(float wheel)
