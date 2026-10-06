@@ -7,6 +7,7 @@
 - Build copies: `AttachmentAnimationBuild.Keep` makes objects created during a build assets until it is released; `Moved` keeps the animations of bones a tool moved before the build.
 - Uploads keep the meshes and materials a build step created in memory (twist splits, accessories following the body): the SDK saves the build copy as a prefab, which dropped them and uploaded those renderers empty. A last build step saves them with the build, meshes in a binary file (a body with its blendshapes is several GB as text).
 - Drawing pen: a thumbs up (index down, thumb up) draws too, like a squeezed fist. Pens created before keep their controller until created again.
+- `BlendShapePruning`: the blendshapes a built avatar uses on a renderer (its controllers' animations, visemes, jaw flap, eyelids, standard MMD morphs on Body), and a copy of the mesh without the others, baked at their weight.
 
 ## 0.3.12 — 2026-10-05
 
