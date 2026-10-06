@@ -26,8 +26,10 @@ namespace Orbiters.Toolkit.Editor.VRChat.Attachments
         private readonly Dictionary<Transform, Original> original = new Dictionary<Transform, Original>();
         private readonly List<Graph> graphs = new List<Graph>();
         private readonly Dictionary<Transform, List<Transform>> activationCopies = new Dictionary<Transform, List<Transform>>();
-        private string assetPath;
+        private string assetPath, meshesPath;
         private AnimatorController container;
+        private AttachmentBuildMeshes meshes;
+        private bool cloned;
 
         private sealed class Original
         {
@@ -97,12 +99,34 @@ namespace Orbiters.Toolkit.Editor.VRChat.Attachments
 
         public static AttachmentAnimationBuild Prepare(GameObject avatar)
         {
+            var build = For(avatar);
+            if (build.cloned) return build;
+            try { build.CloneControllers(); build.cloned = true; return build; }
+            catch { build.Release(); throw; }
+        }
+
+        /// <summary>
+        /// Makes objects created for this build copy (meshes, materials) assets until the build is released, without
+        /// taking over the avatar's animations, then writes all of the copy's build data (objects kept earlier too).
+        /// The SDK saves the copy as a prefab: in-memory objects would be left out.
+        /// </summary>
+        public static void Keep(GameObject avatar, IEnumerable<Object> values)
+        {
+            var created = values.ToList();
+            var build = created.Count > 0 ? For(avatar) : Builds.FirstOrDefault(b => b.root == avatar);
+            if (build == null) return;
+            foreach (var value in created) build.Persist(value);
+            if (build.container != null) AssetDatabase.SaveAssetIfDirty(build.container);
+            if (build.meshes != null) AssetDatabase.SaveAssetIfDirty(build.meshes);
+        }
+
+        private static AttachmentAnimationBuild For(GameObject avatar)
+        {
             var existing = Builds.FirstOrDefault(b => b.root == avatar);
             if (existing != null) return existing;
             var build = new AttachmentAnimationBuild(avatar);
             Builds.Add(build);
-            try { build.CloneControllers(); return build; }
-            catch { build.Release(); throw; }
+            return build;
         }
 
         private void CloneControllers()
@@ -160,20 +184,38 @@ namespace Orbiters.Toolkit.Editor.VRChat.Attachments
 
         private void Persist(Object value)
         {
+            value.hideFlags = HideFlags.HideInHierarchy;
+            // Meshes in a binary file: a body with its blendshapes is hundreds of MB, several GB as text (Unity fails to write it).
+            if (value is Mesh)
+            {
+                if (meshes == null)
+                {
+                    meshesPath = NewCachePath(".asset");
+                    meshes = ScriptableObject.CreateInstance<AttachmentBuildMeshes>();
+                    meshes.name = "Orbiters attachment build meshes";
+                    AssetDatabase.CreateAsset(meshes, meshesPath);
+                }
+                AssetDatabase.AddObjectToAsset(value, meshes);
+                return;
+            }
             if (container == null)
             {
-                if (!AssetDatabase.IsValidFolder(CacheFolder))
-                {
-                    AssetDatabase.CreateFolder("Assets", "OrbitersToolkitBuildCache");
-                    createdCacheFolder = true;
-                }
-                assetPath = CacheFolder + "/attachment-" + Guid.NewGuid().ToString("N") + ".controller";
+                assetPath = NewCachePath(".controller");
                 container = new AnimatorController { name = "Orbiters attachment build data" };
                 AssetDatabase.CreateAsset(container, assetPath);
             }
-            value.hideFlags = HideFlags.HideInHierarchy;
             AssetDatabase.AddObjectToAsset(value, container);
             if (value is AnimatorController controller) OwnedControllers.Add(controller);
+        }
+
+        private static string NewCachePath(string extension)
+        {
+            if (!AssetDatabase.IsValidFolder(CacheFolder))
+            {
+                AssetDatabase.CreateFolder("Assets", "OrbitersToolkitBuildCache");
+                createdCacheFolder = true;
+            }
+            return CacheFolder + "/attachment-" + Guid.NewGuid().ToString("N") + extension;
         }
 
         /// <summary>Moves each follower under its bone with an offset frame, preserving authored local animation values.</summary>
@@ -285,6 +327,7 @@ namespace Orbiters.Toolkit.Editor.VRChat.Attachments
             foreach (var graph in graphs)
                 foreach (var controller in graph.Copies.Values.OfType<AnimatorController>()) OwnedControllers.Remove(controller);
             if (!string.IsNullOrEmpty(assetPath)) AssetDatabase.DeleteAsset(assetPath);
+            if (!string.IsNullOrEmpty(meshesPath)) AssetDatabase.DeleteAsset(meshesPath);
             Builds.Remove(this);
             if (createdCacheFolder && Builds.Count == 0 && AssetDatabase.IsValidFolder(CacheFolder) &&
                 AssetDatabase.FindAssets("", new[] { CacheFolder }).Length == 0)

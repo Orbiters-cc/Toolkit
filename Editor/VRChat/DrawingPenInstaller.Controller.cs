@@ -81,14 +81,16 @@ namespace Orbiters.Toolkit.Editor.VRChat
                 Transition(state, erased, (Enabled, AnimatorConditionMode.IfNot, 0));
                 Transition(state, erased, (Clear, AnimatorConditionMode.If, 0));
             }
+            // The index finger down draws: a squeezed fist (1, trigger pressure with hysteresis) or a thumbs up (7).
             foreach (var side in new[] { (state: drawLeft, held: HeldLeft, gesture: "GestureLeft"),
                 (state: drawRight, held: HeldRight, gesture: "GestureRight") })
             {
                 Transition(idle, side.state, (side.held, AnimatorConditionMode.If, 0), (side.gesture, AnimatorConditionMode.Equals, 1),
                     (side.gesture + "Weight", AnimatorConditionMode.Greater, .35f));
+                Transition(idle, side.state, (side.held, AnimatorConditionMode.If, 0), (side.gesture, AnimatorConditionMode.Equals, 7));
                 Transition(side.state, idle, (side.held, AnimatorConditionMode.IfNot, 0));
-                Transition(side.state, idle, (side.gesture, AnimatorConditionMode.NotEqual, 1));
-                Transition(side.state, idle, (side.gesture + "Weight", AnimatorConditionMode.Less, .2f));
+                Transition(side.state, idle, (side.gesture, AnimatorConditionMode.NotEqual, 1), (side.gesture, AnimatorConditionMode.NotEqual, 7));
+                Transition(side.state, idle, (side.gesture, AnimatorConditionMode.Equals, 1), (side.gesture + "Weight", AnimatorConditionMode.Less, .2f));
             }
             Transition(idle, guest, (Grab + "_IsGrabbed", AnimatorConditionMode.If, 0),
                 (HeldLeft, AnimatorConditionMode.IfNot, 0), (HeldRight, AnimatorConditionMode.IfNot, 0),
