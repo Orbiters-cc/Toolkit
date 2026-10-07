@@ -1,5 +1,27 @@
 # Orbiters Toolkit
 
+## 0.3.16 — 2026-10-07
+
+- **Tools › Orbiters › Animation Extractor**: drop FBX files, from the Project window or your computer (copied into
+  `Assets/Animations/Imported`, or a folder you choose), and save their animations as standalone .anim clips you can use
+  anywhere: pick the clips and their names, keep or force Loop Time, and replace earlier extractions in place so
+  controllers using them keep working (or keep both, or skip). Humanoid curves, events and clip settings come along.
+- Photoshoot **ref sheet**: the avatar from the front, the back and the side, side by side at one scale on a 1920×1080
+  sheet, each view named above it in italic grey on a dark background. Same pose, light and expression as the
+  photoshoot; the side view faces left or right; drag, scroll or Fit the views; captured at full size. Hosts open it
+  with their own button.
+- Photoshoot **effects**, stackable, each with its strength: bloom, comic halftone (flat colours in 2 to 12 tones, ink
+  outlines, and an optional print screen of dots whose size you choose), ambient occlusion, depth of field (sharp at
+  the avatar's view position from its VRChat avatar descriptor), chromatic aberration, grain, lens distortion and
+  vignette (below zero it brightens the edges). Bloom, occlusion, depth of field and chromatic aberration go up to 300%.
+- Photoshoot **backgrounds of your own**: a + swatch (or pictures dropped on the backgrounds) adds PNG or JPEG pictures,
+  kept for every project; each can be removed. Background pictures are now cropped to the frame instead of stretched.
+- Photoshoot Light tab: an environment light slider (0 to 300% of the preset's).
+- The photoshoot's Framing card folds under its header; it is open by default and stays as you leave it.
+- Photoshoot pictures no longer show helpers other tools hang on the avatar without saving them, such as XRay Gizmos'
+  armature.
+- The photoshoot sphere's stylesheet no longer makes Unity warn about an unknown `outline-width` property on every import.
+
 ## 0.3.15 — 2026-10-06
 
 - Photoshoot: changing where the avatar looks no longer zooms in when a framing preset is chosen; like turning, it keeps the zoom and placement.

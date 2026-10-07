@@ -63,6 +63,8 @@ namespace Orbiters.Toolkit.Editor.Photoshoot
             public string displayName;
             /// <summary>A plain background in the colour chosen in the panel instead of an image.</summary>
             public bool solidColor;
+            /// <summary>One of the user's own pictures (<see cref="PhotoshootBackgrounds"/>): it can be removed.</summary>
+            public bool custom;
             public string assetPath;
             public Texture2D texture;
         }
@@ -122,7 +124,19 @@ namespace Orbiters.Toolkit.Editor.Photoshoot
             public float lookWithEyes = .5f;
             public int width;
             public int height;
+            /// <summary>Effects over the shot; null or none on for the shot as rendered.</summary>
+            public PhotoshootEffectSettings effects;
+            /// <summary>Effects of the whole picture (lens distortion, chromatic aberration, vignette): off on a ref sheet's views.</summary>
+            public bool frameEffects = true;
+            /// <summary>The environment light over the preset's own.</summary>
+            public float ambientIntensity = 1f;
         }
+
+        /// <summary>
+        /// Where the avatar sees from, in its root's space (VRChat: the avatar descriptor's view position), set by a
+        /// platform bridge. The depth of field is sharp there; without it, at the head.
+        /// </summary>
+        public static Func<GameObject, Vector3?> ViewPosition;
 
         /// <summary>
         /// One photoshoot stage in its own preview scene: its camera renders only that scene, so other photoshoots and the
@@ -133,6 +147,9 @@ namespace Orbiters.Toolkit.Editor.Photoshoot
             private sealed class PreviewRenderTarget
             {
                 public RenderTexture sceneRenderTexture;
+                /// <summary>The shot with its effects, before the banner effect: what a plain capture reads.</summary>
+                public RenderTexture gradedRenderTexture;
+                public RenderTexture depthTexture;
                 public RenderTexture renderTexture;
                 public RenderTexture nextRenderTexture;
                 public int width;
@@ -167,6 +184,10 @@ namespace Orbiters.Toolkit.Editor.Photoshoot
             private bool hasHeadRegion, hasTorsoRegion, hasBodyRegion;
             private Bounds headRegion, torsoRegion, bodyRegion;
             private ShotKind lastPreviewShotKind = ShotKind.Thumbnail;
+            // The view position in the head's space, measured on the unposed copy, so the focus follows the head in any pose.
+            private Transform viewHead;
+            private Vector3 viewInHead;
+            private bool hasView;
 
             public Texture PreviewTexture => GetPreviewTexture(lastPreviewShotKind);
             public bool IsOpen => scene.IsValid();
@@ -204,6 +225,7 @@ namespace Orbiters.Toolkit.Editor.Photoshoot
                 }
                 // Which way the head and eyes face is read before posing; the look starts from each new pose.
                 if (avatarChanged) lookRig = PhotoshootLook.Prepare(avatarCopy);
+                if (avatarChanged) MeasureViewPoint();
                 if (avatarChanged || poseChanged)
                 {
                     SampleBodyPose(avatarCopy, request.bodyPose);
@@ -249,10 +271,12 @@ namespace Orbiters.Toolkit.Editor.Photoshoot
                 RebuildBackground(camera, stage, request.background, request.backgroundColor);
                 var lightPreset = request.lightPreset ?? CreateLightPresets()[0];
                 ApplyLiveLightPreset(lightPreset);
-                if (lastAmbient != lightPreset.ambientColor)
+                Color ambient = lightPreset.ambientColor * Mathf.Max(0f, request.ambientIntensity);
+                ambient.a = 1f;
+                if (lastAmbient != ambient)
                 {
-                    ApplyStageAmbient(avatarCopy, lightPreset.ambientColor);
-                    lastAmbient = lightPreset.ambientColor;
+                    ApplyStageAmbient(avatarCopy, ambient);
+                    lastAmbient = ambient;
                 }
 
                 camera.targetTexture = target.sceneRenderTexture;
@@ -267,12 +291,13 @@ namespace Orbiters.Toolkit.Editor.Photoshoot
                         camera.Render();
                     }
                     camera.Render();
+                    PhotoshootEffects.RenderDepth(camera, request.effects, ref target.depthTexture, request.width, request.height);
                 }
                 finally
                 {
                     ShaderUtil.allowAsyncCompilation = asyncCompilation;
                 }
-                ApplyShotPostProcess(request.shotKind, target);
+                ApplyShotPostProcess(request, target);
                 MarkRenderTargetUpdated(target);
                 lastPreviewShotKind = request.shotKind;
             }
@@ -285,20 +310,10 @@ namespace Orbiters.Toolkit.Editor.Photoshoot
 
                 var target = GetRenderTarget(request.shotKind);
                 RenderTexture previousActiveTexture = RenderTexture.active;
-                RenderTexture resolved = null;
                 try
                 {
-                    if (withShotEffect)
-                    {
-                        RenderTexture.active = target.renderTexture;
-                    }
-                    else
-                    {
-                        // The scene render is multisampled: resolved into a plain texture before it is read.
-                        resolved = RenderTexture.GetTemporary(request.width, request.height, 0, RenderTextureFormat.ARGB32);
-                        Graphics.Blit(target.sceneRenderTexture, resolved);
-                        RenderTexture.active = resolved;
-                    }
+                    // Without the banner effect: the shot with its effects, already resolved.
+                    RenderTexture.active = withShotEffect ? target.renderTexture : target.gradedRenderTexture;
                     var texture = new Texture2D(request.width, request.height, TextureFormat.RGBA32, false, false)
                     {
                         name = "Orbiters Photoshoot Capture"
@@ -310,7 +325,6 @@ namespace Orbiters.Toolkit.Editor.Photoshoot
                 finally
                 {
                     RenderTexture.active = previousActiveTexture;
-                    if (resolved != null) RenderTexture.ReleaseTemporary(resolved);
                 }
             }
 
@@ -370,11 +384,13 @@ namespace Orbiters.Toolkit.Editor.Photoshoot
             private void EnsureRenderTexture(PreviewRenderTarget target, int width, int height, ShotKind shotKind)
             {
                 if (target.sceneRenderTexture != null &&
+                    target.gradedRenderTexture != null &&
                     target.renderTexture != null &&
                     target.nextRenderTexture != null &&
                     target.width == width &&
                     target.height == height &&
                     target.sceneRenderTexture.IsCreated() &&
+                    target.gradedRenderTexture.IsCreated() &&
                     target.renderTexture.IsCreated() &&
                     target.nextRenderTexture.IsCreated())
                 {
@@ -392,6 +408,7 @@ namespace Orbiters.Toolkit.Editor.Photoshoot
                 target.height = height;
                 string namePrefix = shotKind == ShotKind.Banner ? "Banner" : "Thumbnail";
                 target.sceneRenderTexture = CreateRenderTexture(width, height, 24, $"Orbiters Photoshoot {namePrefix} Scene Render", antiAlias: true);
+                target.gradedRenderTexture = CreateRenderTexture(width, height, 0, $"Orbiters Photoshoot {namePrefix} Graded", antiAlias: false);
                 target.renderTexture = CreateRenderTexture(width, height, 0, $"Orbiters Photoshoot {namePrefix} Live Preview", antiAlias: false);
                 target.nextRenderTexture = CreateRenderTexture(width, height, 0, $"Orbiters Photoshoot {namePrefix} Live Preview Next", antiAlias: false);
                 ClearRenderTexture(target.sceneRenderTexture, PreviewClearColor);
@@ -454,6 +471,7 @@ namespace Orbiters.Toolkit.Editor.Photoshoot
                 DisableAudioListeners(avatarCopy);
                 sourceTransforms = avatarRoot.GetComponentsInChildren<Transform>(true);
                 copyTransforms = avatarCopy.GetComponentsInChildren<Transform>(true);
+                HideEditorHelpers(sourceTransforms, copyTransforms);
 
                 lastAvatarRoot = avatarRoot;
                 sourceAppearance = currentAppearance;
@@ -461,6 +479,14 @@ namespace Orbiters.Toolkit.Editor.Photoshoot
                 lastBodyPose = bodyPose;
                 lastFaceBlendshapeKey = null;
                 return true;
+            }
+
+            // Helpers other editor tools hang on the avatar without ever saving them (XRay Gizmos' armature): not part of
+            // the photo, nor of its framing. Turned off rather than removed, so the copy's bones keep matching the source's.
+            private static void HideEditorHelpers(Transform[] source, Transform[] copy)
+            {
+                for (int i = 1; i < source.Length && i < copy.Length; i++)
+                    if ((source[i].gameObject.hideFlags & HideFlags.DontSaveInEditor) != 0) copy[i].gameObject.SetActive(false);
             }
 
             // Compare source state, not the posed clone. Rebuilding only after a source edit keeps camera-only
@@ -811,26 +837,70 @@ namespace Orbiters.Toolkit.Editor.Photoshoot
                 return light;
             }
 
-            private void ApplyShotPostProcess(ShotKind shotKind, PreviewRenderTarget target)
+            private void ApplyShotPostProcess(RenderRequest request, PreviewRenderTarget target)
             {
                 if (target.sceneRenderTexture == null || target.renderTexture == null)
                 {
                     return;
                 }
 
+                // The scene render is multisampled: resolved, with the effects over it when some are on.
+                if (request.effects != null && request.effects.Count > 0)
+                {
+                    var resolved = RenderTexture.GetTemporary(target.width, target.height, 0, RenderTextureFormat.ARGB32);
+                    try
+                    {
+                        Graphics.Blit(target.sceneRenderTexture, resolved);
+                        PhotoshootEffects.Apply(resolved, target.gradedRenderTexture, request.effects.NeedsDepth ? target.depthTexture : null, camera,
+                            FocusDistance(), request.effects, request.frameEffects);
+                    }
+                    finally
+                    {
+                        RenderTexture.ReleaseTemporary(resolved);
+                    }
+                }
+                else
+                {
+                    Graphics.Blit(target.sceneRenderTexture, target.gradedRenderTexture);
+                }
+
                 RenderTexture output = target.nextRenderTexture != null ? target.nextRenderTexture : target.renderTexture;
-                if (shotKind == ShotKind.Banner && EnsureBannerEffectMaterial())
+                if (request.shotKind == ShotKind.Banner && EnsureBannerEffectMaterial())
                 {
                     bannerEffectMaterial.SetColor("_OverlayColor", BannerEffectOverlayColor);
                     // The same blur at every size (48 texels at 1600 wide): the smaller live preview looks like the capture.
                     bannerEffectMaterial.SetFloat("_MaxBlurTexels", BannerEffectMaxBlurTexels * output.width / 1600f);
-                    Graphics.Blit(target.sceneRenderTexture, output, bannerEffectMaterial);
+                    Graphics.Blit(target.gradedRenderTexture, output, bannerEffectMaterial);
                     SwapPreviewRenderTexture(target);
                     return;
                 }
 
-                Graphics.Blit(target.sceneRenderTexture, output);
+                Graphics.Blit(target.gradedRenderTexture, output);
                 SwapPreviewRenderTexture(target);
+            }
+
+            // Where the avatar sees from (its view position, else its head), carried by the head bone through any pose.
+            private void MeasureViewPoint()
+            {
+                hasView = false;
+                viewHead = null;
+                var animator = avatarCopy.GetComponentInChildren<Animator>(true);
+                Transform head = animator != null && animator.isHuman ? animator.GetBoneTransform(HumanBodyBones.Head) : null;
+                Vector3? local = ViewPosition?.Invoke(avatarCopy);
+                if (!local.HasValue && head == null) return;
+                Vector3 world = local.HasValue ? avatarCopy.transform.TransformPoint(local.Value) : head.position;
+                viewHead = head != null ? head : avatarCopy.transform;
+                viewInHead = viewHead.InverseTransformPoint(world);
+                hasView = true;
+            }
+
+            // How far in front of the camera the avatar sees from: the depth of field is sharp there.
+            private float FocusDistance()
+            {
+                Vector3 point = hasView && viewHead != null ? viewHead.TransformPoint(viewInHead)
+                    : LastFrame.hasHead ? LastFrame.head.center
+                    : LastFrame.bounds.center + Vector3.up * LastFrame.bounds.extents.y * 0.8f;
+                return Mathf.Max(0.05f, Vector3.Dot(point - camera.transform.position, camera.transform.forward));
             }
 
             private static void SwapPreviewRenderTexture(PreviewRenderTarget target)
@@ -934,6 +1004,8 @@ namespace Orbiters.Toolkit.Editor.Photoshoot
 
             private static void ReleaseRenderTarget(PreviewRenderTarget target)
             {
+                ReleaseRenderTexture(ref target.gradedRenderTexture);
+                PhotoshootEffects.Release(ref target.depthTexture);
                 ReleaseRenderTexture(ref target.sceneRenderTexture);
                 ReleaseRenderTexture(ref target.renderTexture);
                 ReleaseRenderTexture(ref target.nextRenderTexture);
@@ -949,7 +1021,9 @@ namespace Orbiters.Toolkit.Editor.Photoshoot
         private const float BannerEffectMaxBlurTexels = 48f;
         private const float ReferenceCameraFieldOfView = 31.8f;
         private const float DefaultCameraZoom = 1.35f;
-        private const float MinCameraZoom = 0.45f;
+        // Wider than the zoom dial goes (PhotoshootState.MinZoom): a fitted framing may need it, such as a ref sheet's side
+        // view of an avatar with a long tail.
+        internal const float MinCameraZoom = 0.2f;
         private const float MaxCameraZoom = 20f;
         private const float PlacementFrameStrength = 0.80f;
         /// <summary>
@@ -1083,12 +1157,19 @@ namespace Orbiters.Toolkit.Editor.Photoshoot
                 .ToList();
         }
 
-        private static List<BackgroundOption> FindBackgrounds()
+        internal static List<BackgroundOption> FindBackgrounds()
         {
             var options = new List<BackgroundOption>
             {
                 new BackgroundOption { displayName = "Color", solidColor = true }
             };
+
+            // The user's own pictures come after the built-in ones.
+            foreach (string path in PhotoshootBackgrounds.Files())
+            {
+                var texture = PhotoshootBackgrounds.Load(path);
+                if (texture != null) options.Add(new BackgroundOption { displayName = Path.GetFileNameWithoutExtension(path), assetPath = path, texture = texture, custom = true });
+            }
 
             if (!AssetDatabase.IsValidFolder(BackgroundFolder))
             {
@@ -1113,7 +1194,7 @@ namespace Orbiters.Toolkit.Editor.Photoshoot
             }
 
             return options
-                .OrderBy(option => option.solidColor ? 0 : 1)
+                .OrderBy(option => option.solidColor ? 0 : option.custom ? 2 : 1)
                 .ThenBy(option => option.displayName, StringComparer.OrdinalIgnoreCase)
                 .ToList();
         }
@@ -1849,6 +1930,12 @@ namespace Orbiters.Toolkit.Editor.Photoshoot
             if (material.HasProperty("_MainTex"))
             {
                 material.mainTexture = texture != null ? texture : Texture2D.whiteTexture;
+                // Cropped to the frame like a cover photo, never stretched.
+                float frame = Mathf.Max(0.01f, camera.aspect);
+                float picture = texture != null ? texture.width / (float)Mathf.Max(1, texture.height) : frame;
+                Vector2 scale = picture > frame ? new Vector2(frame / picture, 1f) : new Vector2(1f, picture / frame);
+                material.mainTextureScale = scale;
+                material.mainTextureOffset = (Vector2.one - scale) * 0.5f;
             }
             Color color = texture != null ? Color.white : solidColor;
             if (material.HasProperty("_Color"))

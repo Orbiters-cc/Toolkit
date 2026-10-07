@@ -404,6 +404,184 @@
     color: #ffffff;
 }
 
+/* The user's own backgrounds: an add swatch, a remove button on hover, and the grid lighting up under dropped pictures. */
+.ps-panel .ps-swatch--add {
+    justify-content: center;
+    align-items: center;
+    background-color: rgba(255, 255, 255, 0.03);
+    border-color: rgba(255, 255, 255, 0.12);
+    border-width: 1px;
+}
+
+.ps-panel .ps-swatch--add:hover:enabled {
+    background-color: rgba(0, 218, 109, 0.08);
+    border-color: rgba(0, 218, 109, 0.5);
+}
+
+.ps-swatch__add-icon {
+    width: 18px;
+    height: 18px;
+    --icon-color: #8f8f8f;
+}
+
+.ps-panel .ps-swatch--add:hover .ps-swatch__add-icon {
+    --icon-color: #00DA6D;
+}
+
+.ps-swatch-wrap {
+    position: relative;
+    margin: 0 8px 8px 0;
+}
+
+.ps-panel .ps-swatch-wrap > .ps-swatch {
+    margin: 0;
+}
+
+.ps-panel .ps-swatch__remove {
+    position: absolute;
+    top: -6px;
+    right: -6px;
+    width: 20px;
+    height: 20px;
+    min-width: 0;
+    padding: 4px;
+    border-radius: 10px;
+    border-width: 1px;
+    border-color: rgba(255, 255, 255, 0.16);
+    background-color: #2a2a2a;
+    opacity: 0;
+}
+
+.ps-swatch-wrap:hover .ps-swatch__remove {
+    opacity: 1;
+}
+
+.ps-panel .ps-swatch__remove:hover:enabled {
+    background-color: #ff6b6b;
+    border-color: #ff6b6b;
+}
+
+.ps-swatch__remove-icon {
+    flex-grow: 1;
+    --icon-color: #e6e6e6;
+}
+
+.ps-panel .ps-swatch__remove:hover .ps-swatch__remove-icon {
+    --icon-color: #1a0505;
+}
+
+.ps-grid--drop {
+    border-radius: 14px;
+    background-color: rgba(0, 218, 109, 0.06);
+}
+
+/* ---- Foldable cards (framing) ------------------------------------------------------------------- */
+
+.ps-card--foldable > .ps-card__header {
+    cursor: link;
+}
+
+.ps-card__chevron {
+    width: 12px;
+    height: 12px;
+    margin-right: 6px;
+    --icon-color: #8f8f8f;
+    rotate: 90deg;
+    transition-property: rotate;
+    transition-duration: 0.18s;
+    transition-timing-function: ease-out;
+}
+
+.ps-card--folded .ps-card__chevron {
+    rotate: 0deg;
+}
+
+.ps-card--foldable > .ps-card__header > .ps-card__title {
+    flex-grow: 1;
+}
+
+.ps-card--folded > .ps-card__header {
+    margin-bottom: 0;
+}
+
+/* ---- Effects: a switch, the name, the strength ----------------------------------------------------- */
+
+.ps-grid--effects {
+    flex-direction: column;
+    flex-wrap: nowrap;
+}
+
+.ps-effect {
+    flex-direction: row;
+    align-items: center;
+    height: 32px;
+    padding: 0 2px 0 2px;
+    border-bottom-width: 1px;
+    border-bottom-color: rgba(255, 255, 255, 0.04);
+}
+
+.ps-effect__name {
+    flex-grow: 1;
+    flex-shrink: 1;
+    min-width: 0;
+    margin-left: 10px;
+    color: #9a9a9a;
+    font-size: 11px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    transition-property: color;
+    transition-duration: 0.15s;
+}
+
+.ps-effect--on .ps-effect__name {
+    color: #f2f2f2;
+}
+
+.ps-effect--sub {
+    margin-left: 22px;
+    height: 28px;
+}
+
+.ps-effect--sub .ps-effect__name {
+    font-size: 10px;
+}
+
+.ps-light__ambient {
+    margin-top: 6px;
+    border-bottom-width: 0;
+}
+
+.ps-light__ambient .ps-effect__name {
+    margin-left: 0;
+}
+
+.ps-effect__slider {
+    width: 118px;
+    height: 20px;
+    flex-shrink: 0;
+    margin-left: 8px;
+    --track-color: #333333;
+    --fill-color: #00DA6D;
+}
+
+.ps-effect__slider:disabled {
+    opacity: 0.32;
+}
+
+.ps-effect__value {
+    width: 36px;
+    flex-shrink: 0;
+    margin-left: 6px;
+    color: #6f6f6f;
+    font-size: 10px;
+    -unity-text-align: middle-right;
+}
+
+.ps-effect--on .ps-effect__value {
+    color: #bdbdbd;
+}
+
 /* ---- Colour picker ------------------------------------------------------------------------------- */
 
 .ps-picker {
@@ -508,6 +686,46 @@
 .ps-look__label {
     color: #bdbdbd;
     font-size: 11px;
+}
+
+/* ---- Ref sheet ----------------------------------------------------------------------------------- */
+
+.ps-stage--refsheet {
+    background-color: #111111;
+}
+
+.ps-shot__icon {
+    width: 22px;
+    height: 22px;
+    margin-right: 10px;
+    --icon-color: #00DA6D;
+}
+
+.ps-refsheet__side {
+    width: 168px;
+}
+
+/* A capture flashes the sheet like a camera. */
+.ps-stage__flash {
+    position: absolute;
+    left: 0;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    background-color: #ffffff;
+    opacity: 0;
+    transition-property: opacity;
+    transition-duration: 0.45s;
+    transition-timing-function: ease-out;
+}
+
+.ps-stage__flash--on {
+    opacity: 0.55;
+    transition-duration: 0s;
+}
+
+.ps-surface--vertical {
+    cursor: resize-vertical;
 }
 
 /* The sphere beside zoom and look: one row, no empty column. */

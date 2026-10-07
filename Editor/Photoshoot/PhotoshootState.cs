@@ -44,12 +44,38 @@ namespace Orbiters.Toolkit.Editor.Photoshoot
         /// <summary>Who looks at the camera: 0 the head alone, 1 the eyes alone.</summary>
         public float LookWithEyes { get; set; } = .5f;
         public HashSet<string> SelectedFaceBlendshapes { get; } = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        /// <summary>Effects over every shot (and the ref sheet's views): bloom, comic halftone, depth of field…</summary>
+        public PhotoshootEffectSettings Effects { get; } = new PhotoshootEffectSettings();
+        /// <summary>The environment light over the preset's own: 1 as the preset has it, up to <see cref="MaxAmbientIntensity"/>.</summary>
+        public float AmbientIntensity { get => ambientIntensity; set => ambientIntensity = Mathf.Clamp(value, 0f, MaxAmbientIntensity); }
+        private float ambientIntensity = 1f;
+        public const float MaxAmbientIntensity = 3f;
+        private const string FramingOpenPref = "Orbiters.Photoshoot.FramingOpen";
+        /// <summary>The framing card is unfolded (the default); remembered by the editor.</summary>
+        public bool FramingOpen { get => EditorPrefs.GetBool(FramingOpenPref, true); set => EditorPrefs.SetBool(FramingOpenPref, value); }
         /// <summary>The style picker tab shown in the panel (pose, light, background or expression); survives host rebuilds.</summary>
         public int StyleTab { get; set; }
         public string Status { get; set; }
         public string Error { get; set; }
         public bool IsGenerating { get; internal set; }
         internal int RefreshTicket;
+
+        /// <summary>The panel shows the ref sheet (front, back and side) instead of the shots; survives host rebuilds.</summary>
+        public bool RefSheetOpen { get; set; }
+        /// <summary>The ref sheet's own plain background, dark grey until changed; the photoshoot keeps its own.</summary>
+        public Color RefSheetBackground { get; set; } = PhotoshootRefSheet.DefaultBackground;
+        public bool RefSheetSideFacesRight { get; set; }
+        /// <summary>Zoom over the full body fitted in every view (1), and how far the views are moved up (positive).</summary>
+        public float RefSheetZoom { get => refSheetZoom; set => refSheetZoom = Mathf.Clamp(value, MinRefSheetZoom, MaxRefSheetZoom); }
+        private float refSheetZoom = 1f;
+        public float RefSheetLift { get => refSheetLift; set => refSheetLift = Mathf.Clamp(value, -PhotoshootService.MaxPlacement, PhotoshootService.MaxPlacement); }
+        private float refSheetLift;
+        public const float MinRefSheetZoom = 0.5f, MaxRefSheetZoom = 4f;
+        private const float RefSheetMargin = 0.88f;
+        private RenderTexture refSheetPreview;
+        // The full-body fit of the last pose: one zoom for every view, so all three share a scale, and each view's placement.
+        private float refSheetFitZoom;
+        private Vector2[] refSheetFitPlacements;
 
         public void Reset(bool destroyPreview)
         {
@@ -67,7 +93,15 @@ namespace Orbiters.Toolkit.Editor.Photoshoot
             LookWithEyes = .5f;
             BackgroundColor = PhotoshootService.DefaultBackgroundColor;
             FramingPreset = null;
+            RefSheetOpen = false;
+            RefSheetBackground = PhotoshootRefSheet.DefaultBackground;
+            RefSheetSideFacesRight = false;
+            RefSheetZoom = 1f;
+            RefSheetLift = 0f;
+            refSheetFitPlacements = null;
             SelectedFaceBlendshapes.Clear();
+            Effects.Reset();
+            AmbientIntensity = 1f;
             Status = null;
             Error = null;
             IsGenerating = false;
@@ -86,6 +120,10 @@ namespace Orbiters.Toolkit.Editor.Photoshoot
 
         public void ClosePreview()
         {
+            ReleaseRefSheetPreview();
+            refSheetFitPlacements = null;
+            // Closing the photoshoot leaves the ref sheet: it opens on its shots next time.
+            RefSheetOpen = false;
             if (previewSession == null)
             {
                 return;
@@ -110,6 +148,17 @@ namespace Orbiters.Toolkit.Editor.Photoshoot
                 var available = new HashSet<string>(Catalog.faceBlendshapes.Select(option => option.name), StringComparer.OrdinalIgnoreCase);
                 SelectedFaceBlendshapes.RemoveWhere(name => !available.Contains(name));
             }
+        }
+
+        /// <summary>The backgrounds again after the user added or removed one; <paramref name="select"/> becomes the chosen one.</summary>
+        internal void ReloadBackgrounds(string select = null)
+        {
+            if (Catalog == null) return;
+            var chosen = Catalog.backgrounds.Count > 0 ? Catalog.backgrounds[ClampIndex(BackgroundIndex, Catalog.backgrounds.Count)] : null;
+            Catalog.backgrounds = PhotoshootService.FindBackgrounds();
+            string wanted = select ?? chosen?.assetPath;
+            int index = Catalog.backgrounds.FindIndex(option => wanted != null ? option.assetPath == wanted : option.solidColor == (chosen?.solidColor ?? true));
+            BackgroundIndex = ClampIndex(index < 0 ? 0 : index, Catalog.backgrounds.Count);
         }
 
         internal bool HasPreviewTexture(PhotoshootService.ShotKind shotKind) => previewSession?.GetPreviewTexture(shotKind) != null;
@@ -218,6 +267,149 @@ namespace Orbiters.Toolkit.Editor.Photoshoot
             return texture;
         }
 
+        // ---- Ref sheet ------------------------------------------------------------------------------------
+
+        /// <summary>
+        /// Renders the live ref sheet at <paramref name="size"/> into <see cref="RefSheetPreview"/>. <paramref name="refit"/>:
+        /// the pose, expression or side changed, so the full body is fitted in every view again first.
+        /// </summary>
+        internal void RenderRefSheet(GameObject avatarRoot, Vector2Int size, bool refit, bool forceFaceBlendshapeApply)
+        {
+            try
+            {
+                Error = null;
+                if (refSheetPreview == null || refSheetPreview.width != size.x || refSheetPreview.height != size.y || !refSheetPreview.IsCreated())
+                {
+                    ReleaseRefSheetPreview();
+                    refSheetPreview = new RenderTexture(size.x, size.y, 0, RenderTextureFormat.ARGB32)
+                    {
+                        name = "Orbiters Photoshoot Ref Sheet", hideFlags = HideFlags.HideAndDontSave, filterMode = FilterMode.Bilinear,
+                        wrapMode = TextureWrapMode.Clamp, useMipMap = false, autoGenerateMips = false
+                    };
+                    refSheetPreview.Create();
+                }
+                DrawRefSheet(avatarRoot, refSheetPreview, refit, forceFaceBlendshapeApply);
+            }
+            catch (Exception ex)
+            {
+                Error = ex.Message;
+                Status = null;
+            }
+        }
+
+        internal Texture RefSheetPreview => refSheetPreview;
+
+        /// <summary>The ref sheet at full size (<see cref="PhotoshootRefSheet.Size"/>), framed as the live one.</summary>
+        internal Texture2D CaptureRefSheet(GameObject avatarRoot)
+        {
+            var size = PhotoshootRefSheet.Size;
+            var sheet = RenderTexture.GetTemporary(size.x, size.y, 0, RenderTextureFormat.ARGB32);
+            var previous = RenderTexture.active;
+            try
+            {
+                DrawRefSheet(avatarRoot, sheet, refSheetFitPlacements == null, false);
+                RenderTexture.active = sheet;
+                var texture = new Texture2D(size.x, size.y, TextureFormat.RGBA32, false, false) { name = "Orbiters Ref Sheet" };
+                texture.ReadPixels(new Rect(0, 0, size.x, size.y), 0, 0, false);
+                texture.Apply(false, false);
+                return texture;
+            }
+            finally
+            {
+                RenderTexture.active = previous;
+                RenderTexture.ReleaseTemporary(sheet);
+            }
+        }
+
+        /// <summary>How far <see cref="RefSheetLift"/> moves for a drag across a whole view's height.</summary>
+        internal float RefSheetLiftPerView(Vector2Int sheet)
+        {
+            var view = PhotoshootRefSheet.ViewSize(sheet);
+            float zoom = refSheetFitZoom > 0f ? refSheetFitZoom * RefSheetZoom : DefaultZoom;
+            return PhotoshootService.PlacementPerFrame(previewSession != null ? previewSession.LastFrame : default, PhotoshootService.ShotKind.Thumbnail, view, zoom).y;
+        }
+
+        private void DrawRefSheet(GameObject avatarRoot, RenderTexture sheet, bool refit, bool forceFaceBlendshapeApply)
+        {
+            if (previewSession == null)
+            {
+                previewSession = new PhotoshootService.LivePreviewSession();
+            }
+
+            var view = PhotoshootRefSheet.ViewSize(new Vector2Int(sheet.width, sheet.height));
+            int views = PhotoshootRefSheet.Views.Length;
+            if (refit || refSheetFitPlacements == null)
+            {
+                // Each view fitted alone, then the smallest zoom for all: the widest outline (arms out, a tail aside) sets
+                // the scale. A turn keeps every point at its height, so the views share their height too.
+                refSheetFitZoom = MaxZoom;
+                var placements = new Vector2[views];
+                for (int i = 0; i < views; i++)
+                {
+                    previewSession.UpdatePreview(RefSheetRequest(avatarRoot, i, view, DefaultZoom, Vector2.zero, forceFaceBlendshapeApply && i == 0));
+                    if (!PhotoshootService.TrySuggestFraming(previewSession.LastFrame, PhotoshootService.ShotKind.Thumbnail, view,
+                            PhotoshootService.FramingPreset.FullBody, out float zoom, out Vector2 placement))
+                    {
+                        zoom = DefaultZoom;
+                        placement = Vector2.zero;
+                    }
+                    refSheetFitZoom = Mathf.Min(refSheetFitZoom, zoom);
+                    placements[i] = placement;
+                }
+                // Room between the views: hands held out never touch the next view.
+                refSheetFitZoom *= RefSheetMargin;
+                refSheetFitPlacements = placements;
+                forceFaceBlendshapeApply = false;
+            }
+
+            PhotoshootRefSheet.Clear(sheet, RefSheetBackground);
+            float scale = Mathf.Clamp(refSheetFitZoom * RefSheetZoom, PhotoshootService.MinCameraZoom, MaxZoom);
+            for (int i = 0; i < views; i++)
+            {
+                var placement = new Vector2(refSheetFitPlacements[i].x, refSheetFitPlacements[0].y + RefSheetLift);
+                previewSession.UpdatePreview(RefSheetRequest(avatarRoot, i, view, scale, placement, forceFaceBlendshapeApply && i == 0));
+                PhotoshootRefSheet.Place(sheet, previewSession.GetPreviewTexture(PhotoshootService.ShotKind.Thumbnail), i);
+            }
+            PhotoshootRefSheet.DrawNames(sheet);
+        }
+
+        // Every view: same pose, light and expression; no tilt, and no look at the camera (the back view would turn its head).
+        private PhotoshootService.RenderRequest RefSheetRequest(GameObject avatarRoot, int view, Vector2Int size, float zoom, Vector2 placement, bool forceFaceBlendshapeApply)
+        {
+            EnsureCatalog(avatarRoot);
+            return new PhotoshootService.RenderRequest
+            {
+                avatarRoot = avatarRoot,
+                bodyPose = Catalog.bodyPoses.Count > 0 ? Catalog.bodyPoses[BodyPoseIndex].clip : null,
+                background = null,
+                backgroundColor = RefSheetBackground,
+                lightPreset = Catalog.lightPresets.Count > 0 ? Catalog.lightPresets[LightPresetIndex] : null,
+                selectedFaceBlendshapeNames = SelectedFaceBlendshapes.ToArray(),
+                forceFaceBlendshapeApply = forceFaceBlendshapeApply,
+                shotKind = PhotoshootService.ShotKind.Thumbnail,
+                zoom = zoom,
+                placement = placement,
+                avatarYawDegrees = PhotoshootRefSheet.Yaw(view, RefSheetSideFacesRight),
+                avatarTiltDegrees = 0f,
+                pivot = PhotoshootService.TurnPivot.Hips,
+                lookAtCamera = false,
+                width = size.x,
+                height = size.y,
+                effects = Effects,
+                frameEffects = false,
+                ambientIntensity = AmbientIntensity
+            };
+        }
+
+        private void ReleaseRefSheetPreview()
+        {
+            if (refSheetPreview == null) return;
+            if (RenderTexture.active == refSheetPreview) RenderTexture.active = null;
+            refSheetPreview.Release();
+            UnityEngine.Object.DestroyImmediate(refSheetPreview);
+            refSheetPreview = null;
+        }
+
         private PhotoshootService.RenderRequest BuildRequest(GameObject avatarRoot, PhotoshootService.ShotKind shotKind, Vector2Int size, bool forceFaceBlendshapeApply)
         {
             EnsureCatalog(avatarRoot);
@@ -239,7 +431,9 @@ namespace Orbiters.Toolkit.Editor.Photoshoot
                 lookAtCamera = LookAtCamera,
                 lookWithEyes = LookWithEyes,
                 width = size.x,
-                height = size.y
+                height = size.y,
+                effects = Effects,
+                ambientIntensity = AmbientIntensity
             };
         }
 

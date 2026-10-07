@@ -40,6 +40,15 @@ namespace Orbiters.Toolkit.Editor.Photoshoot
         /// <summary>Called after a shot changed, so the host can refresh its own controls.</summary>
         public Action Changed;
         public Action Repaint;
+        /// <summary>
+        /// When set, the panel can show a second photoshoot instead of its shots: the avatar from the front, the back and
+        /// the side on one <see cref="PhotoshootRefSheet.Size"/> sheet. The host opens it with its own button
+        /// (<see cref="PhotoshootPanel.ShowRefSheet"/>, or <see cref="PhotoshootState.RefSheetOpen"/> before building the
+        /// panel). Receives each captured sheet; the host owns it.
+        /// </summary>
+        public Action<Texture2D> RefSheet;
+        /// <summary>What the thumbnail shot is called in the panel (My Avatar's gallery calls it a picture).</summary>
+        public string ThumbnailLabel = "Thumbnail";
     }
 
     /// <summary>Live photoshoot editor: preview, shot capture, framing controls and pose, light, background and expression pickers.</summary>
@@ -47,8 +56,8 @@ namespace Orbiters.Toolkit.Editor.Photoshoot
     {
         private const string StyleSheetPath = "Packages/orbiters.toolkit/Editor/Photoshoot/photoshoot.uss";
         private static readonly Vector2Int BannerPreviewSize = new Vector2Int(768, 432);
-        private static readonly string[] StyleTabs = { "Pose", "Light", "Background", "Expression" };
-        private const int PoseTab = 0, LightTab = 1, BackgroundTab = 2, ExpressionTab = 3;
+        private static readonly string[] StyleTabs = { "Pose", "Light", "Background", "Expression", "Effects" };
+        private const int PoseTab = 0, LightTab = 1, BackgroundTab = 2, ExpressionTab = 3, EffectsTab = 4;
 
         private readonly PhotoshootState state;
         private readonly PhotoshootOptions options;
@@ -56,7 +65,11 @@ namespace Orbiters.Toolkit.Editor.Photoshoot
         private readonly Dictionary<string, Button> expressionChips = new Dictionary<string, Button>(StringComparer.OrdinalIgnoreCase);
         private readonly Dictionary<PhotoshootService.ShotKind, ShotRow> shotRows = new Dictionary<PhotoshootService.ShotKind, ShotRow>();
         private readonly Dictionary<VisualElement, FramingDrag> framingSurfaces = new Dictionary<VisualElement, FramingDrag>();
-        private Image bannerImage, thumbnailImage;
+        private static readonly Vector2Int RefSheetPreviewSize = new Vector2Int(1152, 648);
+        private Image bannerImage, thumbnailImage, refSheetImage;
+        private VisualElement ownStage, flash;
+        private Button refSheetCapture;
+        private SegmentedControl sideControl;
         private Texture effectPreviewSource;
         private Texture2D effectPreview;
         private Button backButton;
@@ -92,21 +105,56 @@ namespace Orbiters.Toolkit.Editor.Photoshoot
             AddToClassList("ps-panel");
 
             state.EnsureCatalog(AvatarRoot);
-            if (CanGenerate() && ShotKinds().Any(kind => !state.HasPreviewTexture(kind))) RenderPreviews(false);
-
-            if (options.Back != null)
-            {
-                backButton = CreateButton("‹  " + options.BackText, options.Back, "ps-back");
-                Add(backButton);
-            }
-            if (options.ThumbnailPreview == null) BuildStage();
-            BuildShots();
-            BuildFraming();
-            BuildStyle();
-            Refresh();
+            if (options.RefSheet == null) state.RefSheetOpen = false;
+            if (!state.RefSheetOpen && CanGenerate() && ShotKinds().Any(kind => !state.HasPreviewTexture(kind))) RenderPreviews(false);
+            Build();
+            if (state.RefSheetOpen && CanGenerate()) RenderRefSheet(state.RefSheetPreview == null);
         }
 
         internal static string DisplayName(PhotoshootService.ShotKind shotKind) => shotKind == PhotoshootService.ShotKind.Banner ? "Banner" : "Thumbnail";
+
+        /// <summary>The ref sheet is shown instead of the shots.</summary>
+        public bool RefSheetOpen => state.RefSheetOpen;
+
+        private string ShotName(PhotoshootService.ShotKind shotKind) =>
+            shotKind == PhotoshootService.ShotKind.Banner || string.IsNullOrWhiteSpace(options.ThumbnailLabel) ? DisplayName(shotKind) : options.ThumbnailLabel;
+
+        // The photoshoot, or its ref sheet: the cards are built again when switching between them.
+        private void Build()
+        {
+            if (ownStage != null) DetachFraming(ownStage);
+            Clear();
+            shotRows.Clear();
+            bannerImage = thumbnailImage = refSheetImage = null;
+            ownStage = flash = null;
+            backButton = refSheetCapture = null;
+            zoomDial = lookDial = null;
+            orbit = null;
+            lookSwitch = null;
+            presets = sideControl = null;
+            message = null;
+            if (state.RefSheetOpen)
+            {
+                // The views reuse the thumbnail's render target: a host showing the live thumbnail lets go of it.
+                options.ThumbnailPreview?.Invoke(null);
+                BuildRefSheetStage();
+                BuildRefSheetShot();
+                BuildRefSheetFraming();
+            }
+            else
+            {
+                if (options.Back != null)
+                {
+                    backButton = CreateButton("‹  " + options.BackText, options.Back, "ps-back");
+                    Add(backButton);
+                }
+                if (options.ThumbnailPreview == null) BuildStage();
+                BuildShots();
+                BuildFraming();
+            }
+            BuildStyle();
+            Refresh();
+        }
 
         /// <summary>Re-reads host state (chosen shots, blocked input) without rebuilding the panel.</summary>
         public void Refresh()
@@ -116,7 +164,7 @@ namespace Orbiters.Toolkit.Editor.Photoshoot
                 bool chosen = IsFixed(pair.Key);
                 var row = pair.Value;
                 row.Primary.text = chosen ? "Retake" : "Capture";
-                row.Primary.tooltip = chosen ? "Discard this image and follow the live preview again." : $"Capture the live preview as the {DisplayName(pair.Key).ToLowerInvariant()}.";
+                row.Primary.tooltip = chosen ? "Discard this image and follow the live preview again." : $"Capture the live preview as the {ShotName(pair.Key).ToLowerInvariant()}.";
                 row.Primary.EnableInClassList("ps-pill--accent", !chosen);
                 row.Primary.SetEnabled(!InputBlocked() && (chosen || CanGenerate()));
                 row.Browse.SetEnabled(!InputBlocked());
@@ -125,6 +173,7 @@ namespace Orbiters.Toolkit.Editor.Photoshoot
                 row.Detail.text = chosen ? "Captured · kept while you adjust" : $"Live · {size.x}×{size.y}";
             }
             backButton?.SetEnabled(!InputBlocked());
+            refSheetCapture?.SetEnabled(!InputBlocked() && CanGenerate());
             RefreshImages();
             UpdateMessage();
         }
@@ -162,6 +211,7 @@ namespace Orbiters.Toolkit.Editor.Photoshoot
             var stage = new VisualElement();
             stage.AddToClassList("ps-stage");
             Add(stage);
+            ownStage = stage;
             float aspect = options.IncludeBanner ? 16f / 9f : ThumbnailAspect;
             stage.RegisterCallback<GeometryChangedEvent>(_ =>
             {
@@ -236,7 +286,7 @@ namespace Orbiters.Toolkit.Editor.Photoshoot
                 var text = new VisualElement();
                 text.AddToClassList("ps-shot__text");
                 row.Add(text);
-                var title = new Label(DisplayName(shotKind));
+                var title = new Label(ShotName(shotKind));
                 title.AddToClassList("ps-shot__title");
                 text.Add(title);
                 entry.Detail = new Label();
@@ -259,6 +309,264 @@ namespace Orbiters.Toolkit.Editor.Photoshoot
             message = new Label();
             message.AddToClassList("ps-message");
             card.Add(message);
+        }
+
+        // ---- Ref sheet ----------------------------------------------------------------------------------------
+
+        /// <summary>Shows the ref sheet (front, back and side) instead of the shots, or the shots again.</summary>
+        public void ShowRefSheet(bool show)
+        {
+            if (state.RefSheetOpen == show || (show && options.RefSheet == null)) return;
+            framingTween?.Pause();
+            state.RefSheetOpen = show;
+            state.Status = null;
+            Build();
+            // Both use the thumbnail's render target: whichever shows now renders again at its own size.
+            if (show) RenderRefSheet(true);
+            else RenderPreviews(false);
+            options.Changed?.Invoke();
+        }
+
+        private void BuildRefSheetStage()
+        {
+            var stage = new VisualElement();
+            stage.AddToClassList("ps-stage");
+            stage.AddToClassList("ps-stage--refsheet");
+            Add(stage);
+            stage.RegisterCallback<GeometryChangedEvent>(_ =>
+            {
+                float width = stage.resolvedStyle.width;
+                if (width > 0f && !float.IsNaN(width)) stage.style.height = Mathf.Min(width * PhotoshootRefSheet.Size.y / PhotoshootRefSheet.Size.x, 440f);
+            });
+            refSheetImage = new Image { scaleMode = ScaleMode.ScaleToFit, pickingMode = PickingMode.Ignore };
+            refSheetImage.AddToClassList("ps-stage__image");
+            stage.Add(refSheetImage);
+            flash = new VisualElement { pickingMode = PickingMode.Ignore };
+            flash.AddToClassList("ps-stage__flash");
+            stage.Add(flash);
+            stage.AddManipulator(new RefSheetDrag(this));
+        }
+
+        private void BuildRefSheetShot()
+        {
+            var card = Card("ps-shots");
+            var row = new VisualElement();
+            row.AddToClassList("ps-shot");
+            card.Add(row);
+            var icon = new VectorIcon(IconGlyph.RefSheet);
+            icon.AddToClassList("ps-shot__icon");
+            row.Add(icon);
+            var text = new VisualElement();
+            text.AddToClassList("ps-shot__text");
+            row.Add(text);
+            var title = new Label("Ref sheet");
+            title.AddToClassList("ps-shot__title");
+            text.Add(title);
+            var size = PhotoshootRefSheet.Size;
+            var detail = new Label($"Live · {size.x}×{size.y}");
+            detail.AddToClassList("ps-shot__detail");
+            text.Add(detail);
+            refSheetCapture = CreateButton("Capture", CaptureRefSheet, "ps-pill");
+            refSheetCapture.AddToClassList("ps-pill--accent");
+            refSheetCapture.tooltip = $"Capture the sheet as shown, at {size.x}×{size.y}.";
+            row.Add(refSheetCapture);
+            message = new Label();
+            message.AddToClassList("ps-message");
+            card.Add(message);
+        }
+
+        private void BuildRefSheetFraming()
+        {
+            var card = Card("ps-framing");
+            var header = Header(card, "Framing");
+            var fit = CreateButton("Fit", FitRefSheet, "ps-link");
+            fit.tooltip = "The whole body in every view, at one scale.";
+            header.Add(fit);
+
+            zoomDial = new ScrubDial("Zoom", Mathf.Log(PhotoshootState.MinRefSheetZoom, 2f), Mathf.Log(PhotoshootState.MaxRefSheetZoom, 2f), 0f,
+                0.1f, 5, 70f, 0.04f,
+                value => Mathf.Pow(2f, value).ToString("0.00") + "×",
+                value =>
+                {
+                    framingTween?.Pause();
+                    state.RefSheetZoom = Mathf.Pow(2f, value);
+                    RenderRefSheet(false);
+                });
+            zoomDial.tooltip = "Every view zooms together, so they keep one scale.";
+            card.Add(zoomDial);
+
+            var side = new VisualElement();
+            side.AddToClassList("ps-look");
+            var sideLabel = new Label("Side view");
+            sideLabel.AddToClassList("ps-look__label");
+            side.Add(sideLabel);
+            sideControl = new SegmentedControl(new[] { "Faces left", "Faces right" }, index =>
+            {
+                if (state.RefSheetSideFacesRight == (index == 1)) return;
+                state.RefSheetSideFacesRight = index == 1;
+                RenderRefSheet(true);
+            });
+            sideControl.AddToClassList("ps-refsheet__side");
+            side.Add(sideControl);
+            card.Add(side);
+
+            var tip = new Label("On the sheet: drag up or down to move, scroll to zoom, double-click to fit");
+            tip.AddToClassList("ps-caption");
+            tip.AddToClassList("ps-framing__tip");
+            card.Add(tip);
+            Foldable(card, header);
+            SyncFraming();
+        }
+
+        // The three views render in the same event as the input, like framing: each reuses the posed avatar copy.
+        private void RenderRefSheet(bool refit, bool forceFaceBlendshapeApply = false)
+        {
+            ++state.RefreshTicket;
+            var avatarRoot = AvatarRoot;
+            if (avatarRoot != null && CanGenerate()) state.RenderRefSheet(avatarRoot, RefSheetPreviewSize, refit, forceFaceBlendshapeApply);
+            RefreshImages();
+            UpdateMessage();
+            RepaintPreview();
+            if (state.TakeUnsettled()) Settle();
+        }
+
+        private void CaptureRefSheet()
+        {
+            if (state.IsGenerating || !CanGenerate() || options.RefSheet == null) return;
+            state.IsGenerating = true;
+            state.Error = null;
+            bool captured = false;
+            try
+            {
+                var sheet = state.CaptureRefSheet(AvatarRoot);
+                state.Status = "Ref sheet captured";
+                options.RefSheet(sheet);
+                captured = true;
+            }
+            catch (Exception ex)
+            {
+                state.Error = ex.Message;
+                state.Status = null;
+            }
+            finally
+            {
+                state.IsGenerating = false;
+            }
+
+            if (captured) Flash();
+            // The capture rendered the views at full size: the live sheet renders again at its own.
+            RenderRefSheet(false);
+            Refresh();
+            options.Changed?.Invoke();
+        }
+
+        private void Flash()
+        {
+            if (flash == null) return;
+            flash.AddToClassList("ps-stage__flash--on");
+            flash.schedule.Execute(() => flash.RemoveFromClassList("ps-stage__flash--on")).StartingIn(40);
+        }
+
+        // Back to the whole body in every view, gliding like the framing presets.
+        private void FitRefSheet()
+        {
+            framingTween?.Pause();
+            float fromZoom = Mathf.Log(state.RefSheetZoom), fromLift = state.RefSheetLift;
+            double start = EditorApplication.timeSinceStartup;
+            framingTween = schedule.Execute(() =>
+            {
+                float t = Mathf.Clamp01((float)((EditorApplication.timeSinceStartup - start) / FramingTweenSeconds));
+                float eased = EaseOutBack(t);
+                state.RefSheetZoom = Mathf.Exp(Mathf.LerpUnclamped(fromZoom, 0f, eased));
+                state.RefSheetLift = Mathf.LerpUnclamped(fromLift, 0f, eased);
+                SyncFraming();
+                RenderRefSheet(false);
+                if (t >= 1f) framingTween?.Pause();
+            }).Every(16);
+        }
+
+        private void LiftRefSheet(float pixels, float sheetHeight)
+        {
+            float viewHeight = sheetHeight * (1f - PhotoshootRefSheet.LabelBand - PhotoshootRefSheet.Floor);
+            if (viewHeight <= 0f) return;
+            framingTween?.Pause();
+            // Dragging up moves the views up: the avatar follows the pointer.
+            state.RefSheetLift -= pixels / viewHeight * state.RefSheetLiftPerView(RefSheetPreviewSize);
+            RenderRefSheet(false);
+        }
+
+        private void ZoomRefSheet(float wheel)
+        {
+            framingTween?.Pause();
+            state.RefSheetZoom *= Mathf.Exp(-wheel * 0.05f);
+            SyncFraming();
+            RenderRefSheet(false);
+        }
+
+        /// <summary>On the ref sheet: drag up and down to move every view, scroll to zoom them, double-click to fit.</summary>
+        private sealed class RefSheetDrag : PointerManipulator
+        {
+            private readonly PhotoshootPanel owner;
+            private Label hint;
+            private PointerDragCapture drag;
+            private float last;
+
+            public RefSheetDrag(PhotoshootPanel owner) => this.owner = owner;
+
+            protected override void RegisterCallbacksOnTarget()
+            {
+                target.AddToClassList("ps-surface");
+                target.AddToClassList("ps-surface--vertical");
+                hint = new Label("Drag to move · Scroll to zoom · Double-click to fit") { pickingMode = PickingMode.Ignore };
+                hint.AddToClassList("ps-surface__hint");
+                target.Add(hint);
+                target.RegisterCallback<PointerDownEvent>(OnDown);
+                target.RegisterCallback<PointerMoveEvent>(OnMove);
+                drag = new PointerDragCapture(target, () => target.RemoveFromClassList("ps-surface--dragging"));
+                target.RegisterCallback<WheelEvent>(OnWheel);
+            }
+
+            protected override void UnregisterCallbacksFromTarget()
+            {
+                drag.Dispose();
+                target.UnregisterCallback<PointerDownEvent>(OnDown);
+                target.UnregisterCallback<PointerMoveEvent>(OnMove);
+                target.UnregisterCallback<WheelEvent>(OnWheel);
+                hint?.RemoveFromHierarchy();
+                target.RemoveFromClassList("ps-surface");
+                target.RemoveFromClassList("ps-surface--vertical");
+                target.RemoveFromClassList("ps-surface--dragging");
+            }
+
+            private void OnDown(PointerDownEvent evt)
+            {
+                if (evt.button != 0) return;
+                if (evt.clickCount == 2) { owner.FitRefSheet(); evt.StopPropagation(); return; }
+                last = evt.position.y;
+                drag.Begin(evt.pointerId);
+                target.AddToClassList("ps-surface--dragging");
+                evt.StopPropagation();
+            }
+
+            private void OnMove(PointerMoveEvent evt)
+            {
+                if (!drag.Owns(evt.pointerId)) return;
+                float delta = evt.position.y - last;
+                last = evt.position.y;
+                // The sheet fills the stage's width or its height, whichever it reaches first.
+                var rect = target.contentRect;
+                float sheetHeight = Mathf.Min(rect.height, rect.width * PhotoshootRefSheet.Size.y / PhotoshootRefSheet.Size.x);
+                try { owner.LiftRefSheet(delta, sheetHeight); }
+                catch { drag.End(); throw; }
+                evt.StopPropagation();
+            }
+
+            private void OnWheel(WheelEvent evt)
+            {
+                owner.ZoomRefSheet(evt.delta.y);
+                evt.StopPropagation();
+                evt.PreventDefault();
+            }
         }
 
         // ---- Framing ----------------------------------------------------------------------------------------
@@ -342,11 +650,45 @@ namespace Orbiters.Toolkit.Editor.Photoshoot
             tip.AddToClassList("ps-caption");
             tip.AddToClassList("ps-framing__tip");
             card.Add(tip);
+            Foldable(card, header);
             SyncFraming();
+        }
+
+        // The framing card folds under its header (a press anywhere on it but its links); it stays as left, open at first.
+        private void Foldable(VisualElement card, VisualElement header)
+        {
+            var body = new VisualElement();
+            body.AddToClassList("ps-card__body");
+            foreach (var child in card.Children().Where(child => child != header).ToList()) body.Add(child);
+            card.Add(body);
+            card.AddToClassList("ps-card--foldable");
+            var chevron = new VectorIcon(IconGlyph.Chevron) { pickingMode = PickingMode.Ignore };
+            chevron.AddToClassList("ps-card__chevron");
+            header.Insert(0, chevron);
+            header.tooltip = "Fold or unfold";
+            void Show()
+            {
+                card.EnableInClassList("ps-card--folded", !state.FramingOpen);
+                body.style.display = state.FramingOpen ? DisplayStyle.Flex : DisplayStyle.None;
+            }
+            // The links in the header (Reset, Fit) act on press and stop the event there.
+            header.RegisterCallback<PointerDownEvent>(evt =>
+            {
+                if (evt.button != 0) return;
+                state.FramingOpen = !state.FramingOpen;
+                Show();
+            });
+            Show();
         }
 
         private void SyncFraming()
         {
+            if (state.RefSheetOpen)
+            {
+                zoomDial?.SetValueWithoutNotify(Mathf.Log(state.RefSheetZoom, 2f));
+                sideControl?.SetIndex(state.RefSheetSideFacesRight ? 1 : 0);
+                return;
+            }
             orbit?.SetValueWithoutNotify(state.RotationDegrees, state.TiltDegrees);
             zoomDial?.SetValueWithoutNotify(Mathf.Log(state.Zoom, 2f));
             MovePresetIndicator();
@@ -528,7 +870,7 @@ namespace Orbiters.Toolkit.Editor.Photoshoot
 
             private void OnDown(PointerDownEvent evt)
             {
-                if (evt.button != 0) return;
+                if (evt.button != 0 || owner.state.RefSheetOpen) return;
                 if (evt.clickCount == 2) { owner.ResetFraming(); evt.StopPropagation(); return; }
                 last = evt.position;
                 drag.Begin(evt.pointerId);
@@ -571,6 +913,7 @@ namespace Orbiters.Toolkit.Editor.Photoshoot
             // Scrolling over the preview zooms instead of scrolling the window.
             private void OnWheel(WheelEvent evt)
             {
+                if (owner.state.RefSheetOpen) return;
                 owner.ZoomBy(evt.delta.y);
                 evt.StopPropagation();
                 evt.PreventDefault();
@@ -632,6 +975,18 @@ namespace Orbiters.Toolkit.Editor.Photoshoot
                         var option = state.Catalog.lightPresets[i];
                         grid.Add(Swatch("ps-swatch--light", i, option.displayName, new Image { image = state.GetLightIcon(option), scaleMode = ScaleMode.ScaleToFit }));
                     }
+                    styleContent.Add(SliderRow("Environment light", "How much the surrounding light brightens the avatar, over the preset's own (100%).",
+                        0f, PhotoshootState.MaxAmbientIntensity, state.AmbientIntensity, false, value => Mathf.RoundToInt(value * 100f) + "%",
+                        value => { state.AmbientIntensity = value; RenderKeepingFraming(); }, "ps-effect--on ps-light__ambient"));
+                    break;
+                case BackgroundTab when state.RefSheetOpen:
+                    colorSwatch = null;
+                    colorPicker = new InlineColorPicker(state.RefSheetBackground, PhotoshootRefSheet.DefaultBackground, color =>
+                    {
+                        state.RefSheetBackground = color;
+                        RenderRefSheet(false);
+                    });
+                    styleContent.Add(colorPicker);
                     break;
                 case BackgroundTab:
                     colorSwatch = null;
@@ -646,8 +1001,11 @@ namespace Orbiters.Toolkit.Editor.Photoshoot
                         }
                         else if (option.texture != null) content = new Image { image = option.texture, scaleMode = ScaleMode.ScaleAndCrop };
                         else { content = new VisualElement(); content.AddToClassList("ps-swatch__empty"); }
-                        grid.Add(Swatch("ps-swatch--background", i, option.displayName, content));
+                        var swatch = Swatch("ps-swatch--background", i, option.displayName, content);
+                        grid.Add(option.custom ? WithRemoveButton(swatch, option.assetPath) : swatch);
                     }
+                    grid.Add(AddBackgroundSwatch());
+                    AcceptDroppedBackgrounds(grid);
                     colorPicker = new InlineColorPicker(state.BackgroundColor, PhotoshootService.DefaultBackgroundColor, color =>
                     {
                         state.BackgroundColor = color;
@@ -656,11 +1014,216 @@ namespace Orbiters.Toolkit.Editor.Photoshoot
                     });
                     styleContent.Add(colorPicker);
                     break;
+                case EffectsTab:
+                    grid.AddToClassList("ps-grid--effects");
+                    foreach (var effect in PhotoshootEffectSettings.All) grid.Add(EffectRow(effect));
+                    break;
                 default:
                     BuildExpressionChips(grid);
                     break;
             }
             UpdateSelectionVisuals();
+        }
+
+        // ---- Effects: each one on or off, with its strength ---------------------------------------------------------
+
+        private VisualElement EffectRow(PhotoshootEffect effect)
+        {
+            var settings = state.Effects;
+            bool comic = effect == PhotoshootEffect.Halftone;
+            var group = new VisualElement();
+            group.AddToClassList("ps-effect-group");
+            var row = new VisualElement { tooltip = PhotoshootEffectSettings.Description(effect) };
+            row.AddToClassList("ps-effect");
+            group.Add(row);
+            var value = new Label();
+            value.AddToClassList("ps-effect__value");
+            PhotoshootSlider slider = null;
+            ToggleSwitch toggle = null;
+            VisualElement dots = null;
+            void Sync()
+            {
+                bool on = settings.IsOn(effect);
+                row.EnableInClassList("ps-effect--on", on);
+                slider.SetEnabled(on);
+                dots?.SetEnabled(on);
+                // The comic is all or nothing: its slider sets how many tones its flat colours have.
+                value.text = comic ? settings.ComicColors + " colors" : Mathf.RoundToInt(settings.Amount(effect) * 100f) + "%";
+            }
+            void Switch(bool on)
+            {
+                settings.SetOn(effect, on);
+                toggle.SetValueWithoutNotify(on);
+                Sync();
+                UpdateSelectionVisuals();
+                RenderKeepingFraming();
+            }
+
+            toggle = new ToggleSwitch(settings.IsOn(effect), Switch);
+            row.Add(toggle);
+            var name = new Label(PhotoshootEffectSettings.Label(effect));
+            name.AddToClassList("ps-effect__name");
+            // The name switches it too, a bigger target than the switch.
+            name.RegisterCallback<PointerDownEvent>(evt => { if (evt.button == 0) Switch(!settings.IsOn(effect)); });
+            row.Add(name);
+            slider = comic
+                ? new PhotoshootSlider(PhotoshootEffectSettings.MinComicColors, PhotoshootEffectSettings.MaxComicColors, settings.ComicColors, colors =>
+                {
+                    settings.ComicColors = Mathf.RoundToInt(colors);
+                    Sync();
+                    RenderKeepingFraming();
+                }, whole: true)
+                : new PhotoshootSlider(PhotoshootEffectSettings.Min(effect), PhotoshootEffectSettings.Max(effect), settings.Amount(effect), amount =>
+                {
+                    settings.SetAmount(effect, amount);
+                    Sync();
+                    RenderKeepingFraming();
+                });
+            slider.AddToClassList("ps-effect__slider");
+            slider.tooltip = comic ? "How many tones the flat colours have." : effect == PhotoshootEffect.Vignette
+                ? "Above zero the edges darken, below zero they brighten." : null;
+            row.Add(slider);
+            row.Add(value);
+            if (comic)
+            {
+                // The print screen: ink dots growing with the darkness, their size chosen here.
+                dots = SliderRow("Dots", "A print screen of ink dots over the comic, larger in the shade until they merge.",
+                    0f, 1f, settings.ComicDotSize, false, size => Mathf.RoundToInt(settings.ComicDotCell(1080f)) + " px",
+                    size => { settings.ComicDotSize = size; RenderKeepingFraming(); }, "ps-effect--sub", settings.ComicDots,
+                    on => { settings.ComicDots = on; RenderKeepingFraming(); });
+                group.Add(dots);
+            }
+            Sync();
+            return group;
+        }
+
+        // A labelled slider row, with its own switch when <paramref name="switched"/> is given.
+        private VisualElement SliderRow(string label, string tooltip, float min, float max, float value, bool whole, Func<float, string> format,
+            Action<float> changed, string classes, bool on = true, Action<bool> switched = null)
+        {
+            var row = new VisualElement { tooltip = tooltip };
+            row.AddToClassList("ps-effect");
+            foreach (string className in classes.Split(' ')) row.AddToClassList(className);
+            var text = new Label();
+            text.AddToClassList("ps-effect__value");
+            PhotoshootSlider slider = null;
+            ToggleSwitch toggle = null;
+            void Sync(bool enabled)
+            {
+                row.EnableInClassList("ps-effect--on", enabled);
+                slider.SetEnabled(enabled);
+                text.text = format(slider.Value);
+            }
+            void Switch(bool enabled)
+            {
+                toggle.SetValueWithoutNotify(enabled);
+                Sync(enabled);
+                switched(enabled);
+            }
+            if (switched != null)
+            {
+                toggle = new ToggleSwitch(on, Switch);
+                row.Add(toggle);
+            }
+            var name = new Label(label);
+            name.AddToClassList("ps-effect__name");
+            if (switched != null) name.RegisterCallback<PointerDownEvent>(evt => { if (evt.button == 0) Switch(!toggle.Value); });
+            row.Add(name);
+            slider = new PhotoshootSlider(min, max, value, newValue =>
+            {
+                text.text = format(newValue);
+                changed(newValue);
+            }, whole);
+            slider.AddToClassList("ps-effect__slider");
+            row.Add(slider);
+            row.Add(text);
+            Sync(on);
+            return row;
+        }
+
+        // ---- The user's own backgrounds ----------------------------------------------------------------------------------
+
+        private Button AddBackgroundSwatch()
+        {
+            var add = CreateButton(null, BrowseBackground, "ps-swatch");
+            add.AddToClassList("ps-swatch--background");
+            add.AddToClassList("ps-swatch--add");
+            add.tooltip = "Add a picture of your own (PNG or JPEG), or drop pictures here. Every project gets it.";
+            var icon = new VectorIcon(IconGlyph.Plus) { pickingMode = PickingMode.Ignore };
+            icon.AddToClassList("ps-swatch__add-icon");
+            add.Add(icon);
+            return add;
+        }
+
+        private void BrowseBackground()
+        {
+            string file = EditorUtility.OpenFilePanelWithFilters("Add a background", "", new[] { "Pictures", "png,jpg,jpeg" });
+            if (!string.IsNullOrEmpty(file)) AddBackgrounds(new[] { file });
+        }
+
+        private void AddBackgrounds(IEnumerable<string> files)
+        {
+            string last = null;
+            try
+            {
+                foreach (string file in files.Where(PhotoshootBackgrounds.IsPicture)) last = PhotoshootBackgrounds.Add(Path.GetFullPath(file));
+                state.Error = null;
+            }
+            catch (Exception ex)
+            {
+                state.Error = "Could not add the background: " + ex.Message;
+            }
+
+            if (last != null)
+            {
+                state.ReloadBackgrounds(last);
+                BuildStyleContent();
+                RenderNow();
+            }
+            UpdateMessage();
+        }
+
+        // Beside the swatch, not in it: a press on the swatch would choose the background first.
+        private VisualElement WithRemoveButton(Button swatch, string path)
+        {
+            var wrap = new VisualElement();
+            wrap.AddToClassList("ps-swatch-wrap");
+            wrap.Add(swatch);
+            var remove = CreateButton(null, () =>
+            {
+                PhotoshootBackgrounds.Remove(path);
+                state.ReloadBackgrounds();
+                BuildStyleContent();
+                RenderNow();
+            }, "ps-swatch__remove");
+            remove.tooltip = "Remove this background (the picture it was copied from stays).";
+            var icon = new VectorIcon(IconGlyph.Close) { pickingMode = PickingMode.Ignore };
+            icon.AddToClassList("ps-swatch__remove-icon");
+            remove.Add(icon);
+            wrap.Add(remove);
+            return wrap;
+        }
+
+        // Pictures dropped on the backgrounds, from the Project window or from the desktop, are added to them.
+        private void AcceptDroppedBackgrounds(VisualElement grid)
+        {
+            IEnumerable<string> Pictures() => (DragAndDrop.paths ?? new string[0]).Where(PhotoshootBackgrounds.IsPicture);
+            grid.RegisterCallback<DragUpdatedEvent>(_ =>
+            {
+                bool pictures = Pictures().Any();
+                DragAndDrop.visualMode = pictures ? DragAndDropVisualMode.Copy : DragAndDropVisualMode.Rejected;
+                grid.EnableInClassList("ps-grid--drop", pictures);
+            });
+            grid.RegisterCallback<DragLeaveEvent>(_ => grid.RemoveFromClassList("ps-grid--drop"));
+            grid.RegisterCallback<DragExitedEvent>(_ => grid.RemoveFromClassList("ps-grid--drop"));
+            grid.RegisterCallback<DragPerformEvent>(_ =>
+            {
+                grid.RemoveFromClassList("ps-grid--drop");
+                var files = Pictures().ToList();
+                if (files.Count == 0) return;
+                DragAndDrop.AcceptDrag();
+                AddBackgrounds(files);
+            });
         }
 
         private int SelectedIndex(int tab) => tab == PoseTab ? state.BodyPoseIndex : tab == LightTab ? state.LightPresetIndex : state.BackgroundIndex;
@@ -728,6 +1291,20 @@ namespace Orbiters.Toolkit.Editor.Photoshoot
                 return;
             }
 
+            if (tab == EffectsTab)
+            {
+                int on = state.Effects.Count;
+                styleCaption.text = on == 0 ? "No effects: the shot as rendered. Turn on as many as you like." : on + " effect" + (on == 1 ? "" : "s") + " on";
+                return;
+            }
+
+            if (tab == BackgroundTab && state.RefSheetOpen)
+            {
+                styleCaption.text = "One plain colour behind every view";
+                if (colorPicker != null) colorPicker.style.display = DisplayStyle.Flex;
+                return;
+            }
+
             int selected = SelectedIndex(tab);
             for (int i = 0; i < swatches.Count; i++) swatches[i].EnableInClassList("ps-swatch--selected", i == selected);
             styleCaption.text = selected >= 0 && selected < swatches.Count ? swatches[selected].tooltip : "";
@@ -742,6 +1319,13 @@ namespace Orbiters.Toolkit.Editor.Photoshoot
 
         private void RenderPreviews(bool forceFaceBlendshapeApply, bool refitPreset = true)
         {
+            if (state.RefSheetOpen)
+            {
+                // A pose or expression changes the outline: the full body is fitted again.
+                RenderRefSheet(refitPreset, forceFaceBlendshapeApply);
+                return;
+            }
+
             var avatarRoot = AvatarRoot;
             if (avatarRoot != null && CanGenerate())
             {
@@ -781,6 +1365,8 @@ namespace Orbiters.Toolkit.Editor.Photoshoot
             if (!state.FramingPreset.HasValue || (framingTween != null && framingTween.isActive)) return;
             var kind = PhotoshootService.ShotKind.Thumbnail;
             if (!state.TrySuggestFraming(kind, PreviewSize(kind), state.FramingPreset.Value, out float zoom, out Vector2 placement)) return;
+            // Within the zoom dial's range, as when the preset was chosen.
+            zoom = Mathf.Clamp(zoom, PhotoshootState.MinZoom, PhotoshootState.MaxZoom);
             if (Mathf.Abs(Mathf.Log(zoom) - Mathf.Log(state.Zoom)) < 0.01f && (placement - state.Placement).sqrMagnitude < 0.0001f) return;
             state.Zoom = zoom;
             state.Placement = placement;
@@ -816,6 +1402,15 @@ namespace Orbiters.Toolkit.Editor.Photoshoot
 
         private void RefreshImages()
         {
+            if (refSheetImage != null)
+            {
+                refSheetImage.image = state.RefSheetPreview;
+                refSheetImage.MarkDirtyRepaint();
+                // Any letterbox around the sheet blends into it.
+                if (ownStage != null) ownStage.style.backgroundColor = state.RefSheetBackground;
+            }
+            // The views share the thumbnail's render target: the host's thumbnail keeps its last live image meanwhile.
+            if (state.RefSheetOpen) return;
             if (bannerImage != null) { bannerImage.image = DisplayTexture(PhotoshootService.ShotKind.Banner); bannerImage.MarkDirtyRepaint(); }
             if (thumbnailImage != null) { thumbnailImage.image = DisplayTexture(PhotoshootService.ShotKind.Thumbnail); thumbnailImage.MarkDirtyRepaint(); }
             options.ThumbnailPreview?.Invoke(DisplayTexture(PhotoshootService.ShotKind.Thumbnail));
@@ -823,6 +1418,7 @@ namespace Orbiters.Toolkit.Editor.Photoshoot
 
         private void RepaintPreview()
         {
+            refSheetImage?.MarkDirtyRepaint();
             bannerImage?.MarkDirtyRepaint();
             thumbnailImage?.MarkDirtyRepaint();
             options.Repaint?.Invoke();
@@ -850,7 +1446,7 @@ namespace Orbiters.Toolkit.Editor.Photoshoot
                 var texture = state.Capture(AvatarRoot, shotKind, size, withShotEffect: !plain);
                 options.SetShot?.Invoke(shotKind, texture);
                 // A host that keeps following the live preview after a capture gets a confirmation instead of a Retake.
-                state.Status = IsFixed(shotKind) ? null : $"{DisplayName(shotKind)} captured";
+                state.Status = IsFixed(shotKind) ? null : $"{ShotName(shotKind)} captured";
             }
             catch (Exception ex)
             {

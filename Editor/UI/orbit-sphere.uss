@@ -23,10 +23,6 @@
     scale: 1.05 1.05;
 }
 
-.orb-sphere__ball:focus {
-    outline-width: 0;
-}
-
 .orb-sphere__readout {
     margin-top: 6px;
     padding: 0;

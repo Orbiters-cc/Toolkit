@@ -4,7 +4,7 @@ using UnityEngine.UIElements;
 
 namespace Orbiters.Toolkit.Editor
 {
-    public enum IconGlyph { Bones, Mirror, Clothes, Refresh, Person, PersonOff, People, Robot, RobotOff, Lock, Unlock, Branch, Close, Chevron, Gauge, Sliders, Sound, Check, Sparkle, Male, Female, Key, External, Grid, Download, Broom, Plus }
+    public enum IconGlyph { Bones, Mirror, Clothes, Refresh, Person, PersonOff, People, Robot, RobotOff, Lock, Unlock, Branch, Close, Chevron, Gauge, Sliders, Sound, Check, Sparkle, Male, Female, Key, External, Grid, Download, Broom, Plus, Camera, RefSheet }
 
     /// <summary>
     /// A small line icon drawn with the vector API, crisp at any size. Its colour comes from the USS custom property
@@ -213,6 +213,22 @@ namespace Orbiters.Toolkit.Editor
                     painter.BeginPath(); painter.MoveTo(P(12f, 5f)); painter.LineTo(P(12f, 19f)); painter.Stroke();
                     painter.BeginPath(); painter.MoveTo(P(5f, 12f)); painter.LineTo(P(19f, 12f)); painter.Stroke();
                     break;
+                case IconGlyph.Camera:
+                    painter.lineWidth = 1.8f * scale;
+                    painter.BeginPath();
+                    painter.MoveTo(P(8.6f, 6.8f)); painter.LineTo(P(9.8f, 4.6f)); painter.LineTo(P(14.2f, 4.6f)); painter.LineTo(P(15.4f, 6.8f));
+                    painter.Stroke();
+                    RoundRect(painter, P, 3f, 6.8f, 18f, 12.6f, 2.6f); painter.Stroke();
+                    painter.BeginPath(); painter.Arc(P(12f, 13.1f), 3.5f * scale, 0f, 360f); painter.Stroke();
+                    painter.BeginPath(); painter.Arc(P(17.6f, 9.6f), 0.9f * scale, 0f, 360f); painter.Fill();
+                    break;
+                case IconGlyph.RefSheet:
+                    // Three standing figures: front and back (arms out), then a narrower side view.
+                    painter.lineWidth = 1.5f * scale;
+                    Standing(painter, P, scale, 4.4f, 2.4f);
+                    Standing(painter, P, scale, 12f, 2.4f);
+                    Standing(painter, P, scale, 19.6f, 1.3f);
+                    break;
             }
         }
 
@@ -253,6 +269,16 @@ namespace Orbiters.Toolkit.Editor
             painter.BezierCurveTo(P(x - k, y - k), P(x - k, y - k), P(x, y - r));
             painter.ClosePath();
             painter.Fill();
+        }
+
+        // A head over a rounded body on two legs, centred on x; halfWidth narrows it for a side view.
+        private static void Standing(Painter2D painter, Func<float, float, Vector2> P, float scale, float x, float halfWidth)
+        {
+            painter.BeginPath(); painter.Arc(P(x, 5.4f), 2.1f * scale, 0f, 360f); painter.Stroke();
+            RoundRect(painter, P, x - halfWidth, 8.6f, halfWidth * 2f, 7.2f, Mathf.Min(halfWidth, 1.6f)); painter.Stroke();
+            float leg = Mathf.Min(1.1f, halfWidth * 0.45f);
+            painter.BeginPath(); painter.MoveTo(P(x - leg, 15.8f)); painter.LineTo(P(x - leg, 20.6f)); painter.Stroke();
+            painter.BeginPath(); painter.MoveTo(P(x + leg, 15.8f)); painter.LineTo(P(x + leg, 20.6f)); painter.Stroke();
         }
 
         private static void Slash(Painter2D painter, Func<float, float, Vector2> P)

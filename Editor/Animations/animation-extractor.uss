@@ -1,0 +1,546 @@
+/* Animation Extractor: dark cards on the inspector shell's grey, accent pills, flat buttons (as the photoshoot panel). */
+
+.ae {
+    flex-grow: 1;
+    background-color: #2e2e2e;
+}
+
+.ae Button {
+    margin: 0;
+    border-width: 0;
+    -unity-font-style: normal;
+    transition-property: background-color, color, scale, opacity;
+    transition-duration: 0.14s, 0.14s, 0.2s, 0.14s;
+    transition-timing-function: ease-out, ease-out, ease-out-back, ease-out;
+}
+
+.ae Button.ae-pressed {
+    scale: 0.95 0.95;
+}
+
+.ae Button:disabled {
+    opacity: 0.45;
+}
+
+.ae__top {
+    flex-shrink: 0;
+    padding: 16px 20px 6px 20px;
+}
+
+.ae__scroll {
+    flex-grow: 1;
+}
+
+.ae__content {
+    padding: 6px 20px 10px 20px;
+}
+
+.ae__footer {
+    flex-shrink: 0;
+    padding: 10px 20px 16px 20px;
+}
+
+/* ---- Buttons ------------------------------------------------------------------------------------- */
+
+.ae .ae-pill {
+    height: 28px;
+    min-height: 28px;
+    padding: 0 14px;
+    border-radius: 14px;
+    background-color: #3a3a3a;
+    color: #ffffff;
+    font-size: 12px;
+}
+
+.ae .ae-pill:hover {
+    background-color: #3a3a3a;
+}
+
+.ae .ae-pill:hover:enabled {
+    background-color: #474747;
+}
+
+.ae .ae-pill--accent,
+.ae .ae-pill--accent:hover {
+    background-color: #00DA6D;
+    color: #0b0b0b;
+    -unity-font-style: bold;
+}
+
+.ae .ae-pill--accent:hover:enabled {
+    background-color: #1ee684;
+}
+
+.ae .ae-pill--small {
+    height: 24px;
+    min-height: 24px;
+    padding: 0 12px;
+    border-radius: 12px;
+    font-size: 11px;
+}
+
+.ae .ae-extract {
+    height: 36px;
+    min-height: 36px;
+    border-radius: 18px;
+    font-size: 13px;
+}
+
+.ae .ae-link {
+    height: 22px;
+    min-height: 22px;
+    padding: 0 8px;
+    border-radius: 11px;
+    background-color: rgba(0, 0, 0, 0);
+    color: #9a9a9a;
+    font-size: 11px;
+}
+
+.ae .ae-link:hover {
+    background-color: rgba(0, 0, 0, 0);
+}
+
+.ae .ae-link:hover:enabled {
+    background-color: rgba(255, 255, 255, 0.08);
+    color: #ffffff;
+}
+
+.ae .ae-link--accent {
+    color: #00DA6D;
+}
+
+/* ---- Drop zone ----------------------------------------------------------------------------------- */
+
+.ae-drop {
+    align-items: center;
+    padding: 26px 16px 20px 16px;
+    border-radius: 16px;
+    background-color: #212121;
+    transition-property: background-color;
+    transition-duration: 0.16s;
+}
+
+.ae-drop--over {
+    background-color: #1c2a23;
+}
+
+.ae-drop__icon {
+    width: 30px;
+    height: 30px;
+    flex-shrink: 0;
+    margin-bottom: 10px;
+    --icon-color: #7a7a7a;
+}
+
+.ae-drop--over .ae-drop__icon {
+    --icon-color: #00DA6D;
+}
+
+.ae-drop__texts {
+    align-items: center;
+}
+
+.ae-drop__title {
+    margin: 0;
+    padding: 0;
+    color: #f2f2f2;
+    font-size: 14px;
+    -unity-font-style: bold;
+    -unity-text-align: middle-center;
+    white-space: normal;
+}
+
+.ae-drop__hint {
+    margin: 4px 0 12px 0;
+    padding: 0;
+    color: #8f8f8f;
+    font-size: 11px;
+    -unity-text-align: middle-center;
+    white-space: normal;
+}
+
+.ae-drop__message {
+    margin: 10px 0 0 0;
+    padding: 0;
+    color: #a9b6c2;
+    font-size: 11px;
+    -unity-text-align: middle-center;
+    white-space: normal;
+}
+
+.ae-drop__message--warning {
+    color: #ffb020;
+}
+
+/* Compact once models are listed: one row, the message under it. */
+
+.ae-drop--compact {
+    flex-direction: row;
+    flex-wrap: wrap;
+    padding: 12px 14px 12px 16px;
+}
+
+.ae-drop--compact .ae-drop__icon {
+    width: 22px;
+    height: 22px;
+    margin: 0 12px 0 0;
+}
+
+.ae-drop--compact .ae-drop__texts {
+    flex-grow: 1;
+    flex-shrink: 1;
+    flex-basis: 0;
+    min-width: 0;
+    align-items: flex-start;
+    margin-right: 10px;
+}
+
+.ae-drop--compact .ae-drop__title {
+    font-size: 12px;
+    -unity-text-align: middle-left;
+}
+
+.ae-drop--compact .ae-drop__hint {
+    margin: 2px 0 0 0;
+    -unity-text-align: middle-left;
+}
+
+.ae-drop--compact .ae-drop__message {
+    width: 100%;
+    margin: 8px 0 0 0;
+    padding-left: 34px;
+    -unity-text-align: middle-left;
+}
+
+/* ---- Cards --------------------------------------------------------------------------------------- */
+
+.ae-card {
+    margin-bottom: 10px;
+    padding: 12px 14px 12px 14px;
+    border-radius: 14px;
+    background-color: #242424;
+    border-width: 1px;
+    border-color: rgba(255, 255, 255, 0.05);
+}
+
+.ae-card__title {
+    margin: 0 0 10px 2px;
+    padding: 0;
+    color: #f2f2f2;
+    font-size: 12px;
+    -unity-font-style: bold;
+}
+
+.ae-caption {
+    margin: 0;
+    padding: 0;
+    color: #8f8f8f;
+    font-size: 11px;
+}
+
+.ae-chip {
+    height: 18px;
+    margin: 0 0 0 6px;
+    padding: 0 7px;
+    flex-shrink: 0;
+    border-radius: 9px;
+    background-color: rgba(255, 255, 255, 0.07);
+    color: #bdbdbd;
+    font-size: 10px;
+    -unity-font-style: bold;
+    -unity-text-align: middle-center;
+}
+
+.ae-chip--accent {
+    background-color: rgba(0, 218, 109, 0.12);
+    color: #00DA6D;
+}
+
+/* ---- Model cards --------------------------------------------------------------------------------- */
+
+.ae-model__header {
+    flex-direction: row;
+    align-items: flex-start;
+}
+
+.ae-model__titles {
+    flex-grow: 1;
+    flex-shrink: 1;
+    min-width: 0;
+    margin: 1px 8px 0 2px;
+}
+
+.ae-model__title-row {
+    flex-direction: row;
+    align-items: center;
+}
+
+.ae-model__title {
+    flex-shrink: 1;
+    margin: 0;
+    padding: 0;
+    color: #f2f2f2;
+    font-size: 13px;
+    -unity-font-style: bold;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.ae-model__path {
+    margin-top: 2px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.ae-model__bar {
+    flex-direction: row;
+    align-items: center;
+    margin: 10px 0 2px 0;
+}
+
+.ae-model__count {
+    flex-grow: 1;
+    margin-left: 2px;
+}
+
+.ae-model__empty {
+    margin: 8px 2px;
+}
+
+.ae-model__footer {
+    flex-direction: row;
+    align-items: center;
+    min-height: 22px;
+    margin-top: 4px;
+    padding-top: 8px;
+    border-top-width: 1px;
+    border-top-color: rgba(255, 255, 255, 0.05);
+}
+
+.ae-model__folder {
+    flex-grow: 1;
+    flex-shrink: 1;
+    min-width: 0;
+    margin: 0 8px 0 2px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* ---- Clip rows ----------------------------------------------------------------------------------- */
+
+.ae-clip {
+    flex-direction: row;
+    align-items: flex-start;
+    padding: 8px 0 8px 2px;
+    border-top-width: 1px;
+    border-top-color: rgba(255, 255, 255, 0.05);
+}
+
+.ae-clip--first {
+    border-top-width: 0;
+}
+
+.ae-clip__check {
+    margin: 4px 10px 0 0;
+}
+
+.ae-clip__body {
+    flex-grow: 1;
+    flex-shrink: 1;
+    min-width: 0;
+}
+
+.ae .ae-clip__name {
+    margin: 0;
+}
+
+.ae .ae-clip__name .unity-base-text-field__input {
+    height: 24px;
+    min-height: 24px;
+    margin: 0;
+    padding: 0 8px;
+    border-width: 0;
+    border-radius: 8px;
+    background-color: #1a1a1a;
+    color: #e6e6e6;
+    font-size: 12px;
+}
+
+.ae .ae-clip__name:focus .unity-base-text-field__input {
+    background-color: #161616;
+    border-width: 1px;
+    border-color: rgba(0, 218, 109, 0.5);
+}
+
+.ae-clip__meta {
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+    margin: 5px 0 0 2px;
+}
+
+.ae-clip__timing {
+    flex-shrink: 1;
+    margin: 0 2px 0 0;
+    padding: 0;
+    color: #8f8f8f;
+    font-size: 11px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.ae-clip__message {
+    margin: 5px 0 0 2px;
+    padding: 0;
+    color: #a9b6c2;
+    font-size: 11px;
+    white-space: normal;
+}
+
+.ae-clip__message--error {
+    color: #ff8c59;
+}
+
+.ae-status {
+    flex-direction: row;
+    align-items: center;
+    flex-shrink: 0;
+    height: 24px;
+    margin-left: 10px;
+}
+
+.ae-status__dot {
+    width: 8px;
+    height: 8px;
+    margin-right: 6px;
+    border-radius: 4px;
+    background-color: #5c5c5c;
+}
+
+.ae-status__label {
+    margin: 0;
+    padding: 0;
+    color: #9a9a9a;
+    font-size: 11px;
+    -unity-font-style: bold;
+}
+
+.ae-status--done .ae-status__dot {
+    background-color: #00DA6D;
+}
+
+.ae-status--done .ae-status__label {
+    color: #00DA6D;
+}
+
+.ae-status--error .ae-status__dot {
+    background-color: #ff8c59;
+}
+
+.ae-status--error .ae-status__label {
+    color: #ff8c59;
+}
+
+/* ---- Options ------------------------------------------------------------------------------------- */
+
+.ae-option {
+    margin-top: 14px;
+}
+
+.ae-option--first {
+    margin-top: 0;
+}
+
+.ae-option__label {
+    margin: 0 0 6px 2px;
+    padding: 0;
+    color: #bdbdbd;
+    font-size: 11px;
+}
+
+.ae-option__row {
+    flex-direction: row;
+    align-items: center;
+    min-height: 24px;
+}
+
+.ae-option__control {
+    flex-grow: 1;
+}
+
+.ae-option__value {
+    flex-grow: 1;
+    flex-shrink: 1;
+    min-width: 0;
+    margin: 0 8px 0 2px;
+    padding: 0;
+    color: #e6e6e6;
+    font-size: 12px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.ae-option__row .ae-link {
+    margin-right: 6px;
+}
+
+.ae-option__caption {
+    margin: 6px 2px 0 2px;
+    white-space: normal;
+}
+
+/* ---- Footer -------------------------------------------------------------------------------------- */
+
+.ae-summary {
+    margin: 0 2px 8px 2px;
+    padding: 0;
+    color: #a9b6c2;
+    font-size: 11px;
+    -unity-text-align: middle-center;
+    white-space: normal;
+}
+
+.ae-summary--error {
+    color: #ff8c59;
+}
+
+.ae-progress {
+    height: 36px;
+    justify-content: center;
+}
+
+.ae-progress__label {
+    margin: 0 2px 6px 2px;
+    padding: 0;
+    color: #e6e6e6;
+    font-size: 11px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.ae-progress__track {
+    height: 6px;
+    border-radius: 3px;
+    background-color: #1f1f1f;
+    overflow: hidden;
+}
+
+.ae-progress__fill {
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    /* A percentage like the widths set from code, so the transition can run between them. */
+    width: 0%;
+    border-radius: 3px;
+    background-color: #00DA6D;
+    transition-property: width;
+    transition-duration: 0.2s;
+    transition-timing-function: ease-out;
+}
