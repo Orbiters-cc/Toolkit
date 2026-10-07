@@ -54,6 +54,12 @@ namespace Orbiters.Toolkit.Editor.VRChat.Parameters
         // VRCFury's ParameterCompressorService: seconds per batch, plus half a frame at 30 fps.
         private const float BatchSeconds = .1f + .5f / 30f;
 
+        /// <summary>
+        /// Parameters a build step leaves out of a VRCFury component's parameter assets (e.g. face tracking features My
+        /// Avatar does not sync): they are not counted. Each function returns the names for one component, or null.
+        /// </summary>
+        public static readonly List<Func<Component, ICollection<string>>> BuildRemovedParameters = new List<Func<Component, ICollection<string>>>();
+
         private static Type vrcFuryType, toggleType, fullControllerType;
         private static System.Reflection.FieldInfo networkSyncedField;
 
@@ -247,11 +253,13 @@ namespace Orbiters.Toolkit.Editor.VRChat.Parameters
                             foreach (var pair in MenuUses(menu))
                                 if (!uses.TryGetValue(pair.Key, out var previous) || pair.Value > previous) uses[pair.Key] = pair.Value;
                 if (!(fullControllerType.GetField("prms")?.GetValue(content) is IEnumerable entries)) continue;
+                var removed = RemovedByBuild(component);
                 foreach (var entry in entries)
                 {
                     if (!(VrcFury.ObjectReference(entry?.GetType().GetField("parameters")?.GetValue(entry)) is VRCExpressionParameters asset)) continue;
                     foreach (var parameter in SyncedParameters(asset))
                     {
+                        if (removed != null && removed.Contains(parameter.name)) continue;
                         if (IsGlobal(parameter.name, globals))
                         {
                             if (synced.ContainsKey(parameter.name)) continue;
@@ -265,6 +273,21 @@ namespace Orbiters.Toolkit.Editor.VRChat.Parameters
                 }
             }
             return added;
+        }
+
+        private static HashSet<string> RemovedByBuild(Component component)
+        {
+            HashSet<string> removed = null;
+            foreach (var removes in BuildRemovedParameters)
+            {
+                ICollection<string> names;
+                try { names = removes(component); }
+                catch (Exception ex) { Debug.LogWarning("[Orbiters] A parameter budget hook failed on " + component.name + ": " + ex.Message); continue; }
+                if (names == null || names.Count == 0) continue;
+                removed ??= new HashSet<string>(StringComparer.Ordinal);
+                removed.UnionWith(names);
+            }
+            return removed;
         }
 
         private static bool IsGlobal(string name, IEnumerable<string> rules)

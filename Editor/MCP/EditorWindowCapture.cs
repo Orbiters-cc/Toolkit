@@ -24,6 +24,14 @@ namespace Orbiters.Toolkit.Editor
             return parent;
         }
 
+        /// <summary>Whether the window is shown: open, and the selected tab of its dock.</summary>
+        internal static bool IsShown(EditorWindow window)
+        {
+            var parent = typeof(EditorWindow).GetField("m_Parent", InstanceMembers)?.GetValue(window);
+            var actualView = parent?.GetType().GetProperty("actualView", InstanceMembers);
+            return actualView != null && actualView.GetValue(parent) as EditorWindow == window;
+        }
+
         internal static void RepaintWithoutFocus(EditorWindow window)
         {
             var host = GetVisibleHost(window);
@@ -33,7 +41,7 @@ namespace Orbiters.Toolkit.Editor
             repaint.Invoke(host, null);
         }
 
-        internal static object Save(EditorWindow window, int maxResolution)
+        internal static object Save(EditorWindow window, int maxResolution, bool hidden = false)
         {
             var parent = GetVisibleHost(window);
             var grab = parent.GetType().GetMethod("GrabPixels", InstanceMembers, null,
@@ -98,7 +106,7 @@ namespace Orbiters.Toolkit.Editor
                     fullPath = path, width = pixels.width, height = pixels.height,
                     sourceWidth = width, sourceHeight = height, pixelsPerPoint = scale,
                     windowId = window.GetInstanceID(), windowType = window.GetType().FullName,
-                    title = window.titleContent.text, captureMode = "editor_window_framebuffer",
+                    title = window.titleContent.text, captureMode = hidden ? "hidden_copy_framebuffer" : "editor_window_framebuffer",
                     unityVersion = Application.unityVersion, projectPath = project
                 };
             }

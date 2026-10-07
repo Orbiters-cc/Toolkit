@@ -49,15 +49,22 @@ namespace Orbiters.Toolkit.Editor.Photoshoot
         public Action<Texture2D> RefSheet;
         /// <summary>What the thumbnail shot is called in the panel (My Avatar's gallery calls it a picture).</summary>
         public string ThumbnailLabel = "Thumbnail";
+        /// <summary>
+        /// Fonts (asset paths, an empty one for Unity's default font) for a line of text on the thumbnail
+        /// (<see cref="PhotoshootState.Text"/>): its Text tab and the text on the previews. Null: no text.
+        /// </summary>
+        public IReadOnlyList<string> TextFonts;
+        /// <summary>Called once a change to the thumbnail's text is done (not during a drag), so the host can keep it.</summary>
+        public Action<PhotoshootText> TextChanged;
     }
 
     /// <summary>Live photoshoot editor: preview, shot capture, framing controls and pose, light, background and expression pickers.</summary>
-    public sealed class PhotoshootPanel : VisualElement
+    public sealed partial class PhotoshootPanel : VisualElement
     {
         private const string StyleSheetPath = "Packages/orbiters.toolkit/Editor/Photoshoot/photoshoot.uss";
         private static readonly Vector2Int BannerPreviewSize = new Vector2Int(768, 432);
         private static readonly string[] StyleTabs = { "Pose", "Light", "Background", "Expression", "Effects" };
-        private const int PoseTab = 0, LightTab = 1, BackgroundTab = 2, ExpressionTab = 3, EffectsTab = 4;
+        private const int PoseTab = 0, LightTab = 1, BackgroundTab = 2, ExpressionTab = 3, EffectsTab = 4, TextTab = 5;
 
         private readonly PhotoshootState state;
         private readonly PhotoshootOptions options;
@@ -65,9 +72,13 @@ namespace Orbiters.Toolkit.Editor.Photoshoot
         private readonly Dictionary<string, Button> expressionChips = new Dictionary<string, Button>(StringComparer.OrdinalIgnoreCase);
         private readonly Dictionary<PhotoshootService.ShotKind, ShotRow> shotRows = new Dictionary<PhotoshootService.ShotKind, ShotRow>();
         private readonly Dictionary<VisualElement, FramingDrag> framingSurfaces = new Dictionary<VisualElement, FramingDrag>();
+        private readonly Dictionary<VisualElement, PhotoshootTextLayer> textLayers = new Dictionary<VisualElement, PhotoshootTextLayer>();
         private static readonly Vector2Int RefSheetPreviewSize = new Vector2Int(1152, 648);
         private Image bannerImage, thumbnailImage, refSheetImage;
         private VisualElement ownStage, flash;
+        // The two columns the cards go in (side by side once wide), the one being built, and the host's lead content.
+        private VisualElement mainColumn, column, lead;
+        private const float WideWidth = 820f;
         private Button refSheetCapture;
         private SegmentedControl sideControl;
         private Texture effectPreviewSource;
@@ -103,6 +114,8 @@ namespace Orbiters.Toolkit.Editor.Photoshoot
             var sheet = AssetDatabase.LoadAssetAtPath<StyleSheet>(StyleSheetPath);
             if (sheet) styleSheets.Add(sheet);
             AddToClassList("ps-panel");
+            // Wide enough for two columns: the shot and its framing on the left, its style beside them.
+            RegisterCallback<GeometryChangedEvent>(_ => EnableInClassList("ps-panel--wide", resolvedStyle.width >= WideWidth));
 
             state.EnsureCatalog(AvatarRoot);
             if (options.RefSheet == null) state.RefSheetOpen = false;
@@ -133,6 +146,16 @@ namespace Orbiters.Toolkit.Editor.Photoshoot
             lookSwitch = null;
             presets = sideControl = null;
             message = null;
+            mainColumn = new VisualElement();
+            mainColumn.AddToClassList("ps-column");
+            mainColumn.AddToClassList("ps-column--main");
+            Add(mainColumn);
+            var styleColumn = new VisualElement();
+            styleColumn.AddToClassList("ps-column");
+            styleColumn.AddToClassList("ps-column--style");
+            Add(styleColumn);
+            if (lead != null) mainColumn.Add(lead);
+            column = mainColumn;
             if (state.RefSheetOpen)
             {
                 // The views reuse the thumbnail's render target: a host showing the live thumbnail lets go of it.
@@ -146,19 +169,34 @@ namespace Orbiters.Toolkit.Editor.Photoshoot
                 if (options.Back != null)
                 {
                     backButton = CreateButton("‹  " + options.BackText, options.Back, "ps-back");
-                    Add(backButton);
+                    column.Add(backButton);
                 }
                 if (options.ThumbnailPreview == null) BuildStage();
                 BuildShots();
                 BuildFraming();
             }
+            column = styleColumn;
             BuildStyle();
+            column = mainColumn;
             Refresh();
+        }
+
+        /// <summary>
+        /// Host content shown first in the panel, above its shots (and beside the style once the panel is wide), such as
+        /// the card a host shows the live thumbnail on. Null takes it back out; the host puts it where it belongs.
+        /// </summary>
+        public void SetLead(VisualElement value)
+        {
+            if (lead == value) return;
+            lead?.RemoveFromHierarchy();
+            lead = value;
+            if (lead != null) mainColumn?.Insert(0, lead);
         }
 
         /// <summary>Re-reads host state (chosen shots, blocked input) without rebuilding the panel.</summary>
         public void Refresh()
         {
+            foreach (var layer in textLayers.Values) layer.style.display = TextOn ? DisplayStyle.Flex : DisplayStyle.None;
             foreach (var pair in shotRows)
             {
                 bool chosen = IsFixed(pair.Key);
@@ -210,7 +248,7 @@ namespace Orbiters.Toolkit.Editor.Photoshoot
         {
             var stage = new VisualElement();
             stage.AddToClassList("ps-stage");
-            Add(stage);
+            column.Add(stage);
             ownStage = stage;
             float aspect = options.IncludeBanner ? 16f / 9f : ThumbnailAspect;
             stage.RegisterCallback<GeometryChangedEvent>(_ =>
@@ -332,7 +370,7 @@ namespace Orbiters.Toolkit.Editor.Photoshoot
             var stage = new VisualElement();
             stage.AddToClassList("ps-stage");
             stage.AddToClassList("ps-stage--refsheet");
-            Add(stage);
+            column.Add(stage);
             stage.RegisterCallback<GeometryChangedEvent>(_ =>
             {
                 float width = stage.resolvedStyle.width;
@@ -815,6 +853,7 @@ namespace Orbiters.Toolkit.Editor.Photoshoot
             if (surface == null || !framingSurfaces.TryGetValue(surface, out var drag)) return;
             surface.RemoveManipulator(drag);
             framingSurfaces.Remove(surface);
+            if (textLayers.TryGetValue(surface, out var layer)) { layer.RemoveFromHierarchy(); textLayers.Remove(surface); }
         }
 
         private void AttachFraming(VisualElement surface, PhotoshootService.ShotKind kind, Func<Vector2> frameSize)
@@ -823,6 +862,14 @@ namespace Orbiters.Toolkit.Editor.Photoshoot
             var drag = new FramingDrag(this, kind, frameSize);
             framingSurfaces[surface] = drag;
             surface.AddManipulator(drag);
+            // The thumbnail's text sits on the same surface: pressing it moves the text, pressing elsewhere the avatar.
+            if (kind == PhotoshootService.ShotKind.Thumbnail && options.TextFonts != null)
+            {
+                var layer = new PhotoshootTextLayer(() => state.Text, frameSize, TextChanged);
+                layer.style.display = TextOn ? DisplayStyle.Flex : DisplayStyle.None;
+                surface.Add(layer);
+                textLayers[surface] = layer;
+            }
         }
 
         private sealed class FramingDrag : PointerManipulator
@@ -925,8 +972,8 @@ namespace Orbiters.Toolkit.Editor.Photoshoot
         private void BuildStyle()
         {
             var card = Card("ps-style");
-            state.StyleTab = Mathf.Clamp(state.StyleTab, 0, StyleTabs.Length - 1);
-            styleTabs = new SegmentedControl(StyleTabs, SelectTab);
+            state.StyleTab = Mathf.Clamp(state.StyleTab, 0, Tabs.Length - 1);
+            styleTabs = new SegmentedControl(Tabs, SelectTab);
             card.Add(styleTabs);
 
             styleCaption = new Label();
@@ -966,8 +1013,16 @@ namespace Orbiters.Toolkit.Editor.Photoshoot
                     for (int i = 0; i < state.Catalog.bodyPoses.Count; i++)
                     {
                         var option = state.Catalog.bodyPoses[i];
-                        grid.Add(Swatch("ps-swatch--pose", i, option.displayName, new Image { image = state.GetPoseIcon(AvatarRoot, option), scaleMode = ScaleMode.ScaleToFit }));
+                        var swatch = Swatch("ps-swatch--pose", i, option.displayName, new Image { image = state.GetPoseIcon(AvatarRoot, option), scaleMode = ScaleMode.ScaleToFit });
+                        string path = option.assetPath;
+                        grid.Add(option.custom ? WithRemoveButton(swatch, "Remove this pose (the animation it was taken from stays).", () =>
+                        {
+                            PhotoshootPoses.Remove(path);
+                            state.ReloadPoses();
+                        }) : swatch);
                     }
+                    grid.Add(AddSwatch("ps-swatch--pose", "Add a pose of your own from a humanoid animation in this project (an .anim, or a model's clips), or drop animations here. Every project gets it.", BrowsePose));
+                    AcceptDrops(grid, PosesDragged, () => AddPoses(DraggedClips()));
                     break;
                 case LightTab:
                     for (int i = 0; i < state.Catalog.lightPresets.Count; i++)
@@ -1002,10 +1057,15 @@ namespace Orbiters.Toolkit.Editor.Photoshoot
                         else if (option.texture != null) content = new Image { image = option.texture, scaleMode = ScaleMode.ScaleAndCrop };
                         else { content = new VisualElement(); content.AddToClassList("ps-swatch__empty"); }
                         var swatch = Swatch("ps-swatch--background", i, option.displayName, content);
-                        grid.Add(option.custom ? WithRemoveButton(swatch, option.assetPath) : swatch);
+                        string path = option.assetPath;
+                        grid.Add(option.custom ? WithRemoveButton(swatch, "Remove this background (the picture it was copied from stays).", () =>
+                        {
+                            PhotoshootBackgrounds.Remove(path);
+                            state.ReloadBackgrounds();
+                        }) : swatch);
                     }
-                    grid.Add(AddBackgroundSwatch());
-                    AcceptDroppedBackgrounds(grid);
+                    grid.Add(AddSwatch("ps-swatch--background", "Add a picture of your own (PNG or JPEG), or drop pictures here. Every project gets it.", BrowseBackground));
+                    AcceptDrops(grid, () => DraggedPictures().Count > 0, () => AddBackgrounds(DraggedPictures()));
                     colorPicker = new InlineColorPicker(state.BackgroundColor, PhotoshootService.DefaultBackgroundColor, color =>
                     {
                         state.BackgroundColor = color;
@@ -1013,6 +1073,9 @@ namespace Orbiters.Toolkit.Editor.Photoshoot
                         RenderNow();
                     });
                     styleContent.Add(colorPicker);
+                    break;
+                case TextTab:
+                    BuildTextTab(grid);
                     break;
                 case EffectsTab:
                     grid.AddToClassList("ps-grid--effects");
@@ -1141,18 +1204,81 @@ namespace Orbiters.Toolkit.Editor.Photoshoot
             return row;
         }
 
-        // ---- The user's own backgrounds ----------------------------------------------------------------------------------
+        // ---- The user's own backgrounds and poses ------------------------------------------------------------------------
 
-        private Button AddBackgroundSwatch()
+        private Button AddSwatch(string modifier, string tooltip, Action browse)
         {
-            var add = CreateButton(null, BrowseBackground, "ps-swatch");
-            add.AddToClassList("ps-swatch--background");
+            var add = CreateButton(null, browse, "ps-swatch");
+            add.AddToClassList(modifier);
             add.AddToClassList("ps-swatch--add");
-            add.tooltip = "Add a picture of your own (PNG or JPEG), or drop pictures here. Every project gets it.";
+            add.tooltip = tooltip;
             var icon = new VectorIcon(IconGlyph.Plus) { pickingMode = PickingMode.Ignore };
             icon.AddToClassList("ps-swatch__add-icon");
             add.Add(icon);
             return add;
+        }
+
+        // Adds the user's own items, then shows them with the last one added chosen. What was added before a failure stays.
+        private void AddOwn<T>(IEnumerable<T> items, Func<T, string> add, string what, Action<string> reload)
+        {
+            string last = null;
+            try
+            {
+                foreach (var item in items) last = add(item);
+                state.Error = null;
+            }
+            catch (Exception ex)
+            {
+                state.Error = $"Could not add the {what}: {ex.Message}";
+            }
+
+            if (last != null)
+            {
+                reload(last);
+                BuildStyleContent();
+                RenderNow();
+            }
+            UpdateMessage();
+        }
+
+        // Beside the swatch, not in it: a press on the swatch would choose it first.
+        private VisualElement WithRemoveButton(Button swatch, string tooltip, Action remove)
+        {
+            var wrap = new VisualElement();
+            wrap.AddToClassList("ps-swatch-wrap");
+            wrap.Add(swatch);
+            var button = CreateButton(null, () =>
+            {
+                remove();
+                BuildStyleContent();
+                RenderNow();
+            }, "ps-swatch__remove");
+            button.tooltip = tooltip;
+            var icon = new VectorIcon(IconGlyph.Close) { pickingMode = PickingMode.Ignore };
+            icon.AddToClassList("ps-swatch__remove-icon");
+            button.Add(icon);
+            wrap.Add(button);
+            return wrap;
+        }
+
+        // What is dropped on the grid, from the Project window or from the desktop, is added to it.
+        private static void AcceptDrops(VisualElement grid, Func<bool> accepts, Action drop)
+        {
+            grid.RegisterCallback<DragUpdatedEvent>(_ =>
+            {
+                bool accepted = accepts();
+                DragAndDrop.visualMode = accepted ? DragAndDropVisualMode.Copy : DragAndDropVisualMode.Rejected;
+                grid.EnableInClassList("ps-grid--drop", accepted);
+            });
+            grid.RegisterCallback<DragLeaveEvent>(_ => grid.RemoveFromClassList("ps-grid--drop"));
+            grid.RegisterCallback<DragExitedEvent>(_ => grid.RemoveFromClassList("ps-grid--drop"));
+            grid.RegisterCallback<DragPerformEvent>(_ =>
+            {
+                grid.RemoveFromClassList("ps-grid--drop");
+                if (!accepts()) return;
+                DragAndDrop.AcceptDrag();
+                drop();
+            });
         }
 
         private void BrowseBackground()
@@ -1161,69 +1287,32 @@ namespace Orbiters.Toolkit.Editor.Photoshoot
             if (!string.IsNullOrEmpty(file)) AddBackgrounds(new[] { file });
         }
 
-        private void AddBackgrounds(IEnumerable<string> files)
-        {
-            string last = null;
-            try
-            {
-                foreach (string file in files.Where(PhotoshootBackgrounds.IsPicture)) last = PhotoshootBackgrounds.Add(Path.GetFullPath(file));
-                state.Error = null;
-            }
-            catch (Exception ex)
-            {
-                state.Error = "Could not add the background: " + ex.Message;
-            }
+        private static List<string> DraggedPictures() => (DragAndDrop.paths ?? new string[0]).Where(PhotoshootBackgrounds.IsPicture).ToList();
 
-            if (last != null)
-            {
-                state.ReloadBackgrounds(last);
-                BuildStyleContent();
-                RenderNow();
-            }
-            UpdateMessage();
+        private void AddBackgrounds(IEnumerable<string> files) =>
+            AddOwn(files.Where(PhotoshootBackgrounds.IsPicture), file => PhotoshootBackgrounds.Add(Path.GetFullPath(file)), "background", state.ReloadBackgrounds);
+
+        private void BrowsePose()
+        {
+            string file = EditorUtility.OpenFilePanelWithFilters("Add a pose", Application.dataPath, new[] { "Animations", "anim,fbx" });
+            if (!string.IsNullOrEmpty(file)) AddPoses(new[] { file }.SelectMany(PhotoshootPoses.ClipsIn));
         }
 
-        // Beside the swatch, not in it: a press on the swatch would choose the background first.
-        private VisualElement WithRemoveButton(Button swatch, string path)
-        {
-            var wrap = new VisualElement();
-            wrap.AddToClassList("ps-swatch-wrap");
-            wrap.Add(swatch);
-            var remove = CreateButton(null, () =>
-            {
-                PhotoshootBackgrounds.Remove(path);
-                state.ReloadBackgrounds();
-                BuildStyleContent();
-                RenderNow();
-            }, "ps-swatch__remove");
-            remove.tooltip = "Remove this background (the picture it was copied from stays).";
-            var icon = new VectorIcon(IconGlyph.Close) { pickingMode = PickingMode.Ignore };
-            icon.AddToClassList("ps-swatch__remove-icon");
-            remove.Add(icon);
-            wrap.Add(remove);
-            return wrap;
-        }
+        // Read while adding, so a file that can't give a pose (outside the project, no animation) is reported.
+        private void AddPoses(IEnumerable<AnimationClip> clips) => AddOwn(clips, PhotoshootPoses.Add, "pose", state.ReloadPoses);
 
-        // Pictures dropped on the backgrounds, from the Project window or from the desktop, are added to them.
-        private void AcceptDroppedBackgrounds(VisualElement grid)
+        private static bool PosesDragged() =>
+            (DragAndDrop.objectReferences ?? new UnityEngine.Object[0]).OfType<AnimationClip>().Any() ||
+            (DragAndDrop.paths ?? new string[0]).Any(PhotoshootPoses.IsAnimationFile);
+
+        // A clip dragged from the Project window (one of a model's) is that clip; other animation and model files bring
+        // every clip in them.
+        private static IEnumerable<AnimationClip> DraggedClips()
         {
-            IEnumerable<string> Pictures() => (DragAndDrop.paths ?? new string[0]).Where(PhotoshootBackgrounds.IsPicture);
-            grid.RegisterCallback<DragUpdatedEvent>(_ =>
-            {
-                bool pictures = Pictures().Any();
-                DragAndDrop.visualMode = pictures ? DragAndDropVisualMode.Copy : DragAndDropVisualMode.Rejected;
-                grid.EnableInClassList("ps-grid--drop", pictures);
-            });
-            grid.RegisterCallback<DragLeaveEvent>(_ => grid.RemoveFromClassList("ps-grid--drop"));
-            grid.RegisterCallback<DragExitedEvent>(_ => grid.RemoveFromClassList("ps-grid--drop"));
-            grid.RegisterCallback<DragPerformEvent>(_ =>
-            {
-                grid.RemoveFromClassList("ps-grid--drop");
-                var files = Pictures().ToList();
-                if (files.Count == 0) return;
-                DragAndDrop.AcceptDrag();
-                AddBackgrounds(files);
-            });
+            var clips = (DragAndDrop.objectReferences ?? new UnityEngine.Object[0]).OfType<AnimationClip>().ToList();
+            var clipFiles = new HashSet<string>(clips.Select(AssetDatabase.GetAssetPath), StringComparer.OrdinalIgnoreCase);
+            var files = (DragAndDrop.paths ?? new string[0]).Where(file => PhotoshootPoses.IsAnimationFile(file) && !clipFiles.Contains(file)).ToList();
+            return clips.Concat(files.SelectMany(PhotoshootPoses.ClipsIn));
         }
 
         private int SelectedIndex(int tab) => tab == PoseTab ? state.BodyPoseIndex : tab == LightTab ? state.LightPresetIndex : state.BackgroundIndex;
@@ -1288,6 +1377,12 @@ namespace Orbiters.Toolkit.Editor.Photoshoot
                 foreach (var pair in expressionChips) pair.Value.EnableInClassList("ps-chip--selected", state.SelectedFaceBlendshapes.Contains(pair.Key));
                 int count = state.SelectedFaceBlendshapes.Count;
                 styleCaption.text = count == 0 ? "Neutral face" : count + " blendshape" + (count == 1 ? "" : "s") + " on";
+                return;
+            }
+
+            if (tab == TextTab)
+            {
+                UpdateTextControls();
                 return;
             }
 
@@ -1443,7 +1538,8 @@ namespace Orbiters.Toolkit.Editor.Photoshoot
             {
                 var size = CaptureSize(shotKind);
                 bool plain = options.ServerAppliesBannerEffect && shotKind == PhotoshootService.ShotKind.Banner;
-                var texture = state.Capture(AvatarRoot, shotKind, size, withShotEffect: !plain);
+                var text = TextOn && shotKind == PhotoshootService.ShotKind.Thumbnail ? state.Text : null;
+                var texture = state.Capture(AvatarRoot, shotKind, size, withShotEffect: !plain, text: text);
                 options.SetShot?.Invoke(shotKind, texture);
                 // A host that keeps following the live preview after a capture gets a confirmation instead of a Retake.
                 state.Status = IsFixed(shotKind) ? null : $"{ShotName(shotKind)} captured";
@@ -1531,7 +1627,7 @@ namespace Orbiters.Toolkit.Editor.Photoshoot
             var card = new VisualElement();
             card.AddToClassList("ps-card");
             card.AddToClassList(modifier);
-            Add(card);
+            column.Add(card);
             return card;
         }
 

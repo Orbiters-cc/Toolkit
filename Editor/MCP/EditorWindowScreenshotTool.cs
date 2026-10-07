@@ -10,8 +10,10 @@ using UnityEngine;
 namespace Orbiters.Toolkit.Editor
 {
     [McpForUnityTool("orbiters_editor_window",
-        Description = "List Unity editor windows or capture one window's actual UI to PNG without bringing Unity forward. Background capture is the default; focus=true explicitly permits activation. Inactive docked tabs fail instead of activating. Returns fullPath for image inspection.",
-        RequiresPolling = true, PollAction = "status", MaxPollSeconds = 20)]
+        Description = "List Unity editor windows or capture one window's actual UI to PNG, always in the background: Unity is never brought forward and the user's layout, tabs, scrolling and selection are left alone. " +
+                      "A shown window is captured as it is. A window that is not open (open_if_missing), an inactive docked tab, or a capture with width/height/scroll_to is rendered in a hidden copy outside every display, closed afterwards. " +
+                      "inspect captures a hidden Inspector locked on any object (instance ID, scene path like \"Root/Child\" or \"Scene:Root/Child\", or asset path) without selecting it; tall heights show long inspectors whole. Returns fullPath for image inspection.",
+        RequiresPolling = true, PollAction = "status", MaxPollSeconds = 30)]
     public static class EditorWindowScreenshotTool
     {
         public class Parameters
@@ -19,9 +21,12 @@ namespace Orbiters.Toolkit.Editor
             [ToolParameter("list, capture, or status")] public string action { get; set; }
             [ToolParameter("Window instance ID from list", Required = false)] public int? window_id { get; set; }
             [ToolParameter("Exact full EditorWindow type name; ambiguous open instances require window_id", Required = false)] public string window_type { get; set; }
-            [ToolParameter("Explicitly allow opening window_type when absent", Required = false)] public bool open_if_missing { get; set; }
-            [ToolParameter("Explicitly permit foreground activation and tab selection; default false", Required = false)] public bool focus { get; set; }
-            [ToolParameter("Maximum image edge, 64..4096, or 0 for native pixels; default 0", Required = false)] public int max_resolution { get; set; }
+            [ToolParameter("Object to show in a hidden Inspector locked on it: instance ID, scene path (\"Root/Child\", \"Scene:Root/Child\") or asset path; replaces window_id/window_type", Required = false)] public string inspect { get; set; }
+            [ToolParameter("Open a hidden window_type window when none is open (never focused)", Required = false)] public bool open_if_missing { get; set; }
+            [ToolParameter("Hidden copy width in points (default: the window's own, or 520 for inspect)", Required = false)] public int width { get; set; }
+            [ToolParameter("Hidden copy height in points, up to 8000 (default: the window's own, or 2400 for inspect); tall values show long windows whole", Required = false)] public int height { get; set; }
+            [ToolParameter("Scroll a hidden copy so the first element whose name, USS class or text matches is at the top", Required = false)] public string scroll_to { get; set; }
+            [ToolParameter("Maximum image edge, 64..8192, or 0 for native pixels; default 0", Required = false)] public int max_resolution { get; set; }
             [ToolParameter("Capture job identifier returned by capture", Required = false)] public string job_id { get; set; }
         }
 
@@ -29,6 +34,9 @@ namespace Orbiters.Toolkit.Editor
         {
             internal string Id;
             internal EditorWindow Window;
+            internal bool Hidden;
+            internal string ScrollTo;
+            internal bool Scrolled;
             internal int MaxResolution;
             internal double Started;
             internal int Ticks;
@@ -47,10 +55,10 @@ namespace Orbiters.Toolkit.Editor
                 switch (p.action)
                 {
                     case "list":
-                        return new SuccessResponse("Open Unity editor windows.", Windows().Select(w => new
+                        return new SuccessResponse("Open Unity editor windows. shown=false means an inactive docked tab: capture still works, in a hidden copy.", Windows().Select(w => new
                         {
                             windowId = w.GetInstanceID(), windowType = w.GetType().FullName,
-                            title = w.titleContent.text, focused = EditorWindow.focusedWindow == w,
+                            title = w.titleContent.text, focused = EditorWindow.focusedWindow == w, shown = EditorWindowCapture.IsShown(w),
                             width = w.position.width, height = w.position.height
                         }).ToArray());
                     case "capture": return Start(p);
@@ -67,7 +75,8 @@ namespace Orbiters.Toolkit.Editor
             catch (Exception ex) { return new ErrorResponse(ex.Message); }
         }
 
-        private static EditorWindow[] Windows() => Resources.FindObjectsOfTypeAll<EditorWindow>();
+        // Hidden copies made for captures are not the user's windows.
+        private static EditorWindow[] Windows() => Resources.FindObjectsOfTypeAll<EditorWindow>().Where(w => (w.hideFlags & HideFlags.HideAndDontSave) != HideFlags.HideAndDontSave).ToArray();
 
         private static object Start(Parameters p)
         {
@@ -75,30 +84,44 @@ namespace Orbiters.Toolkit.Editor
             if (EditorApplication.isCompiling || EditorApplication.isUpdating)
                 throw new InvalidOperationException("Wait for Unity compilation and asset refresh to finish.");
             if (active != null) throw new InvalidOperationException("Another window capture is still pending.");
-            if (p.max_resolution != 0 && (p.max_resolution < 64 || p.max_resolution > 4096))
-                throw new ArgumentException("max_resolution must be 0 or between 64 and 4096.");
-            if (p.window_id.HasValue == !string.IsNullOrWhiteSpace(p.window_type))
-                throw new ArgumentException("Specify exactly one of window_id and window_type.");
+            if (p.max_resolution != 0 && (p.max_resolution < 64 || p.max_resolution > 8192))
+                throw new ArgumentException("max_resolution must be 0 or between 64 and 8192.");
+            if (p.width < 0 || p.height < 0 || p.width > 8000 || p.height > 8000) throw new ArgumentException("width and height must be between 1 and 8000 points.");
 
-            var matches = Windows().Where(w => p.window_id.HasValue
-                ? w.GetInstanceID() == p.window_id.Value : w.GetType().FullName == p.window_type).ToArray();
-            if (matches.Length > 1) throw new ArgumentException("Several windows match; select a window_id from list.");
-            EditorWindow window = matches.SingleOrDefault();
-            if (window == null && p.open_if_missing && !string.IsNullOrWhiteSpace(p.window_type))
+            EditorWindow window;
+            bool hidden;
+            if (!string.IsNullOrWhiteSpace(p.inspect))
             {
-                if (!p.focus)
-                    throw new InvalidOperationException("Opening a window may activate Unity. Open it yourself first, or explicitly allow focus=true.");
-                var type = TypeCache.GetTypesDerivedFrom<EditorWindow>().SingleOrDefault(t => t.FullName == p.window_type);
-                if (type == null || type.IsAbstract) throw new ArgumentException("No concrete EditorWindow type matches.");
-                window = EditorWindow.GetWindow(type, false, null, p.focus);
+                if (p.window_id.HasValue || !string.IsNullOrWhiteSpace(p.window_type)) throw new ArgumentException("inspect replaces window_id and window_type.");
+                var target = EditorWindowHiddenHost.Resolve(p.inspect) ?? throw new ArgumentException("No object matches inspect: use an instance ID, a scene path such as \"Root/Child\" or an asset path.");
+                window = EditorWindowHiddenHost.Inspector(target, new Vector2(p.width > 0 ? p.width : 520, p.height > 0 ? p.height : 2400));
+                hidden = true;
             }
-            if (window == null) throw new ArgumentException("Window not found. Use list, or explicitly set open_if_missing with window_type.");
-            if (p.focus) window.Focus();
+            else
+            {
+                if (p.window_id.HasValue == !string.IsNullOrWhiteSpace(p.window_type))
+                    throw new ArgumentException("Specify exactly one of window_id, window_type and inspect.");
+                var matches = Windows().Where(w => p.window_id.HasValue
+                    ? w.GetInstanceID() == p.window_id.Value : w.GetType().FullName == p.window_type).ToArray();
+                if (matches.Length > 1) throw new ArgumentException("Several windows match; select a window_id from list.");
+                var open = matches.SingleOrDefault();
+                if (open == null && !(p.open_if_missing && !string.IsNullOrWhiteSpace(p.window_type)))
+                    throw new ArgumentException("Window not found. Use list, or set open_if_missing with window_type to capture a hidden one.");
+                hidden = open == null || !EditorWindowCapture.IsShown(open) || p.width > 0 || p.height > 0 || !string.IsNullOrWhiteSpace(p.scroll_to);
+                if (hidden)
+                {
+                    var type = open != null ? open.GetType() : TypeCache.GetTypesDerivedFrom<EditorWindow>().SingleOrDefault(t => t.FullName == p.window_type);
+                    if (type == null || type.IsAbstract) throw new ArgumentException("No concrete EditorWindow type matches.");
+                    var size = new Vector2(p.width > 0 ? p.width : open != null ? open.position.width : 520, p.height > 0 ? p.height : open != null ? open.position.height : 720);
+                    window = EditorWindowHiddenHost.Open(type, size, open);
+                }
+                else window = open;
+            }
             EditorWindowCapture.RepaintWithoutFocus(window);
 
             foreach (var key in Jobs.Where(pair => pair.Value.Result != null).Select(pair => pair.Key).ToArray())
                 if (Jobs.Count >= 16) Jobs.Remove(key);
-            var job = new Job { Id = Guid.NewGuid().ToString("N"), Window = window,
+            var job = new Job { Id = Guid.NewGuid().ToString("N"), Window = window, Hidden = hidden, ScrollTo = string.IsNullOrWhiteSpace(p.scroll_to) ? null : p.scroll_to.Trim(),
                 MaxResolution = p.max_resolution, Started = EditorApplication.timeSinceStartup };
             Jobs.Add(job.Id, job);
             latestJobId = job.Id;
@@ -110,7 +133,7 @@ namespace Orbiters.Toolkit.Editor
         }
 
         private static PendingResponse Pending(Job job) => new PendingResponse(
-            "Waiting for the selected editor window to repaint.", 0.5, new { job_id = job.Id });
+            "Waiting for the editor window to repaint.", 0.5, new { job_id = job.Id });
 
         private static void Tick()
         {
@@ -119,15 +142,29 @@ namespace Orbiters.Toolkit.Editor
             try
             {
                 double elapsed = EditorApplication.timeSinceStartup - job.Started;
-                if (elapsed > 10) throw new TimeoutException("Window capture timed out; retry when Unity is responsive.");
+                if (elapsed > 20) throw new TimeoutException("Window capture timed out; retry when Unity is responsive.");
                 if (job.Window == null) throw new InvalidOperationException("The window closed before capture.");
-                // Yield to Unity's event loop; sleeping on the editor thread cannot complete a repaint.
-                if (++job.Ticks < 3 || elapsed < 0.35) { job.Window.Repaint(); return; }
+                // Yield to Unity's event loop; sleeping on the editor thread cannot complete a repaint. A hidden copy builds its
+                // UI first, then scrolls, then lays out once more.
+                if (++job.Ticks < 3 || elapsed < (job.Hidden ? 1.0 : 0.35)) { job.Window.Repaint(); return; }
+                if (job.ScrollTo != null && !job.Scrolled)
+                {
+                    if (!EditorWindowHiddenHost.ScrollTo(job.Window, job.ScrollTo))
+                    {
+                        if (elapsed > 6) throw new InvalidOperationException("Nothing in the window matches scroll_to \"" + job.ScrollTo + "\".");
+                        job.Window.Repaint(); return;
+                    }
+                    job.Scrolled = true; job.Ticks = 0; job.Started = EditorApplication.timeSinceStartup - 0.7;
+                    job.Window.Repaint(); return;
+                }
                 EditorWindowCapture.RepaintWithoutFocus(job.Window);
-                job.Result = new SuccessResponse("Editor window screenshot saved.", EditorWindowCapture.Save(job.Window, job.MaxResolution));
+                job.Result = new SuccessResponse("Editor window screenshot saved.", EditorWindowCapture.Save(job.Window, job.MaxResolution, job.Hidden));
             }
             catch (Exception ex) { job.Result = new ErrorResponse(ex.Message); }
-            if (job.Result != null) { active = null; EditorApplication.update -= Tick; }
+            if (job.Result == null) return;
+            active = null;
+            EditorApplication.update -= Tick;
+            if (job.Hidden && job.Window != null) job.Window.Close();
         }
     }
 }

@@ -24,20 +24,28 @@ namespace Orbiters.Toolkit.Editor.VRChat
             controller.AddParameter("GestureRightWeight", AnimatorControllerParameterType.Float);
             var machine = controller.layers[0].stateMachine;
             var off = State(controller, machine, "Off", PropClip(false, false, false, true));
-            var spawn = State(controller, machine, "Spawn", PropClip(true, false, false, true));
+            var spawn = State(controller, machine, "Spawn", PropClip(true, false, false, true, resetGrip: true));
             var dropped = State(controller, machine, "Dropped", PropClip(true, false, true, false));
             var held = State(controller, machine, "Guest held", PropClip(true, true, false, false));
             var left = State(controller, machine, "Left hand", PropClip(true, false, false, false, 1));
             var right = State(controller, machine, "Right hand", PropClip(true, false, false, false, 2));
+            // One frame world-frozen between following the grabbed bone and following the wrist: unfreezing measures the
+            // wrist's offset where the pen is, so it never jumps into a set pose in the hand.
+            var catchLeft = State(controller, machine, "Left catch", PropClip(true, false, true, false, 1));
+            var catchRight = State(controller, machine, "Right catch", PropClip(true, false, true, false, 2));
             machine.defaultState = off;
             Transition(off, spawn, (Enabled, AnimatorConditionMode.If, 0));
-            foreach (var state in new[] { spawn, dropped, held, left, right })
+            foreach (var state in new[] { spawn, dropped, held, left, right, catchLeft, catchRight })
                 Transition(state, off, (Enabled, AnimatorConditionMode.IfNot, 0));
             var settle = Transition(spawn, dropped); settle.hasExitTime = true; settle.exitTime = 1;
-            foreach (var state in new[] { dropped, held })
+            // Dropped is already frozen; held follows the grabbed bone and is frozen for a frame first.
+            Transition(dropped, left, (HeldLeft, AnimatorConditionMode.If, 0));
+            Transition(dropped, right, (HeldRight, AnimatorConditionMode.If, 0));
+            Transition(held, catchLeft, (HeldLeft, AnimatorConditionMode.If, 0));
+            Transition(held, catchRight, (HeldRight, AnimatorConditionMode.If, 0));
+            foreach (var (from, to) in new[] { (catchLeft, left), (catchRight, right) })
             {
-                Transition(state, left, (HeldLeft, AnimatorConditionMode.If, 0));
-                Transition(state, right, (HeldRight, AnimatorConditionMode.If, 0));
+                var caught = Transition(from, to); caught.hasExitTime = true; caught.exitTime = 0;
             }
             Transition(dropped, held, (Grab + "_IsGrabbed", AnimatorConditionMode.If, 0),
                 (HeldLeft, AnimatorConditionMode.IfNot, 0), (HeldRight, AnimatorConditionMode.IfNot, 0));
@@ -134,9 +142,14 @@ namespace Orbiters.Toolkit.Editor.VRChat
             return layers[layers.Length - 1].stateMachine;
         }
 
-        private static AnimationClip PropClip(bool visible, bool baseFrozen, bool penFrozen, bool atHome, int hand = 0)
+        private static AnimationClip PropClip(bool visible, bool baseFrozen, bool penFrozen, bool atHome, int hand = 0, bool resetGrip = false)
         {
             var clip = new AnimationClip();
+            // A hold leaves the offsets measured where it was grabbed; back home, the pen sits on the grip again.
+            if (resetGrip)
+                foreach (string offset in new[] { "ParentPositionOffset", "ParentRotationOffset" })
+                foreach (string axis in new[] { "x", "y", "z" })
+                    Curve(clip, "Pen", typeof(VRCParentConstraint), "Sources.source0." + offset + "." + axis, 0);
             Curve(clip, "Pen/Model", typeof(GameObject), "m_IsActive", visible ? 1 : 0);
             Curve(clip, "Grab base/Bone", typeof(VRCPhysBone), "m_Enabled", visible && hand == 0 ? 1 : 0);
             Curve(clip, "Grab base", typeof(VRCParentConstraint), "FreezeToWorld", baseFrozen ? 1 : 0);

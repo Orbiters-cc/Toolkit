@@ -61,15 +61,20 @@ namespace Orbiters.Toolkit.Editor.VRChat.Posing
             EditorSceneManager.sceneSaved += scene => { if (saving) { saving = false; if (Enabled) Sync(); } };
         }
 
+        // A custom base's logic (MCB's proxies and contacts) links to the bones too, but it is not clothing.
+        private static Orbiters.Toolkit.Editor.Refit.CustomBaseFootprint CustomBaseObjects(Transform avatarRoot) =>
+            Orbiters.Toolkit.Editor.Refit.CustomBases.Describe(avatarRoot)?.Footprint?.Invoke() ?? new Orbiters.Toolkit.Editor.Refit.CustomBaseFootprint();
+
         /// <summary>The accessories under the avatar and how each follows it, without changing anything.</summary>
         public static List<Accessory> Find(Transform avatarRoot)
         {
             var result = new List<Accessory>();
             if (avatarRoot == null) return result;
             var skeleton = AvatarSkeleton.Bones(avatarRoot, AttachmentPlanner.Body(avatarRoot));
+            var footprint = CustomBaseObjects(avatarRoot);
             foreach (var group in AttachmentFollow.Links(avatarRoot).GroupBy(l => l.Accessory))
             {
-                if (group.Key == null) continue;
+                if (group.Key == null || footprint.Owns(group.Key)) continue;
                 var bones = group.Key.GetComponentsInChildren<SkinnedMeshRenderer>(true).SelectMany(r => r.bones)
                     .Where(b => b != null && !skeleton.Contains(b)).Distinct().Count();
                 var links = group.ToList();
@@ -94,7 +99,8 @@ namespace Orbiters.Toolkit.Editor.VRChat.Posing
             if (avatarRoot == null || EditorUtility.IsPersistent(avatarRoot) || EditorApplication.isPlayingOrWillChangePlaymode)
                 return Fail("Select an editable scene avatar.");
             // Bones driven by constraints are left to them.
-            Links.AddRange(AttachmentFollow.Links(avatarRoot).Where(l => !Driven(l.Follower)));
+            var footprint = CustomBaseObjects(avatarRoot);
+            Links.AddRange(AttachmentFollow.Links(avatarRoot).Where(l => !Driven(l.Follower) && !footprint.Owns(l.Accessory)));
             Found.AddRange(Find(avatarRoot));
             if (Links.Count == 0) return Fail(Found.Count == 0 ? "No clothing or accessory to follow under this avatar." : "No accessory bone matches the avatar's bones.");
             // Parents first, so each child is placed from its parent's new pose.

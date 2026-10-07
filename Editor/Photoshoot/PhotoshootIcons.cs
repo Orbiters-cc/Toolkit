@@ -66,10 +66,8 @@ namespace Orbiters.Toolkit.Editor.Photoshoot
                     avatarCopy = UnityEngine.Object.Instantiate(avatarRoot);
                     avatarCopy.hideFlags = HideFlags.HideAndDontSave;
                     avatarCopy.SetActive(true);
-                    if (clip != null)
-                    {
-                        clip.SampleAnimation(avatarCopy, 0f);
-                    }
+                    // Posed as the photoshoot poses it, so the user's own poses (humanoid curves only) show too.
+                    PhotoshootService.SampleBodyPose(avatarCopy, clip);
 
                     var animator = avatarCopy.GetComponentInChildren<Animator>();
                     if (animator != null && animator.isHuman)

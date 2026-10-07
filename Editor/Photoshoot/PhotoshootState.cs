@@ -46,6 +46,8 @@ namespace Orbiters.Toolkit.Editor.Photoshoot
         public HashSet<string> SelectedFaceBlendshapes { get; } = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         /// <summary>Effects over every shot (and the ref sheet's views): bloom, comic halftone, depth of field…</summary>
         public PhotoshootEffectSettings Effects { get; } = new PhotoshootEffectSettings();
+        /// <summary>The thumbnail's line of text, when the host offers fonts for it (<see cref="PhotoshootOptions.TextFonts"/>).</summary>
+        public PhotoshootText Text { get; set; } = new PhotoshootText();
         /// <summary>The environment light over the preset's own: 1 as the preset has it, up to <see cref="MaxAmbientIntensity"/>.</summary>
         public float AmbientIntensity { get => ambientIntensity; set => ambientIntensity = Mathf.Clamp(value, 0f, MaxAmbientIntensity); }
         private float ambientIntensity = 1f;
@@ -154,11 +156,36 @@ namespace Orbiters.Toolkit.Editor.Photoshoot
         internal void ReloadBackgrounds(string select = null)
         {
             if (Catalog == null) return;
-            var chosen = Catalog.backgrounds.Count > 0 ? Catalog.backgrounds[ClampIndex(BackgroundIndex, Catalog.backgrounds.Count)] : null;
+            string wanted = select ?? ChosenPath(Catalog.backgrounds, BackgroundIndex, option => option.assetPath);
             Catalog.backgrounds = PhotoshootService.FindBackgrounds();
-            string wanted = select ?? chosen?.assetPath;
-            int index = Catalog.backgrounds.FindIndex(option => wanted != null ? option.assetPath == wanted : option.solidColor == (chosen?.solidColor ?? true));
-            BackgroundIndex = ClampIndex(index < 0 ? 0 : index, Catalog.backgrounds.Count);
+            BackgroundIndex = IndexOfPath(Catalog.backgrounds, option => option.assetPath, wanted);
+        }
+
+        /// <summary>The poses again after the user added or removed one; <paramref name="select"/> becomes the chosen one.</summary>
+        internal void ReloadPoses(string select = null)
+        {
+            if (Catalog == null) return;
+            string wanted = select ?? ChosenPath(Catalog.bodyPoses, BodyPoseIndex, option => option.assetPath);
+            Catalog.bodyPoses = PhotoshootService.FindBodyPoses();
+            BodyPoseIndex = IndexOfPath(Catalog.bodyPoses, option => option.assetPath, wanted);
+            // A pose added under the name of one removed before must not show the old one's icon.
+            var current = new HashSet<string>(Catalog.bodyPoses.Select(PoseIconKey), StringComparer.OrdinalIgnoreCase);
+            foreach (string key in poseIconCache.Keys.Where(key => key == select || !current.Contains(key)).ToList())
+            {
+                if (poseIconCache[key] != null) UnityEngine.Object.DestroyImmediate(poseIconCache[key]);
+                poseIconCache.Remove(key);
+            }
+        }
+
+        // The chosen option's file (null for the default pose or the colour background), so it stays chosen once the list
+        // is read again, unless it was removed: then the first option is.
+        private static string ChosenPath<T>(List<T> options, int index, Func<T, string> path) =>
+            options.Count > 0 ? path(options[ClampIndex(index, options.Count)]) : null;
+
+        private static int IndexOfPath<T>(List<T> options, Func<T, string> path, string wanted)
+        {
+            int index = options.FindIndex(option => string.Equals(path(option), wanted, StringComparison.OrdinalIgnoreCase));
+            return ClampIndex(index < 0 ? 0 : index, options.Count);
         }
 
         internal bool HasPreviewTexture(PhotoshootService.ShotKind shotKind) => previewSession?.GetPreviewTexture(shotKind) != null;
@@ -223,7 +250,8 @@ namespace Orbiters.Toolkit.Editor.Photoshoot
         internal Vector2 PlacementPerFrame(PhotoshootService.ShotKind shotKind, Vector2Int size) =>
             PhotoshootService.PlacementPerFrame(previewSession != null ? previewSession.LastFrame : default, shotKind, size, Zoom);
 
-        internal Texture2D Capture(GameObject avatarRoot, PhotoshootService.ShotKind shotKind, Vector2Int size, bool withShotEffect = true)
+        /// <param name="text">A line of text drawn over the picture, or null.</param>
+        internal Texture2D Capture(GameObject avatarRoot, PhotoshootService.ShotKind shotKind, Vector2Int size, bool withShotEffect = true, PhotoshootText text = null)
         {
             var request = BuildRequest(avatarRoot, shotKind, size, false);
             if (previewSession == null)
@@ -238,6 +266,7 @@ namespace Orbiters.Toolkit.Editor.Photoshoot
             }
 
             texture.name = $"Orbiters Photoshoot {PhotoshootPanel.DisplayName(shotKind)}";
+            if (text != null && !text.IsEmpty) PhotoshootTextRenderer.Composite(texture, text);
             return texture;
         }
 
@@ -254,9 +283,11 @@ namespace Orbiters.Toolkit.Editor.Photoshoot
             return texture;
         }
 
+        private static string PoseIconKey(PhotoshootService.BodyPoseOption option) => !string.IsNullOrWhiteSpace(option.assetPath) ? option.assetPath : "__default_pose";
+
         internal Texture2D GetPoseIcon(GameObject avatarRoot, PhotoshootService.BodyPoseOption option)
         {
-            string key = !string.IsNullOrWhiteSpace(option.assetPath) ? option.assetPath : "__default_pose";
+            string key = PoseIconKey(option);
             if (poseIconCache.TryGetValue(key, out Texture2D texture) && texture != null)
             {
                 return texture;

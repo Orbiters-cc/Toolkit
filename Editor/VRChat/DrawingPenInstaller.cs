@@ -74,19 +74,20 @@ namespace Orbiters.Toolkit.Editor.VRChat
             phys.allowCollision = VRCPhysBoneBase.AdvancedBool.False;
             phys.allowGrabbing = VRCPhysBoneBase.AdvancedBool.True;
             phys.allowPosing = VRCPhysBoneBase.AdvancedBool.False;
-            phys.snapToHand = true; phys.resetWhenDisabled = true; phys.parameter = Grab;
+            phys.snapToHand = false; phys.resetWhenDisabled = true; phys.parameter = Grab;
 
             var baseConstraint = basis.gameObject.AddComponent<VRCParentConstraint>();
             baseConstraint.Sources.Add(new VRCConstraintSource(home, 1, new Vector3(0, -.02f, 0), Vector3.zero));
             baseConstraint.Sources.Add(new VRCConstraintSource(body, 0, new Vector3(0, -.02f, 0), Vector3.zero));
             baseConstraint.IsActive = true; baseConstraint.Locked = true;
             baseConstraint.RebakeOffsetsWhenUnfrozen = false;
-            // Sources 1 and 2 are the left and right wrists, set by Bind on the avatar.
+            // Sources 1 and 2 are the left and right wrists, set by Bind on the avatar. The pen is held as it was
+            // grabbed: it is world-frozen until then, and unfreezing measures again where it sits from each source.
             var follow = body.gameObject.AddComponent<VRCParentConstraint>();
             follow.Sources.Add(new VRCConstraintSource(end, 1));
             follow.Sources.Add(new VRCConstraintSource(null, 0));
             follow.Sources.Add(new VRCConstraintSource(null, 0));
-            follow.IsActive = true; follow.Locked = true; follow.RebakeOffsetsWhenUnfrozen = false;
+            follow.IsActive = true; follow.Locked = true; follow.RebakeOffsetsWhenUnfrozen = true;
 
             AddHandContact(body, "Left hand", Left, "HandL");
             AddHandContact(body, "Right hand", Right, "HandR");
@@ -114,7 +115,8 @@ namespace Orbiters.Toolkit.Editor.VRChat
         }
 
         /// <summary>
-        /// Fits a placed pen to <paramref name="avatar"/>: it waits in front of the chest and is held at either wrist.
+        /// Fits a placed pen to <paramref name="avatar"/>: it waits in front of the chest and follows either wrist, from
+        /// wherever it was grabbed.
         /// Recorded with Undo; binding again (another avatar, a moved armature) replaces the earlier fit.
         /// </summary>
         public static void Bind(OrbitersDrawingPen pen, Transform avatar)
@@ -131,39 +133,13 @@ namespace Orbiters.Toolkit.Editor.VRChat
             home.position = chest.position + avatar.rotation * new Vector3(.12f, 0, .35f);
             basis.localPosition = home.localPosition - Vector3.up * .02f;
             body.localPosition = home.localPosition;
-            follow.Sources[1] = HandSource(animator, true);
-            follow.Sources[2] = HandSource(animator, false);
+            follow.Sources[1] = new VRCConstraintSource(animator.GetBoneTransform(HumanBodyBones.LeftHand), 0);
+            follow.Sources[2] = new VRCConstraintSource(animator.GetBoneTransform(HumanBodyBones.RightHand), 0);
             EditorUtility.SetDirty(follow);
         }
 
         private static Transform Child(Transform parent, string name)
         { var t = new GameObject(name).transform; t.SetParent(parent, false); return t; }
-
-        internal static VRCConstraintSource HandSource(Animator animator, bool left)
-        {
-            var hand = animator.GetBoneTransform(left ? HumanBodyBones.LeftHand : HumanBodyBones.RightHand);
-            var middle = animator.GetBoneTransform(left ? HumanBodyBones.LeftMiddleProximal : HumanBodyBones.RightMiddleProximal);
-            var index = animator.GetBoneTransform(left ? HumanBodyBones.LeftIndexProximal : HumanBodyBones.RightIndexProximal);
-            var little = animator.GetBoneTransform(left ? HumanBodyBones.LeftLittleProximal : HumanBodyBones.RightLittleProximal);
-            return HandSource(animator.transform, hand, middle, index, little, left);
-        }
-
-        internal static VRCConstraintSource HandSource(Transform avatar, Transform hand, Transform middle, Transform index, Transform little, bool left)
-        {
-            var forward = middle != null ? middle.position - hand.position : hand.rotation * (left ? Vector3.left : Vector3.right) * .08f;
-            if (forward.sqrMagnitude < .000001f) forward = hand.forward * .08f;
-            var across = index != null && little != null ? index.position - little.position : avatar.forward;
-            var normal = Vector3.Cross(forward, across) * (left ? -1 : 1);
-            if (normal.sqrMagnitude < .000001f) normal = Vector3.Cross(forward, avatar.up);
-            if (normal.sqrMagnitude < .000001f) normal = Vector3.Cross(forward, avatar.right);
-            if (across.sqrMagnitude < .000001f) across = Vector3.Cross(normal, forward);
-            var rotation = Quaternion.LookRotation(normal.normalized, -across.normalized);
-            // Use the wrist as the source: finger curl must not rotate or displace the grip.
-            // Sit across the curled fingers, just clear of the palm, with the nib at the thumb side.
-            var grip = hand.position + forward * .85f + normal.normalized * forward.magnitude * .3f;
-            return new VRCConstraintSource(hand, 0, hand.InverseTransformPoint(grip),
-                (Quaternion.Inverse(hand.rotation) * rotation).eulerAngles);
-        }
 
         private static void AddHandContact(Transform body, string name, string parameter, string tag)
         {

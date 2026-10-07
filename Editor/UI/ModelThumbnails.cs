@@ -79,7 +79,9 @@ namespace Orbiters.Toolkit.Editor
             {
                 var bounds = new Bounds();
                 bool any = false;
-                foreach (var renderer in root.GetComponentsInChildren<Renderer>(false))
+                // A prop hidden until its menu toggle turns it on (a drawing pen) is pictured as it shows then.
+                for (int pass = 0; pass < 2 && !any; pass++)
+                foreach (var renderer in root.GetComponentsInChildren<Renderer>(pass == 1))
                 {
                     // Only what is worn: not editor helpers (gizmo overlays, previews) hidden in the hierarchy or tagged EditorOnly.
                     if (!renderer.enabled || Helper(renderer.transform, root.transform)) continue;

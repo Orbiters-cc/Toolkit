@@ -21,6 +21,8 @@ namespace Orbiters.Toolkit.Editor.Photoshoot
         public sealed class BodyPoseOption
         {
             public string displayName;
+            /// <summary>One of the user's own poses (<see cref="PhotoshootPoses"/>): it can be removed.</summary>
+            public bool custom;
             public string assetPath;
             public AnimationClip clip;
         }
@@ -437,7 +439,8 @@ namespace Orbiters.Toolkit.Editor.Photoshoot
                 int[] currentAppearance = CaptureSourceAppearance(avatarRoot);
                 bool sourceUnchanged = sourceAppearance != null && sourceAppearance.SequenceEqual(currentAppearance);
                 int currentPoseRevision = bodyPose != null ? EditorUtility.GetDirtyCount(bodyPose) : 0;
-                if (avatarCopy != null && lastAvatarRoot == avatarRoot && sourceUnchanged && lastBodyPose == bodyPose && bodyPoseRevision == currentPoseRevision)
+                // By reference: a removed pose of the user's is destroyed, and would equal the default pose (null) otherwise.
+                if (avatarCopy != null && lastAvatarRoot == avatarRoot && sourceUnchanged && ReferenceEquals(lastBodyPose, bodyPose) && bodyPoseRevision == currentPoseRevision)
                 {
                     return false;
                 }
@@ -1122,12 +1125,19 @@ namespace Orbiters.Toolkit.Editor.Photoshoot
                     .OrderBy(name => name, StringComparer.OrdinalIgnoreCase));
         }
 
-        private static List<BodyPoseOption> FindBodyPoses()
+        internal static List<BodyPoseOption> FindBodyPoses()
         {
             var options = new List<BodyPoseOption>
             {
                 new BodyPoseOption { displayName = "Default Pose" }
             };
+
+            // The user's own poses come after the built-in ones.
+            foreach (string path in PhotoshootPoses.Files())
+            {
+                var clip = PhotoshootPoses.Load(path);
+                if (clip != null) options.Add(new BodyPoseOption { displayName = Path.GetFileNameWithoutExtension(path), assetPath = path, clip = clip, custom = true });
+            }
 
             if (!AssetDatabase.IsValidFolder(BodyPoseFolder))
             {
@@ -1152,7 +1162,7 @@ namespace Orbiters.Toolkit.Editor.Photoshoot
             }
 
             return options
-                .OrderBy(option => option.clip == null ? 0 : 1)
+                .OrderBy(option => option.clip == null ? 0 : option.custom ? 2 : 1)
                 .ThenBy(option => option.displayName, StringComparer.OrdinalIgnoreCase)
                 .ToList();
         }

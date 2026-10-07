@@ -1,5 +1,39 @@
 # Orbiters Toolkit
 
+## 0.3.17 — 2026-10-07
+
+- **Drawing pen** held where it was grabbed: it no longer jumps into a set pose in the hand, but follows the hand from
+  the position and rotation it had when grabbed, for the owner and for guests. Back in front of the chest, it sits on
+  its grip again. Pens built before keep the old hold until rebuilt (a new gallery version for gallery pens).
+- Item pictures show props hidden until their menu toggle turns them on (the drawing pen) instead of an empty square.
+- `orbiters_editor_window` (MCP) captures everything in the background: inactive docked tabs, windows that are not open
+  (`open_if_missing`) and long windows (`width`, `height`, `scroll_to`) are rendered in a hidden copy outside every
+  display, and `inspect` captures any object's Inspector without selecting it. Unity is never brought forward; the
+  `focus` option is gone.
+- `MaterialSides`: whether a material shows the back of its faces and whether the mesh part it covers needs that (open
+  surfaces such as fur cards and feathers). `MaterialSurfaceMaps.OriginalShader`, `StrippedTexture` and `EnableEmission`
+  for locked (optimized) materials and emission maps.
+- The clothing pose preview leaves a custom base's own objects alone (its `CustomBaseFootprint`, e.g. MCB's logic).
+- `BoneFrameRetarget`: animations written for a skeleton whose bones rest in other orientations (a model re-exported with
+  other bone rolls) turn each bone the same way from its rest pose on the current skeleton; clips already made for it
+  stay. `AttachmentAnimationBuild.IsBuildData` tells build copies (in memory, the build cache, VRCFury's temporary
+  builds) from source assets.
+- `OrbitersAboutWindow`: the About window of the Orbiters tools (logo, version, license, then each third-party project
+  with its license, read from the tool's notices file). MCB and My Avatar use it. It recognises the SIL Open Font License (OFL) and keeps
+  a notice's list items on their own lines.
+- The photoshoot uses two columns once it is wide enough (820 points): the shot and its framing on the left, its
+  style beside them. A host can put its own content first in it (`PhotoshootPanel.SetLead`, e.g. My Avatar's card).
+- Photoshoot **text**: a host that passes fonts (`PhotoshootOptions.TextFonts`) gets a line of text on the thumbnail
+  (`PhotoshootState.Text`), edited on its previews (`PhotoshootTextLayer`: move, resize, write in place, while the rest
+  of the preview still frames the avatar) and in a Text tab, and drawn into captured thumbnails by the same renderer
+  that draws the preview (`PhotoshootTextRenderer`: glyphs from the font, then outline, shadow or glow).
+- Photoshoot **poses of your own**: a + swatch on the Pose tab (or animations dropped on the poses) adds poses from
+  humanoid animations in the project: an .anim, or a model's clips (a clip dragged from a model adds just that one).
+  Each pose is kept for every project, also once the animation is gone, and can be removed like your own backgrounds;
+  both share one store (`PhotoshootLibrary`).
+- `AvatarParameterBudget.BuildRemovedParameters`: a build step that leaves parameters of a VRCFury component out (My
+  Avatar's face tracking features others don't see) makes every budget count them as uploaded.
+
 ## 0.3.16 — 2026-10-07
 
 - **Tools › Orbiters › Animation Extractor**: drop FBX files, from the Project window or your computer (copied into
@@ -316,20 +350,25 @@ Capture the existing ReFit window:
 ```
 
 Use `window_id` from the list instead of `window_type` to distinguish multiple
-instances. By default the tool repaints the window while Unity stays in the
-background. It yields to Unity's event loop before reading the window framebuffer.
-It does not click any
-controls, run ReFit, change the scene, or capture pixels from the desktop.
+instances. Everything happens in the background: Unity is never brought forward and
+the user's layout, tabs, scroll positions, selection and focus are left alone. The
+tool does not click any controls, change the scene, or capture pixels from the desktop.
 
-Set `open_if_missing: true` and `focus: true` with an exact `window_type` to allow
-creation of a window. Opening can activate Unity, so background mode requires an
-already open window. Opening calls Unity's `EditorWindow.GetWindow`, not package-specific menu
-initialization. For windows requiring a menu setup routine, run that menu first.
-`focus` defaults to false. The target must be the selected tab in its own dock,
-but neither Unity nor the target needs keyboard focus. Inactive docked tabs return
-an error instead of changing the layout or capturing a different tab. Explicit
-`focus: true` permits tab selection and bringing Unity forward; it leaves the
-target focused. Background mode never restores or switches application focus.
+- A shown window (the selected tab of its dock) is repainted and its framebuffer read.
+- An inactive docked tab, a window that is not open (`"open_if_missing": true` with an
+  exact `window_type`), or a capture with `width`, `height` (points, up to 8000) or
+  `scroll_to` is rendered in a hidden copy: shown without focus outside every display,
+  with the original window's serialized state, and closed after the capture
+  (`captureMode: "hidden_copy_framebuffer"`). Opening a window type uses only its
+  `CreateInstance`; windows that need a menu setup routine may show their empty state.
+- `scroll_to` scrolls the hidden copy so the first element whose name, USS class or
+  text matches is at the top.
+- `"inspect": "<instance ID | Root/Child | Scene:Root/Child | Assets/... path>"`
+  captures a hidden Inspector locked on that object, without selecting it:
+
+```json
+{ "action": "capture", "inspect": "Rexouium1.6 Default Setup", "height": 1400, "scroll_to": "Face tracking" }
+```
 
 The server polls pending captures automatically. Clients without polling support
 can call `{ "action": "status", "job_id": "<returned job_id>" }`. Jobs are
@@ -341,7 +380,7 @@ window identity, Unity version and project path. Open `fullPath` with the client
 image viewer to inspect the PNG. Files use unique names under
 `Library/OrbitersToolkit/Screenshots/`; they are not imported as Unity assets and
 are removed if the project's Library is cleared. `max_resolution` accepts 0 for
-native pixels or 64–4096 for a downscaled image.
+native pixels or 64–8192 for a downscaled image.
 
 ## Boundaries
 

@@ -85,6 +85,15 @@ namespace Orbiters.Toolkit.Editor.VRChat.Attachments
 
         public static bool Owns(AnimatorController controller) => controller != null && OwnedControllers.Contains(controller);
 
+        /// <summary>Build data a build step may change: in memory, in this build cache or in VRCFury's temporary builds. Never a source asset.</summary>
+        public static bool IsBuildData(Object value)
+        {
+            if (value == null) return false;
+            string path = AssetDatabase.GetAssetPath(value).Replace('\\', '/');
+            return path.Length == 0 || path.StartsWith(CacheFolder + "/", StringComparison.Ordinal) ||
+                   path.IndexOf("com.vrcfury.temp", StringComparison.OrdinalIgnoreCase) >= 0;
+        }
+
         private AttachmentAnimationBuild(GameObject avatar)
         {
             root = avatar;

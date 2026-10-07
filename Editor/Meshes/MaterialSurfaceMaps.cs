@@ -33,16 +33,49 @@ namespace Orbiters.Toolkit.Editor
             return false;
         }
 
+        public static bool IsLocked(Material m) => m && m.shader && m.shader.name.StartsWith("Hidden/Locked/", StringComparison.Ordinal);
+
+        /// <summary>
+        /// The shader a locked (optimized) material was generated from, or null. A lock keeps only the features that were on:
+        /// its original shader still has every texture slot, e.g. an emission map on hair locked with emission off.
+        /// </summary>
+        public static Shader OriginalShader(Material m)
+        {
+            if (!IsLocked(m)) return null;
+            var name = m.GetTag("OriginalShader", false);
+            var shader = string.IsNullOrEmpty(name) ? null : Shader.Find(name);
+            string guid = m.GetTag("OriginalShaderGUID", false);
+            if (!shader && !string.IsNullOrEmpty(guid)) shader = AssetDatabase.LoadAssetAtPath<Shader>(AssetDatabase.GUIDToAssetPath(guid));
+            if (!shader && name.IndexOf("poiyomi", StringComparison.OrdinalIgnoreCase) >= 0) shader = Shader.Find(".poiyomi/Poiyomi Toon");
+            return shader;
+        }
+
+        /// <summary>A texture a locked material keeps aside for a slot its locked shader no longer has.</summary>
+        public static Texture StrippedTexture(Material m, string property)
+        {
+            string guid = m ? m.GetTag("_stripped_tex_" + property, false) : null;
+            return string.IsNullOrEmpty(guid) ? null : AssetDatabase.LoadAssetAtPath<Texture>(AssetDatabase.GUIDToAssetPath(guid));
+        }
+
+        /// <summary>
+        /// Makes an emission map glow on a caller-owned copy: a black emission color turns white, and Poiyomi's own emission
+        /// toggle and strength (0 by default) are set, so its keyword survives the material being locked again on upload.
+        /// </summary>
+        public static void EnableEmission(Material m)
+        {
+            if (m.HasProperty("_EmissionColor") && m.GetColor("_EmissionColor").maxColorComponent == 0) m.SetColor("_EmissionColor", Color.white);
+            if (m.HasProperty("_EnableEmission")) m.SetFloat("_EnableEmission", 1);
+            if (m.HasProperty("_EmissionStrength") && m.GetFloat("_EmissionStrength") == 0) m.SetFloat("_EmissionStrength", 1);
+            m.EnableKeyword("_EMISSION");
+            m.globalIlluminationFlags &= ~MaterialGlobalIlluminationFlags.EmissiveIsBlack;
+        }
+
         // Mutate only a caller-owned copy. Locked shaders bake scalar values into code; changing a float alone has no effect.
         public static void MakeEditable(Material copy)
         {
-            if (!copy.shader || !copy.shader.name.StartsWith("Hidden/Locked/", StringComparison.Ordinal)) return;
+            if (!IsLocked(copy)) return;
             var name = copy.GetTag("OriginalShader", false);
-            var shader = Shader.Find(name);
-            string guid = copy.GetTag("OriginalShaderGUID", false);
-            if (!shader && !string.IsNullOrEmpty(guid)) shader = AssetDatabase.LoadAssetAtPath<Shader>(AssetDatabase.GUIDToAssetPath(guid));
-            if (!shader && name.IndexOf("poiyomi", StringComparison.OrdinalIgnoreCase) >= 0)
-                shader = Shader.Find(".poiyomi/Poiyomi Toon");
+            var shader = OriginalShader(copy);
             if (!shader) throw new InvalidOperationException("Install the original shader to edit " + copy.name + ": " + name);
             int queue = copy.renderQueue;
             string renderType = copy.GetTag("RenderType", false);

@@ -1,50 +1,45 @@
 ---
 name: orbiters-toolkit
-description: Capture and visually inspect Unity editor tool windows such as ReFit, inspectors, or custom EditorWindows through Orbiters Toolkit and MCP for Unity, keeping Unity in the background.
+description: Capture and visually inspect any Unity editor window (custom tool windows, inspectors, a component section far down an Inspector, inactive docked tabs, windows that are not open) through Orbiters Toolkit and MCP for Unity, always in the background — never focusing Unity, never asking the user to open or scroll anything, never touching the desktop.
 ---
 
 # Unity editor window capture
 
-Use this for actual editor UI screenshots. Scene-camera screenshots do not show
-custom editor controls. The Unity project needs `orbiters.toolkit` and a connected
-MCP for Unity server.
+This is the only way to look at Unity editor UI when the MCP for Unity bridge works. Scene-camera screenshots do not
+show editor controls. Never ask the user to open, focus, dock, scroll or select a window for a screenshot, and never
+use desktop screenshots, window-capture APIs or mouse/keyboard input on Unity to look at it: everything below runs in
+the background and leaves the user's layout, tabs, scroll positions, selection and focus untouched.
 
-1. Read `mcpforunity://instances` and select the intended project if several Unity
-   instances are connected. Read `mcpforunity://custom-tools` and find
-   `orbiters_editor_window`. If missing, check installation/compilation and tool
-   discovery; do not substitute a camera screenshot.
-2. Call `execute_custom_tool` with `tool_name: "orbiters_editor_window"` and
-   `parameters: {"action":"list"}` to identify the window's ID and exact type.
-3. Capture by ID, for example:
+The tool is `orbiters_editor_window` (package `orbiters.toolkit`, `Editor/MCP/EditorWindowScreenshotTool.cs`). Call it
+with `execute_custom_tool` (`tool_name: "orbiters_editor_window"`, `parameters: {...}`), especially when the typed
+`mcp__unityMCP__orbiters_editor_window` tool does not list a parameter yet (the typed schema is registered when the
+MCP server starts and can lag behind the package).
 
-   ```json
-   {
-     "tool_name": "orbiters_editor_window",
-     "parameters": { "action": "capture", "window_id": 12345, "focus": false }
-   }
-   ```
+1. If several Unity instances are connected, read `mcpforunity://instances` and select the project.
+2. `{"action":"list"}` lists windows with `windowId`, exact `windowType`, and `shown` (false = inactive docked tab;
+   it can still be captured).
+3. Capture:
 
-   Replace the example ID with the listed ID. An exact `window_type` can replace
-   `window_id` when only one instance is open. ReFit uses
-   `Orbiters.ReFit.Editor.ReFitWizard`. `max_resolution` defaults to 0 (native
-   pixels); 64–4096 caps the longest edge.
-4. The server normally polls to completion. If it returns a pending job, call the
-   same tool with `action: "status"` and its `job_id`. A domain reload clears jobs;
-   retry the capture after Unity is ready.
-5. Open the returned `fullPath` with an available local image-viewing tool and
-   inspect the actual PNG. Confirm the expected window, readable UI, colors and
-   framing. A successful file write alone does not establish visual correctness.
+   | What | Parameters |
+   |---|---|
+   | A shown window as it is | `{"action":"capture","window_id":12345}` |
+   | An inactive docked tab | same; it is rendered in a hidden copy automatically |
+   | A window that is not open | `{"action":"capture","window_type":"Orbiters.MyAvatar.Editor.MyAvatarAboutWindow","open_if_missing":true}` |
+   | A long window, whole | add `"width":560,"height":2400` (points, up to 8000) |
+   | A section far down | add `"scroll_to":"Face tracking"` (text shown, element name, or USS class) |
+   | Any object's Inspector, without selecting it | `{"action":"capture","inspect":"Rexouium1.6 Default Setup","height":1400,"scroll_to":"Face tracking"}` |
 
-Keep `focus: false`. Background capture works for an already open window that is
-the selected tab within its dock, even while another application is in front.
-An inactive docked tab produces an error. Do not automatically retry with
-`focus: true`: it activates Unity and interrupts the user. Only activate or open
-windows when the user authorizes that interaction. Creating a missing window
-requires both `open_if_missing: true` and `focus: true`; menu-specific setup may
-still be required by that window.
+   `inspect` takes an instance ID, a hierarchy path (`"Root/Child"`, or `"Scene:Root/Child"`), or an asset path
+   (`"Assets/…"`, `"Packages/…"`). Hidden copies (`captureMode: "hidden_copy_framebuffer"`) are shown without focus
+   outside every display, keep the original window's serialized state, and are closed after the capture.
+   `max_resolution` (64–8192, default 0 = native) caps the longest edge.
+4. The server normally polls to completion. If it returns a pending job, call again with `{"action":"status"}`
+   (and its `job_id`). A domain reload clears jobs: retry once Unity is ready (not compiling or importing).
+5. Open the returned `fullPath` PNG (in `Library/OrbitersToolkit/Screenshots/`) with an image-viewing tool and look
+   at it: expected window, readable UI, colors, spacing, framing. A file being written proves nothing about the UI.
 
-PNGs are in `Library/OrbitersToolkit/Screenshots/`. The response identifies the
-project, Unity version, window, scale and dimensions. This captures window content,
-not desktop pixels, native title bars or separate popups. Headless/minimized
-rendering is not guaranteed. Report capture failures rather than presenting an old
-image as fresh evidence.
+If a capture fails, report the error and fix the tool (it is Orbiters' own code) rather than working around it. The
+capture shows window content, not native title bars or separate OS popups.
+
+The only desktop interaction allowed in this project is reconnecting a dropped MCP session (Start Session in the "MCP
+For Unity" window), as described in the project's AGENTS.md.
