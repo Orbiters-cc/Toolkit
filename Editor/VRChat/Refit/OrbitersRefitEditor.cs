@@ -28,7 +28,7 @@ namespace Orbiters.Toolkit.Editor.VRChat.Refit
                 foreach (string shape in shapes) list.Add(new Label(shape));
                 root.Add(list);
             }
-            var restore = new Button(() => RefitRecords.Remove(record)) { text = record.Applied ? "Restore the original mesh" : "Remove this record" };
+            var restore = new Button(() => RefitRecords.Discard(record)) { text = record.Applied ? "Restore the original mesh" : "Remove this record" };
             restore.style.marginTop = 6;
             root.Add(restore);
             return root;

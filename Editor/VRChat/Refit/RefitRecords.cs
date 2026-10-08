@@ -247,6 +247,18 @@ namespace Orbiters.Toolkit.Editor.VRChat.Refit
             if (renderer != null) Changed?.Invoke(renderer);
         }
 
+        /// <summary>
+        /// Takes a refit back for good, as the user asked (any tool's Restore): <see cref="Remove"/>, and the custom base
+        /// providers forget the fits of theirs that would bring it back later (MCB's saved fit for the applied version).
+        /// </summary>
+        public static void Discard(OrbitersRefit record, bool restore = true)
+        {
+            if (record == null) return;
+            var renderer = record.GetComponent<SkinnedMeshRenderer>();
+            if (renderer != null) CustomBases.ForgetFit(AvatarRoot(renderer.transform), renderer);
+            Remove(record, restore);
+        }
+
         /// <summary>Restores every refitted mesh of the avatar and removes their records (resetting to the original base).</summary>
         public static int RemoveAll(Transform avatarRoot)
         {

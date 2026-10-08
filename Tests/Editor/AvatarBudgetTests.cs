@@ -5,6 +5,7 @@ using System.Linq;
 using NUnit.Framework;
 using Orbiters.Toolkit.Editor.Refit;
 using Orbiters.Toolkit.Editor.VRChat.Budget;
+using Orbiters.Toolkit.Editor.VRChat.Parameters;
 using UnityEditor;
 using UnityEngine;
 using VRC.Dynamics;
@@ -71,6 +72,30 @@ public sealed class AvatarBudgetTests
         Assert.AreEqual((1, 1), (budget.Bones.Avatar, budget.Bones.CustomBase), "the stripped bone leaves the custom base's count");
         Assert.AreEqual(2, budget.BuildPhysBones);
         Assert.AreEqual(1, budget.BuildRemovedBones);
+    }
+
+    [Test] public void CountsFaceTrackingApartAndBeforeTheCustomBase()
+    {
+        var face = Child("face template", root.transform);
+        var logic = Child("mcb logic", root.transform);
+        var faceParameters = Own(ScriptableObject.CreateInstance<VRCExpressionParameters>());
+        faceParameters.parameters = new[] { new VRCExpressionParameters.Parameter { name = "FT/v2/JawOpen", valueType = VRCExpressionParameters.ValueType.Float, networkSynced = true } };
+        AddFullController(face.gameObject, faceParameters);
+        var ownParameters = Own(ScriptableObject.CreateInstance<VRCExpressionParameters>());
+        ownParameters.parameters = new[] { new VRCExpressionParameters.Parameter { name = "Flex", valueType = VRCExpressionParameters.ValueType.Float, networkSynced = true } };
+        AddFullController(logic.gameObject, ownParameters);
+        provider.Footprint = new CustomBaseFootprint { Objects = { logic.gameObject, face.gameObject } };
+        Func<GameObject, bool> owns = go => go == face.gameObject;
+        AvatarParameterBudget.FaceTrackingOwners.Add(owns);
+        try
+        {
+            var parameters = AvatarBudget.Estimate(root).Parameters;
+            Assert.AreEqual(8, parameters.FaceTrackingBits, "the template counts as face tracking even where the custom base owns it");
+            Assert.AreEqual(8, parameters.CustomBaseBits, "the custom base keeps only its own");
+            Assert.AreEqual(0, parameters.AvatarBits);
+            Assert.AreEqual(16, parameters.TotalBeforeCompression);
+        }
+        finally { AvatarParameterBudget.FaceTrackingOwners.Remove(owns); }
     }
 
     [Test] public void AnAvatarWithoutCustomBaseIsAllAvatar()

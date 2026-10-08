@@ -11,12 +11,12 @@ using VRC.SDKBase.Validation.Performance.Stats;
 
 namespace Orbiters.Toolkit.Editor.VRChat.Budget
 {
-    /// <summary>A counted stat, split between the avatar and the custom base it uses.</summary>
+    /// <summary>A counted stat, split between the avatar, the custom base it uses and its face tracking.</summary>
     public readonly struct BudgetCount
     {
-        public readonly int Avatar, CustomBase;
-        public BudgetCount(int avatar, int customBase) { Avatar = avatar; CustomBase = customBase; }
-        public int Total => Avatar + CustomBase;
+        public readonly int Avatar, CustomBase, FaceTracking;
+        public BudgetCount(int avatar, int customBase, int faceTracking = 0) { Avatar = avatar; CustomBase = customBase; FaceTracking = faceTracking; }
+        public int Total => Avatar + CustomBase + FaceTracking;
     }
 
     /// <summary>

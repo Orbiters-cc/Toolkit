@@ -15,7 +15,8 @@ namespace Orbiters.Toolkit.Editor.VRChat.Refit
     /// At build, every animation of a body blendshape also drives the shapes generated from it on refitted meshes (exact
     /// copies of the curves, whatever animates them: gestures, menus, sliders, correctives). The refitted renderers are taken
     /// from the build copy before VRCFury (-10000) can merge or rename them; the links are applied after VRCFury built its
-    /// controllers and after MCB's correctives (-9000), so curves those add are copied too.
+    /// controllers, after MCB's correctives (-9000) and mode locks (-8970), so curves those add (and the values the modes
+    /// lock) are copied too.
     /// </summary>
     public static class RefitBuild
     {
@@ -130,7 +131,7 @@ namespace Orbiters.Toolkit.Editor.VRChat.Refit
 
     internal sealed class RefitLinkHook : IVRCSDKPreprocessAvatarCallback
     {
-        // After VRCFury (-10000) and MCB's correctives (-9000); before Follow Body Blendshapes (-8950) and attachments sync
+        // After VRCFury (-10000), MCB's correctives (-9000) and mode locks (-8970); before Follow Body Blendshapes (-8950) and attachments sync
         // their own shapes (-8900).
         public int callbackOrder => -8960;
 

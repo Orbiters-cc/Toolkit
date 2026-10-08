@@ -10,7 +10,7 @@ namespace Orbiters.Toolkit.Editor.VRChat.BlendShapes
 {
     /// <summary>
     /// Applies blendshape links to the controllers VRCFury built for the avatar being processed (assets under
-    /// "com.vrcfury.temp"). Authoring controllers are never touched. Run it from a preprocess callback after VRCFury (-10000).
+    /// "com.vrcfury.temp", or in-memory copies a build preview puts on the descriptor). Authoring controllers are never touched. Run it from a preprocess callback after VRCFury (-10000).
     /// </summary>
     public static partial class BlendShapeLinkEngine
     {
@@ -154,7 +154,7 @@ namespace Orbiters.Toolkit.Editor.VRChat.BlendShapes
                 }
             }
 
-            AssetDatabase.SaveAssets();
+            if (changedControllers.Any(c => AssetDatabase.Contains(c))) AssetDatabase.SaveAssets();
             return new BlendShapeLinkResult
             {
                 Success = true, Links = linksProcessed, Controllers = changedControllers.Count,
@@ -186,8 +186,9 @@ namespace Orbiters.Toolkit.Editor.VRChat.BlendShapes
             return !string.IsNullOrEmpty(path) && path.Replace("\\", "/").IndexOf("com.vrcfury.temp", StringComparison.OrdinalIgnoreCase) >= 0;
         }
 
+        // In memory: a copy made for a preview of the build (My Avatar's face tracking test); never an authored asset.
         private static bool IsBuiltController(AnimatorController controller) =>
-            IsVrcFuryBuiltController(controller) || Attachments.AttachmentAnimationBuild.Owns(controller);
+            IsVrcFuryBuiltController(controller) || Attachments.AttachmentAnimationBuild.Owns(controller) || string.IsNullOrEmpty(AssetDatabase.GetAssetPath(controller));
 
         private static void Trace(string message) => Log?.Invoke(message);
 

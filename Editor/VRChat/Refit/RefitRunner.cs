@@ -67,6 +67,42 @@ namespace Orbiters.Toolkit.Editor.VRChat.Refit
     /// </summary>
     public static class RefitRunner
     {
+        // Refits at work per avatar root: a refit spans many frames, and changing the custom base meanwhile mixes two bases.
+        private static readonly Dictionary<int, int> Working = new Dictionary<int, int>();
+
+        /// <summary>
+        /// True while a refit (any tool's) works on the avatar, or on any avatar when <paramref name="avatarRoot"/> is null.
+        /// Tools that change the custom base (MCB's version switch) wait until it is done.
+        /// </summary>
+        public static bool IsRunning(Transform avatarRoot = null) =>
+            avatarRoot == null ? Working.Count > 0 : Working.ContainsKey(avatarRoot.GetInstanceID());
+
+        /// <summary>
+        /// Marks the avatar as being refitted until disposed: <see cref="Run"/> holds it, and a tool holds it around the whole
+        /// answer (checks, then the run) so the custom base cannot change in between.
+        /// </summary>
+        public static IDisposable Hold(Transform avatarRoot)
+        {
+            if (avatarRoot == null) return new Release(0);
+            int id = avatarRoot.GetInstanceID();
+            Working[id] = Working.TryGetValue(id, out int count) ? count + 1 : 1;
+            return new Release(id);
+        }
+
+        private sealed class Release : IDisposable
+        {
+            private int id;
+            public Release(int id) => this.id = id;
+
+            public void Dispose()
+            {
+                if (id == 0) return;
+                if (Working.TryGetValue(id, out int count) && count > 1) Working[id] = count - 1;
+                else Working.Remove(id);
+                id = 0;
+            }
+        }
+
         public static Task<RefitBatchResult> RunAsync(RefitBatch batch, Action<float, string> progress, CancellationToken cancellation)
         {
             var completion = new TaskCompletionSource<RefitBatchResult>();
@@ -79,8 +115,17 @@ namespace Orbiters.Toolkit.Editor.VRChat.Refit
             return completion.Task;
         }
 
-        /// <summary>The editor coroutine; <paramref name="done"/> is called once, also when cancelled.</summary>
+        /// <summary>The editor coroutine; <paramref name="done"/> is called once, also when cancelled. The avatar counts as running meanwhile.</summary>
         public static IEnumerator Run(RefitBatch batch, Action<float, string> progress, Action<RefitBatchResult> done, CancellationToken cancellation)
+        {
+            using (Hold(batch.Avatar))
+            {
+                var steps = Steps(batch, progress, done, cancellation);
+                while (steps.MoveNext()) yield return steps.Current;
+            }
+        }
+
+        private static IEnumerator Steps(RefitBatch batch, Action<float, string> progress, Action<RefitBatchResult> done, CancellationToken cancellation)
         {
             var result = new RefitBatchResult();
             var engine = RefitEngine.Current;

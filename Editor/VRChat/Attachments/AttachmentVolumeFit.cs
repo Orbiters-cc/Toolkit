@@ -185,7 +185,7 @@ namespace Orbiters.Toolkit.Editor.VRChat.Attachments
             foreach (var fit in attachment.fittedMeshes)
             {
                 var refit = RefitRecords.Find(fit.renderer);
-                if (refit && refit.Applied && refit.original.mesh == fit.after) RefitRecords.Remove(refit);
+                if (refit && refit.Applied && refit.original.mesh == fit.after) RefitRecords.Discard(refit);
                 if (!fit.renderer || fit.renderer.sharedMesh != fit.after) continue;
                 Undo.RecordObject(fit.renderer, "Cancel clothing volume fit");
                 fit.renderer.sharedMesh = fit.before;

@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using UnityEngine;
 
 namespace Orbiters.Toolkit.Editor.Refit
@@ -75,6 +76,13 @@ namespace Orbiters.Toolkit.Editor.Refit
         CustomBaseInfo Describe(Transform avatarRoot);
     }
 
+    /// <summary>A provider that keeps fits to put back later (MCB saves them per version), so a refit taken back stays taken back.</summary>
+    public interface ICustomBaseFits
+    {
+        /// <summary>The renderer's refit was taken back for good: never put a saved fit back on it for the current custom base.</summary>
+        void Forget(Transform avatarRoot, SkinnedMeshRenderer renderer);
+    }
+
     public static class CustomBases
     {
         private static readonly List<ICustomBaseProvider> Providers = new List<ICustomBaseProvider>();
@@ -108,6 +116,17 @@ namespace Orbiters.Toolkit.Editor.Refit
         }
 
         public static void NotifyChanged(Transform avatarRoot) => Changed?.Invoke(avatarRoot);
+
+        /// <summary>Tells every provider keeping fits that the renderer's refit was taken back (see RefitRecords.Discard).</summary>
+        public static void ForgetFit(Transform avatarRoot, SkinnedMeshRenderer renderer)
+        {
+            if (avatarRoot == null || renderer == null) return;
+            foreach (var fits in Providers.OfType<ICustomBaseFits>())
+            {
+                try { fits.Forget(avatarRoot, renderer); }
+                catch (Exception ex) { Debug.LogWarning("[Orbiters] Could not forget the saved fit of " + renderer.name + ": " + ex.Message); }
+            }
+        }
 
         /// <summary>Flexing shapes are named by convention: any name containing "flex", in any case.</summary>
         public static bool IsFlex(string name) => !string.IsNullOrEmpty(name) && name.IndexOf("flex", StringComparison.OrdinalIgnoreCase) >= 0;

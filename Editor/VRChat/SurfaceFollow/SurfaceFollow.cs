@@ -401,7 +401,7 @@ namespace Orbiters.Toolkit.Editor.VRChat.SurfaceFollow
 
     internal sealed class SurfaceFollowHook : IVRCSDKPreprocessAvatarCallback
     {
-        // After VRCFury (-10000) and MCB's blendshape links (-9000), before My Avatar's attachments finish (-8900).
+        // After VRCFury (-10000), MCB's blendshape links (-9000) and mode locks (-8970), before My Avatar's attachments finish (-8900).
         public int callbackOrder => -8950;
         public bool OnPreprocessAvatar(GameObject avatarRoot)
         {

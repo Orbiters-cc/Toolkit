@@ -277,6 +277,51 @@ public sealed class RefitRecordsTests
         Assert.That(jacket.transform.childCount, Is.EqualTo(1));
     }
 
+    private sealed class FitsProvider : ICustomBaseProvider, ICustomBaseFits
+    {
+        public readonly List<SkinnedMeshRenderer> Forgotten = new List<SkinnedMeshRenderer>();
+        public CustomBaseInfo Describe(Transform avatarRoot) => null;
+        public void Forget(Transform avatarRoot, SkinnedMeshRenderer renderer) => Forgotten.Add(renderer);
+    }
+
+    // A refit taken back in one tool (My Avatar's Restore) must not come back from another's saved fits (MCB's per version).
+    [Test]
+    public void DiscardTellsTheProvidersToForgetTheirSavedFit()
+    {
+        var provider = new FitsProvider();
+        CustomBases.Register(provider);
+        try
+        {
+            Run(Batch(RefitMode.Fit, "Flex arms"));
+            RefitRecords.Remove(jacket.GetComponent<OrbitersRefit>());
+            Assert.That(provider.Forgotten, Is.Empty, "A version switch removes records without forgetting their fits.");
+            Run(Batch(RefitMode.Fit, "Flex arms"));
+            RefitRecords.Discard(jacket.GetComponent<OrbitersRefit>());
+            Assert.That(provider.Forgotten, Is.EqualTo(new[] { jacket }));
+            Assert.That(jacket.sharedMesh, Is.SameAs(jacketMesh));
+            Assert.That(jacket.GetComponent<OrbitersRefit>(), Is.Null);
+        }
+        finally { CustomBases.Unregister(provider); }
+    }
+
+    [Test]
+    public void TheAvatarCountsAsRefittingUntilTheRunAndEveryHoldEnd()
+    {
+        RefitBatchResult result = null;
+        var routine = RefitRunner.Run(Batch(RefitMode.Fit, "Flex arms"), null, r => result = r, CancellationToken.None);
+        Assert.That(RefitRunner.IsRunning(root.transform), Is.False);
+        Assert.That(routine.MoveNext(), Is.True);
+        Assert.That(RefitRunner.IsRunning(root.transform), Is.True, "A version switch must wait for the refit.");
+        Assert.That(RefitRunner.IsRunning(), Is.True);
+        var hold = RefitRunner.Hold(root.transform);
+        Drain(routine);
+        Assert.That(result, Is.Not.Null);
+        Assert.That(RefitRunner.IsRunning(root.transform), Is.True, "A tool still holds the avatar (its answer is not done).");
+        hold.Dispose();
+        hold.Dispose();
+        Assert.That(RefitRunner.IsRunning(root.transform), Is.False);
+    }
+
     [Test]
     public void RunnerFitsOnceAndRefitsFromTheOriginalWithoutStacking()
     {

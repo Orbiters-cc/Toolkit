@@ -16,7 +16,9 @@ namespace Orbiters.Toolkit.Editor.VRChat.Parameters
         public int DescriptorBits, ToggleBits, FullControllerBits, TotalBeforeCompression;
         /// <summary>Bits of the custom base's objects (Options.IsCustomBase).</summary>
         public int CustomBaseBits;
-        public int AvatarBits => TotalBeforeCompression - CustomBaseBits;
+        /// <summary>Bits of the face tracking template (<see cref="AvatarParameterBudget.FaceTrackingOwners"/>), as built.</summary>
+        public int FaceTrackingBits;
+        public int AvatarBits => TotalBeforeCompression - CustomBaseBits - FaceTrackingBits;
         public bool VrcFuryPresent;
         public string CompressionStatus;
         /// <summary>True when VRCFury will compress at build: over the limit, with compression allowed (or asked and accepted).</summary>
@@ -60,6 +62,12 @@ namespace Orbiters.Toolkit.Editor.VRChat.Parameters
         /// </summary>
         public static readonly List<Func<Component, ICollection<string>>> BuildRemovedParameters = new List<Func<Component, ICollection<string>>>();
 
+        /// <summary>
+        /// Tells which objects are a face tracking template (My Avatar's), so their parameters are counted apart from the
+        /// avatar's own. Takes priority over the custom base when an object is both.
+        /// </summary>
+        public static readonly List<Func<GameObject, bool>> FaceTrackingOwners = new List<Func<GameObject, bool>>();
+
         private static Type vrcFuryType, toggleType, fullControllerType;
         private static System.Reflection.FieldInfo networkSyncedField;
 
@@ -87,12 +95,14 @@ namespace Orbiters.Toolkit.Editor.VRChat.Parameters
             if (vrcFuryType == null) return budget;
             budget.VrcFuryPresent = true;
 
-            bool IsCustomBase(GameObject go) => go != null && options?.IsCustomBase != null && options.IsCustomBase(go);
+            bool IsFaceTracking(GameObject go) => go != null && IsFaceTrackingOwner(go);
+            bool IsCustomBase(GameObject go) => go != null && !IsFaceTracking(go) && options?.IsCustomBase != null && options.IsCustomBase(go);
             var components = avatarRoot.GetComponentsInChildren(vrcFuryType, true);
-            budget.FullControllerBits = FullControllerBits(components, synced, parameters, IsCustomBase, out int customControllers);
-            budget.ToggleBits = ToggleBits(components, parameters, IsCustomBase, out int customToggles);
+            budget.FullControllerBits = FullControllerBits(components, synced, parameters, IsCustomBase, IsFaceTracking, out int customControllers, out int faceControllers);
+            budget.ToggleBits = ToggleBits(components, parameters, IsCustomBase, IsFaceTracking, out int customToggles, out int faceToggles);
             budget.TotalBeforeCompression = budget.DescriptorBits + budget.ToggleBits + budget.FullControllerBits;
             budget.CustomBaseBits = customControllers + customToggles;
+            budget.FaceTrackingBits = faceControllers + faceToggles;
 
             var mode = VrcFury.Find("VF.Menu.CompressorMenuItem")?.GetMethod("Get")?.Invoke(null, null)?.ToString();
             budget.CompressionStatus = mode == "Ask" ? "VRCFury asks about compression during build."
@@ -232,10 +242,22 @@ namespace Orbiters.Toolkit.Editor.VRChat.Parameters
 
         private static object Content(Component component) => VrcFury.Content(component);
 
+        private static bool IsFaceTrackingOwner(GameObject go)
+        {
+            foreach (var owns in FaceTrackingOwners)
+            {
+                try { if (owns(go)) return true; }
+                catch (Exception ex) { Debug.LogWarning("[Orbiters] A face tracking budget hook failed on " + go.name + ": " + ex.Message); }
+            }
+
+            return false;
+        }
+
         private static int FullControllerBits(Component[] components, Dictionary<string, VRCExpressionParameters.ValueType> synced,
-            List<Synced> parameters, Func<GameObject, bool> isCustomBase, out int custom)
+            List<Synced> parameters, Func<GameObject, bool> isCustomBase, Func<GameObject, bool> isFaceTracking, out int custom, out int face)
         {
             custom = 0;
+            face = 0;
             if (fullControllerType == null) return 0;
             int added = 0;
             foreach (var component in components)
@@ -268,7 +290,8 @@ namespace Orbiters.Toolkit.Editor.VRChat.Parameters
                         else if (!localNames.Add(parameter.name)) continue;
                         int cost = Add(parameters, parameter.valueType, uses, parameter.name);
                         added += cost;
-                        if (isCustomBase(component.gameObject)) custom += cost;
+                        if (isFaceTracking(component.gameObject)) face += cost;
+                        else if (isCustomBase(component.gameObject)) custom += cost;
                     }
                 }
             }
@@ -310,9 +333,11 @@ namespace Orbiters.Toolkit.Editor.VRChat.Parameters
         }
 
         // A toggle is a menu toggle, a radial when it is a slider, or a button when held.
-        private static int ToggleBits(Component[] components, List<Synced> parameters, Func<GameObject, bool> isCustomBase, out int custom)
+        private static int ToggleBits(Component[] components, List<Synced> parameters, Func<GameObject, bool> isCustomBase,
+            Func<GameObject, bool> isFaceTracking, out int custom, out int face)
         {
             custom = 0;
+            face = 0;
             if (toggleType == null) return 0;
             int raw = 0;
             foreach (var component in components)
@@ -326,7 +351,8 @@ namespace Orbiters.Toolkit.Editor.VRChat.Parameters
                 int cost = slider || integer ? 8 : 1;
                 parameters.Add(new Synced { Cost = cost, Bool = cost == 1, Menu = held ? MenuUse.Button : slider ? MenuUse.Radial : MenuUse.Toggle });
                 raw += cost;
-                if (isCustomBase(component.gameObject)) custom += cost;
+                if (isFaceTracking(component.gameObject)) face += cost;
+                else if (isCustomBase(component.gameObject)) custom += cost;
             }
             return raw;
         }

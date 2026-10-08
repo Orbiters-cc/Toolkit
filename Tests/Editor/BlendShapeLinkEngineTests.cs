@@ -190,6 +190,36 @@ public sealed class BlendShapeLinkEngineTests
         }
     }
 
+    // A build preview (My Avatar's face tracking test) plays an in-memory copy of an authored controller: the links apply to
+    // the copy, as on an upload's VRCFury controller, and the authored one stays as it is.
+    [Test]
+    public void LinksApplyToAnInMemoryCopyOnTheDescriptor()
+    {
+        AddRenderer(Child("Body"), "Smile", "Fix");
+        var authored = AnimatorController.CreateAnimatorControllerAtPath(folder + "/authored.controller");
+        var smile = Clip("smile", Shape("Body", "Smile", 0, 100));
+        authored.layers[0].stateMachine.AddState("Smile").motion = smile;
+        var copy = Orbiters.Toolkit.Editor.Animations.AnimatorControllerCopy.Of(authored);
+        try
+        {
+            var descriptor = root.AddComponent<VRCAvatarDescriptor>();
+            descriptor.baseAnimationLayers = new[] { new VRCAvatarDescriptor.CustomAnimLayer { type = VRCAvatarDescriptor.AnimLayerType.FX, animatorController = copy.Controller } };
+
+            var result = BlendShapeLinkEngine.Apply(root, new[] { FactorLink(BlendShapeLinkEndpoint.BlendShape, "Fix", null) }, "test");
+
+            Assert.That(result.Success, Is.True, result.Message);
+            var wrapper = copy.Controller.layers[0].stateMachine.states[0].state.motion as BlendTree;
+            Assert.That(wrapper, Is.Not.Null, "The copy's smile is wrapped with the fix.");
+            Assert.That(wrapper.blendParameter, Is.EqualTo("UP_Test_Factor"));
+            var fixedClip = (AnimationClip)wrapper.children[1].motion;
+            Assert.That(AnimationUtility.GetCurveBindings(fixedClip).Any(b => b.propertyName == "blendShape.Fix"), Is.True);
+            Assert.That(AssetDatabase.Contains(fixedClip), Is.False, "Nothing made for the preview becomes an asset.");
+            Assert.That(authored.layers[0].stateMachine.states[0].state.motion, Is.SameAs(smile), "The authored controller is untouched.");
+            Assert.That(copy.Controller.layers[0].stateMachine.states[0].state, Is.Not.SameAs(authored.layers[0].stateMachine.states[0].state));
+        }
+        finally { copy.Destroy(); }
+    }
+
     // Body/Smile goes from 0 to 100 over a second and triggers the effect through a factor link.
     private AnimationClip ApplyShapeTriggeredEffect(AnimationClip effect)
     {

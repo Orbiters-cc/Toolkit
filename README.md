@@ -1,5 +1,24 @@
 # Orbiters Toolkit
 
+## 0.3.18 — 2026-10-08
+
+- `AvatarParameterBudget` counts a face tracking template apart: objects an `AvatarParameterBudget.FaceTrackingOwners` hook claims (My Avatar's) have their parameters in `ParameterBudget.FaceTrackingBits`, taken out of `AvatarBits` and, when the custom base also owns them, out of `CustomBaseBits`. `BudgetCount` gets a `FaceTracking` share.
+- `AnimatorControllerCopy`: a deep copy of an animator controller in memory (layers, state machines, states,
+  transitions, behaviours, blend trees and clips, with an optional clip rewrite), freed with `Destroy()`.
+- `BlendShapeLinkEngine` also applies links to in-memory controllers on the descriptor (build previews such as My
+  Avatar's face tracking test), and only saves assets when an asset controller changed.
+- `OrbitersVectorLogo` draws relative SVG path commands and H, V and S, reads the viewBox (also one not starting at 0)
+  and fills each path with its own `fill` colour (white, or `Fill`, without one).
+- `VrcAvatarCard` and `VrcCardStage`: VRChat's in-game avatar card (badges, two-line name, author) in its menu
+  backdrop, moved here from My Avatar so other tools show the same card (Unit Git's upload releases). The host sets the
+  platforms, the performance warning and the author; `VrcCardStage.SetAmbient` lights the backdrop with the thumbnail's
+  colours. `VrcLinks.AvatarPage` gives an avatar's page on vrchat.com.
+- `RefitRecords.Discard` takes a refit back for every tool: it removes the record and tells the custom base provider
+  (`ICustomBaseFits`, implemented by MCB) to forget the fit it saved for the version. `RefitRunner.IsRunning` / `Hold`
+  tell whether a refit is at work on an avatar. The temporary original-base import is shared by reference count.
+- Mode-lock ordering: the clothing links (ReFit -8960, Follow Body Blendshapes -8950, accessories -8900) run after MCB
+  locks its modes (-8970), so they copy the locked values.
+
 ## 0.3.17 — 2026-10-07
 
 - **Drawing pen** held where it was grabbed: it no longer jumps into a set pose in the hand, but follows the hand from
@@ -111,7 +130,7 @@ login saves only if it is still the newest, uncancelled one and the tools are st
 
 `OrbitersAccountView`, `OrbitersSignInElement` and `OrbitersAccountElement` provide
 common account controls. `OrbitersGlow` and `OrbitersGlowSurfaceElement` render
-the animated background; `OrbitersVectorLogo` draws absolute SVG M/L/C/Z paths.
+the animated background; `OrbitersVectorLogo` draws SVG paths (M, L, H, V, C, S, Z, absolute or relative) in their own fill colours.
 These editor-guarded services live in `Orbiters.Toolkit`, allowing components with
 editor-only helpers to reference them. Player builds contain none of this editor
 logic. `Orbiters.Toolkit.Editor` continues to own posing and screenshot utilities.
