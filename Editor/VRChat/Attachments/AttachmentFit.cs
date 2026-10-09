@@ -2,6 +2,8 @@ using System.Collections.Generic;
 using System.Linq;
 using Orbiters.Toolkit.Armature;
 using Orbiters.Toolkit.Editor.Posing;
+using Orbiters.Toolkit.Editor.Storage;
+using Orbiters.Toolkit.Editor.VRChat.Posing;
 using Orbiters.Toolkit.VRChat;
 using UnityEditor;
 using UnityEngine;
@@ -14,7 +16,8 @@ namespace Orbiters.Toolkit.Editor.VRChat.Attachments
     /// matched to the avatar's humanoid bones and compared. When its size differs by more than <see cref="ScaleThreshold"/>
     /// or it stands more than <see cref="OffsetThreshold"/> of the avatar's height away, it is resized to the avatar's
     /// size, moved onto its hips, and each matched key bone is put on its avatar bone (parents first), so the clothing also
-    /// takes the avatar's proportions. What changes is recorded on the attachment: <see cref="Cancel"/> puts it back.
+    /// takes the avatar's proportions. What changes is recorded on the attachment: <see cref="Cancel"/> puts it back. Both
+    /// run with the posing preview paused, so they measure, record and put back where the clothing rests.
     /// </summary>
     public static class AttachmentFit
     {
@@ -121,6 +124,11 @@ namespace Orbiters.Toolkit.Editor.VRChat.Attachments
         public static Measure Fit(OrbitersAttachment attachment, Transform avatarRoot)
         {
             if (attachment == null) return null;
+            using (AccessoryPoseSync.Pause(avatarRoot)) return FitAtRest(attachment, avatarRoot);
+        }
+
+        private static Measure FitAtRest(OrbitersAttachment attachment, Transform avatarRoot)
+        {
             var measure = Compare(attachment.gameObject, avatarRoot);
             if (measure == null || !measure.NeedsFit) return null;
             var root = attachment.transform;
@@ -191,24 +199,34 @@ namespace Orbiters.Toolkit.Editor.VRChat.Attachments
             }
         }
 
-        /// <summary>Puts back what the fit changed, with Undo, where it is still as the fit left it.</summary>
-        public static void Cancel(OrbitersAttachment attachment)
+        /// <summary>
+        /// Puts back what the fit changed, with Undo, where it is still as the fit left it, or everything with
+        /// <paramref name="force"/>. What was changed since stays recorded, so the fit is never forgotten half undone: true
+        /// once nothing of it is left.
+        /// </summary>
+        public static bool Cancel(OrbitersAttachment attachment, bool force = false)
         {
-            if (!Fitted(attachment)) return;
-            AttachmentVolumeFit.Cancel(attachment);
-            var still = attachment.fitted.Where(f => f.transform != null && Same(Pose(f.transform), f.after)).ToList();
-            if (still.Count > 0) Undo.RecordObjects(still.Select(f => (Object)f.transform).ToArray(), "Cancel the fit of " + attachment.name);
-            // Children first: each is put back in its own parent's space, so the order does not matter for local values.
-            foreach (var f in still)
+            if (!Fitted(attachment)) return true;
+            using (AccessoryPoseSync.Pause(attachment.transform))
             {
-                f.transform.localPosition = f.before.position;
-                f.transform.localRotation = f.before.rotation;
-                f.transform.localScale = f.before.scale;
-                PrefabUtility.RecordPrefabInstancePropertyModifications(f.transform);
+                AttachmentVolumeFit.Cancel(attachment);
+                var back = attachment.fitted.Where(f => f.transform != null && (force || Same(Pose(f.transform), f.after))).ToList();
+                if (back.Count > 0) Undo.RecordObjects(back.Select(f => (Object)f.transform).ToArray(), "Cancel the fit of " + attachment.name);
+                // Children first: each is put back in its own parent's space, so the order does not matter for local values.
+                foreach (var f in back)
+                {
+                    f.transform.localPosition = f.before.position;
+                    f.transform.localRotation = f.before.rotation;
+                    f.transform.localScale = f.before.scale;
+                    PrefabUtility.RecordPrefabInstancePropertyModifications(f.transform);
+                }
+                Undo.RecordObject(attachment, "Cancel the fit of " + attachment.name);
+                attachment.fitted.RemoveAll(f => f.transform == null || back.Contains(f));
+                AttachmentInstaller.Dirty(attachment);
             }
-            Undo.RecordObject(attachment, "Cancel the fit of " + attachment.name);
-            attachment.fitted.Clear();
-            AttachmentInstaller.Dirty(attachment);
+            // Its fitted meshes may be used by nothing now.
+            GeneratedAssets.SweepSoon();
+            return attachment.fitted.Count == 0;
         }
 
         // Hips to head, else the body's height.

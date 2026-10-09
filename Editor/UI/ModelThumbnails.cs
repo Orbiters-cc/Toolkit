@@ -172,8 +172,9 @@ namespace Orbiters.Toolkit.Editor
             finally
             {
                 preview.Cleanup();
+                // Only the meshes baked here: built-in ones (primitives) share the flags but are assets.
                 foreach (var part in parts)
-                    if (part.Mesh != null && part.Mesh.hideFlags == HideFlags.HideAndDontSave) Object.DestroyImmediate(part.Mesh);
+                    if (part.Mesh != null && part.Mesh.hideFlags == HideFlags.HideAndDontSave && !EditorUtility.IsPersistent(part.Mesh)) Object.DestroyImmediate(part.Mesh);
             }
         }
 

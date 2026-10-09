@@ -149,6 +149,8 @@ namespace Orbiters.Toolkit.Editor
         {
             string all = (text ?? "") + " " + (intro ?? "");
             if (all.IndexOf("public domain", StringComparison.OrdinalIgnoreCase) >= 0) return "Public domain";
+            // A project that publishes no license (its notice says so) is used under its author's own terms.
+            if (all.IndexOf("no license", StringComparison.OrdinalIgnoreCase) >= 0) return "Author’s terms";
             // Before MIT: the OFL also grants permission "free of charge".
             if (all.IndexOf("SIL Open Font License", StringComparison.OrdinalIgnoreCase) >= 0) return "OFL";
             if (all.IndexOf("MIT License", StringComparison.OrdinalIgnoreCase) >= 0 || all.IndexOf("Permission is hereby granted, free of charge", StringComparison.Ordinal) >= 0) return "MIT";

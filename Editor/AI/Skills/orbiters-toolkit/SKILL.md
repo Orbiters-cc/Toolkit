@@ -27,6 +27,7 @@ MCP server starts and can lag behind the package).
    | A window that is not open | `{"action":"capture","window_type":"Orbiters.MyAvatar.Editor.MyAvatarAboutWindow","open_if_missing":true}` |
    | A long window, whole | add `"width":560,"height":2400` (points, up to 8000) |
    | A section far down | add `"scroll_to":"Face tracking"` (text shown, element name, or USS class) |
+   | An animated state, or after it settles | add `"delay_ms":2500` (up to 8000) before the capture |
    | Any object's Inspector, without selecting it | `{"action":"capture","inspect":"Rexouium1.6 Default Setup","height":1400,"scroll_to":"Face tracking"}` |
 
    `inspect` takes an instance ID, a hierarchy path (`"Root/Child"`, or `"Scene:Root/Child"`), or an asset path

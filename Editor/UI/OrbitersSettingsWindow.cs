@@ -124,7 +124,7 @@ namespace Orbiters.Toolkit.Editor
             bool development = OrbitersEnvironment.IsDevelopment;
             server.SetIndex(development ? 1 : 0);
             caption.text = development
-                ? "Development: the tools talk to a local Orbiters server (localhost:4100) and use its own login. For Orbiters developers."
+                ? "Development: the tools talk to a local Orbiters server (127.0.0.1:4100) and use its own login. For Orbiters developers."
                 : "Production (default): the tools talk to orbiters.cc. Each server keeps its own login.";
             OnFeatureChanged(null);
         }

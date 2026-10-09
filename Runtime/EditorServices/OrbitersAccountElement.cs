@@ -10,14 +10,16 @@ public sealed class OrbitersAccountElement : VisualElement
     private readonly string endpoint;
     private readonly Action<bool> changed;
     private readonly string reason;
+    private readonly bool confirmLogout;
     private Texture2D picture;
     private CancellationTokenSource lifetime;
     private int revision;
     /// <param name="endpoint">The tool's connection check, e.g. "myavatar/connection"; its first segment names the tool on the login page.</param>
     /// <param name="reason">Why connecting helps, shown under the login buttons.</param>
-    public OrbitersAccountElement(string endpoint, Action<bool> changed, string reason = null)
+    /// <param name="confirmLogout">Ask before signing out (of every Orbiters tool, since they share the account).</param>
+    public OrbitersAccountElement(string endpoint, Action<bool> changed, string reason = null, bool confirmLogout = false)
     {
-        this.endpoint = endpoint; this.changed = changed; this.reason = reason;
+        this.endpoint = endpoint; this.changed = changed; this.reason = reason; this.confirmLogout = confirmLogout;
         RegisterCallback<AttachToPanelEvent>(_ => { lifetime = new CancellationTokenSource(); AuthenticationService.Changed += Refresh; OrbitersEnvironment.Changed += Refresh; Refresh(); });
         RegisterCallback<DetachFromPanelEvent>(_ => { AuthenticationService.Changed -= Refresh; OrbitersEnvironment.Changed -= Refresh; lifetime?.Cancel(); lifetime?.Dispose(); lifetime = null;
             if (picture) UnityEngine.Object.DestroyImmediate(picture); picture = null; });
@@ -33,6 +35,7 @@ public sealed class OrbitersAccountElement : VisualElement
         var row = new VisualElement(); row.AddToClassList("mcb-account"); Add(row);
         void Draw(string state) {
             row.Clear(); OrbitersAccountView.Populate(row, auth.username ?? auth.user, state, state == "Checking…", picture, OrbitersAccountView.FallbackColor(auth.username ?? auth.user), () => {
+                if (confirmLogout && !UnityEditor.EditorUtility.DisplayDialog("Log out", "Log out of your Orbiters account in every Orbiters tool?", "Log out", "Cancel")) return;
                 if (!AuthenticationService.RemoveAuth()) Add(new OrbitersNoticeElement("Could not clear the saved account. Check file permissions.", HelpBoxMessageType.Warning));
             });
         }

@@ -12,7 +12,8 @@ namespace Orbiters.Toolkit.Editor
     /// What importing a .unitypackage would do to the project, before it is imported. Unity's importer writes every entry
     /// to the asset that already has its GUID: a package carrying a prefab, material or mesh the project already has with
     /// other content replaces it, also for every avatar and scene using it. This lists those replacements so a tool can
-    /// ask first, and leaves out entries under Packages/, which belong to VPM and other package managers.
+    /// ask first, and leaves out entries under Packages/, which belong to VPM and other package managers, as well as entries
+    /// whose GUID Unity would resolve to a file there.
     /// </summary>
     public sealed class UnityPackagePreview
     {
@@ -29,16 +30,22 @@ namespace Orbiters.Toolkit.Editor
         public readonly List<Change> Replaced = new List<Change>();
         /// <summary>Files the project already has with the same content.</summary>
         public readonly List<Change> Unchanged = new List<Change>();
-        /// <summary>Entries outside Assets/ (VPM packages and other managed folders), never imported by the caller.</summary>
+        /// <summary>
+        /// Entries that would write outside Assets/ (VPM packages and other managed folders), by their name or through a GUID
+        /// the project already has there: never imported by the caller. The project path for the latter.
+        /// </summary>
         public readonly List<string> Skipped = new List<string>();
         public bool HasConflicts => Replaced.Count > 0;
         /// <summary>The GUIDs to import: everything under Assets/.</summary>
         public IEnumerable<string> ImportGuids => Added.Concat(Replaced).Concat(Unchanged).Select(c => c.Guid);
+        /// <summary>Code the import would write: its entries under Assets/ and the existing files their GUIDs update.</summary>
+        public List<string> CodeFiles => CodeContent.Filter(Added.Concat(Replaced).Concat(Unchanged).SelectMany(c => new[] { c.PackagePath, c.ProjectPath }));
 
-        /// <summary>Main thread: reads the project's side, then hashes on a worker thread.</summary>
+        /// <summary>Main thread: reads the project's side (only for entries under Assets/), then hashes on a worker thread.</summary>
         public static async Task<UnityPackagePreview> CreateAsync(string packagePath, UnityPackageIndex index, CancellationToken cancellation = default)
         {
-            var existing = index.Entries.ToDictionary(e => e.Guid, e => AssetDatabase.GUIDToAssetPath(e.Guid), StringComparer.OrdinalIgnoreCase);
+            var existing = index.Entries.Where(e => e.Path.StartsWith("Assets/", StringComparison.Ordinal))
+                .ToDictionary(e => e.Guid, e => AssetDatabase.GUIDToAssetPath(e.Guid), StringComparer.OrdinalIgnoreCase);
             var folders = new HashSet<string>(existing.Values.Where(p => !string.IsNullOrEmpty(p) && AssetDatabase.IsValidFolder(p)), StringComparer.OrdinalIgnoreCase);
             string root = Path.GetDirectoryName(UnityEngine.Application.dataPath);
             return await Task.Run(() =>
@@ -50,6 +57,8 @@ namespace Orbiters.Toolkit.Editor
                     cancellation.ThrowIfCancellationRequested();
                     if (!entry.Path.StartsWith("Assets/", StringComparison.Ordinal)) { preview.Skipped.Add(entry.Path); continue; }
                     existing.TryGetValue(entry.Guid, out string projectPath);
+                    // Unity writes an entry to the asset holding its GUID, wherever it is: a VPM package file stays as it is.
+                    if (!string.IsNullOrEmpty(projectPath) && !projectPath.StartsWith("Assets/", StringComparison.Ordinal)) { preview.Skipped.Add(projectPath); continue; }
                     var change = new Change { Guid = entry.Guid, PackagePath = entry.Path, ProjectPath = string.IsNullOrEmpty(projectPath) ? entry.Path : projectPath };
                     string file = string.IsNullOrEmpty(projectPath) ? null : Path.Combine(root, projectPath);
                     if (file == null || folders.Contains(projectPath) || (!File.Exists(file) && !Directory.Exists(file))) { preview.Added.Add(change); continue; }

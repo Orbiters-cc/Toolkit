@@ -1,18 +1,19 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using UnityEditor;
 using UnityEditor.Animations;
 using UnityEngine;
-using VRC.SDK3.Avatars.Components;
 using VRC.SDK3.Avatars.ScriptableObjects;
-using VRC.SDKBase;
-using VRC.SDK3.Dynamics.Constraint.Components;
-using VRC.SDK3.Dynamics.PhysBone.Components;
+using static Orbiters.Toolkit.Editor.VRChat.HeldPropRig;
 
 namespace Orbiters.Toolkit.Editor.VRChat
 {
     public static partial class DrawingPenInstaller
     {
+        // Trigger pressure (the fist's gesture weight) that starts and stops the ink.
+        internal const float InkOn = .5f, InkOff = .4f;
+
         internal static void BuildController(GameObject root, string folder)
         {
             var controller = AnimatorController.CreateAnimatorControllerAtPath(folder + "/Drawing pen.controller");
@@ -37,16 +38,15 @@ namespace Orbiters.Toolkit.Editor.VRChat
             Transition(off, spawn, (Enabled, AnimatorConditionMode.If, 0));
             foreach (var state in new[] { spawn, dropped, held, left, right, catchLeft, catchRight })
                 Transition(state, off, (Enabled, AnimatorConditionMode.IfNot, 0));
-            var settle = Transition(spawn, dropped); settle.hasExitTime = true; settle.exitTime = 1;
+            // The next update: a transition only waits for exit time when its clip loops (0.2 s here).
+            Transition(spawn, dropped, (Enabled, AnimatorConditionMode.If, 0));
             // Dropped is already frozen; held follows the grabbed bone and is frozen for a frame first.
             Transition(dropped, left, (HeldLeft, AnimatorConditionMode.If, 0));
             Transition(dropped, right, (HeldRight, AnimatorConditionMode.If, 0));
             Transition(held, catchLeft, (HeldLeft, AnimatorConditionMode.If, 0));
             Transition(held, catchRight, (HeldRight, AnimatorConditionMode.If, 0));
-            foreach (var (from, to) in new[] { (catchLeft, left), (catchRight, right) })
-            {
-                var caught = Transition(from, to); caught.hasExitTime = true; caught.exitTime = 0;
-            }
+            Transition(catchLeft, left, (HeldLeft, AnimatorConditionMode.If, 0));
+            Transition(catchRight, right, (HeldRight, AnimatorConditionMode.If, 0));
             Transition(dropped, held, (Grab + "_IsGrabbed", AnimatorConditionMode.If, 0),
                 (HeldLeft, AnimatorConditionMode.IfNot, 0), (HeldRight, AnimatorConditionMode.IfNot, 0));
             Transition(held, dropped, (Grab + "_IsGrabbed", AnimatorConditionMode.IfNot, 0));
@@ -67,12 +67,12 @@ namespace Orbiters.Toolkit.Editor.VRChat
             foreach (var side in new[] { (state: ownerLeft, contact: Left, gesture: "GestureLeft"),
                 (state: ownerRight, contact: Right, gesture: "GestureRight") })
             {
-                Transition(free, side.state, ("IsLocal", AnimatorConditionMode.If, 0), (Enabled, AnimatorConditionMode.If, 0),
-                    (Drop, AnimatorConditionMode.IfNot, 0), (Grab + "_IsGrabbed", AnimatorConditionMode.If, 0),
-                    (side.contact, AnimatorConditionMode.If, 0), (side.gesture, AnimatorConditionMode.NotEqual, 2));
+                Transition(free, side.state, new[] { ("IsLocal", AnimatorConditionMode.If, 0f), (Enabled, AnimatorConditionMode.If, 0f),
+                    (Drop, AnimatorConditionMode.IfNot, 0f), (Grab + "_IsGrabbed", AnimatorConditionMode.If, 0f),
+                    (side.contact, AnimatorConditionMode.If, 0f) }.Concat(Gripping(side.gesture)).ToArray());
                 Transition(side.state, free, (Enabled, AnimatorConditionMode.IfNot, 0));
                 Transition(side.state, free, (Drop, AnimatorConditionMode.If, 0));
-                Transition(side.state, free, (side.gesture, AnimatorConditionMode.Equals, 2));
+                LetGo(side.state, free, side.gesture);
             }
 
             var ink = Layer(controller, "Ink");
@@ -89,16 +89,17 @@ namespace Orbiters.Toolkit.Editor.VRChat
                 Transition(state, erased, (Enabled, AnimatorConditionMode.IfNot, 0));
                 Transition(state, erased, (Clear, AnimatorConditionMode.If, 0));
             }
-            // The index finger down draws: a squeezed fist (1, trigger pressure with hysteresis) or a thumbs up (7).
+            // The index finger down draws: a squeezed fist (1, trigger pressure) or a thumbs up (7). Ink stops as soon as
+            // the trigger eases off past half way, not once it is nearly released: a narrow band keeps the stroke steady.
             foreach (var side in new[] { (state: drawLeft, held: HeldLeft, gesture: "GestureLeft"),
                 (state: drawRight, held: HeldRight, gesture: "GestureRight") })
             {
                 Transition(idle, side.state, (side.held, AnimatorConditionMode.If, 0), (side.gesture, AnimatorConditionMode.Equals, 1),
-                    (side.gesture + "Weight", AnimatorConditionMode.Greater, .35f));
+                    (side.gesture + "Weight", AnimatorConditionMode.Greater, InkOn));
                 Transition(idle, side.state, (side.held, AnimatorConditionMode.If, 0), (side.gesture, AnimatorConditionMode.Equals, 7));
                 Transition(side.state, idle, (side.held, AnimatorConditionMode.IfNot, 0));
                 Transition(side.state, idle, (side.gesture, AnimatorConditionMode.NotEqual, 1), (side.gesture, AnimatorConditionMode.NotEqual, 7));
-                Transition(side.state, idle, (side.gesture, AnimatorConditionMode.Equals, 1), (side.gesture + "Weight", AnimatorConditionMode.Less, .2f));
+                Transition(side.state, idle, (side.gesture, AnimatorConditionMode.Equals, 1), (side.gesture + "Weight", AnimatorConditionMode.Less, InkOff));
             }
             Transition(idle, guest, (Grab + "_IsGrabbed", AnimatorConditionMode.If, 0),
                 (HeldLeft, AnimatorConditionMode.IfNot, 0), (HeldRight, AnimatorConditionMode.IfNot, 0),
@@ -107,59 +108,18 @@ namespace Orbiters.Toolkit.Editor.VRChat
             Transition(guest, idle, (HeldLeft, AnimatorConditionMode.If, 0));
             Transition(guest, idle, (HeldRight, AnimatorConditionMode.If, 0));
 
-            var parameters = ScriptableObject.CreateInstance<VRCExpressionParameters>();
-            parameters.parameters = new[] { Parameter(Enabled), Parameter(Clear), Parameter(HeldLeft), Parameter(HeldRight), Parameter(Drop) };
-            AssetDatabase.CreateAsset(parameters, folder + "/Parameters.asset");
-            var sub = ScriptableObject.CreateInstance<VRCExpressionsMenu>();
-            sub.controls = new List<VRCExpressionsMenu.Control>
+            Install(root, folder, controller, MenuPath, "Pen menu", new List<VRCExpressionsMenu.Control>
             {
-                new VRCExpressionsMenu.Control { name = "Enable pen", type = VRCExpressionsMenu.Control.ControlType.Toggle, parameter = new VRCExpressionsMenu.Control.Parameter { name = Enabled }, value = 1 },
-                new VRCExpressionsMenu.Control { name = "Clear drawing", type = VRCExpressionsMenu.Control.ControlType.Button, parameter = new VRCExpressionsMenu.Control.Parameter { name = Clear }, value = 1 },
-                new VRCExpressionsMenu.Control { name = "Drop pen", type = VRCExpressionsMenu.Control.ControlType.Button, parameter = new VRCExpressionsMenu.Control.Parameter { name = Drop }, value = 1 }
-            };
-            AssetDatabase.CreateAsset(sub, folder + "/Pen menu.asset");
-            var menu = ScriptableObject.CreateInstance<VRCExpressionsMenu>();
-            menu.controls = new List<VRCExpressionsMenu.Control> { new VRCExpressionsMenu.Control { name = MenuPath, type = VRCExpressionsMenu.Control.ControlType.SubMenu, subMenu = sub } };
-            AssetDatabase.CreateAsset(menu, folder + "/Menu.asset");
-            VrcFury.Writer.FullController(root, controller, menu, parameters);
+                Control("Enable pen", VRCExpressionsMenu.Control.ControlType.Toggle, Enabled),
+                Control("Clear drawing", VRCExpressionsMenu.Control.ControlType.Button, Clear),
+                Control("Drop pen", VRCExpressionsMenu.Control.ControlType.Button, Drop)
+            }, new[] { Parameter(Enabled), Parameter(Clear), Parameter(HeldLeft), Parameter(HeldRight), Parameter(Drop) });
         }
 
-        private static VRCExpressionParameters.Parameter Parameter(string name) => new VRCExpressionParameters.Parameter
-        { name = name, valueType = VRCExpressionParameters.ValueType.Bool, defaultValue = 0, saved = false, networkSynced = true };
+        private static void HoldParameters(AnimatorState state, bool left, bool right) => Hold(state, HeldLeft, HeldRight, left, right);
 
-        private static void HoldParameters(AnimatorState state, bool left, bool right)
-        {
-            var driver = state.AddStateMachineBehaviour<VRCAvatarParameterDriver>();
-            driver.localOnly = true;
-            driver.parameters.Add(new VRC_AvatarParameterDriver.Parameter { name = HeldLeft, value = left ? 1 : 0 });
-            driver.parameters.Add(new VRC_AvatarParameterDriver.Parameter { name = HeldRight, value = right ? 1 : 0 });
-        }
-
-        private static AnimatorStateMachine Layer(AnimatorController controller, string name)
-        {
-            controller.AddLayer(name); var layers = controller.layers;
-            layers[layers.Length - 1].defaultWeight = 1; controller.layers = layers;
-            return layers[layers.Length - 1].stateMachine;
-        }
-
-        private static AnimationClip PropClip(bool visible, bool baseFrozen, bool penFrozen, bool atHome, int hand = 0, bool resetGrip = false)
-        {
-            var clip = new AnimationClip();
-            // A hold leaves the offsets measured where it was grabbed; back home, the pen sits on the grip again.
-            if (resetGrip)
-                foreach (string offset in new[] { "ParentPositionOffset", "ParentRotationOffset" })
-                foreach (string axis in new[] { "x", "y", "z" })
-                    Curve(clip, "Pen", typeof(VRCParentConstraint), "Sources.source0." + offset + "." + axis, 0);
-            Curve(clip, "Pen/Model", typeof(GameObject), "m_IsActive", visible ? 1 : 0);
-            Curve(clip, "Grab base/Bone", typeof(VRCPhysBone), "m_Enabled", visible && hand == 0 ? 1 : 0);
-            Curve(clip, "Grab base", typeof(VRCParentConstraint), "FreezeToWorld", baseFrozen ? 1 : 0);
-            Curve(clip, "Grab base", typeof(VRCParentConstraint), "Sources.source0.Weight", atHome ? 1 : 0);
-            Curve(clip, "Grab base", typeof(VRCParentConstraint), "Sources.source1.Weight", atHome ? 0 : 1);
-            Curve(clip, "Pen", typeof(VRCParentConstraint), "FreezeToWorld", penFrozen ? 1 : 0);
-            for (int source = 0; source < 3; source++)
-                Curve(clip, "Pen", typeof(VRCParentConstraint), "Sources.source" + source + ".Weight", source == hand ? 1 : 0);
-            return clip;
-        }
+        private static AnimationClip PropClip(bool visible, bool baseFrozen, bool penFrozen, bool atHome, int hand = 0, bool resetGrip = false) =>
+            HeldPropRig.PropClip("Pen", "Pen/Model", visible, baseFrozen, penFrozen, atHome, hand == 1, hand == 2, visible && hand == 0, resetGrip);
 
         private static AnimationClip InkClip(bool draw, float lifetime)
         {
@@ -167,22 +127,6 @@ namespace Orbiters.Toolkit.Editor.VRChat
             Curve(clip, "Pen/Ink", typeof(TrailRenderer), "m_Emitting", draw ? 1 : 0);
             Curve(clip, "Pen/Ink", typeof(TrailRenderer), "m_Time", lifetime);
             return clip;
-        }
-
-        private static void Curve(AnimationClip clip, string path, Type type, string property, float value) =>
-            AnimationUtility.SetEditorCurve(clip, EditorCurveBinding.FloatCurve(path, type, property), AnimationCurve.Constant(0, .2f, value));
-
-        private static AnimatorState State(AnimatorController controller, AnimatorStateMachine machine, string name, AnimationClip clip)
-        {
-            clip.name = name; AssetDatabase.AddObjectToAsset(clip, controller);
-            var state = machine.AddState(name); state.motion = clip; state.writeDefaultValues = false; return state;
-        }
-
-        private static AnimatorStateTransition Transition(AnimatorState from, AnimatorState to, params (string name, AnimatorConditionMode mode, float value)[] conditions)
-        {
-            var transition = from.AddTransition(to); transition.duration = 0; transition.hasExitTime = false;
-            foreach (var condition in conditions) transition.AddCondition(condition.mode, condition.value, condition.name);
-            return transition;
         }
     }
 }

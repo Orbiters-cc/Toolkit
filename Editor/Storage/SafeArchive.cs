@@ -41,9 +41,10 @@ namespace Orbiters.Toolkit.Editor.Storage
                     foreach (var entry in files)
                     {
                         string raw = entry.FullName.Replace('\\', '/');
-                        SafePaths.ContainedPath(staging, raw);
-                        if (raw.StartsWith("/", StringComparison.Ordinal) || raw.Contains(":") || raw.Split('/').Any(segment => segment == ".." || segment == "."))
-                            throw new InvalidDataException($"The {budget.Subject} archive contains an unsafe path.");
+                        bool safe = !raw.StartsWith("/", StringComparison.Ordinal) && !raw.Contains(":") && raw.Split('/').All(segment => segment != ".." && segment != ".");
+                        try { if (safe) SafePaths.ContainedPath(staging, raw); }
+                        catch (InvalidDataException) { safe = false; }
+                        if (!safe) throw new InvalidDataException($"The {budget.Subject} archive contains an unsafe path: {entry.FullName}");
                     }
                     string rootPrefix = SingleRootPrefix(files);
 

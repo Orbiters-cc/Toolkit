@@ -1,0 +1,79 @@
+// The hand screen's picture: the video the world is playing, letterboxed to the screen, or a quiet idle screen when the
+// world shares none (always on the back, with _Video off). Viewers who hide custom shaders see the unlit fallback with
+// _MainTex (black). HandScreenInstaller copies this file into each hand screen's folder as "Hand screen.shader".
+Shader "Orbiters/Hand Screen"
+{
+    Properties
+    {
+        _MainTex ("Fallback picture", 2D) = "black" {}
+        _Aspect ("Screen aspect (width / height)", Float) = 1.7777778
+        _Accent ("Idle accent", Color) = (0.1, 0.85, 1, 1)
+        [ToggleUI] _Video ("Show the world's video", Float) = 1
+    }
+    SubShader
+    {
+        Tags { "RenderType" = "Opaque" "Queue" = "Geometry" "VRCFallback" = "Unlit" }
+        Pass
+        {
+            // Drawn just in front of the shell it lies on, at every size.
+            Offset -1, -1
+            CGPROGRAM
+            #pragma vertex vert
+            #pragma fragment frag
+            #pragma multi_compile_instancing
+            #include "UnityCG.cginc"
+
+            float _Aspect, _Video;
+            fixed4 _Accent;
+            // Video players such as ProTV share the playing video under this global name. It must never be a material
+            // property: a material value would hide the world's texture.
+            sampler2D _Udon_VideoTex;
+            float4 _Udon_VideoTex_TexelSize;
+
+            struct appdata { float4 vertex : POSITION; float2 uv : TEXCOORD0; UNITY_VERTEX_INPUT_INSTANCE_ID };
+            struct v2f { float4 pos : SV_POSITION; float2 uv : TEXCOORD0; UNITY_VERTEX_OUTPUT_STEREO };
+
+            v2f vert(appdata v)
+            {
+                v2f o;
+                UNITY_SETUP_INSTANCE_ID(v);
+                UNITY_INITIALIZE_VERTEX_OUTPUT_STEREO(o);
+                o.pos = UnityObjectToClipPos(v.vertex);
+                o.uv = v.uv;
+                return o;
+            }
+
+            // A dark screen with a play sign breathing softly in its middle.
+            fixed3 Idle(float2 uv)
+            {
+                // Linear values: about the dark blue-grey of the Orbiters tools once shown in sRGB.
+                fixed3 colour = lerp(fixed3(.008, .01, .015), fixed3(.018, .022, .03), uv.y);
+                float2 p = (uv - .5) * float2(_Aspect, 1);
+                // Play triangle pointing right, centred on its centroid, as a signed distance.
+                float2 q = float2(p.x, abs(p.y));
+                float d = max(-q.x - .07, q.x * .5 + q.y - .07);
+                float aa = fwidth(d);
+                float ring = abs(length(p) - .17) - .006;
+                float pulse = .55 + .25 * sin(_Time.y * 1.6);
+                colour = lerp(colour, _Accent.rgb, (1 - smoothstep(-aa, aa, d)) * pulse);
+                colour = lerp(colour, _Accent.rgb, (1 - smoothstep(-fwidth(ring), fwidth(ring), ring)) * pulse * .5);
+                return colour;
+            }
+
+            fixed4 frag(v2f i) : SV_Target
+            {
+                float2 size = _Udon_VideoTex_TexelSize.zw;
+                // No texture (or a tiny placeholder) means nothing is playing: the same test as Poiyomi's video decals.
+                if (_Video < .5 || size.x <= 16) return fixed4(Idle(i.uv), 1);
+                // The whole picture fits inside the screen; the rest is black.
+                float video = size.x / size.y;
+                float2 fit = video > _Aspect ? float2(1, _Aspect / video) : float2(video / _Aspect, 1);
+                float2 uv = (i.uv - .5) / fit + .5;
+                if (any(uv < 0) || any(uv > 1)) return fixed4(0, 0, 0, 1);
+                return fixed4(tex2D(_Udon_VideoTex, uv).rgb, 1);
+            }
+            ENDCG
+        }
+    }
+    Fallback "Unlit/Texture"
+}

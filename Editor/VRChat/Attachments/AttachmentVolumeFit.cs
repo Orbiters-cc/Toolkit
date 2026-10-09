@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using Orbiters.Toolkit.Editor.Storage;
 using Orbiters.Toolkit.Editor.VRChat.Refit;
 using Orbiters.Toolkit.Meshes;
 using Orbiters.Toolkit.VRChat;
@@ -12,7 +13,10 @@ using UnityEngine.SceneManagement;
 
 namespace Orbiters.Toolkit.Editor.VRChat.Attachments
 {
-    /// <summary>Coarse body clearance after skeleton alignment, before optional ReFit shape transfer.</summary>
+    /// <summary>
+    /// Coarse body clearance after skeleton alignment, before optional ReFit shape transfer. The fitted meshes are generated
+    /// assets (<see cref="GeneratedAssets"/>): they go once nothing uses them (removed, cancelled, undone).
+    /// </summary>
     public static class AttachmentVolumeFit
     {
         public static void Apply(OrbitersAttachment attachment, Transform avatarRoot, AttachmentFit.Measure measure)
@@ -85,15 +89,11 @@ namespace Orbiters.Toolkit.Editor.VRChat.Attachments
                     copy.vertices = vertices;
                     copy.RecalculateBounds();
                     // Keep authored split normals and all morphs; the smooth displacement retains the fabric detail.
-                    string folder = "Assets/Orbiters/Attachments/Fits";
-                    string parent = "Assets";
-                    foreach (var part in folder.Split('/').Skip(1))
-                    {
-                        if (!AssetDatabase.IsValidFolder(parent + "/" + part)) AssetDatabase.CreateFolder(parent, part);
-                        parent += "/" + part;
-                    }
-                    string fileName = string.Concat(copy.name.Select(c => Path.GetInvalidFileNameChars().Contains(c) ? '_' : c));
-                    AssetDatabase.CreateAsset(copy, AssetDatabase.GenerateUniqueAssetPath(folder + "/" + fileName + ".asset"));
+                    const string folder = "Assets/Orbiters/Attachments/Fits";
+                    AssetPaths.EnsureFolder(folder);
+                    string path = AssetDatabase.GenerateUniqueAssetPath(folder + "/" + AssetPaths.FileName(copy.name) + ".asset");
+                    AssetDatabase.CreateAsset(copy, path);
+                    GeneratedAssets.Track(path);
                     Undo.RecordObjects(new UnityEngine.Object[] { attachment, renderer }, "Fit clothing to body volume");
                     attachment.fittedMeshes.Add(new OrbitersAttachment.FittedMesh { renderer = renderer, before = renderer.sharedMesh,
                         after = copy, beforeBounds = renderer.localBounds, afterBounds = copy.bounds });

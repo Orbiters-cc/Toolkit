@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using NUnit.Framework;
+using Orbiters.Toolkit.Editor.Tests;
 using Orbiters.Toolkit.Editor.VRChat.BlendShapes;
 using UnityEditor;
 using UnityEditor.Animations;
@@ -17,10 +18,12 @@ public sealed class BlendShapeLinkEngineTests
     private Scene scene;
     private GameObject root;
     private string folder;
+    private TestUndoSandbox sandbox;
 
     [SetUp]
     public void SetUp()
     {
+        sandbox = TestUndoSandbox.Begin();
         scene = EditorSceneManager.NewPreviewScene();
         root = new GameObject("Blendshape link avatar");
         SceneManager.MoveGameObjectToScene(root, scene);
@@ -37,6 +40,8 @@ public sealed class BlendShapeLinkEngineTests
         foreach (var value in owned) if (value != null) Object.DestroyImmediate(value);
         owned.Clear();
         AssetDatabase.DeleteAsset(folder);
+        // The controller APIs record Undo steps ("Layer added", "State added"): they leave with the test.
+        sandbox.End();
     }
 
     [Test]

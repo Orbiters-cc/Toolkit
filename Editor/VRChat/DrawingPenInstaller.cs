@@ -1,15 +1,11 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using Orbiters.Toolkit.Editor.VRChat.Attachments;
-using Orbiters.Toolkit.VRChat;
 using UnityEditor;
 using UnityEngine;
 using UnityEngine.Rendering;
-using VRC.Dynamics;
-using VRC.SDK3.Avatars.Components;
-using VRC.SDK3.Dynamics.Constraint.Components;
-using VRC.SDK3.Dynamics.Contact.Components;
 using VRC.SDK3.Dynamics.PhysBone.Components;
 using Object = UnityEngine.Object;
 
@@ -18,6 +14,8 @@ namespace Orbiters.Toolkit.Editor.VRChat
     /// <summary>
     /// The drawing pen: a native avatar prop (nothing in the built avatar needs a custom runtime script). The prefab is
     /// avatar-independent and published like any accessory; <see cref="Bind"/> fits it to the avatar it is attached to.
+    /// It carries no Orbiters script: Toolkit releases ship without .meta files, so its scripts get other GUIDs in every
+    /// project and a gallery copy referring to one would arrive with a missing script and never be fitted.
     /// </summary>
     public static partial class DrawingPenInstaller
     {
@@ -25,15 +23,26 @@ namespace Orbiters.Toolkit.Editor.VRChat
         public const string PrefabName = "Drawing pen.prefab";
         internal const string Enabled = "Pen/Enabled", Grab = "Pen/Grab", Left = "Pen/Left", Right = "Pen/Right", Clear = "Pen/Clear";
         internal const string HeldLeft = "Pen/HeldLeft", HeldRight = "Pen/HeldRight", Drop = "Pen/Drop";
-        // Where the pen waits until it is bound to an avatar's chest.
-        private static readonly Vector3 DefaultSpawn = new Vector3(.12f, 1.25f, .35f);
-        public static OrbitersDrawingPen Find(GameObject avatar) => avatar != null ? avatar.GetComponentInChildren<OrbitersDrawingPen>(true) : null;
+        // Where the pen waits until it is bound to an avatar's head.
+        private static readonly Vector3 DefaultSpawn = new Vector3(.1f, 1.45f, .3f);
+        internal static readonly Color InkColour = new Color(.1f, .85f, 1f);
+
+        /// <summary>The pens below <paramref name="root"/>, known by their grab.</summary>
+        internal static IEnumerable<Transform> FindAll(GameObject root) => root == null ? Enumerable.Empty<Transform>() :
+            root.GetComponentsInChildren<VRCPhysBone>(true).Where(p => p.parameter == Grab).Select(PenOf).Where(p => p != null).ToList();
+
+        // The grab is "Grab base/Bone", two levels below the pen's root.
+        private static Transform PenOf(VRCPhysBone grab)
+        {
+            var root = grab.transform.parent != null ? grab.transform.parent.parent : null;
+            return root != null && root.Find(HeldPropRig.GrabBone) == grab.transform ? root : null;
+        }
 
         [InitializeOnLoadMethod]
         private static void RegisterAttachHook() => AttachmentHooks.Register((root, avatar) =>
         {
-            foreach (var pen in root.GetComponentsInChildren<OrbitersDrawingPen>(true)) Bind(pen, avatar);
-        });
+            foreach (var pen in FindAll(root)) Bind(pen, avatar);
+        }, root => FindAll(root).Any());
 
         /// <summary>Creates the pen prefab with its controller, menu, parameters and materials in <paramref name="folder"/>.</summary>
         public static string CreatePrefab(string folder)
@@ -56,113 +65,39 @@ namespace Orbiters.Toolkit.Editor.VRChat
 
         private static void Build(GameObject root, string folder)
         {
-            var marker = root.AddComponent<OrbitersDrawingPen>(); marker.generatedFolder = folder;
-            var home = Child(root.transform, "Spawn"); home.localPosition = DefaultSpawn;
-            var basis = Child(root.transform, "Grab base"); basis.localPosition = home.localPosition - Vector3.up * .02f;
-            var bone = Child(basis, "Bone");
-            var end = Child(bone, "Grip"); end.localPosition = Vector3.up * .02f;
-            var body = Child(root.transform, "Pen"); body.localPosition = home.localPosition;
-
-            // Only the last part of this short chain is grabbable. A separate constraint carries the visible prop,
-            // so stretching the grab chain never stretches its model or ink width.
-            var phys = bone.gameObject.AddComponent<VRCPhysBone>();
-            phys.rootTransform = bone; phys.endpointPosition = new Vector3(0, .001f, 0);
-            phys.pull = 1; phys.spring = 0; phys.immobile = 1;
-            phys.radius = .055f; phys.radiusCurve = AnimationCurve.Constant(0, .49f, 0);
-            phys.radiusCurve.AddKey(new Keyframe(.5f, 1)); phys.radiusCurve.AddKey(new Keyframe(1, 1));
-            phys.maxStretch = 1000; phys.maxSquish = 1; phys.grabMovement = 1;
-            phys.allowCollision = VRCPhysBoneBase.AdvancedBool.False;
-            phys.allowGrabbing = VRCPhysBoneBase.AdvancedBool.True;
-            phys.allowPosing = VRCPhysBoneBase.AdvancedBool.False;
-            phys.snapToHand = false; phys.resetWhenDisabled = true; phys.parameter = Grab;
-
-            var baseConstraint = basis.gameObject.AddComponent<VRCParentConstraint>();
-            baseConstraint.Sources.Add(new VRCConstraintSource(home, 1, new Vector3(0, -.02f, 0), Vector3.zero));
-            baseConstraint.Sources.Add(new VRCConstraintSource(body, 0, new Vector3(0, -.02f, 0), Vector3.zero));
-            baseConstraint.IsActive = true; baseConstraint.Locked = true;
-            baseConstraint.RebakeOffsetsWhenUnfrozen = false;
-            // Sources 1 and 2 are the left and right wrists, set by Bind on the avatar. The pen is held as it was
-            // grabbed: it is world-frozen until then, and unfreezing measures again where it sits from each source.
-            var follow = body.gameObject.AddComponent<VRCParentConstraint>();
-            follow.Sources.Add(new VRCConstraintSource(end, 1));
-            follow.Sources.Add(new VRCConstraintSource(null, 0));
-            follow.Sources.Add(new VRCConstraintSource(null, 0));
-            follow.IsActive = true; follow.Locked = true; follow.RebakeOffsetsWhenUnfrozen = true;
-
-            AddHandContact(body, "Left hand", Left, "HandL");
-            AddHandContact(body, "Right hand", Right, "HandR");
-            var shell = Material(folder, "Pen shell", new Color(.055f, .07f, .09f), "VRChat/Mobile/Toon Standard");
-            var inkMaterial = Material(folder, "Ink", Color.white, "Sprites/Default");
-            var accent = Material(folder, "Pen accent", marker.color, "VRChat/Mobile/Toon Standard");
-            var model = Child(body, "Model");
+            var rig = HeldPropRig.Build(root.transform, "Pen", DefaultSpawn, Grab, .055f, Left, Right, .18f, othersGrab: true, localContacts: false);
+            var shell = HeldPropRig.Material(folder, "Pen shell", new Color(.055f, .07f, .09f), "VRChat/Mobile/Toon Standard");
+            var inkMaterial = HeldPropRig.Material(folder, "Ink", Color.white, "Sprites/Default");
+            var accent = HeldPropRig.Material(folder, "Pen accent", InkColour, "VRChat/Mobile/Toon Standard");
+            var model = HeldPropRig.Child(rig.Body, "Model");
             // The constrained transform is the grip, not the model centre or the drawing tip.
             model.localPosition = Vector3.up * .035f;
-            Primitive(model, "Barrel", PrimitiveType.Capsule, new Vector3(.022f, .075f, .022f), Vector3.zero, shell);
-            Primitive(model, "Grip", PrimitiveType.Cylinder, new Vector3(.025f, .018f, .025f), new Vector3(0, -.035f, 0), accent);
-            Primitive(model, "Nib", PrimitiveType.Sphere, Vector3.one * .013f, new Vector3(0, -.079f, 0), accent);
-            var tip = Child(body, "Ink"); tip.localPosition = new Vector3(0, -.05f, 0);
-            marker.ink = tip.gameObject.AddComponent<TrailRenderer>();
-            marker.ink.sharedMaterial = inkMaterial; marker.ink.time = 0; marker.ink.emitting = false;
-            marker.ink.minVertexDistance = .002f; marker.ink.widthMultiplier = .006f;
-            marker.ink.numCornerVertices = 4; marker.ink.numCapVertices = 4;
-            marker.ink.startColor = marker.ink.endColor = marker.color;
-            marker.ink.shadowCastingMode = ShadowCastingMode.Off; marker.ink.receiveShadows = false;
-            marker.ink.lightProbeUsage = LightProbeUsage.Off; marker.ink.reflectionProbeUsage = ReflectionProbeUsage.Off;
-            marker.ink.autodestruct = false;
+            HeldPropRig.Primitive(model, "Barrel", PrimitiveType.Capsule, new Vector3(.022f, .075f, .022f), Vector3.zero, shell);
+            HeldPropRig.Primitive(model, "Grip", PrimitiveType.Cylinder, new Vector3(.025f, .018f, .025f), new Vector3(0, -.035f, 0), accent);
+            HeldPropRig.Primitive(model, "Nib", PrimitiveType.Sphere, Vector3.one * .013f, new Vector3(0, -.079f, 0), accent);
+            var tip = HeldPropRig.Child(rig.Body, "Ink"); tip.localPosition = new Vector3(0, -.05f, 0);
+            var ink = tip.gameObject.AddComponent<TrailRenderer>();
+            ink.sharedMaterial = inkMaterial; ink.time = 0; ink.emitting = false;
+            ink.minVertexDistance = .002f; ink.widthMultiplier = .006f;
+            ink.numCornerVertices = 4; ink.numCapVertices = 4;
+            ink.startColor = ink.endColor = InkColour;
+            ink.shadowCastingMode = ShadowCastingMode.Off; ink.receiveShadows = false;
+            ink.lightProbeUsage = LightProbeUsage.Off; ink.reflectionProbeUsage = ReflectionProbeUsage.Off;
+            ink.autodestruct = false;
             BuildController(root, folder);
             model.gameObject.SetActive(false);
-            phys.enabled = false;
+            rig.Grab.enabled = false;
         }
 
         /// <summary>
-        /// Fits a placed pen to <paramref name="avatar"/>: it waits in front of the chest and follows either wrist, from
-        /// wherever it was grabbed.
-        /// Recorded with Undo; binding again (another avatar, a moved armature) replaces the earlier fit.
+        /// Fits a placed pen to <paramref name="avatar"/>: it waits in front of the face (following the head while it is
+        /// off) and follows either wrist, from wherever it was grabbed. Recorded with Undo; binding again (another avatar,
+        /// a moved armature) replaces the earlier fit.
         /// </summary>
-        public static void Bind(OrbitersDrawingPen pen, Transform avatar)
+        public static void Bind(Transform pen, Transform avatar)
         {
             if (pen == null || avatar == null) throw new ArgumentNullException(pen == null ? nameof(pen) : nameof(avatar));
-            var animator = avatar.GetComponent<Animator>();
-            if (animator == null || !animator.isHuman) throw new InvalidOperationException("The drawing pen needs a humanoid avatar.");
-            var root = pen.transform;
-            var home = root.Find("Spawn"); var basis = root.Find("Grab base"); var body = root.Find("Pen");
-            var follow = body != null ? body.GetComponent<VRCParentConstraint>() : null;
-            if (home == null || basis == null || follow == null || follow.Sources.Count < 3) throw new InvalidOperationException("This drawing pen was modified: add it again.");
-            var chest = animator.GetBoneTransform(HumanBodyBones.Chest) ?? animator.GetBoneTransform(HumanBodyBones.Hips);
-            Undo.RecordObjects(new Object[] { home, basis, body, follow }, "Fit drawing pen");
-            home.position = chest.position + avatar.rotation * new Vector3(.12f, 0, .35f);
-            basis.localPosition = home.localPosition - Vector3.up * .02f;
-            body.localPosition = home.localPosition;
-            follow.Sources[1] = new VRCConstraintSource(animator.GetBoneTransform(HumanBodyBones.LeftHand), 0);
-            follow.Sources[2] = new VRCConstraintSource(animator.GetBoneTransform(HumanBodyBones.RightHand), 0);
-            EditorUtility.SetDirty(follow);
-        }
-
-        private static Transform Child(Transform parent, string name)
-        { var t = new GameObject(name).transform; t.SetParent(parent, false); return t; }
-
-        private static void AddHandContact(Transform body, string name, string parameter, string tag)
-        {
-            var receiver = Child(body, name).gameObject.AddComponent<VRCContactReceiver>();
-            receiver.radius = .11f; receiver.allowSelf = true; receiver.allowOthers = false;
-            receiver.localOnly = false; receiver.parameter = parameter;
-            receiver.collisionTags.Add(tag);
-        }
-
-        private static Material Material(string folder, string name, Color color, string shaderName)
-        {
-            var shader = Shader.Find(shaderName);
-            if (shader == null) throw new InvalidOperationException("Missing shader: " + shaderName);
-            var material = new Material(shader) { name = name };
-            material.color = color; AssetDatabase.CreateAsset(material, folder + "/" + name + ".mat"); return material;
-        }
-
-        private static void Primitive(Transform parent, string name, PrimitiveType type, Vector3 scale, Vector3 position, Material material)
-        {
-            var go = GameObject.CreatePrimitive(type); go.name = name; go.transform.SetParent(parent, false);
-            go.transform.localPosition = position; go.transform.localScale = scale;
-            Object.DestroyImmediate(go.GetComponent<Collider>());
-            go.GetComponent<Renderer>().sharedMaterial = material;
+            HeldPropRig.Bind(pen, "Pen", avatar, new Vector3(.1f, -.12f, .3f), "drawing pen");
         }
     }
 }

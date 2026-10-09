@@ -514,6 +514,78 @@ public sealed class AttachmentTests
         Assert.Less(Vector3.Distance(bones["Left arm"].TransformPoint(offset), arm.position), .0001f);
     }
 
+    private GameObject BiggerShirt()
+    {
+        var shirt = Clothing("Shirt", new[] { ("hips", "", ""), ("spine", "hips", ""), ("chest", "spine", ""), ("neck", "chest", ""),
+            ("shoulder.L", "chest", ""), ("upper_arm.L", "shoulder.L", ""), ("forearm.L", "upper_arm.L", "") });
+        shirt.transform.localScale = Vector3.one * 1.3f;
+        shirt.transform.position += Vector3.up * .4f;
+        return shirt;
+    }
+
+    private static void AssertRest(Dictionary<Transform, (Vector3 position, Quaternion rotation, Vector3 scale)> rest)
+    {
+        foreach (var pair in rest)
+        {
+            Assert.Less(Vector3.Distance(pair.Key.localPosition, pair.Value.position), 1e-4f, pair.Key.name);
+            Assert.Less(Quaternion.Angle(pair.Key.localRotation, pair.Value.rotation), .01f, pair.Key.name);
+            Assert.Less(Vector3.Distance(pair.Key.localScale, pair.Value.scale), 1e-4f, pair.Key.name);
+        }
+    }
+
+    // The posing preview moves the fitted bones without Undo: Cancel works where the shirt rests, and switching the preview
+    // off afterwards does not bring the fit back.
+    [Test] public void CancellingAFitWhileThePosePreviewRunsPutsTheClothingBackWhereItRested()
+    {
+        var shirt = BiggerShirt();
+        var rest = shirt.GetComponentsInChildren<Transform>().ToDictionary(t => t, t => (t.localPosition, t.localRotation, t.localScale));
+        var attachment = AttachmentInstaller.Install(AttachmentPlanner.Analyze(shirt, avatar.transform), new AttachmentOptions { Created = true, AddToggle = false });
+        Assert.NotNull(AttachmentFit.Fit(attachment, avatar.transform));
+        Assert.True(AccessoryPoseSync.Enable(avatar.transform), AccessoryPoseSync.LastStatus);
+        bones["Left shoulder"].localRotation = Quaternion.Euler(0, 0, 50);
+        AccessoryPoseSync.Sync();
+        Assert.True(AttachmentFit.Cancel(attachment), "the preview's pose is not a change of the user's");
+        Assert.False(AttachmentFit.Fitted(attachment));
+        Assert.True(AccessoryPoseSync.Enabled, "the preview follows again after the cancel");
+        AccessoryPoseSync.Disable();
+        AssertRest(rest);
+    }
+
+    // A bone the user moved since the fit stays theirs: the fit stays recorded until a forced Cancel puts it back too.
+    [Test] public void CancelKeepsTheFitOfBonesMovedSinceUntilForced()
+    {
+        var shirt = BiggerShirt();
+        var rest = shirt.GetComponentsInChildren<Transform>().ToDictionary(t => t, t => (t.localPosition, t.localRotation, t.localScale));
+        var attachment = AttachmentInstaller.Install(AttachmentPlanner.Analyze(shirt, avatar.transform), new AttachmentOptions { Created = true, AddToggle = false });
+        Assert.NotNull(AttachmentFit.Fit(attachment, avatar.transform));
+        var arm = shirt.GetComponentsInChildren<Transform>().Single(t => t.name == "upper_arm.L");
+        arm.localPosition += Vector3.up * .1f;
+        Assert.False(AttachmentFit.Cancel(attachment));
+        Assert.AreEqual(1, attachment.fitted.Count);
+        Assert.AreSame(arm, attachment.fitted[0].transform);
+        Assert.True(AttachmentFit.Cancel(attachment, force: true));
+        AssertRest(rest);
+    }
+
+    // Edits run with the preview paused, so Undo records where the shirt rests; undoing the fit while the preview runs
+    // keeps the shirt unfitted once the preview is switched off.
+    [Test] public void UndoingAFitWhileThePosePreviewRunsKeepsItUndone()
+    {
+        var shirt = BiggerShirt();
+        var rest = shirt.GetComponentsInChildren<Transform>().ToDictionary(t => t, t => (t.localPosition, t.localRotation, t.localScale));
+        var attachment = AttachmentInstaller.Install(AttachmentPlanner.Analyze(shirt, avatar.transform), new AttachmentOptions { Created = true, AddToggle = false });
+        Undo.IncrementCurrentGroup();
+        Assert.True(AccessoryPoseSync.Enable(avatar.transform), AccessoryPoseSync.LastStatus);
+        bones["Left shoulder"].localRotation = Quaternion.Euler(0, 0, 50);
+        AccessoryPoseSync.Sync();
+        Assert.NotNull(AttachmentFit.Fit(attachment, avatar.transform));
+        Undo.IncrementCurrentGroup();
+        Undo.PerformUndo();
+        Assert.False(AttachmentFit.Fitted(attachment));
+        AccessoryPoseSync.Disable();
+        AssertRest(rest);
+    }
+
     [Test] public void RemovingAnAccessoryTheToolPlacedDeletesIt()
     {
         var hat = GameObject.CreatePrimitive(PrimitiveType.Cube);

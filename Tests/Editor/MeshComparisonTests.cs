@@ -27,8 +27,11 @@ namespace Orbiters.Toolkit.Editor.Tests
                 if (mesh == null) continue;
                 var mine = parsed.FirstOrDefault(m => m.Path.EndsWith(renderer.name, System.StringComparison.Ordinal));
                 Assert.That(mine, Is.Not.Null, "No mesh read for " + renderer.name);
-                var toRoot = root.transform.worldToLocalMatrix * renderer.transform.localToWorldMatrix;
-                var unity = GeometryUtility.CalculateBounds(mesh.vertices, toRoot);
+                // The reader places meshes in the file's space, above every node. Unity makes a file's only top node the
+                // model's root and keeps that node's transform on it (AdBand.fbx: -90 degrees on X), so the root's own space
+                // is the node's, not the file's: compare in the model asset's space, which is the file's.
+                var toFile = renderer.transform.localToWorldMatrix;
+                var unity = GeometryUtility.CalculateBounds(mesh.vertices, toFile);
                 var read = GeometryUtility.CalculateBounds(mine.Points, Matrix4x4.identity);
                 Assert.That(Vector3.Distance(unity.center, read.center), Is.LessThan(unity.size.magnitude * 0.01f + 1e-4f), renderer.name + " centre");
                 Assert.That(Vector3.Distance(unity.size, read.size), Is.LessThan(unity.size.magnitude * 0.01f + 1e-4f), renderer.name + " size");

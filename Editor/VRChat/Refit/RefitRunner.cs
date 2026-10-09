@@ -6,6 +6,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Orbiters.Toolkit.Editor.Refit;
 using Orbiters.Toolkit.Editor.VRChat.BlendShapes;
+using Orbiters.Toolkit.Editor.VRChat.Posing;
 using Orbiters.Toolkit.VRChat;
 using UnityEditor;
 using UnityEngine;
@@ -115,10 +116,14 @@ namespace Orbiters.Toolkit.Editor.VRChat.Refit
             return completion.Task;
         }
 
-        /// <summary>The editor coroutine; <paramref name="done"/> is called once, also when cancelled. The avatar counts as running meanwhile.</summary>
+        /// <summary>
+        /// The editor coroutine; <paramref name="done"/> is called once, also when cancelled. The avatar counts as running
+        /// meanwhile, and its posing preview is paused: a refit captures and fits the clothing where it rests.
+        /// </summary>
         public static IEnumerator Run(RefitBatch batch, Action<float, string> progress, Action<RefitBatchResult> done, CancellationToken cancellation)
         {
             using (Hold(batch.Avatar))
+            using (AccessoryPoseSync.Pause(batch.Avatar))
             {
                 var steps = Steps(batch, progress, done, cancellation);
                 while (steps.MoveNext()) yield return steps.Current;

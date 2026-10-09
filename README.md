@@ -1,5 +1,48 @@
 # Orbiters Toolkit
 
+## 0.3.19 — 2026-10-09
+
+- **Hand screen** (`HandScreenInstaller.CreatePrefab`): the video the world is playing (its `_Udon_VideoTex` global
+  texture, shared by ProTV 3 and other players), letterboxed on a 16:9 screen with a handle on each side. One hand
+  carries it, both hands stretch it: each handle follows its own wrist and constraints work the screen's corners out
+  from the two handles (no animator maths). Let go, it stays in the world. Only its owner moves it; 4 bits of
+  parameters; needs VRCFury. Without a video in the world it shows a quiet play sign, as on its back. The prefab
+  carries its own shader and no Orbiters script (Toolkit releases ship without .meta files, so their GUIDs differ in
+  every project): a gallery copy works wherever it is installed, and Toolkit finds it by its left handle's grab.
+- **Hand screen**: the second hand takes the other handle while the first hand still holds its own. The first hand's
+  native grab used to have to end before the second hand counted, which on Touch only happens when the trigger is
+  pulled into a full fist, so with grip alone only one handle at a time could be held. Each one-hand hold now knows
+  which handle it holds and only the other handle's grab brings in the second hand.
+- **Drawing pen**: ink stops as soon as the trigger eases off past half way (it starts above 0.5 and stops below 0.4
+  of the fist's trigger pressure), instead of only once the trigger was almost released (below 0.2).
+- `UnityPackageReader`: the one `.unitypackage` reader of every Orbiters tool. It streams the archive once, checking its
+  structure as `UnityPackageIndex` did (tar checksums, record names, sizes, the expanded size and entry count, metadata
+  GUIDs, one GUID per path), and hands each record to the caller. `UnityPackageIndex`, `UnityPackageFiles.AssetHashes`
+  and `CopyEntries` (which now check the archive too, and copy long-name records as stored), MCB's source FBX extraction
+  and the Unity Package Manager all read through it. `Options.FirstLinePathname` (and `UnityPackageIndex.Read`'s
+  `firstLinePathname`) reads a pathname's first line, as Unity's importer does, for tools that only read a package.
+  `UnityPackageIndex.ExpandedBytes` gives the archive's decompressed size: a package nested in a ZIP is checked in one
+  pass instead of being decompressed twice.
+- The About window's third-party cards show "Author’s terms" for a project whose notice says it publishes no license
+  (GoGoLoco in My Avatar), instead of a "License" chip with nothing behind it.
+- `OrbitersAccountElement` takes `confirmLogout` to ask before signing out of every tool (MCB's account row uses it).
+- The Orbiters settings window names the development server `127.0.0.1:4100`, the address the tools use.
+- `HeldPropRig`: the drawing pen's grab rig (PhysBone pickup, wrist hold measured where it was grabbed, world-fixed
+  drop) and controller pieces, shared by the pen and the hand screen.
+- **Drawing pen** (and the hand screen): follows the hand the moment it is grabbed (the frozen "catch" lasted a whole
+  0.2 s clip, since an exit-time transition waits for the clip to loop), lets go as soon as the hand relaxes (Neutral or
+  Open) instead of only fully open, waits in front of the face wherever the owner looks (its spawn point follows the
+  head bone while it is off) and tells which hand took it from further away. Pens made before keep their behaviour
+  until made again.
+- **Drawing pen** carries no Orbiters script any more (the `OrbitersDrawingPen` marker stays only so older pens load
+  without a missing script): a gallery pen is found by its grab and fitted in any project, where it used to arrive with
+  a missing script and never follow the hands (Toolkit's script GUIDs differ in every project). `DrawingPenInstaller.Bind`
+  takes the pen's transform; `Find` is replaced by the internal `FindAll`.
+- `AttachmentHooks.Register(hook, claims)` and `AttachmentHooks.Fits`: a package of a prop a hook fits declares the
+  Toolkit version it needs (My Avatar 0.9.7's gallery packager), even when it refers to none of Toolkit's files.
+- Item pictures of props built from Unity's primitives (the drawing pen, the hand screen) no longer log "Destroying
+  assets is not permitted": only the meshes baked for the picture are freed.
+
 ## 0.3.18 — 2026-10-08
 
 - `AvatarParameterBudget` counts a face tracking template apart: objects an `AvatarParameterBudget.FaceTrackingOwners` hook claims (My Avatar's) have their parameters in `ParameterBudget.FaceTrackingBits`, taken out of `AvatarBits` and, when the custom base also owns them, out of `CustomBaseBits`. `BudgetCount` gets a `FaceTracking` share.
@@ -382,6 +425,8 @@ tool does not click any controls, change the scene, or capture pixels from the d
   `CreateInstance`; windows that need a menu setup routine may show their empty state.
 - `scroll_to` scrolls the hidden copy so the first element whose name, USS class or
   text matches is at the top.
+- `delay_ms` (0..8000) waits that much longer before the capture: an animation settled,
+  or a state reached a moment after the window opens.
 - `"inspect": "<instance ID | Root/Child | Scene:Root/Child | Assets/... path>"`
   captures a hidden Inspector locked on that object, without selecting it:
 

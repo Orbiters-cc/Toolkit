@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using Orbiters.Toolkit.Editor.Refit;
+using Orbiters.Toolkit.Editor.VRChat.Posing;
 using Orbiters.Toolkit.VRChat;
 using UnityEditor;
 using UnityEngine;
@@ -41,8 +42,16 @@ namespace Orbiters.Toolkit.Editor.VRChat.Refit
 
         // ---- Renderer state -----------------------------------------------------------------------------------------
 
-        /// <summary>The renderer's mesh, skinning, local pose and blendshape weights; transforms also by path under the root.</summary>
+        /// <summary>
+        /// The renderer's mesh, skinning, local pose and blendshape weights; transforms also by path under the root. Where the
+        /// clothing rests: a posing preview is paused meanwhile.
+        /// </summary>
         public static RefitRendererState Capture(Transform avatarRoot, SkinnedMeshRenderer renderer)
+        {
+            using (AccessoryPoseSync.Pause(avatarRoot)) return CaptureAtRest(avatarRoot, renderer);
+        }
+
+        private static RefitRendererState CaptureAtRest(Transform avatarRoot, SkinnedMeshRenderer renderer)
         {
             var state = new RefitRendererState
             {
@@ -106,10 +115,16 @@ namespace Orbiters.Toolkit.Editor.VRChat.Refit
         /// <summary>
         /// Puts a captured state back with Undo: the pose of every captured transform (recreating a missing one from its path),
         /// the mesh, bones, root bone, bounds and blendshape weights. Removes the refit engine's binding data from the renderer.
+        /// A posing preview is paused meanwhile, so the pose put back is where the clothing rests.
         /// </summary>
         public static bool Restore(Transform avatarRoot, SkinnedMeshRenderer renderer, RefitRendererState state, string undoName)
         {
             if (avatarRoot == null || renderer == null || state == null) return false;
+            using (AccessoryPoseSync.Pause(avatarRoot)) return RestoreAtRest(avatarRoot, renderer, state, undoName);
+        }
+
+        private static bool RestoreAtRest(Transform avatarRoot, SkinnedMeshRenderer renderer, RefitRendererState state, string undoName)
+        {
             bool restored = false;
             var poses = SavedPoses(state);
 

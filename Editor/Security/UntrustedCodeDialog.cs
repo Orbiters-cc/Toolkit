@@ -7,8 +7,9 @@ using UnityEngine.UIElements;
 namespace Orbiters.Toolkit.Editor
 {
     /// <summary>
-    /// Asks before content that contains code is imported: Unity compiles and runs it with the user's permissions. Cancel is
-    /// the default (Escape, closing the window). Returns false without asking in batch mode.
+    /// Asks before content that contains code is imported: Unity compiles and runs it with the user's permissions. Also asks,
+    /// with its own title and file kind, before an import replaces files the project already has. Cancel is the default
+    /// (Escape, closing the window). Returns false without asking in batch mode.
     /// </summary>
     public sealed class UntrustedCodeDialog : EditorWindow
     {
@@ -22,6 +23,8 @@ namespace Orbiters.Toolkit.Editor
             public string Message;
             public IReadOnlyList<string> Files;
             public string ConfirmLabel = "Import anyway";
+            /// <summary>The heading, the window's title and what each listed file is, as a noun taking an "s" ("code file").</summary>
+            public string Title = "This content contains code", WindowTitle = "Code in this download", FileKind = "code file";
         }
 
         private const string StyleSheetPath = "Packages/orbiters.toolkit/Editor/Security/untrusted-code-dialog.uss";
@@ -34,7 +37,7 @@ namespace Orbiters.Toolkit.Editor
             if (request == null || Application.isBatchMode) return false;
             var window = CreateInstance<UntrustedCodeDialog>();
             window.request = request;
-            window.titleContent = new GUIContent("Code in this download");
+            window.titleContent = new GUIContent(string.IsNullOrEmpty(request.WindowTitle) ? "Code in this download" : request.WindowTitle);
             var size = new Vector2(540, Mathf.Clamp(300 + 18 * Mathf.Min(request.Files?.Count ?? 0, 10), 340, 520));
             var main = EditorGUIUtility.GetMainWindowPosition();
             window.position = new Rect(main.center - size / 2, size);
@@ -61,7 +64,7 @@ namespace Orbiters.Toolkit.Editor
             var icon = new Image { image = EditorGUIUtility.IconContent("console.warnicon").image, scaleMode = ScaleMode.ScaleToFit };
             icon.AddToClassList("orb-code__icon"); header.Add(icon);
             var titles = new VisualElement(); titles.AddToClassList("orb-code__titles"); header.Add(titles);
-            titles.Add(Text("This content contains code", "orb-code__title"));
+            titles.Add(Text(string.IsNullOrEmpty(request.Title) ? "This content contains code" : request.Title, "orb-code__title"));
             string subject = string.IsNullOrEmpty(request.Author) ? request.Subject : $"{request.Subject} · by {request.Author}";
             if (!string.IsNullOrEmpty(subject)) titles.Add(Text(subject, "orb-code__subject"));
 
@@ -69,7 +72,8 @@ namespace Orbiters.Toolkit.Editor
             card.Add(Text(request.Message ?? "Orbiters does not review the files and scripts of this content. Unity compiles and runs code as soon as it is imported, with your permissions.", "orb-code__message"));
 
             int count = request.Files?.Count ?? 0;
-            root.Add(Text($"{count} code file{(count == 1 ? "" : "s")}", "orb-code__count"));
+            string kind = string.IsNullOrEmpty(request.FileKind) ? "code file" : request.FileKind;
+            root.Add(Text($"{count} {kind}{(count == 1 ? "" : "s")}", "orb-code__count"));
             var list = new ScrollView(ScrollViewMode.Vertical); list.AddToClassList("orb-code__list"); root.Add(list);
             foreach (var file in (request.Files ?? new List<string>()).Take(MaxListed)) list.Add(Text(file, "orb-code__file"));
             if (count > MaxListed) list.Add(Text($"…and {count - MaxListed} more", "orb-code__file"));

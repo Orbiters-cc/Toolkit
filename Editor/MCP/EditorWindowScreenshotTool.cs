@@ -27,6 +27,7 @@ namespace Orbiters.Toolkit.Editor
             [ToolParameter("Hidden copy height in points, up to 8000 (default: the window's own, or 2400 for inspect); tall values show long windows whole", Required = false)] public int height { get; set; }
             [ToolParameter("Scroll a hidden copy so the first element whose name, USS class or text matches is at the top", Required = false)] public string scroll_to { get; set; }
             [ToolParameter("Maximum image edge, 64..8192, or 0 for native pixels; default 0", Required = false)] public int max_resolution { get; set; }
+            [ToolParameter("Extra wait before the capture in milliseconds, 0..8000: lets animations settle or catches a later state", Required = false)] public int delay_ms { get; set; }
             [ToolParameter("Capture job identifier returned by capture", Required = false)] public string job_id { get; set; }
         }
 
@@ -38,6 +39,7 @@ namespace Orbiters.Toolkit.Editor
             internal string ScrollTo;
             internal bool Scrolled;
             internal int MaxResolution;
+            internal double Delay;
             internal double Started;
             internal int Ticks;
             internal object Result;
@@ -86,6 +88,7 @@ namespace Orbiters.Toolkit.Editor
             if (active != null) throw new InvalidOperationException("Another window capture is still pending.");
             if (p.max_resolution != 0 && (p.max_resolution < 64 || p.max_resolution > 8192))
                 throw new ArgumentException("max_resolution must be 0 or between 64 and 8192.");
+            if (p.delay_ms < 0 || p.delay_ms > 8000) throw new ArgumentException("delay_ms must be between 0 and 8000.");
             if (p.width < 0 || p.height < 0 || p.width > 8000 || p.height > 8000) throw new ArgumentException("width and height must be between 1 and 8000 points.");
 
             EditorWindow window;
@@ -122,7 +125,7 @@ namespace Orbiters.Toolkit.Editor
             foreach (var key in Jobs.Where(pair => pair.Value.Result != null).Select(pair => pair.Key).ToArray())
                 if (Jobs.Count >= 16) Jobs.Remove(key);
             var job = new Job { Id = Guid.NewGuid().ToString("N"), Window = window, Hidden = hidden, ScrollTo = string.IsNullOrWhiteSpace(p.scroll_to) ? null : p.scroll_to.Trim(),
-                MaxResolution = p.max_resolution, Started = EditorApplication.timeSinceStartup };
+                MaxResolution = p.max_resolution, Delay = p.delay_ms / 1000d, Started = EditorApplication.timeSinceStartup };
             Jobs.Add(job.Id, job);
             latestJobId = job.Id;
             active = job;
@@ -142,11 +145,11 @@ namespace Orbiters.Toolkit.Editor
             try
             {
                 double elapsed = EditorApplication.timeSinceStartup - job.Started;
-                if (elapsed > 20) throw new TimeoutException("Window capture timed out; retry when Unity is responsive.");
+                if (elapsed > 20 + job.Delay) throw new TimeoutException("Window capture timed out; retry when Unity is responsive.");
                 if (job.Window == null) throw new InvalidOperationException("The window closed before capture.");
                 // Yield to Unity's event loop; sleeping on the editor thread cannot complete a repaint. A hidden copy builds its
                 // UI first, then scrolls, then lays out once more.
-                if (++job.Ticks < 3 || elapsed < (job.Hidden ? 1.0 : 0.35)) { job.Window.Repaint(); return; }
+                if (++job.Ticks < 3 || elapsed < (job.Hidden ? 1.0 : 0.35) + job.Delay) { job.Window.Repaint(); return; }
                 if (job.ScrollTo != null && !job.Scrolled)
                 {
                     if (!EditorWindowHiddenHost.ScrollTo(job.Window, job.ScrollTo))

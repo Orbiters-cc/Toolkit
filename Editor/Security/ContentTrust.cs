@@ -70,14 +70,12 @@ namespace Orbiters.Toolkit.Editor
         public static List<string> PackageCode(UnityPackageIndex index, Func<string, string> resolveGuid) =>
             index?.CodeFilesIncludingExisting(resolveGuid) ?? new List<string>();
 
-        // A nested package's expansion is charged to the archive's budget before it is indexed within the rest of it.
+        // A nested package is indexed within what is left of the archive's budget, then charged to it: one pass.
         private static UnityPackageIndex ReadNested(string packagePath, string name, ArchiveBudget budget)
         {
-            long before = budget.TotalBytes;
-            using (var gzip = new GZipStream(File.OpenRead(packagePath), CompressionMode.Decompress))
-                budget.Copy(gzip, Stream.Null, name);
-            var index = UnityPackageIndex.Read(packagePath, maxExpandedBytes: Math.Max(1024L, budget.TotalBytes - before),
+            var index = UnityPackageIndex.Read(packagePath, maxExpandedBytes: Math.Max(1024L, budget.RemainingBytes),
                 maxEntries: Math.Max(1, budget.RemainingEntries));
+            budget.AddBytes(index.ExpandedBytes, name);
             budget.AddEntries(index.Entries.Count);
             return index;
         }

@@ -1,7 +1,9 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using Orbiters.Toolkit.Editor.Storage;
 using Orbiters.Toolkit.Editor.VRChat.BlendShapes;
+using Orbiters.Toolkit.Editor.VRChat.Posing;
 using Orbiters.Toolkit.VRChat;
 using UnityEditor;
 using UnityEngine;
@@ -73,9 +75,13 @@ namespace Orbiters.Toolkit.Editor.VRChat.Attachments
             return attachment;
         }
 
-        /// <summary>Makes a prop follow another bone (the user's or AI's choice), placing it on the bone when asked.</summary>
+        /// <summary>
+        /// Makes a prop follow another bone (the user's or AI's choice), placing it on the bone when asked. A posing preview
+        /// pauses meanwhile and then follows the new bone.
+        /// </summary>
         public static void Retarget(OrbitersAttachment attachment, Transform bone, bool snap)
         {
+            using var paused = AccessoryPoseSync.Pause(attachment.transform);
             Undo.RecordObject(attachment, "Attach accessory to " + bone.name);
             attachment.mode = OrbitersAttachment.AttachMode.Parent;
             attachment.links.Clear();
@@ -87,6 +93,7 @@ namespace Orbiters.Toolkit.Editor.VRChat.Attachments
         /// <summary>Adds bone links found later (AI answers); links of the same bone are replaced.</summary>
         public static void Link(OrbitersAttachment attachment, IEnumerable<(Transform from, Transform to)> links)
         {
+            using var paused = AccessoryPoseSync.Pause(attachment.transform);
             Undo.RecordObject(attachment, "Link accessory bones");
             foreach (var (from, to) in links)
             {
@@ -100,16 +107,24 @@ namespace Orbiters.Toolkit.Editor.VRChat.Attachments
 
         /// <summary>
         /// Deletes an accessory the tool placed. From one the user placed, takes off what the tool added and puts back what it
-        /// changed (constraints, place, blendshape weights) where the user did not change it since.
+        /// changed (constraints, place, blendshape weights) where the user did not change it since. Runs with the posing
+        /// preview paused: Undo brings the accessory back where it rests. Files generated for it go once nothing uses them.
         /// </summary>
         public static void Remove(OrbitersAttachment attachment)
         {
             if (attachment == null) return;
-            if (attachment.created) { Undo.DestroyObjectImmediate(attachment.gameObject); return; }
-            AttachmentFit.Cancel(attachment);
-            AttachmentChanges.Restore(attachment);
-            foreach (var component in attachment.added.Where(c => c != null).ToList()) Undo.DestroyObjectImmediate(component);
-            Undo.DestroyObjectImmediate(attachment);
+            using (AccessoryPoseSync.Pause(attachment.transform))
+            {
+                if (attachment.created) Undo.DestroyObjectImmediate(attachment.gameObject);
+                else
+                {
+                    AttachmentFit.Cancel(attachment);
+                    AttachmentChanges.Restore(attachment);
+                    foreach (var component in attachment.added.Where(c => c != null).ToList()) Undo.DestroyObjectImmediate(component);
+                    Undo.DestroyObjectImmediate(attachment);
+                }
+            }
+            GeneratedAssets.SweepSoon();
         }
 
         /// <summary>
