@@ -8,10 +8,17 @@ using UnityEngine;
 
 namespace Orbiters.Toolkit.Editor.VRChat.Refit
 {
-    /// <summary>Coverage is only requested for body clothing with evidence of different rig dimensions.</summary>
+    /// <summary>
+    /// Coverage is only requested for body clothing with evidence of different rig dimensions. Underwear, swimwear and
+    /// one-piece garments count as body clothing.
+    /// </summary>
     public static class ClothingCoverage
     {
-        private static readonly Regex Clothing = new Regex(@"\b(pants|shorts|trousers|hoodie|jacket|shirt|underwear)\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+        private static readonly Regex Clothing = new Regex(@"\b(pants|shorts|trousers|hoodie|jacket|shirt|underwear|briefs|boxers|thong|bra|jock|speedo|trunks)\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+        // Distinctive enough to count inside longer names ("classicJockstrap", "WickerOnesie").
+        private static readonly Regex Garments = new Regex("jockstrap|underwear|lingerie|panties|bikini|swimsuit|swimwear|leotard|bodysuit|onesie|jumpsuit", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+        private static readonly Regex Underwear = new Regex(@"\b(underwear|briefs|boxers|thong|bra|jock|speedo|trunks)\b|jockstrap|lingerie|panties|bikini", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+        private static readonly Regex OnePiece = new Regex("swimsuit|swimwear|leotard|bodysuit|onesie|jumpsuit", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
 
         public static bool Eligible(OrbitersAttachment attachment, bool madeForDifferentBase = false)
         {
@@ -47,11 +54,15 @@ namespace Orbiters.Toolkit.Editor.VRChat.Refit
         {
             name = name.Replace('_', ' ').Replace('-', ' ');
             if (Regex.IsMatch(name, @"\b(jacket|hoodie)\b", RegexOptions.IgnoreCase)) return 2;
-            if (Regex.IsMatch(name, @"\b(shirt|pants|shorts|trousers)\b", RegexOptions.IgnoreCase)) return 1;
-            return Regex.IsMatch(name, @"\bunderwear\b", RegexOptions.IgnoreCase) ? 0 : -1;
+            if (Regex.IsMatch(name, @"\b(shirt|pants|shorts|trousers)\b", RegexOptions.IgnoreCase) || OnePiece.IsMatch(name)) return 1;
+            return Underwear.IsMatch(name) ? 0 : -1;
         }
 
-        private static bool NamedClothing(string name) => Clothing.IsMatch(name.Replace('_', ' ').Replace('-', ' '));
+        private static bool NamedClothing(string name)
+        {
+            name = name.Replace('_', ' ').Replace('-', ' ');
+            return Clothing.IsMatch(name) || Garments.IsMatch(name);
+        }
 
         private static bool DifferentBase(OrbitersAttachment attachment, bool madeForDifferentBase)
         {

@@ -58,9 +58,17 @@ namespace Orbiters.Toolkit.Editor.VRChat.Parameters
 
         /// <summary>
         /// Parameters a build step leaves out of a VRCFury component's parameter assets (e.g. face tracking features My
-        /// Avatar does not sync): they are not counted. Each function returns the names for one component, or null.
+        /// Avatar does not sync), or out of the avatar's own expression parameters when the component is its
+        /// <see cref="VRCAvatarDescriptor"/> (e.g. those only menu items left out of the upload set): they are not counted.
+        /// Each function returns the names for one component, or null.
         /// </summary>
         public static readonly List<Func<Component, ICollection<string>>> BuildRemovedParameters = new List<Func<Component, ICollection<string>>>();
+
+        /// <summary>
+        /// VRCFury Toggles a build step leaves out with their menu item (e.g. items left out of the upload in My Avatar's
+        /// menu editor): their parameter is not counted. Each function tells for one Toggle component.
+        /// </summary>
+        public static readonly List<Func<Component, bool>> BuildRemovedToggles = new List<Func<Component, bool>>();
 
         /// <summary>
         /// Tells which objects are a face tracking template (My Avatar's), so their parameters are counted apart from the
@@ -80,12 +88,13 @@ namespace Orbiters.Toolkit.Editor.VRChat.Parameters
 
             var parameters = new List<Synced>();
             var synced = new Dictionary<string, VRCExpressionParameters.ValueType>();
+            var descriptorRemoved = RemovedByBuild(descriptor);
             if (descriptor.customExpressions)
             {
                 var uses = MenuUses(descriptor.expressionsMenu);
                 foreach (var parameter in SyncedParameters(descriptor.expressionParameters))
                 {
-                    if (synced.ContainsKey(parameter.name)) continue;
+                    if (synced.ContainsKey(parameter.name) || descriptorRemoved != null && descriptorRemoved.Contains(parameter.name)) continue;
                     synced[parameter.name] = parameter.valueType;
                     budget.DescriptorBits += Add(parameters, parameter.valueType, uses, parameter.name);
                 }
@@ -98,7 +107,7 @@ namespace Orbiters.Toolkit.Editor.VRChat.Parameters
             bool IsFaceTracking(GameObject go) => go != null && IsFaceTrackingOwner(go);
             bool IsCustomBase(GameObject go) => go != null && !IsFaceTracking(go) && options?.IsCustomBase != null && options.IsCustomBase(go);
             var components = avatarRoot.GetComponentsInChildren(vrcFuryType, true);
-            budget.FullControllerBits = FullControllerBits(components, synced, parameters, IsCustomBase, IsFaceTracking, out int customControllers, out int faceControllers);
+            budget.FullControllerBits = FullControllerBits(components, synced, descriptorRemoved, parameters, IsCustomBase, IsFaceTracking, out int customControllers, out int faceControllers);
             budget.ToggleBits = ToggleBits(components, parameters, IsCustomBase, IsFaceTracking, out int customToggles, out int faceToggles);
             budget.TotalBeforeCompression = budget.DescriptorBits + budget.ToggleBits + budget.FullControllerBits;
             budget.CustomBaseBits = customControllers + customToggles;
@@ -253,7 +262,7 @@ namespace Orbiters.Toolkit.Editor.VRChat.Parameters
             return false;
         }
 
-        private static int FullControllerBits(Component[] components, Dictionary<string, VRCExpressionParameters.ValueType> synced,
+        private static int FullControllerBits(Component[] components, Dictionary<string, VRCExpressionParameters.ValueType> synced, HashSet<string> descriptorRemoved,
             List<Synced> parameters, Func<GameObject, bool> isCustomBase, Func<GameObject, bool> isFaceTracking, out int custom, out int face)
         {
             custom = 0;
@@ -267,7 +276,6 @@ namespace Orbiters.Toolkit.Editor.VRChat.Parameters
                 if (content == null || !fullControllerType.IsInstanceOfType(content)) continue;
                 // VRCFury gives each Full Controller its own namespace. Only explicit globals share names.
                 var localNames = new HashSet<string>();
-                var globals = fullControllerType.GetField("globalParams")?.GetValue(content) as IEnumerable<string>;
                 var uses = new Dictionary<string, MenuUse>();
                 if (fullControllerType.GetField("menus")?.GetValue(content) is IEnumerable menus)
                     foreach (var entry in menus)
@@ -282,9 +290,10 @@ namespace Orbiters.Toolkit.Editor.VRChat.Parameters
                     foreach (var parameter in SyncedParameters(asset))
                     {
                         if (removed != null && removed.Contains(parameter.name)) continue;
-                        if (IsGlobal(parameter.name, globals))
+                        if (VrcFury.IsGlobalParameter(content, parameter.name))
                         {
-                            if (synced.ContainsKey(parameter.name)) continue;
+                            // The avatar's own parameter: left out with it.
+                            if (synced.ContainsKey(parameter.name) || descriptorRemoved != null && descriptorRemoved.Contains(parameter.name)) continue;
                             synced[parameter.name] = parameter.valueType;
                         }
                         else if (!localNames.Add(parameter.name)) continue;
@@ -313,23 +322,14 @@ namespace Orbiters.Toolkit.Editor.VRChat.Parameters
             return removed;
         }
 
-        private static bool IsGlobal(string name, IEnumerable<string> rules)
+        private static bool ToggleRemovedByBuild(Component component)
         {
-            bool global = false;
-            foreach (string rule in rules ?? Enumerable.Empty<string>())
+            foreach (var removes in BuildRemovedToggles)
             {
-                if (string.IsNullOrEmpty(rule)) continue;
-                bool negative = rule.StartsWith("!", StringComparison.Ordinal);
-                string match = negative ? rule.Substring(1) : rule;
-                bool wildcard = match.EndsWith("*", StringComparison.Ordinal);
-                if (wildcard) match = match.Substring(0, match.Length - 1);
-                if (name == match || (wildcard && name.StartsWith(match, StringComparison.Ordinal)))
-                {
-                    if (negative) return false;
-                    global = true;
-                }
+                try { if (removes(component)) return true; }
+                catch (Exception ex) { Debug.LogWarning("[Orbiters] A parameter budget hook failed on " + component.name + ": " + ex.Message); }
             }
-            return global;
+            return false;
         }
 
         // A toggle is a menu toggle, a radial when it is a slider, or a button when held.
@@ -344,7 +344,7 @@ namespace Orbiters.Toolkit.Editor.VRChat.Parameters
             {
                 if (component == null) continue;
                 var content = Content(component);
-                if (content == null || !toggleType.IsInstanceOfType(content)) continue;
+                if (content == null || !toggleType.IsInstanceOfType(content) || ToggleRemovedByBuild(component)) continue;
                 bool slider = (bool)(toggleType.GetField("slider")?.GetValue(content) ?? false);
                 bool integer = (bool)(toggleType.GetField("useInt")?.GetValue(content) ?? false);
                 bool held = (bool)(toggleType.GetField("holdButton")?.GetValue(content) ?? false);

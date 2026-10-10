@@ -31,7 +31,19 @@ namespace Orbiters.Toolkit.Editor.VRCFury
                 toggle.SetSaved();
                 if (defaultOn) toggle.SetDefaultOn();
                 toggle.GetActions().AddTurnOn(target);
-            });
+            }, Icon);
+        }
+
+        // Orbiters' default toggle icon (VRCFury's public API has none): set on the new component's model.
+        private static void Icon(Component toggle)
+        {
+            var serialized = new SerializedObject(toggle);
+            var enable = serialized.FindProperty("content.enableIcon");
+            var icon = serialized.FindProperty("content.icon.objRef");
+            if (enable == null || icon == null) return;
+            enable.boolValue = true;
+            icon.objectReferenceValue = VRChat.OrbitersMenuIcons.Toggle;
+            serialized.ApplyModifiedPropertiesWithoutUndo();
         }
 
         // The public API adds components without Undo: register the new one so Undo removes it.
@@ -46,13 +58,14 @@ namespace Orbiters.Toolkit.Editor.VRCFury
             });
         }
 
-        private static Component Created(GameObject host, System.Action create)
+        private static Component Created(GameObject host, System.Action create, System.Action<Component> finish = null)
         {
             var before = host.GetComponents(VRChat.VrcFury.Component).ToList();
             create();
             var added = host.GetComponents(VRChat.VrcFury.Component).FirstOrDefault(c => !before.Contains(c));
             if (added != null)
             {
+                finish?.Invoke(added);
                 Undo.RegisterCreatedObjectUndo(added, "Add VRCFury component");
                 EditorUtility.SetDirty(added);
                 PrefabUtility.RecordPrefabInstancePropertyModifications(added);

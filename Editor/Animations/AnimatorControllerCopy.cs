@@ -41,6 +41,17 @@ namespace Orbiters.Toolkit.Editor.Animations
             return copy;
         }
 
+        /// <summary>
+        /// A new blend tree with <paramref name="source"/>'s settings and children (the same motions). Unity asserts when a
+        /// blend tree holding other trees is instantiated, so trees are copied this way.
+        /// </summary>
+        public static BlendTree Tree(BlendTree source) => new BlendTree
+        {
+            name = source.name, blendType = source.blendType, blendParameter = source.blendParameter, blendParameterY = source.blendParameterY,
+            minThreshold = source.minThreshold, maxThreshold = source.maxThreshold, useAutomaticThresholds = source.useAutomaticThresholds,
+            children = source.children,
+        };
+
         /// <summary>Everything the copy made, its clips too.</summary>
         public IReadOnlyList<Object> Made => made;
 
@@ -97,11 +108,7 @@ namespace Orbiters.Toolkit.Editor.Animations
             if (motions.TryGetValue(source, out var known)) return known;
             if (source is BlendTree tree)
             {
-                var copied = Make(new BlendTree
-                {
-                    name = tree.name, blendType = tree.blendType, blendParameter = tree.blendParameter, blendParameterY = tree.blendParameterY,
-                    minThreshold = tree.minThreshold, maxThreshold = tree.maxThreshold, useAutomaticThresholds = tree.useAutomaticThresholds,
-                });
+                var copied = Make(Tree(tree));
                 motions[source] = copied;
                 copied.children = tree.children.Select(c => { c.motion = CopyMotion(c.motion); return c; }).ToArray();
                 return copied;

@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.IO;
 using System.Linq;
 using Orbiters.Toolkit.Editor.VRChat.Attachments;
 using UnityEditor;
@@ -63,23 +62,8 @@ namespace Orbiters.Toolkit.Editor.VRChat
         }, root => FindAll(root).Any());
 
         /// <summary>Creates the hand screen prefab with its controller, menu, parameters, mesh and materials in <paramref name="folder"/>.</summary>
-        public static string CreatePrefab(string folder)
-        {
-            if (VrcFury.Writer == null) throw new InvalidOperationException("Install VRCFury in Creator Companion to build the hand screen.");
-            if (folder == null || !folder.StartsWith("Assets/", StringComparison.Ordinal)) throw new ArgumentException("Create the hand screen below Assets/.");
-            string path = folder + "/" + PrefabName;
-            if (AssetDatabase.LoadAssetAtPath<GameObject>(path) != null) throw new InvalidOperationException(folder + " already holds a hand screen.");
-            Directory.CreateDirectory(folder); AssetDatabase.ImportAsset(folder);
-            var root = new GameObject("Hand screen");
-            try
-            {
-                Build(root, folder);
-                PrefabUtility.SaveAsPrefabAsset(root, path);
-                AssetDatabase.SaveAssets();
-                return path;
-            }
-            finally { Object.DestroyImmediate(root); }
-        }
+        public static string CreatePrefab(string folder) =>
+            HeldPropRig.SavePrefab(folder, PrefabName, "Hand screen", "hand screen", root => Build(root, folder));
 
         private static void Build(GameObject root, string folder)
         {
@@ -188,17 +172,7 @@ namespace Orbiters.Toolkit.Editor.VRChat
         }
 
         // The shader goes into the prop's folder, so the published package holds it.
-        private static Shader CopyShader(string folder)
-        {
-            var template = AssetDatabase.LoadAssetAtPath<TextAsset>(ShaderTemplate);
-            if (template == null) throw new InvalidOperationException("Missing " + ShaderTemplate + ": reinstall Orbiters Toolkit.");
-            string path = folder + "/Hand screen.shader";
-            File.WriteAllText(path, template.text);
-            AssetDatabase.ImportAsset(path, ImportAssetOptions.ForceSynchronousImport);
-            var shader = AssetDatabase.LoadAssetAtPath<Shader>(path);
-            if (shader == null) throw new InvalidOperationException("Unity did not import " + path + ".");
-            return shader;
-        }
+        private static Shader CopyShader(string folder) => HeldPropRig.CopyShader(ShaderTemplate, folder + "/Hand screen.shader");
 
         private static Material PictureMaterial(string folder, Shader shader, string name, bool video)
         {

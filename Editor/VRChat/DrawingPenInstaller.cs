@@ -1,13 +1,11 @@
 using System;
 using System.Collections.Generic;
-using System.IO;
 using System.Linq;
 using Orbiters.Toolkit.Editor.VRChat.Attachments;
 using UnityEditor;
 using UnityEngine;
 using UnityEngine.Rendering;
 using VRC.SDK3.Dynamics.PhysBone.Components;
-using Object = UnityEngine.Object;
 
 namespace Orbiters.Toolkit.Editor.VRChat
 {
@@ -45,23 +43,8 @@ namespace Orbiters.Toolkit.Editor.VRChat
         }, root => FindAll(root).Any());
 
         /// <summary>Creates the pen prefab with its controller, menu, parameters and materials in <paramref name="folder"/>.</summary>
-        public static string CreatePrefab(string folder)
-        {
-            if (VrcFury.Writer == null) throw new InvalidOperationException("Install VRCFury in Creator Companion to build the drawing pen.");
-            if (folder == null || !folder.StartsWith("Assets/", StringComparison.Ordinal)) throw new ArgumentException("Create the pen below Assets/.");
-            string path = folder + "/" + PrefabName;
-            if (AssetDatabase.LoadAssetAtPath<GameObject>(path) != null) throw new InvalidOperationException(folder + " already holds a drawing pen.");
-            Directory.CreateDirectory(folder); AssetDatabase.ImportAsset(folder);
-            var root = new GameObject("Drawing pen");
-            try
-            {
-                Build(root, folder);
-                PrefabUtility.SaveAsPrefabAsset(root, path);
-                AssetDatabase.SaveAssets();
-                return path;
-            }
-            finally { Object.DestroyImmediate(root); }
-        }
+        public static string CreatePrefab(string folder) =>
+            HeldPropRig.SavePrefab(folder, PrefabName, "Drawing pen", "drawing pen", root => Build(root, folder));
 
         private static void Build(GameObject root, string folder)
         {

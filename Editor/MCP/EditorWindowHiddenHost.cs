@@ -20,7 +20,8 @@ namespace Orbiters.Toolkit.Editor
     internal static class EditorWindowHiddenHost
     {
         private const BindingFlags Members = BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public;
-        // Far outside any display arrangement.
+        // Far outside any display arrangement. Unity keeps a window on a display (this lands in a display's corner), so the
+        // native window is moved there again through the system (NativeWindows); the capture reads the window's own surface.
         private static readonly Vector2 Offscreen = new Vector2(-32000f, -32000f);
 
         internal static readonly Type InspectorType = typeof(UnityEditor.Editor).Assembly.GetType("UnityEditor.InspectorWindow");
@@ -34,9 +35,12 @@ namespace Orbiters.Toolkit.Editor
             if (template != null) window.titleContent = new GUIContent(template.titleContent);
             var rect = new Rect(Offscreen, size);
             window.position = rect;
-            ShowWithoutFocus(window);
-            window.minSize = window.maxSize = size;
-            window.position = rect;
+            NativeWindows.ShowHidden(() =>
+            {
+                ShowWithoutFocus(window);
+                window.minSize = window.maxSize = size;
+                window.position = rect;
+            });
             return window;
         }
 
@@ -62,6 +66,55 @@ namespace Orbiters.Toolkit.Editor
                 throw new NotSupportedException("This Unity version cannot show a window without focusing it.");
             }
             show.Invoke(window, new[] { Enum.Parse(showMode, "PopupMenu"), (object)false });
+        }
+
+        // Windows a show creates never reach the screen: each is cloaked (still drawn, never displayed) the moment it
+        // exists, before Windows first shows it, then moved off every display without being activated. The hook lives
+        // only for the show, on Unity's main thread, so no reload can leave it calling into unloaded code.
+        private static class NativeWindows
+        {
+#if UNITY_EDITOR_WIN
+            private delegate bool EnumProc(IntPtr window, IntPtr data);
+            private delegate IntPtr HookProc(int code, IntPtr wParam, IntPtr lParam);
+            [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]
+            private struct CallResult { public IntPtr result, lParam, wParam; public uint message; public IntPtr window; }
+            [System.Runtime.InteropServices.DllImport("user32.dll")] private static extern bool EnumWindows(EnumProc proc, IntPtr data);
+            [System.Runtime.InteropServices.DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(IntPtr window, out uint process);
+            [System.Runtime.InteropServices.DllImport("user32.dll")] private static extern bool SetWindowPos(IntPtr window, IntPtr after, int x, int y, int width, int height, uint flags);
+            [System.Runtime.InteropServices.DllImport("user32.dll")] private static extern IntPtr SetWindowsHookEx(int hook, HookProc proc, IntPtr module, uint thread);
+            [System.Runtime.InteropServices.DllImport("user32.dll")] private static extern bool UnhookWindowsHookEx(IntPtr hook);
+            [System.Runtime.InteropServices.DllImport("user32.dll")] private static extern IntPtr CallNextHookEx(IntPtr hook, int code, IntPtr wParam, IntPtr lParam);
+            [System.Runtime.InteropServices.DllImport("kernel32.dll")] private static extern uint GetCurrentThreadId();
+            [System.Runtime.InteropServices.DllImport("dwmapi.dll")] private static extern int DwmSetWindowAttribute(IntPtr window, int attribute, ref int value, int size);
+            private const uint NoSize = 0x0001, NoZOrder = 0x0004, NoActivate = 0x0010, NoOwnerZOrder = 0x0200;
+            private const int AfterWindowProcedure = 12, Created = 0x0001, Cloak = 13;
+
+            internal static void ShowHidden(Action show)
+            {
+                HookProc cloak = (code, wParam, lParam) =>
+                {
+                    if (code >= 0 && System.Runtime.InteropServices.Marshal.PtrToStructure<CallResult>(lParam) is var call && call.message == Created)
+                    { int on = 1; DwmSetWindowAttribute(call.window, Cloak, ref on, sizeof(int)); }
+                    return CallNextHookEx(IntPtr.Zero, code, wParam, lParam);
+                };
+                var before = Own();
+                var hook = SetWindowsHookEx(AfterWindowProcedure, cloak, IntPtr.Zero, GetCurrentThreadId());
+                try { show(); }
+                finally { if (hook != IntPtr.Zero) UnhookWindowsHookEx(hook); GC.KeepAlive(cloak); }
+                foreach (var window in Own().Except(before))
+                    SetWindowPos(window, IntPtr.Zero, (int)Offscreen.x, (int)Offscreen.y, 0, 0, NoSize | NoZOrder | NoActivate | NoOwnerZOrder);
+            }
+
+            private static HashSet<IntPtr> Own()
+            {
+                uint own = (uint)System.Diagnostics.Process.GetCurrentProcess().Id;
+                var found = new HashSet<IntPtr>();
+                EnumWindows((window, _) => { GetWindowThreadProcessId(window, out uint process); if (process == own) found.Add(window); return true; }, IntPtr.Zero);
+                return found;
+            }
+#else
+            internal static void ShowHidden(Action show) => show();
+#endif
         }
 
         /// <summary>

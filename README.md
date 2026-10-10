@@ -1,5 +1,24 @@
 # Orbiters Toolkit
 
+## 0.3.20 — 2026-10-10
+
+- `OrbitersMenuIcons`: Orbiters' default VRChat menu icons, written once as 64 × 64 PNGs into
+  `Assets/Orbiters/Menu Icons/` (a white dot for toggles, a gauge for sliders, a folder for folders, an arrow for
+  **Next** pages). The toggles `VrcFuryWriter` makes, and the held props' toggles, buttons, sliders and folders
+  (`HeldPropRig`: drawing pen, hand screen), get them.
+- `AvatarParameterBudget`: `BuildRemovedParameters` is also asked about the avatar's own expression parameters (with its
+  `VRCAvatarDescriptor`; a Full Controller's global parameters left out there are left out too), and
+  `BuildRemovedToggles` tells which VRCFury Toggles a build leaves out. My Avatar uses both for items left out of the
+  upload. `VrcFury.IsGlobalParameter` reads a Full Controller's global parameter rules.
+- `AnimatorControllerCopy.Tree`: a new blend tree with another's settings and children. Unity asserts when a blend tree
+  holding other trees is instantiated; the controller copy and My Avatar's face tracking build copy trees this way.
+- Refit coverage (`ClothingCoverage`) counts underwear, swimwear and one-piece garments as body clothing by name
+  (jockstrap, briefs, boxers, thong, bra, speedo, trunks, lingerie, bikini, swimsuit, leotard, bodysuit, onesie,
+  jumpsuit): underwear is fitted first, as the innermost layer, and one-pieces with shirts and trousers.
+- `OrbitCamera` and `OffscreenPreview`: the 3D previews' camera (turn, move and zoom with the pointer, values gliding to
+  their targets, view presets with `LookFrom`) and their render into UI Toolkit textures, which always restores the
+  editor's lighting after `PreviewRenderUtility.Render`. MCB's version comparison and ReFit's stage use them.
+
 ## 0.3.19 — 2026-10-09
 
 - **Hand screen** (`HandScreenInstaller.CreatePrefab`): the video the world is playing (its `_Udon_VideoTex` global

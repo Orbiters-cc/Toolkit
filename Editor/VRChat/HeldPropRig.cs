@@ -16,17 +16,47 @@ using Object = UnityEngine.Object;
 namespace Orbiters.Toolkit.Editor.VRChat
 {
     /// <summary>
-    /// The grab rig of a held avatar prop (the drawing pen, the hand screen), on native avatar components only. The prop
-    /// waits at Spawn; the end of a short PhysBone chain picks it up; the owner's wrist then carries it from where it was
-    /// grabbed (one frame world-frozen, then unfrozen so each source's offset is measured where the prop is); let go, it
-    /// stays world-fixed. The rig is avatar-independent: <see cref="Bind"/> fits it to an avatar's head and wrists.
-    /// Also the controller pieces the props build their state machines from.
+    /// The grab rig of a held avatar prop (the drawing pen, the hand screen, the voting sign), on native avatar components
+    /// only. The prop waits at Spawn; the end of a short PhysBone chain picks it up; the owner's wrist then carries it from
+    /// where it was grabbed (one frame world-frozen, then unfrozen so each source's offset is measured where the prop is);
+    /// let go, it stays world-fixed. The rig is avatar-independent: <see cref="Bind"/> fits it to an avatar's head and
+    /// wrists. Also the pieces every generated avatar prop (held or worn on a finger) builds its prefab, controller and
+    /// menu from.
     /// </summary>
     internal static class HeldPropRig
     {
         internal const string Spawn = "Spawn", GrabBase = "Grab base", GrabBone = "Grab base/Bone";
         // The grab chain's root sits this far below the grip it moves.
         private static readonly Vector3 GripRise = Vector3.up * .02f;
+
+        /// <summary>A held prop's carried object, its model and the parameters of its rig and controller.</summary>
+        internal sealed class Names
+        {
+            public string Body, Model, Enabled, Grab, Left, Right, HeldLeft, HeldRight, Drop;
+            public string Grabbed => Grab + "_IsGrabbed";
+        }
+
+        /// <summary>
+        /// Creates the prefab <paramref name="prefabName"/> in <paramref name="folder"/> (below Assets/): <paramref name="build"/>
+        /// fills a new root object named <paramref name="rootName"/> and saves its assets in the folder.
+        /// </summary>
+        internal static string SavePrefab(string folder, string prefabName, string rootName, string what, Action<GameObject> build)
+        {
+            if (VrcFury.Writer == null) throw new InvalidOperationException("Install VRCFury in Creator Companion to build the " + what + ".");
+            if (folder == null || !folder.StartsWith("Assets/", StringComparison.Ordinal)) throw new ArgumentException("Create the " + what + " below Assets/.");
+            string path = folder + "/" + prefabName;
+            if (AssetDatabase.LoadAssetAtPath<GameObject>(path) != null) throw new InvalidOperationException(folder + " already holds a " + what + ".");
+            System.IO.Directory.CreateDirectory(folder); AssetDatabase.ImportAsset(folder);
+            var root = new GameObject(rootName);
+            try
+            {
+                build(root);
+                PrefabUtility.SaveAsPrefabAsset(root, path);
+                AssetDatabase.SaveAssets();
+                return path;
+            }
+            finally { Object.DestroyImmediate(root); }
+        }
 
         internal sealed class Parts
         {
@@ -156,7 +186,117 @@ namespace Orbiters.Toolkit.Editor.VRChat
             EditorUtility.SetDirty(follow);
         }
 
+        /// <summary>
+        /// Ties <paramref name="anchor"/> (its parent constraint's first source) to the tip of the right index finger, turned
+        /// like the avatar as it stands now. Recorded with Undo; binding again replaces the earlier fit.
+        /// </summary>
+        internal static void FollowFingertip(Transform anchor, Animator animator, Transform avatar, string prop)
+        {
+            var follow = anchor != null ? anchor.GetComponent<VRCParentConstraint>() : null;
+            if (follow == null || follow.Sources.Count < 1) throw new InvalidOperationException("This " + prop + " was modified: add it again.");
+            var (bone, tip) = Fingertip(animator, prop);
+            Undo.RecordObjects(new Object[] { anchor, follow }, "Fit " + prop);
+            anchor.SetPositionAndRotation(tip, avatar.rotation);
+            // Offsets are in the finger's axes, unscaled, as for the head.
+            var turn = Quaternion.Inverse(bone.rotation);
+            follow.Sources[0] = new VRCConstraintSource(bone, 1, turn * (tip - bone.position), (turn * avatar.rotation).eulerAngles);
+            EditorUtility.SetDirty(follow);
+        }
+
+        /// <summary>
+        /// The bone the right index fingertip moves with, and where the tip is: the end of the last finger bone (its child, or
+        /// as far again as the bone before it). Avatars without finger bones use the end of the hand.
+        /// </summary>
+        internal static (Transform bone, Vector3 tip) Fingertip(Animator animator, string prop)
+        {
+            var hand = animator.GetBoneTransform(HumanBodyBones.RightHand);
+            if (hand == null) throw new InvalidOperationException("The " + prop + " needs an avatar with a right hand.");
+            var bone = new[] { HumanBodyBones.RightIndexDistal, HumanBodyBones.RightIndexIntermediate, HumanBodyBones.RightIndexProximal }
+                .Select(animator.GetBoneTransform).FirstOrDefault(b => b != null) ?? hand;
+            var before = bone == hand ? animator.GetBoneTransform(HumanBodyBones.RightLowerArm) : bone.parent;
+            float reach = before != null ? Vector3.Distance(before.position, bone.position) : 0;
+            if (reach < .0001f) return (bone, bone.position);
+            if (bone != hand && bone.childCount > 0)
+            {
+                float end = Vector3.Distance(bone.GetChild(0).position, bone.position);
+                if (end > .001f && end < reach * 2) return (bone, bone.GetChild(0).position);
+            }
+            // A hand is about a third of a forearm long; a fingertip about as long as the bone before it.
+            var along = (bone.position - before.position) / reach;
+            return (bone, bone.position + along * (bone == hand ? reach * .35f : reach * .8f));
+        }
+
         // ---- Controller pieces ----
+
+        /// <summary>The bools and gestures every held prop's controller reads (<see cref="HeldLayers"/>).</summary>
+        internal static void HeldParameters(AnimatorController controller, Names names)
+        {
+            foreach (var parameter in new[] { names.Enabled, names.Grabbed, names.Left, names.Right, names.HeldLeft, names.HeldRight, names.Drop, "IsLocal" })
+                controller.AddParameter(parameter, AnimatorControllerParameterType.Bool);
+            controller.AddParameter("GestureLeft", AnimatorControllerParameterType.Int);
+            controller.AddParameter("GestureRight", AnimatorControllerParameterType.Int);
+        }
+
+        /// <summary>
+        /// A held prop's first two layers: where it is (off, waiting at Spawn, dropped, held by a guest's grab or by the
+        /// owner's wrist) in the base layer, and the owner's grip latch in "Owner grip".
+        /// </summary>
+        internal static void HeldLayers(AnimatorController controller, Names n)
+        {
+            AnimationClip Clip(bool visible, bool baseFrozen, bool frozen, bool atHome, int hand = 0, bool resetGrip = false) =>
+                PropClip(n.Body, n.Model, visible, baseFrozen, frozen, atHome, hand == 1, hand == 2, visible && hand == 0, resetGrip);
+            var machine = controller.layers[0].stateMachine;
+            var off = State(controller, machine, "Off", Clip(false, false, false, true));
+            var spawn = State(controller, machine, "Spawn", Clip(true, false, false, true, resetGrip: true));
+            var dropped = State(controller, machine, "Dropped", Clip(true, false, true, false));
+            var held = State(controller, machine, "Guest held", Clip(true, true, false, false));
+            var left = State(controller, machine, "Left hand", Clip(true, false, false, false, 1));
+            var right = State(controller, machine, "Right hand", Clip(true, false, false, false, 2));
+            // One frame world-frozen between following the grabbed bone and following the wrist: unfreezing measures the
+            // wrist's offset where the prop is, so it never jumps into a set pose in the hand.
+            var catchLeft = State(controller, machine, "Left catch", Clip(true, false, true, false, 1));
+            var catchRight = State(controller, machine, "Right catch", Clip(true, false, true, false, 2));
+            machine.defaultState = off;
+            Transition(off, spawn, (n.Enabled, AnimatorConditionMode.If, 0));
+            foreach (var state in new[] { spawn, dropped, held, left, right, catchLeft, catchRight })
+                Transition(state, off, (n.Enabled, AnimatorConditionMode.IfNot, 0));
+            // The next update: a transition only waits for exit time when its clip loops (0.2 s here).
+            Transition(spawn, dropped, (n.Enabled, AnimatorConditionMode.If, 0));
+            // Dropped is already frozen; held follows the grabbed bone and is frozen for a frame first.
+            Transition(dropped, left, (n.HeldLeft, AnimatorConditionMode.If, 0));
+            Transition(dropped, right, (n.HeldRight, AnimatorConditionMode.If, 0));
+            Transition(held, catchLeft, (n.HeldLeft, AnimatorConditionMode.If, 0));
+            Transition(held, catchRight, (n.HeldRight, AnimatorConditionMode.If, 0));
+            Transition(catchLeft, left, (n.HeldLeft, AnimatorConditionMode.If, 0));
+            Transition(catchRight, right, (n.HeldRight, AnimatorConditionMode.If, 0));
+            Transition(dropped, held, (n.Grabbed, AnimatorConditionMode.If, 0),
+                (n.HeldLeft, AnimatorConditionMode.IfNot, 0), (n.HeldRight, AnimatorConditionMode.IfNot, 0));
+            Transition(held, dropped, (n.Grabbed, AnimatorConditionMode.IfNot, 0));
+            Transition(left, dropped, (n.HeldLeft, AnimatorConditionMode.IfNot, 0));
+            Transition(right, dropped, (n.HeldRight, AnimatorConditionMode.IfNot, 0));
+
+            // A PhysBone starts the owner's pickup, but must not own the continuing hold:
+            // Touch's grab/pose inputs can release that grab while the fist is being squeezed.
+            // Latch the hand locally and sync it so observers also follow the owner's wrist.
+            var ownership = Layer(controller, "Owner grip");
+            var free = State(controller, ownership, "Free", new AnimationClip());
+            var ownerLeft = State(controller, ownership, "Hold left", new AnimationClip());
+            var ownerRight = State(controller, ownership, "Hold right", new AnimationClip());
+            ownership.defaultState = free;
+            Hold(free, n.HeldLeft, n.HeldRight, false, false);
+            Hold(ownerLeft, n.HeldLeft, n.HeldRight, true, false);
+            Hold(ownerRight, n.HeldLeft, n.HeldRight, false, true);
+            foreach (var side in new[] { (state: ownerLeft, contact: n.Left, gesture: "GestureLeft"),
+                (state: ownerRight, contact: n.Right, gesture: "GestureRight") })
+            {
+                Transition(free, side.state, new[] { ("IsLocal", AnimatorConditionMode.If, 0f), (n.Enabled, AnimatorConditionMode.If, 0f),
+                    (n.Drop, AnimatorConditionMode.IfNot, 0f), (n.Grabbed, AnimatorConditionMode.If, 0f),
+                    (side.contact, AnimatorConditionMode.If, 0f) }.Concat(Gripping(side.gesture)).ToArray());
+                Transition(side.state, free, (n.Enabled, AnimatorConditionMode.IfNot, 0));
+                Transition(side.state, free, (n.Drop, AnimatorConditionMode.If, 0));
+                LetGo(side.state, free, side.gesture);
+            }
+        }
 
         /// <summary>
         /// Where the prop is in one state: shown or not, which wrists carry <paramref name="body"/> (neither: the grab
@@ -266,13 +406,20 @@ namespace Orbiters.Toolkit.Editor.VRChat
             sub.controls = controls;
             AssetDatabase.CreateAsset(sub, folder + "/" + subMenuName + ".asset");
             var menu = ScriptableObject.CreateInstance<VRCExpressionsMenu>();
-            menu.controls = new List<VRCExpressionsMenu.Control> { new VRCExpressionsMenu.Control { name = menuPath, type = VRCExpressionsMenu.Control.ControlType.SubMenu, subMenu = sub } };
+            menu.controls = new List<VRCExpressionsMenu.Control>
+            { new VRCExpressionsMenu.Control { name = menuPath, type = VRCExpressionsMenu.Control.ControlType.SubMenu, subMenu = sub, icon = OrbitersMenuIcons.Submenu } };
             AssetDatabase.CreateAsset(menu, folder + "/Menu.asset");
             VrcFury.Writer.FullController(root, controller, menu, asset);
         }
 
+        // Orbiters' default icons: a dot for toggles and buttons, a gauge for sliders, a folder for submenus.
         internal static VRCExpressionsMenu.Control Control(string name, VRCExpressionsMenu.Control.ControlType type, string parameter) =>
-            new VRCExpressionsMenu.Control { name = name, type = type, parameter = new VRCExpressionsMenu.Control.Parameter { name = parameter }, value = 1 };
+            new VRCExpressionsMenu.Control
+            {
+                name = name, type = type, parameter = new VRCExpressionsMenu.Control.Parameter { name = parameter }, value = 1,
+                icon = type == VRCExpressionsMenu.Control.ControlType.SubMenu ? OrbitersMenuIcons.Submenu
+                    : type == VRCExpressionsMenu.Control.ControlType.RadialPuppet ? OrbitersMenuIcons.Slider : OrbitersMenuIcons.Toggle,
+            };
 
         // ---- Scene pieces ----
 
@@ -303,6 +450,62 @@ namespace Orbiters.Toolkit.Editor.VRChat
             Object.DestroyImmediate(go.GetComponent<Collider>());
             go.GetComponent<Renderer>().sharedMaterial = material;
             return go.transform;
+        }
+
+        /// <summary>
+        /// Saves <paramref name="width"/> × <paramref name="height"/> pixels from <paramref name="pixel"/> (x, y in 0..1) as
+        /// <paramref name="name"/>.png in <paramref name="folder"/>, imported clamped with its alpha as transparency.
+        /// </summary>
+        internal static Texture2D Png(string folder, string name, int width, int height, Func<float, float, Color> pixel)
+        {
+            var texture = new Texture2D(width, height, TextureFormat.RGBA32, false);
+            try
+            {
+                for (int y = 0; y < height; y++)
+                for (int x = 0; x < width; x++)
+                    texture.SetPixel(x, y, pixel((x + .5f) / width, (y + .5f) / height));
+                string path = folder + "/" + name + ".png";
+                System.IO.File.WriteAllBytes(path, texture.EncodeToPNG());
+                AssetDatabase.ImportAsset(path, ImportAssetOptions.ForceSynchronousImport);
+                var importer = (TextureImporter)AssetImporter.GetAtPath(path);
+                importer.alphaIsTransparency = true; importer.wrapMode = TextureWrapMode.Clamp;
+                importer.SaveAndReimport();
+                return AssetDatabase.LoadAssetAtPath<Texture2D>(path);
+            }
+            finally { Object.DestroyImmediate(texture); }
+        }
+
+        /// <summary>A soft white dot with a faint four-pointed glint, for additive sparkles.</summary>
+        internal static Texture2D Sparkle(string folder) => Png(folder, "Sparkle", 64, 64, (x, y) =>
+        {
+            float dx = Mathf.Abs(x - .5f) * 2, dy = Mathf.Abs(y - .5f) * 2, r = Mathf.Sqrt(dx * dx + dy * dy);
+            float glow = Mathf.Pow(Mathf.Clamp01(1 - r), 2.5f);
+            float glint = Mathf.Clamp01(1 - r) * Mathf.Clamp01(1 - Mathf.Min(dx, dy) * 14) * .7f;
+            return new Color(1, 1, 1, Mathf.Clamp01(glow + glint));
+        });
+
+        /// <summary>
+        /// Writes the Toolkit's shader <paramref name="template"/> (a .shader.txt) to <paramref name="path"/> in a prop's
+        /// folder, so the published package holds the shader itself rather than a Toolkit file another project knows by
+        /// another GUID.
+        /// </summary>
+        internal static Shader CopyShader(string template, string path)
+        {
+            var text = AssetDatabase.LoadAssetAtPath<TextAsset>(template);
+            if (text == null) throw new InvalidOperationException("Missing " + template + ": reinstall Orbiters Toolkit.");
+            System.IO.File.WriteAllText(path, text.text);
+            AssetDatabase.ImportAsset(path, ImportAssetOptions.ForceSynchronousImport);
+            var shader = AssetDatabase.LoadAssetAtPath<Shader>(path);
+            if (shader == null) throw new InvalidOperationException("Unity did not import " + path + ".");
+            return shader;
+        }
+
+        /// <summary>An additive particle material (VRChat's mobile shader, so every platform shows it).</summary>
+        internal static Material Additive(string folder, string name, Texture texture)
+        {
+            var material = Material(folder, name, Color.white, "VRChat/Mobile/Particles/Additive");
+            material.mainTexture = texture; EditorUtility.SetDirty(material);
+            return material;
         }
     }
 }

@@ -80,6 +80,30 @@ namespace Orbiters.Toolkit.Editor.VRChat
             return null;
         }
 
+        /// <summary>
+        /// Whether a Full Controller (its feature) shares <paramref name="name"/> with the avatar (its "globalParams" rules:
+        /// names, "prefix*" wildcards, "!" exceptions) instead of giving it its own namespace.
+        /// </summary>
+        public static bool IsGlobalParameter(object fullController, string name)
+        {
+            var rules = Field(fullController, "globalParams") as IEnumerable<string>;
+            bool global = false;
+            foreach (string rule in rules ?? Enumerable.Empty<string>())
+            {
+                if (string.IsNullOrEmpty(rule)) continue;
+                bool negative = rule.StartsWith("!", StringComparison.Ordinal);
+                string match = negative ? rule.Substring(1) : rule;
+                bool wildcard = match.EndsWith("*", StringComparison.Ordinal);
+                if (wildcard) match = match.Substring(0, match.Length - 1);
+                if (name == match || (wildcard && name.StartsWith(match, StringComparison.Ordinal)))
+                {
+                    if (negative) return false;
+                    global = true;
+                }
+            }
+            return global;
+        }
+
         /// <summary>The object behind VRCFury's GuidWrapper fields (controllers, menus, parameter assets).</summary>
         public static UnityEngine.Object ObjectReference(object wrapper)
         {
