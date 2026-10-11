@@ -1,5 +1,17 @@
 # Orbiters Toolkit
 
+## 0.3.21 — 2026-10-11
+
+- `SafeArchive.Extract` stages into `<folder>.building-<8 hex>` and `SafePaths.ReplaceDirectory` sets the previous
+  folder aside as `<folder>.trash-<8 hex>`, both named by `SafePaths.Sibling` (they added a whole 32-digit GUID). Their
+  files must fit the 259 characters Unity can use on Windows (`SafePaths.MaxPathLength`; Unity is not long-path aware,
+  whatever the system setting): MCB downloads failed with "Could not find a part of the path" in ordinary project
+  folders.
+- `SafeArchive.RequireRoom` and `SafePaths.RequireLength`: an archive whose files would not fit is refused before
+  anything is written, with a message saying how many characters shorter the project's folder path must be. Callers
+  that know the files can check before downloading (MCB does).
+- A staging folder that cannot be deleted no longer hides why the extraction failed.
+
 ## 0.3.20 — 2026-10-10
 
 - `OrbitersMenuIcons`: Orbiters' default VRChat menu icons, written once as 64 × 64 PNGs into

@@ -14,6 +14,8 @@ namespace Orbiters.Toolkit.Editor.Storage
     /// </summary>
     public static class SafeArchive
     {
+        private const string StagingKind = "building";
+
         /// <param name="capture">Relative paths whose bytes to return (within the budget's captured limit).</param>
         /// <param name="validate">Called with the staging folder before it replaces the destination; throw to refuse.</param>
         /// <returns>The captured entries' bytes, by relative path.</returns>
@@ -27,7 +29,7 @@ namespace Orbiters.Toolkit.Editor.Storage
                 StringComparer.OrdinalIgnoreCase);
 
             string finalPath = Path.GetFullPath(destination);
-            string staging = finalPath + ".building-" + Guid.NewGuid().ToString("N");
+            string staging = SafePaths.Sibling(finalPath, StagingKind);
             try
             {
                 // Open the archive before making a staging directory; the previous folder stays intact.
@@ -35,7 +37,6 @@ namespace Orbiters.Toolkit.Editor.Storage
                 {
                     SafePaths.RejectLinks(Path.GetDirectoryName(finalPath), finalPath);
                     budget.AddEntries(archive.Entries.Count);
-                    Directory.CreateDirectory(staging);
                     var files = archive.Entries.Where(entry => entry != null && !IsDirectory(entry)).ToList();
                     if (files.Count == 0) throw new InvalidDataException($"The {budget.Subject} archive is empty.");
                     foreach (var entry in files)
@@ -47,14 +48,20 @@ namespace Orbiters.Toolkit.Editor.Storage
                         if (!safe) throw new InvalidDataException($"The {budget.Subject} archive contains an unsafe path: {entry.FullName}");
                     }
                     string rootPrefix = SingleRootPrefix(files);
+                    string Relative(ZipArchiveEntry entry)
+                    {
+                        string relative = Normalize(entry.FullName);
+                        if (!string.IsNullOrEmpty(relative) && !string.IsNullOrEmpty(rootPrefix) && relative.StartsWith(rootPrefix, StringComparison.OrdinalIgnoreCase))
+                            relative = Normalize(relative.Substring(rootPrefix.Length));
+                        return string.IsNullOrWhiteSpace(relative) ? null : relative;
+                    }
+                    RequireRoom(finalPath, files.Select(Relative));
+                    Directory.CreateDirectory(staging);
 
                     foreach (var entry in files)
                     {
-                        string relative = Normalize(entry.FullName);
-                        if (string.IsNullOrWhiteSpace(relative)) continue;
-                        if (!string.IsNullOrEmpty(rootPrefix) && relative.StartsWith(rootPrefix, StringComparison.OrdinalIgnoreCase))
-                            relative = Normalize(relative.Substring(rootPrefix.Length));
-                        if (string.IsNullOrWhiteSpace(relative)) continue;
+                        string relative = Relative(entry);
+                        if (relative == null) continue;
 
                         string output = Path.GetFullPath(Path.Combine(staging, relative.Replace('/', Path.DirectorySeparatorChar)));
                         if (!SafePaths.IsSameOrChild(output, staging))
@@ -78,8 +85,23 @@ namespace Orbiters.Toolkit.Editor.Storage
             }
             finally
             {
-                if (Directory.Exists(staging)) Directory.Delete(staging, true);
+                // A failed cleanup must not hide why the extraction failed.
+                try { if (Directory.Exists(staging)) Directory.Delete(staging, true); }
+                catch (IOException) { }
+                catch (UnauthorizedAccessException) { }
             }
+        }
+
+        /// <summary>
+        /// Refuses, with steps the user can take, files Windows could not hold once <see cref="Extract"/> expands them for
+        /// <paramref name="destination"/> (the staging folder's path is the longest). Callers that know the files can check
+        /// before downloading anything.
+        /// </summary>
+        public static void RequireRoom(string destination, IEnumerable<string> relativeFiles)
+        {
+            string staging = SafePaths.Sibling(destination, StagingKind);
+            foreach (string relative in (relativeFiles ?? Enumerable.Empty<string>()).Select(Normalize).Where(path => !string.IsNullOrWhiteSpace(path)))
+                SafePaths.RequireLength(Path.Combine(staging, relative.Replace('/', Path.DirectorySeparatorChar)));
         }
 
         public static string Normalize(string path)

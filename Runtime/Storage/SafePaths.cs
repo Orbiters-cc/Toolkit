@@ -15,6 +15,31 @@ namespace Orbiters.Toolkit.Storage
         private static readonly StringComparison PathComparison = Path.DirectorySeparatorChar == '\\'
             ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
 
+        /// <summary>
+        /// The longest file path Unity can use on Windows (MAX_PATH less its terminating null): Unity is not long-path aware,
+        /// whatever the system's setting.
+        /// </summary>
+        public const int MaxPathLength = 259;
+
+        /// <summary>
+        /// A sibling of <paramref name="path"/> named "&lt;name&gt;.&lt;kind&gt;-&lt;8 hex&gt;", to stage or set a folder aside. Its files
+        /// keep their names in it, so the suffix stays short: they must still fit <see cref="MaxPathLength"/>.
+        /// </summary>
+        public static string Sibling(string path, string kind) =>
+            Path.GetFullPath(path).TrimEnd('/', '\\') + "." + kind + "-" + Guid.NewGuid().ToString("N").Substring(0, 8);
+
+        /// <summary>Refuses a path too long for Windows, saying how much shorter the project's folder must be.</summary>
+        public static void RequireLength(string fullPath)
+        {
+            if (Path.DirectorySeparatorChar != '\\' || fullPath == null || fullPath.Length <= MaxPathLength) return;
+            string project = Directory.GetCurrentDirectory().TrimEnd('/', '\\');
+            string shorter = Path.Combine(Path.GetPathRoot(project) ?? "", "Unity", Path.GetFileName(project));
+            throw new PathTooLongException(
+                $"The project's folder path is too long for Windows: a file would need {fullPath.Length} characters, and Unity can use " +
+                $"at most {MaxPathLength}. Move the project to a folder path at least {fullPath.Length - MaxPathLength} characters " +
+                $"shorter (for example {shorter}) and try again.");
+        }
+
         /// <summary>A plain file or folder name: no separators, reserved characters or trailing dot.</summary>
         public static void ValidateLabel(string value, string parameter)
         {
@@ -82,7 +107,7 @@ namespace Orbiters.Toolkit.Storage
                 throw new InvalidDataException("Replacement requires a distinct sibling staging folder.");
             RejectLinks(parent, staged);
             RejectLinks(parent, final);
-            string previous = final + ".trash-" + Guid.NewGuid().ToString("N");
+            string previous = Sibling(final, "trash");
             bool moved = false;
             try
             {
