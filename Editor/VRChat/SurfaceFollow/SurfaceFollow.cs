@@ -96,7 +96,7 @@ namespace Orbiters.Toolkit.Editor.VRChat.SurfaceFollow
 
         private static Mesh MeshOf(Renderer renderer)
         {
-            return renderer is SkinnedMeshRenderer skinned ? skinned.sharedMesh : renderer.GetComponent<MeshFilter>()?.sharedMesh;
+            return Optimization.MeshOptimization.MeshOf(renderer);
         }
 
         // ---- Build ---------------------------------------------------------------------------------------------------------

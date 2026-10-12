@@ -49,7 +49,7 @@ namespace Orbiters.Toolkit.Editor.VRChat.Attachments
 
             // The creator's setup, and everything its links already attach.
             var features = VrcFury.Features(root).ToList();
-            var modular = root.GetComponentsInChildren<Component>(true).Where(c => c != null && (c.GetType().Namespace ?? "").StartsWith("nadena.dev.modular_avatar", StringComparison.Ordinal)).ToList();
+            var modular = root.GetComponentsInChildren<Component>(true).Where(ModularAvatar.IsComponent).ToList();
             if (features.Count > 0) plan.Setup = "VRCFury";
             if (modular.Count > 0) plan.Setup = plan.Setup == null ? "Modular Avatar" : plan.Setup + " and Modular Avatar";
             plan.NeedsModularAvatar = modular.Count == 0 && UsesMissingModularAvatar(root);

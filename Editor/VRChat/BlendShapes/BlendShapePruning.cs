@@ -28,17 +28,37 @@ namespace Orbiters.Toolkit.Editor.VRChat.BlendShapes
         /// <summary>
         /// Blendshapes the built avatar uses on this renderer: animated by one of its controllers (playable layers,
         /// Animator components), driven by the descriptor (visemes, jaw flap, eyelids), or a standard MMD morph on Body.
-        /// Call it once every build step that adds animations has run.
+        /// Call it once every build step that adds animations has run. With <paramref name="constantsUnused"/>, a shape every
+        /// animation only ever sets to the weight it already has never changes, and doesn't count.
         /// </summary>
-        public static HashSet<string> Used(GameObject avatarRoot, SkinnedMeshRenderer renderer)
+        /// <summary>
+        /// Blendshapes a caller needs on an avatar it is building, by the avatar's root (a VRM export keeps the shapes its
+        /// expressions set, which no VRChat animation may use): <see cref="Used"/> counts them, on any of its meshes, so no
+        /// build step removes them. Set before the build, removed after.
+        /// </summary>
+        public static readonly Dictionary<GameObject, HashSet<string>> Keep = new Dictionary<GameObject, HashSet<string>>();
+
+        public static HashSet<string> Used(GameObject avatarRoot, SkinnedMeshRenderer renderer, bool constantsUnused = false)
         {
             var mesh = renderer.sharedMesh;
             var used = new HashSet<string>();
             string path = UnityEditor.AnimationUtility.CalculateTransformPath(renderer.transform, avatarRoot.transform);
+            var changing = new HashSet<string>();
             foreach (var clip in Controllers(avatarRoot).SelectMany(c => c.animationClips).Where(c => c != null).Distinct())
                 foreach (var binding in UnityEditor.AnimationUtility.GetCurveBindings(clip))
-                    if (binding.path == path && binding.type == typeof(SkinnedMeshRenderer) && binding.propertyName.StartsWith("blendShape.", StringComparison.Ordinal))
-                        used.Add(binding.propertyName.Substring("blendShape.".Length));
+                {
+                    if (binding.path != path || binding.type != typeof(SkinnedMeshRenderer) || !binding.propertyName.StartsWith("blendShape.", StringComparison.Ordinal)) continue;
+                    string name = binding.propertyName.Substring("blendShape.".Length);
+                    used.Add(name);
+                    if (!constantsUnused || changing.Contains(name)) continue;
+                    int index = mesh.GetBlendShapeIndex(name);
+                    var curve = UnityEditor.AnimationUtility.GetEditorCurve(clip, binding);
+                    if (index < 0 || curve == null || curve.keys.Any(k => Mathf.Abs(k.value - renderer.GetBlendShapeWeight(index)) > .01f)) changing.Add(name);
+                }
+            if (constantsUnused) used.IntersectWith(changing);
+            if (Keep.TryGetValue(avatarRoot, out var kept))
+                for (int i = 0; i < mesh.blendShapeCount; i++)
+                    if (kept.Contains(mesh.GetBlendShapeName(i))) used.Add(mesh.GetBlendShapeName(i));
             foreach (var descriptor in avatarRoot.GetComponentsInChildren<VRCAvatarDescriptor>(true))
             {
                 if (descriptor.VisemeSkinnedMesh == renderer)
@@ -64,11 +84,19 @@ namespace Orbiters.Toolkit.Editor.VRChat.BlendShapes
         /// non-zero weight is baked into the copy at that weight. Descriptor eyelid indices follow. Returns the copy (in
         /// memory, for the build to keep), or null when every blendshape is used.
         /// </summary>
-        public static Mesh Prune(GameObject avatarRoot, SkinnedMeshRenderer renderer)
+        public static Mesh Prune(GameObject avatarRoot, SkinnedMeshRenderer renderer, bool constantsUnused = false)
         {
             var mesh = renderer.sharedMesh;
-            if (mesh == null || mesh.blendShapeCount == 0 || !mesh.isReadable) return null;
-            var used = Used(avatarRoot, renderer);
+            if (mesh == null || mesh.blendShapeCount == 0) return null;
+            return Prune(avatarRoot, renderer, Used(avatarRoot, renderer, constantsUnused));
+        }
+
+        /// <summary>The same, keeping the blendshapes named in <paramref name="used"/> (a file format that keeps only some).</summary>
+        public static Mesh Prune(GameObject avatarRoot, SkinnedMeshRenderer renderer, ICollection<string> used)
+        {
+            var mesh = renderer.sharedMesh;
+            // The editor reads any mesh; Play mode only those imported with Read/Write.
+            if (mesh == null || mesh.blendShapeCount == 0 || !mesh.isReadable && Application.isPlaying) return null;
             int count = mesh.blendShapeCount;
             var keep = new bool[count];
             for (int i = 0; i < count; i++) keep[i] = used.Contains(mesh.GetBlendShapeName(i));

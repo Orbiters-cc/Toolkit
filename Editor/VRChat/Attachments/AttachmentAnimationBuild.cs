@@ -178,6 +178,16 @@ namespace Orbiters.Toolkit.Editor.VRChat.Attachments
         public void Keep(Object value) => Persist(value);
 
         /// <summary>
+        /// The build's copies of the avatar's animation data (controllers, state machines, states, transitions, behaviours,
+        /// blend trees, clips, masks): a build step may change them.
+        /// </summary>
+        public IEnumerable<Object> Owned => graphs.SelectMany(g => g.Copies.Values).Where(v => v != null).Distinct();
+
+        /// <summary>The build's copies of the clips, each with the object its paths start from (the avatar's, or a nested Animator's).</summary>
+        public IEnumerable<(AnimationClip Clip, Transform AnimatorRoot)> Clips =>
+            graphs.SelectMany(g => g.Copies.Values.OfType<AnimationClip>().Select(c => (c, g.AnimatorRoot))).Distinct();
+
+        /// <summary>
         /// Animations written before a tool moved these transforms keep animating them: bindings to each former path
         /// (avatar-relative, its own name included) and to its children's are rewritten to where they are now.
         /// </summary>
@@ -194,8 +204,9 @@ namespace Orbiters.Toolkit.Editor.VRChat.Attachments
         private void Persist(Object value)
         {
             value.hideFlags = HideFlags.HideInHierarchy;
-            // Meshes in a binary file: a body with its blendshapes is hundreds of MB, several GB as text (Unity fails to write it).
-            if (value is Mesh)
+            // Meshes and textures in a binary file: a body with its blendshapes is hundreds of MB, several GB as text (Unity
+            // fails to write it), and a texture's pixels as text are twice their size.
+            if (value is Mesh || value is Texture)
             {
                 if (meshes == null)
                 {
@@ -350,6 +361,7 @@ namespace Orbiters.Toolkit.Editor.VRChat.Attachments
         {
             private readonly AttachmentAnimationBuild owner;
             private readonly Transform animatorRoot;
+            internal Transform AnimatorRoot => animatorRoot;
             private readonly Dictionary<string, Transform> paths;
             private readonly Dictionary<AnimationClip, AnimationClip> overrides = new Dictionary<AnimationClip, AnimationClip>();
             internal readonly Dictionary<Object, Object> Copies = new Dictionary<Object, Object>();

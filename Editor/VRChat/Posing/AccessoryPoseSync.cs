@@ -85,7 +85,7 @@ namespace Orbiters.Toolkit.Editor.VRChat.Posing
                     .Where(b => b != null && !skeleton.Contains(b)).Distinct().Count();
                 var links = group.ToList();
                 int driven = links.Count(l => Driven(l.Follower));
-                bool modular = group.Key.GetComponentsInChildren<Component>(true).Any(c => c != null && (c.GetType().Namespace ?? "").StartsWith("nadena.dev.modular_avatar", StringComparison.Ordinal));
+                bool modular = group.Key.GetComponentsInChildren<Component>(true).Any(ModularAvatar.IsComponent);
                 bool rigid = links.Count == 1 && bones <= 1;
                 result.Add(new Accessory
                 {

@@ -1,0 +1,20 @@
+{
+  "name": "Orbiters.AlterMesh",
+  "rootNamespace": "Orbiters.AlterMesh",
+  "references": [
+    "Unity.Burst",
+    "Unity.Mathematics",
+    "Unity.Collections"
+  ],
+  "includePlatforms": [
+    "Editor"
+  ],
+  "excludePlatforms": [],
+  "allowUnsafeCode": true,
+  "overrideReferences": false,
+  "precompiledReferences": [],
+  "autoReferenced": false,
+  "defineConstraints": [],
+  "versionDefines": [],
+  "noEngineReferences": false
+}

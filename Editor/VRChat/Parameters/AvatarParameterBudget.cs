@@ -238,7 +238,8 @@ namespace Orbiters.Toolkit.Editor.VRChat.Parameters
             fullControllerType ??= VrcFury.Find("VF.Model.Feature.FullController");
         }
 
-        private static bool IsSynced(VRCExpressionParameters.Parameter parameter)
+        /// <summary>Whether VRChat syncs this expression parameter to other players (the SDK's Synced box).</summary>
+        public static bool IsSynced(VRCExpressionParameters.Parameter parameter)
         {
             networkSyncedField ??= typeof(VRCExpressionParameters.Parameter).GetField("networkSynced",
                 System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);

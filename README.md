@@ -1,5 +1,68 @@
 # Orbiters Toolkit
 
+## 0.3.22 — 2026-10-12
+
+- **Build-copy optimization** (`Orbiters.Toolkit.Editor.VRChat.Optimization`), shared by My Avatar's Optimization
+  section. Each step changes a build copy only, never edits a source asset, and returns what it changed:
+  - `AvatarUsage`: what a built avatar animates (playable layers and Animator components: shown objects, switched
+    components, moved transforms, swapped materials), which components point at what, its humanoid bones and the
+    parameters its animators read. Editor-only components don't count, unless the caller says so for an avatar not
+    built yet (then anything near a build tool's component is left alone: `Pending`).
+  - `ComponentCleanup`: objects that start hidden and that no animation shows, components that start disabled and that
+    no animation turns on, PhysBones that move nothing, PhysBone colliders no PhysBone lists, PhysBones that stop
+    following animations nothing plays on their bones, and end bones that become a PhysBone's endpoint position.
+  - `MeshOptimization.PruneBones` drops unweighted bones from a skinned mesh's bone list (VRChat ranks every listed
+    bone); `MergeSlots` drops empty submeshes and merges the ones sharing an opaque material, unless an animation swaps
+    the renderer's materials.
+  - `MeshMerge.MergeStill` merges the skinned meshes always shown into the one animations use, per group drawn the same
+    way; a mesh bound in the same rest pose moves into its mesh space and shares its bones. Static props (mesh
+    renderers always shown) join too, skinned to their own transform. A mesh whose materials have a property the merged
+    renderer's animations set stays apart. `MergeTogether` merges the skinned meshes every animation shows and hides
+    together (the same toggle keys in every clip, the same state at rest); their animated blendshapes join the merged
+    mesh and the build's copies of the animations move their curves onto it.
+  - `MaterialCleanup` gives renderers copies of their materials without the textures their shader doesn't declare, and
+    (`MergeDuplicateTextures`) pointing at one texture where two are the same file imported the same way.
+  - `MenuIcons.Shrink` copies the expression menus holding an icon larger than 64 px and points them at copies of the
+    icons at 64 px at most, compressed for the platform (BC7, ASTC 6x6 on Android).
+  - `ShortNames.Rename` gives objects and the parameters only animators use the shortest names, rewriting the build's
+    copies of the animations (paths, masks, conditions, blend trees, parameter drivers, audio), PhysBones and contacts.
+    The humanoid model's bones, the root's `Body`, VRChat's parameters and the menu's keep their names.
+  - `MeshParts` takes a mesh apart and back together: `Subset` (the triangles chosen, with every attribute, weights,
+    bind poses and the blendshapes asked for), `Replace` (part of a mesh swapped for another, blendshapes joined by
+    name in one pass), `Join`, `DropEmptySubmeshes`, `Reach` (the vertices each blendshape moves) and `Within` (whether
+    points lie on a surface within a distance, and shade the same).
+- `Parameters.VrcParameters.Protected`: the parameters VRChat and VRCFaceTracking set by name, shared by every build
+  step that changes or renames parameters.
+- `AttachmentAnimationBuild.Owned` and `Clips` give the build's copies of the avatar's animation data to other build
+  steps.
+  - `BodyCover.HideCovered` removes the body's triangles that opaque clothing worn all the time hides from every side
+    (rays from each vertex through a grid of the clothing's triangles).
+  - `StaticBones.Fold` skins bones that never move against their parent through the nearest bone that can move, with
+    bind poses that keep every vertex in place, so meshes list fewer bones.
+- `BlendShapePruning.Prune` also works on meshes imported without Read/Write, outside Play mode.
+- `AvatarBounds.Unify` gives every skinned mesh that moves with the hips the same culling box: around all of them as
+  they stand, with room for the limbs, the hips as root bone. Meshes below a constraint keep their own.
+- **AlterMesh** (`Orbiters.AlterMesh`, editor only, needs Burst, Collections and Mathematics): Orbiters' mesh
+  simplifier, derived from Meshia Mesh Simplification 3.2.0 (MIT, `Editor/AlterMesh/LICENSE-Meshia.md`). Fixed there:
+  blendshape normal and tangent offsets are no longer normalized at each collapse, empty submeshes no longer crash the
+  k-d tree, empty bit ranges are no longer counted (Collections throws). See `Editor/AlterMesh/README.md`.
+- `HiddenAvatarBuild`: the avatar built as an upload builds it, without uploading: a copy in its own preview scene put
+  through every SDK build step in order, one per editor frame (Poiyomi's lock, the build cache, VRCFury's blueprint hook
+  and the caller's skips left out), released before scripts reload.
+- **Checks** (`Orbiters.Toolkit.Editor.VRChat.Checks`), run on a built avatar, each returning `AvatarIssue`s (level,
+  title, what happens in game and how to fix it, where): `MenuAudit` (pages over 8 controls, controls on missing or
+  unread parameters, empty submenus, synced parameters no animator reads), `AnimatorFlow` (parameters a layer reads
+  that its controller doesn't have, states nothing leads to), `BodyHoles` (shrink shapes left on while clothing can
+  come off) and `QuestParity` (desktop shaders, components Quest removes, the Quest rank; `Compare` and `Counterparts`
+  for the other platform's version of the same blueprint).
+- `VrcFury.IsComponent` and `ModularAvatar.IsComponent` tell a build tool's components apart (Modular Avatar's check
+  was repeated in two places). `AvatarParameterBudget.IsSynced` is public.
+- The build cache (`AttachmentAnimationBuild.Keep`) stores textures in the binary asset with meshes.
+- `BlendShapePruning.Keep`: blendshapes a caller needs on an avatar it is building (My Avatar's VRM export keeps the
+  shapes its expressions set): every prune counts them as used. `Prune` also takes the names to keep.
+- `HiddenAvatarBuild.Start` takes a step that changes the copy before the build (a setting the build reads).
+- `SurfaceFollow` no longer throws on a mesh renderer without a mesh filter.
+
 ## 0.3.21 — 2026-10-11
 
 - `SafeArchive.Extract` stages into `<folder>.building-<8 hex>` and `SafePaths.ReplaceDirectory` sets the previous

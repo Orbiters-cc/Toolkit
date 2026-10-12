@@ -8,8 +8,8 @@ using Object = UnityEngine.Object;
 namespace Orbiters.Toolkit.Editor.VRChat.Attachments
 {
     /// <summary>
-    /// Last build step: meshes and materials that a build step created in memory (twist splits, followed accessories...)
-    /// become build data. The SDK saves the build copy as a prefab, which drops in-memory objects: the avatar would upload
+    /// Last build step: meshes, materials and the textures they show that a build step created in memory (twist splits,
+    /// followed accessories, resized texture copies...) become build data. The SDK saves the build copy as a prefab, which drops in-memory objects: the avatar would upload
     /// without them (invisible renderers).
     /// </summary>
     internal sealed class BuildCopyAssetsHook : IVRCSDKPreprocessAvatarCallback
@@ -33,6 +33,9 @@ namespace Orbiters.Toolkit.Editor.VRChat.Attachments
                 if (renderer is SkinnedMeshRenderer skinned) objects.Add(skinned.sharedMesh);
                 else if (renderer.TryGetComponent<MeshFilter>(out var filter)) objects.Add(filter.sharedMesh);
                 objects.AddRange(renderer.sharedMaterials);
+                foreach (var material in renderer.sharedMaterials)
+                    if (material != null && !EditorUtility.IsPersistent(material))
+                        objects.AddRange(material.GetTexturePropertyNameIDs().Select(material.GetTexture));
             }
             // Editor-only objects (previews, gizmos) stay out of the build.
             return objects.Where(o => o != null && !EditorUtility.IsPersistent(o) && (o.hideFlags & HideFlags.DontSaveInBuild) == 0)

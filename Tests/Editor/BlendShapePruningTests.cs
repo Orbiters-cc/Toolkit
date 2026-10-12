@@ -69,5 +69,29 @@ public sealed class BlendShapePruningTests
         Assert.That(BlendShapePruning.Prune(root, body), Is.Null, "Nothing left to remove.");
     }
 
+    [Test] public void ShapesAnimationsOnlySetToTheirWeightCanBeBaked()
+    {
+        var root = Own(new GameObject("Avatar"));
+        var descriptor = root.AddComponent<VRCAvatarDescriptor>();
+        var body = new GameObject("Body").AddComponent<SkinnedMeshRenderer>();
+        body.transform.SetParent(root.transform, false);
+        var mesh = Own(new Mesh { vertices = new[] { Vector3.zero, Vector3.up, Vector3.right }, triangles = new[] { 0, 1, 2 } });
+        foreach (var name in new[] { "held", "moving" }) mesh.AddBlendShapeFrame(name, 100, new[] { Vector3.forward, Vector3.zero, Vector3.zero }, new Vector3[3], new Vector3[3]);
+        body.sharedMesh = mesh;
+        body.SetBlendShapeWeight(0, 30); body.SetBlendShapeWeight(1, 30);
+        var clip = Own(new AnimationClip());
+        AnimationUtility.SetEditorCurve(clip, EditorCurveBinding.FloatCurve("Body", typeof(SkinnedMeshRenderer), "blendShape.held"), AnimationCurve.Constant(0, 1, 30));
+        AnimationUtility.SetEditorCurve(clip, EditorCurveBinding.FloatCurve("Body", typeof(SkinnedMeshRenderer), "blendShape.moving"), AnimationCurve.Constant(0, 1, 100));
+        var controller = Own(new AnimatorController()); controller.AddLayer("Base");
+        controller.layers[0].stateMachine.AddState("On").motion = clip;
+        descriptor.baseAnimationLayers = new[] { new VRCAvatarDescriptor.CustomAnimLayer { type = VRCAvatarDescriptor.AnimLayerType.FX, animatorController = controller } };
+
+        Assert.That(BlendShapePruning.Used(root, body), Is.EquivalentTo(new[] { "held", "moving" }));
+        Assert.That(BlendShapePruning.Used(root, body, constantsUnused: true), Is.EquivalentTo(new[] { "moving" }), "Animated only to the weight it has: it never changes.");
+        var copy = Own(BlendShapePruning.Prune(root, body, constantsUnused: true));
+        Assert.That(copy.blendShapeCount, Is.EqualTo(1));
+        Assert.That(copy.vertices[0].z, Is.EqualTo(.3f).Within(1e-5), "Baked in at its weight.");
+    }
+
     private T Own<T>(T value) where T : Object { owned.Add(value); return value; }
 }

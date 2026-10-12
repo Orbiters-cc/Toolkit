@@ -44,6 +44,12 @@ namespace Orbiters.Toolkit.Editor.VRChat
             return null;
         }
 
+        private static Type anyComponent;
+
+        /// <summary>Whether a component is one of VRCFury's (what it holds builds at upload).</summary>
+        public static bool IsComponent(Component value) =>
+            value != null && (anyComponent ??= Find("VF.Component.VRCFuryComponent")) != null && anyComponent.IsInstanceOfType(value);
+
         public static object Content(Component vrcFury) => vrcFury != null ? Component?.GetField("content")?.GetValue(vrcFury) : null;
 
         /// <summary>
