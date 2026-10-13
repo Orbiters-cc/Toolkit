@@ -60,6 +60,28 @@ public static class OrbitersEnvironment
         return builder.Uri.ToString();
     }
 
+    /// <summary>Whether <paramref name="host"/> is one of Orbiters' own (its API, website and file hosts) or the local development server.</summary>
+    public static bool IsOrbitersHost(string host)
+    {
+        if (string.IsNullOrEmpty(host)) return false;
+        host = host.ToLowerInvariant();
+        string api = Uri.TryCreate(ApiUrl(), UriKind.Absolute, out var root) ? root.Host.ToLowerInvariant() : null;
+        return host == api || host == "orbiters.cc" || host.EndsWith(".orbiters.cc", StringComparison.Ordinal) || IsLoopback(host);
+    }
+
+    // Where Orbiters takes members' profile pictures from besides its own files (publicAvatarService on the server).
+    private static readonly string[] ProfilePictureHosts = { "cdn.discordapp.com", "media.discordapp.net", "avatars.githubusercontent.com", "t.me", "telegram.org", "telesco.pe" };
+
+    /// <summary>Whether a member's profile picture may come from <paramref name="host"/>: Orbiters' own hosts, or a sign-in service it takes them from.</summary>
+    public static bool IsProfilePictureHost(string host)
+    {
+        if (IsOrbitersHost(host)) return true;
+        host = (host ?? "").ToLowerInvariant();
+        foreach (string known in ProfilePictureHosts)
+            if (host == known || host.EndsWith("." + known, StringComparison.Ordinal)) return true;
+        return false;
+    }
+
     public static bool IsLoopback(string host) =>
         string.Equals(host, "localhost", StringComparison.OrdinalIgnoreCase) || host == "127.0.0.1" || host == "[::1]" || host == "::1";
 

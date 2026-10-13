@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using Orbiters.Toolkit.Armature;
+using Orbiters.Toolkit.Editor.Animations;
 using UnityEditor;
 using UnityEditor.Animations;
 using UnityEngine;
@@ -160,6 +161,13 @@ namespace Orbiters.Toolkit.Editor.VRChat.Attachments
             foreach (var animator in root.GetComponentsInChildren<Animator>(true))
                 if (animator.runtimeAnimatorController != null)
                     animator.runtimeAnimatorController = (RuntimeAnimatorController)graphFor(animator.transform).Clone(animator.runtimeAnimatorController);
+            // Legacy Animation components play their clips from their own object too.
+            foreach (var animation in root.GetComponentsInChildren<Animation>(true))
+                if (LegacyAnimationClips.Of(animation).Count > 0)
+                {
+                    var graph = graphFor(animation.transform);
+                    LegacyAnimationClips.Replace(animation, clip => (AnimationClip)graph.Clone(clip));
+                }
         }
 
         private static VRCAvatarDescriptor.CustomAnimLayer[] CloneLayers(VRCAvatarDescriptor.CustomAnimLayer[] source, Graph graph)
@@ -186,6 +194,13 @@ namespace Orbiters.Toolkit.Editor.VRChat.Attachments
         /// <summary>The build's copies of the clips, each with the object its paths start from (the avatar's, or a nested Animator's).</summary>
         public IEnumerable<(AnimationClip Clip, Transform AnimatorRoot)> Clips =>
             graphs.SelectMany(g => g.Copies.Values.OfType<AnimationClip>().Select(c => (c, g.AnimatorRoot))).Distinct();
+
+        /// <summary>
+        /// <see cref="Owned"/>, each with the object the animator it plays in starts from (paths in clips, masks and state
+        /// audio are relative to it).
+        /// </summary>
+        public IEnumerable<(Object Copy, Transform AnimatorRoot)> OwnedByAnimator =>
+            graphs.SelectMany(g => g.Copies.Values.Where(v => v != null).Select(v => (v, g.AnimatorRoot))).Distinct();
 
         /// <summary>
         /// Animations written before a tool moved these transforms keep animating them: bindings to each former path

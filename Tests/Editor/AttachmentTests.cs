@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
 using NUnit.Framework;
+using Orbiters.Toolkit.Editor.Tests;
 using Orbiters.Toolkit.Editor.VRChat;
 using Orbiters.Toolkit.Editor.VRChat.Attachments;
 using Orbiters.Toolkit.Editor.VRChat.Posing;
@@ -22,9 +23,12 @@ public sealed class AttachmentTests
     private readonly Dictionary<string, Transform> bones = new Dictionary<string, Transform>();
 
     private int undoGroup;
+    // A toggle the installer makes gets Orbiters' menu icon, written into the project the first time.
+    private SharedFolders folders;
 
     [SetUp] public void SetUp()
     {
+        folders = SharedFolders.Begin();
         Undo.IncrementCurrentGroup();
         undoGroup = Undo.GetCurrentGroup();
         avatar = Own(new GameObject("Attachment test avatar"));
@@ -48,6 +52,7 @@ public sealed class AttachmentTests
         foreach (var value in owned.AsEnumerable().Reverse()) if (value != null) Object.DestroyImmediate(value);
         owned.Clear();
         bones.Clear();
+        folders.End();
     }
 
     [Test] public void ClothingWithTheAvatarsBoneNamesUsesOneVrcFuryLink()

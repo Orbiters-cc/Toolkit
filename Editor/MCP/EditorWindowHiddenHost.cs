@@ -15,7 +15,8 @@ namespace Orbiters.Toolkit.Editor
     /// Hidden copies of editor windows for background captures: shown without focus, far outside every display, closed
     /// after the capture. The user's layout, tabs, scroll positions, selection and focus stay as they are; Unity is never
     /// brought forward. Used for windows that are not open, inactive docked tabs, a taller view of a long window, and
-    /// Inspectors locked on any object.
+    /// Inspectors locked on any object. A hidden copy left open (a capture cut short) is closed before scripts reload, and
+    /// one a reload kept is closed once it is over: nobody could see or close it.
     /// </summary>
     internal static class EditorWindowHiddenHost
     {
@@ -26,6 +27,30 @@ namespace Orbiters.Toolkit.Editor
 
         internal static readonly Type InspectorType = typeof(UnityEditor.Editor).Assembly.GetType("UnityEditor.InspectorWindow");
 
+        private static readonly List<EditorWindow> Opened = new List<EditorWindow>();
+
+        [InitializeOnLoadMethod]
+        private static void CloseLeftovers()
+        {
+            AssemblyReloadEvents.beforeAssemblyReload += CloseAll;
+            // Copies open when scripts reloaded mid-capture: no job will close them any more.
+            EditorApplication.delayCall += () =>
+            {
+                foreach (var window in Resources.FindObjectsOfTypeAll<EditorWindow>())
+                    if (window != null && IsHidden(window)) window.Close();
+            };
+        }
+
+        private static void CloseAll()
+        {
+            foreach (var window in Opened.ToArray()) if (window != null) window.Close();
+            Opened.Clear();
+        }
+
+        /// <summary>Whether a window is one of these copies: never saved, far outside every display.</summary>
+        internal static bool IsHidden(EditorWindow window) =>
+            window.hideFlags == HideFlags.HideAndDontSave && window.position.x <= Offscreen.x / 2f && window.position.y <= Offscreen.y / 2f;
+
         /// <summary>A hidden <paramref name="type"/> window of <paramref name="size"/> points, with <paramref name="template"/>'s serialized state when given.</summary>
         internal static EditorWindow Open(Type type, Vector2 size, EditorWindow template = null)
         {
@@ -35,6 +60,8 @@ namespace Orbiters.Toolkit.Editor
             if (template != null) window.titleContent = new GUIContent(template.titleContent);
             var rect = new Rect(Offscreen, size);
             window.position = rect;
+            Opened.RemoveAll(w => w == null);
+            Opened.Add(window);
             NativeWindows.ShowHidden(() =>
             {
                 ShowWithoutFocus(window);
@@ -49,10 +76,18 @@ namespace Orbiters.Toolkit.Editor
         {
             if (InspectorType == null) throw new NotSupportedException("This Unity version has no InspectorWindow type.");
             var window = Open(InspectorType, size);
-            var setLocked = InspectorType.GetMethod("SetObjectsLocked", Members, null, new[] { typeof(List<Object>) }, null);
-            if (setLocked == null) { window.Close(); throw new NotSupportedException("This Unity version cannot lock an Inspector on an object."); }
-            setLocked.Invoke(window, new object[] { new List<Object> { target } });
-            return window;
+            try
+            {
+                var setLocked = InspectorType.GetMethod("SetObjectsLocked", Members, null, new[] { typeof(List<Object>) }, null);
+                if (setLocked == null) throw new NotSupportedException("This Unity version cannot lock an Inspector on an object.");
+                setLocked.Invoke(window, new object[] { new List<Object> { target } });
+                return window;
+            }
+            catch
+            {
+                window.Close();
+                throw;
+            }
         }
 
         // EditorWindow.ShowPopup() is ShowPopupWithMode(PopupMenu, giveFocus: true): the same without focus.
@@ -69,8 +104,9 @@ namespace Orbiters.Toolkit.Editor
         }
 
         // Windows a show creates never reach the screen: each is cloaked (still drawn, never displayed) the moment it
-        // exists, before Windows first shows it, then moved off every display without being activated. The hook lives
-        // only for the show, on Unity's main thread, so no reload can leave it calling into unloaded code.
+        // exists, before Windows first shows it, then moved off every display without being activated. A dialog the show
+        // opens (a message box) is left as it is: it waits for an answer. The hook lives only for the show, on Unity's main
+        // thread, so no reload can leave it calling into unloaded code.
         private static class NativeWindows
         {
 #if UNITY_EDITOR_WIN
@@ -86,14 +122,18 @@ namespace Orbiters.Toolkit.Editor
             [System.Runtime.InteropServices.DllImport("user32.dll")] private static extern IntPtr CallNextHookEx(IntPtr hook, int code, IntPtr wParam, IntPtr lParam);
             [System.Runtime.InteropServices.DllImport("kernel32.dll")] private static extern uint GetCurrentThreadId();
             [System.Runtime.InteropServices.DllImport("dwmapi.dll")] private static extern int DwmSetWindowAttribute(IntPtr window, int attribute, ref int value, int size);
+            [System.Runtime.InteropServices.DllImport("user32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode)]
+            private static extern int GetClassName(IntPtr window, System.Text.StringBuilder name, int size);
             private const uint NoSize = 0x0001, NoZOrder = 0x0004, NoActivate = 0x0010, NoOwnerZOrder = 0x0200;
             private const int AfterWindowProcedure = 12, Created = 0x0001, Cloak = 13;
+            // Windows' dialog class: message boxes, file pickers.
+            private const string DialogClass = "#32770";
 
             internal static void ShowHidden(Action show)
             {
                 HookProc cloak = (code, wParam, lParam) =>
                 {
-                    if (code >= 0 && System.Runtime.InteropServices.Marshal.PtrToStructure<CallResult>(lParam) is var call && call.message == Created)
+                    if (code >= 0 && System.Runtime.InteropServices.Marshal.PtrToStructure<CallResult>(lParam) is var call && call.message == Created && !Dialog(call.window))
                     { int on = 1; DwmSetWindowAttribute(call.window, Cloak, ref on, sizeof(int)); }
                     return CallNextHookEx(IntPtr.Zero, code, wParam, lParam);
                 };
@@ -101,8 +141,14 @@ namespace Orbiters.Toolkit.Editor
                 var hook = SetWindowsHookEx(AfterWindowProcedure, cloak, IntPtr.Zero, GetCurrentThreadId());
                 try { show(); }
                 finally { if (hook != IntPtr.Zero) UnhookWindowsHookEx(hook); GC.KeepAlive(cloak); }
-                foreach (var window in Own().Except(before))
+                foreach (var window in Own().Except(before).Where(w => !Dialog(w)))
                     SetWindowPos(window, IntPtr.Zero, (int)Offscreen.x, (int)Offscreen.y, 0, 0, NoSize | NoZOrder | NoActivate | NoOwnerZOrder);
+            }
+
+            private static bool Dialog(IntPtr window)
+            {
+                var name = new System.Text.StringBuilder(64);
+                return GetClassName(window, name, name.Capacity) > 0 && name.ToString() == DialogClass;
             }
 
             private static HashSet<IntPtr> Own()

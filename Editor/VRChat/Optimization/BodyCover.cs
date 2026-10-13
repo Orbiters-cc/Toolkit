@@ -13,7 +13,9 @@ namespace Orbiters.Toolkit.Editor.VRChat.Optimization
     /// outward (along its normal and eight directions around it); a vertex is hidden when every ray meets clothing within
     /// reach, and a triangle whose three vertices are hidden goes. Skin near a collar, a cuff or a hem keeps some way out,
     /// so it stays. Clothing counts when it is always shown (never hidden or switched off), its opaque materials only,
-    /// and when its animations change nothing but blendshapes the body has too (it follows the body's shape).
+    /// and when its animations change nothing but blendshapes the body has too (it follows the body's shape). Only what
+    /// moves with the body covers it, and only skin that moves with the skeleton is hidden: clothing weighted to a bone a
+    /// PhysBone, a constraint or an animation moves (a skirt, a coat's tails, long hair) swings away from the skin below.
     /// </summary>
     public static class BodyCover
     {
@@ -25,6 +27,8 @@ namespace Orbiters.Toolkit.Editor.VRChat.Optimization
 
         // Reach and offsets in avatar heights; the side rays lean this far from the normal.
         private const float Reach = .08f, Lift = .0008f, Lean = 55f;
+        // A bone weighted below this moves its vertex too little to matter.
+        private const float Slight = .05f;
 
         /// <summary>
         /// Gives <paramref name="body"/> a copy of its mesh without the hidden triangles; null when none are hidden or no
@@ -33,8 +37,9 @@ namespace Orbiters.Toolkit.Editor.VRChat.Optimization
         public static Result HideCovered(AvatarUsage usage, SkinnedMeshRenderer body)
         {
             var mesh = body != null ? body.sharedMesh : null;
-            if (mesh == null || !Shown(body, usage) || usage.Pending(body.transform)) return null;
-            var clothing = Clothing(usage, body);
+            if (mesh == null || !usage.AlwaysShown(body) || usage.Pending(body.transform)) return null;
+            var loose = Loose(usage);
+            var clothing = Clothing(usage, body, loose);
             if (clothing.Count == 0) return null;
 
             var baked = new Mesh();
@@ -43,64 +48,120 @@ namespace Orbiters.Toolkit.Editor.VRChat.Optimization
                 body.BakeMesh(baked, false);
                 var vertices = baked.vertices; var normals = baked.normals;
                 if (vertices.Length != mesh.vertexCount || normals.Length != vertices.Length) return null;
-                var toWorld = body.transform.localToWorldMatrix;
+                // The bake leaves the renderer's scale out: only its place and turn apply.
+                var toWorld = SkinnedMeshBounds.BakedToWorld(body);
                 for (int i = 0; i < vertices.Length; i++) { vertices[i] = toWorld.MultiplyPoint3x4(vertices[i]); normals[i] = toWorld.MultiplyVector(normals[i]).normalized; }
                 float height = Mathf.Max(.2f, Bounds(vertices).size.y);
                 var grid = new Grid(clothing, height / 120f);
-                var hidden = Hidden(vertices, normals, grid, height);
+                var hidden = Hidden(vertices, normals, grid, height, Steady(body, loose));
                 return Remove(body, mesh, hidden);
             }
             finally { Object.DestroyImmediate(baked); }
         }
 
-        // ---- What counts as clothing ----
+        // ---- What moves with the body ----
 
-        private static bool Shown(Renderer renderer, AvatarUsage usage)
+        // Bones that move against the skeleton: driven (PhysBone chains, constraints) or moved by an animation, and every
+        // bone below one.
+        private static Func<Transform, bool> Loose(AvatarUsage usage)
         {
-            if (!renderer.enabled || usage.Toggled(renderer.transform) || usage.Switched(renderer)) return false;
-            for (var t = renderer.transform; t != null; t = t == usage.Root.transform ? null : t.parent)
-                if (!t.gameObject.activeSelf || t.CompareTag("EditorOnly")) return false;
-            return true;
+            var driven = usage.Driven();
+            var known = new Dictionary<Transform, bool>();
+            bool Of(Transform bone)
+            {
+                if (bone == null || bone == usage.Root.transform) return false;
+                if (known.TryGetValue(bone, out bool loose)) return loose;
+                return known[bone] = driven.Contains(bone) || usage.Transformed(bone) || Of(bone.parent);
+            }
+            return Of;
         }
 
-        // Opaque triangles of the clothing, in world space, as it is posed now.
-        private static List<Vector3> Clothing(AvatarUsage usage, SkinnedMeshRenderer body)
+        // For each vertex of a skinned mesh, whether every bone it is weighted to (more than slightly) moves with the
+        // skeleton; null when the mesh has no weights to tell (it then moves with its own object).
+        private static bool[] Steady(SkinnedMeshRenderer renderer, Func<Transform, bool> loose)
+        {
+            var mesh = renderer.sharedMesh;
+            var bones = renderer.bones;
+            var counts = mesh.GetBonesPerVertex();
+            if (counts.Length != mesh.vertexCount) return null;
+            var weights = mesh.GetAllBoneWeights();
+            var looseBone = bones.Select(b => loose(b)).ToArray();
+            var steady = new bool[counts.Length];
+            for (int v = 0, k = 0; v < counts.Length; v++)
+            {
+                bool still = true;
+                for (int n = 0; n < counts[v]; n++, k++)
+                {
+                    var weight = weights[k];
+                    if (weight.weight > Slight && (weight.boneIndex >= looseBone.Length || looseBone[weight.boneIndex])) still = false;
+                }
+                steady[v] = still;
+            }
+            return steady;
+        }
+
+        // ---- What counts as clothing ----
+
+        // Opaque triangles of the clothing, in world space, as it is posed now; those of vertices that swing away left out.
+        private static List<Vector3> Clothing(AvatarUsage usage, SkinnedMeshRenderer body, Func<Transform, bool> loose)
         {
             var bodyShapes = new HashSet<string>(Enumerable.Range(0, body.sharedMesh.blendShapeCount).Select(body.sharedMesh.GetBlendShapeName));
             var triangles = new List<Vector3>();
             foreach (var renderer in usage.Root.GetComponentsInChildren<Renderer>(true))
             {
                 if (renderer == body || !(renderer is SkinnedMeshRenderer || renderer is MeshRenderer)) continue;
-                if (!Shown(renderer, usage) || usage.Pending(renderer.transform) || usage.SwapsMaterials(renderer)) continue;
+                if (!usage.AlwaysShown(renderer) || usage.Pending(renderer.transform) || usage.SwapsMaterials(renderer)) continue;
                 // Its own animations may only move blendshapes the body moves too.
                 if (usage.AnimatedAt(renderer.transform).Any(p => !p.StartsWith("blendShape.", StringComparison.Ordinal) || !bodyShapes.Contains(p.Substring(11)))) continue;
                 var source = MeshOptimization.MeshOf(renderer);
                 if (source == null) continue;
                 var materials = renderer.sharedMaterials;
                 var opaque = Enumerable.Range(0, source.subMeshCount)
-                    .Where(i => i < materials.Length && materials[i] != null && materials[i].renderQueue < (int)RenderQueue.AlphaTest && source.GetTopology(i) == MeshTopology.Triangles).ToList();
+                    .Where(i => i < materials.Length && materials[i] != null && materials[i].renderQueue < (int)RenderQueue.AlphaTest && !MeshOptimization.Blends(materials[i]) &&
+                                source.GetTopology(i) == MeshTopology.Triangles).ToList();
                 if (opaque.Count == 0) continue;
                 Vector3[] points;
-                Matrix4x4 toWorld = renderer.transform.localToWorldMatrix;
+                bool[] steady;
                 if (renderer is SkinnedMeshRenderer skinned)
                 {
                     var baked = new Mesh();
                     skinned.BakeMesh(baked, false);
                     points = baked.vertices;
                     Object.DestroyImmediate(baked);
+                    var toWorld = SkinnedMeshBounds.BakedToWorld(skinned);
+                    for (int i = 0; i < points.Length; i++) points[i] = toWorld.MultiplyPoint3x4(points[i]);
+                    steady = Steady(skinned, loose);
+                    if (steady == null && loose(renderer.transform)) continue;
                 }
-                else points = source.vertices;
-                for (int i = 0; i < points.Length; i++) points[i] = toWorld.MultiplyPoint3x4(points[i]);
+                else
+                {
+                    // A prop moves with the object it sits on.
+                    if (loose(renderer.transform)) continue;
+                    points = source.vertices;
+                    var toWorld = renderer.transform.localToWorldMatrix;
+                    for (int i = 0; i < points.Length; i++) points[i] = toWorld.MultiplyPoint3x4(points[i]);
+                    steady = null;
+                }
                 foreach (int sub in opaque)
-                    foreach (int index in source.GetIndices(sub))
-                        if (index < points.Length) triangles.Add(points[index]);
+                {
+                    var indices = source.GetIndices(sub);
+                    for (int t = 0; t + 2 < indices.Length; t += 3)
+                    {
+                        int a = indices[t], b = indices[t + 1], c = indices[t + 2];
+                        if (a >= points.Length || b >= points.Length || c >= points.Length) continue;
+                        if (steady != null && (!steady[a] || !steady[b] || !steady[c])) continue;
+                        triangles.Add(points[a]); triangles.Add(points[b]); triangles.Add(points[c]);
+                    }
+                }
             }
             return triangles;
         }
 
         // ---- Which vertices are hidden ----
 
-        private static bool[] Hidden(Vector3[] vertices, Vector3[] normals, Grid grid, float height)
+        // Skin that swings with a PhysBone or an animation (a tail, a jiggling part) leaves the clothing it is under now:
+        // only steady skin can be hidden.
+        private static bool[] Hidden(Vector3[] vertices, Vector3[] normals, Grid grid, float height, bool[] steady)
         {
             float reach = Reach * height, lift = Lift * height;
             var hidden = new bool[vertices.Length];
@@ -108,7 +169,7 @@ namespace Orbiters.Toolkit.Editor.VRChat.Optimization
             for (int v = 0; v < vertices.Length; v++)
             {
                 var n = normals[v];
-                if (n.sqrMagnitude < .5f || !grid.Near(vertices[v], reach)) continue;
+                if (steady != null && !steady[v] || n.sqrMagnitude < .5f || !grid.Near(vertices[v], reach)) continue;
                 var origin = vertices[v] + n * lift;
                 // The normal, then eight directions leaning around it.
                 var side = Vector3.Cross(n, Mathf.Abs(n.y) < .9f ? Vector3.up : Vector3.right).normalized;
@@ -143,6 +204,7 @@ namespace Orbiters.Toolkit.Editor.VRChat.Optimization
             }
             if (removed == 0) return null;
             var copy = MeshOptimization.Copy(mesh);
+            MeshOptimization.FitIndices(copy, kept);
             for (int sub = 0; sub < mesh.subMeshCount; sub++) copy.SetIndices(kept[sub], mesh.GetTopology(sub), sub, false, 0);
             copy.bounds = mesh.bounds;
             MeshOptimization.SetMesh(body, copy);

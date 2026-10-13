@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using Orbiters.Toolkit.Editor.Storage;
+using Orbiters.Toolkit.Storage;
 using UnityEditor;
 using UnityEditor.PackageManager;
 using UnityEngine;
@@ -54,7 +55,7 @@ namespace Orbiters.Toolkit.Editor.Animations
         public string Source;
         public string Clip;
         public int Occurrence;
-        /// <summary>File name without extension, made valid with <see cref="AssetPaths.FileName"/>.</summary>
+        /// <summary>File name without extension, made valid with <see cref="SafePaths.FileName"/>.</summary>
         public string Name;
         public string Folder;
     }
@@ -136,7 +137,7 @@ namespace Orbiters.Toolkit.Editor.Animations
         /// <summary>Where a model's clips go unless the user chooses: "&lt;model folder&gt;/&lt;model name&gt; Animations".</summary>
         public static string DefaultFolder(string sourcePath)
         {
-            string name = AssetPaths.FileName(Path.GetFileNameWithoutExtension(sourcePath ?? ""), "Model") + " Animations";
+            string name = SafePaths.FileName(Path.GetFileNameWithoutExtension(sourcePath ?? ""), "Model") + " Animations";
             string parent = AssetPaths.Normalize(Path.GetDirectoryName(sourcePath ?? ""));
             // Packages from a registry or git are read-only: their clips go under Assets.
             if (parent != "Assets" && !parent.StartsWith("Assets/", StringComparison.Ordinal) && !Writable(parent)) parent = "Assets/Animations";
@@ -148,7 +149,7 @@ namespace Orbiters.Toolkit.Editor.Animations
         /// else the clip's.
         /// </summary>
         public static string DefaultName(AnimationSourceInfo source, AnimationClipInfo clip) =>
-            AssetPaths.FileName(source.Clips.Count == 1 ? source.Name : clip.Name, "Animation");
+            SafePaths.FileName(source.Clips.Count == 1 ? source.Name : clip.Name, "Animation");
 
         /// <summary>Saves every job's clip, in one batch. See <see cref="ExtractionRun"/> to spread the work over editor updates.</summary>
         public static List<ExtractionResult> Extract(IEnumerable<ExtractionJob> jobs, ExtractionOptions options)
@@ -179,7 +180,7 @@ namespace Orbiters.Toolkit.Editor.Animations
             var taken = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (string source in sources)
             {
-                string stem = folder + "/" + AssetPaths.FileName(Path.GetFileNameWithoutExtension(source), "Model"), extension = Path.GetExtension(source);
+                string stem = folder + "/" + SafePaths.FileName(Path.GetFileNameWithoutExtension(source), "Model"), extension = Path.GetExtension(source);
                 string target = stem + extension;
                 for (int i = 1; ; i++)
                 {
@@ -336,7 +337,7 @@ namespace Orbiters.Toolkit.Editor.Animations
                 var source = Source(job);
                 if (source == null) return Fail(result, $"{Path.GetFileName(job.Source)} has no clip named “{job.Clip}”.");
 
-                string stem = folder + "/" + AssetPaths.FileName(job.Name, AssetPaths.FileName(job.Clip, "Animation"));
+                string stem = folder + "/" + SafePaths.FileName(job.Name, SafePaths.FileName(job.Clip, "Animation"));
                 string path = stem + ".anim";
                 for (int i = 1; claimed.Contains(path) || (options.Existing == ExistingAnimation.KeepBoth && AssetPaths.Exists(path)); i++)
                     path = stem + " " + i + ".anim";

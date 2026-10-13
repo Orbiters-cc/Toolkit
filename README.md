@@ -1,51 +1,71 @@
 # Orbiters Toolkit
 
-## 0.3.22 — 2026-10-12
+## 0.3.22 — 2026-10-13
 
 - **Build-copy optimization** (`Orbiters.Toolkit.Editor.VRChat.Optimization`), shared by My Avatar's Optimization
   section. Each step changes a build copy only, never edits a source asset, and returns what it changed:
-  - `AvatarUsage`: what a built avatar animates (playable layers and Animator components: shown objects, switched
-    components, moved transforms, swapped materials), which components point at what, its humanoid bones and the
-    parameters its animators read. Editor-only components don't count, unless the caller says so for an avatar not
-    built yet (then anything near a build tool's component is left alone: `Pending`).
+  - `AvatarUsage`: what a built avatar animates (playable layers, Animator components and legacy Animation components,
+    each read from the object its clips' paths start at: shown objects, switched components, moved transforms, swapped
+    materials), which components point at what, its humanoid bones and the parameters its animators read
+    (`ReadsInPlayableLayers`: only the playable layers get VRChat's parameters). Editor-only components don't count,
+    unless the caller says so for an avatar not built yet, or they belong to an optimizer that builds later (Avatar
+    Optimizer, d4rk Avatar Optimizer: `AvatarOptimizers`); anything near those is left alone (`Pending`), and
+    `BlendShapePruning.Used` keeps every shape of a renderer holding one. Shared by the steps: `AlwaysShown`, `Driven`
+    (PhysBone chains and what constraints move, `PhysBoneChain`, `ConstraintTargets`), `Animators` and `Clips`.
   - `ComponentCleanup`: objects that start hidden and that no animation shows, components that start disabled and that
-    no animation turns on, PhysBones that move nothing, PhysBone colliders no PhysBone lists, PhysBones that stop
-    following animations nothing plays on their bones, and end bones that become a PhysBone's endpoint position.
+    no animation turns on, PhysBones that move nothing (the branches they ignore still follow them), PhysBone colliders
+    no PhysBone lists, PhysBones that stop following animations nothing plays on their bones, and end bones that become
+    a PhysBone's endpoint position (not on a chain two PhysBones share).
   - `MeshOptimization.PruneBones` drops unweighted bones from a skinned mesh's bone list (VRChat ranks every listed
-    bone); `MergeSlots` drops empty submeshes and merges the ones sharing an opaque material, unless an animation swaps
-    the renderer's materials.
+    bone); `MergeSlots` drops empty submeshes and merges the ones sharing an opaque or cutout material (one that blends
+    keeps its slot, whatever its queue), unless an animation swaps the renderer's materials. Both leave a mesh weighted
+    to bones it doesn't list alone, and indices past 65535 get a 32-bit index buffer.
   - `MeshMerge.MergeStill` merges the skinned meshes always shown into the one animations use, per group drawn the same
     way; a mesh bound in the same rest pose moves into its mesh space and shares its bones. Static props (mesh
     renderers always shown) join too, skinned to their own transform. A mesh whose materials have a property the merged
-    renderer's animations set stays apart. `MergeTogether` merges the skinned meshes every animation shows and hides
-    together (the same toggle keys in every clip, the same state at rest); their animated blendshapes join the merged
-    mesh and the build's copies of the animations move their curves onto it.
-  - `MaterialCleanup` gives renderers copies of their materials without the textures their shader doesn't declare, and
-    (`MergeDuplicateTextures`) pointing at one texture where two are the same file imported the same way.
+    renderer's animations set stays apart, and every mesh does when they set its own settings (shadows, probes);
+    renderers a particle system emits from, or a build tool still works on, stay as they are. `MergeTogether` merges the
+    skinned meshes every animation shows and hides together (the same toggle keys in every clip, the same state at
+    rest); their animated blendshapes join the merged mesh and the build's copies of the animations move their curves
+    onto it. A part Unity drew mirrored otherwise than the merged renderer (a prop scaled -1) keeps its faces outwards
+    and its normal maps; normals, tangents and their blendshape offsets come out of the bones as before; the culling box
+    is measured from each part's own box (hidden renderers included).
+  - `MaterialCleanup` gives renderers copies of their materials without the textures their shader doesn't declare (the
+    main texture stays, for VRChat's fallback shader), and (`MergeDuplicateTextures`) pointing at one texture where two
+    are the same file imported the same way, package cache files included.
   - `MenuIcons.Shrink` copies the expression menus holding an icon larger than 64 px and points them at copies of the
-    icons at 64 px at most, compressed for the platform (BC7, ASTC 6x6 on Android).
+    icons at 64 px at most, compressed for the platform (BC7, sides a multiple of 4; ASTC 6x6 on Android).
   - `ShortNames.Rename` gives objects and the parameters only animators use the shortest names, rewriting the build's
-    copies of the animations (paths, masks, conditions, blend trees, parameter drivers, audio), PhysBones and contacts.
-    The humanoid model's bones, the root's `Body`, VRChat's parameters and the menu's keep their names.
+    copies of the animations (paths, masks, conditions, blend trees, parameter drivers, audio from its own animator),
+    PhysBones and contacts. The humanoid model's bones, the root's `Body`, VRChat's parameters and the menu's (VRChat's
+    default menu's without custom expressions) keep their names; no new name lands on a binding left dangling, and a
+    step that fails puts back the names it changed.
   - `MeshParts` takes a mesh apart and back together: `Subset` (the triangles chosen, with every attribute, weights,
-    bind poses and the blendshapes asked for), `Replace` (part of a mesh swapped for another, blendshapes joined by
-    name in one pass), `Join`, `DropEmptySubmeshes`, `Reach` (the vertices each blendshape moves) and `Within` (whether
-    points lie on a surface within a distance, and shade the same).
-- `Parameters.VrcParameters.Protected`: the parameters VRChat and VRCFaceTracking set by name, shared by every build
-  step that changes or renames parameters.
-- `AttachmentAnimationBuild.Owned` and `Clips` give the build's copies of the avatar's animation data to other build
-  steps.
+    bind poses and the blendshapes asked for; lines and points stay out), `Replace` (part of a mesh swapped for another,
+    blendshapes joined by name in one pass, lines and points kept), `Join` (blendshape frames at every weight either mesh
+    has one at), `DropEmptySubmeshes`, `ShapeAt` (a blendshape's offsets at a weight), `Reach` (the vertices each
+    blendshape moves) and `Within` (whether points lie on a surface within a distance, and shade the same).
   - `BodyCover.HideCovered` removes the body's triangles that opaque clothing worn all the time hides from every side
-    (rays from each vertex through a grid of the clothing's triangles).
+    (rays from each vertex through a grid of the clothing's triangles). Only clothing that moves with the body covers it
+    and only skin that moves with the skeleton goes: what a PhysBone, a constraint or an animation swings (skirts, coat
+    tails, long hair, a tail) is left out. Meshes at any scale are measured where they show.
   - `StaticBones.Fold` skins bones that never move against their parent through the nearest bone that can move, with
     bind poses that keep every vertex in place, so meshes list fewer bones.
+- `Parameters.VrcParameters.Protected`: the parameters VRChat and VRCFaceTracking set by name, shared by every build
+  step that changes or renames parameters; `PhysBoneSuffixes` and `DefaultExpressionParameters` too.
+- `AttachmentAnimationBuild.Owned`, `OwnedByAnimator` and `Clips` give the build's copies of the avatar's animation data
+  to other build steps. Legacy Animation components' clips are copied too, so they follow moved and renamed objects
+  (`Animations.LegacyAnimationClips` reads and replaces them).
 - `BlendShapePruning.Prune` also works on meshes imported without Read/Write, outside Play mode.
 - `AvatarBounds.Unify` gives every skinned mesh that moves with the hips the same culling box: around all of them as
-  they stand, with room for the limbs, the hips as root bone. Meshes below a constraint keep their own.
-- **AlterMesh** (`Orbiters.AlterMesh`, editor only, needs Burst, Collections and Mathematics): Orbiters' mesh
-  simplifier, derived from Meshia Mesh Simplification 3.2.0 (MIT, `Editor/AlterMesh/LICENSE-Meshia.md`). Fixed there:
-  blendshape normal and tangent offsets are no longer normalized at each collapse, empty submeshes no longer crash the
-  k-d tree, empty bit ranges are no longer counted (Collections throws). See `Editor/AlterMesh/README.md`.
+  they stand, with room for the limbs, the hips as root bone. Meshes on a bone a constraint moves (from anywhere: a
+  VRChat constraint's target), or below one, keep their own. The room never takes a box that fits VRChat's Excellent
+  bounds (2.5 m) out of it.
+- **AlterMesh** (`Orbiters.AlterMesh`, editor only, needs Burst 1.8.7 and Collections 2.1.4, the VRChat SDK's own, and
+  Mathematics 1.3.2, whose geometry types it uses): Orbiters' mesh simplifier, derived from Meshia Mesh Simplification
+  3.2.0 (MIT, `Editor/AlterMesh/LICENSE-Meshia.md`). Fixed there: blendshape normal and tangent offsets are no longer
+  normalized at each collapse, empty submeshes no longer crash the k-d tree, empty bit ranges are no longer counted
+  (Collections throws). See `Editor/AlterMesh/README.md`.
 - `HiddenAvatarBuild`: the avatar built as an upload builds it, without uploading: a copy in its own preview scene put
   through every SDK build step in order, one per editor frame (Poiyomi's lock, the build cache, VRCFury's blueprint hook
   and the caller's skips left out), released before scripts reload.
@@ -56,12 +76,38 @@
   come off) and `QuestParity` (desktop shaders, components Quest removes, the Quest rank; `Compare` and `Counterparts`
   for the other platform's version of the same blueprint).
 - `VrcFury.IsComponent` and `ModularAvatar.IsComponent` tell a build tool's components apart (Modular Avatar's check
-  was repeated in two places). `AvatarParameterBudget.IsSynced` is public.
+  was repeated in two places). `VrcFury.Find` remembers the types it did not find too: without VRCFury, a budget no
+  longer searches every assembly each time it asks. `AvatarParameterBudget.IsSynced` is public.
 - The build cache (`AttachmentAnimationBuild.Keep`) stores textures in the binary asset with meshes.
 - `BlendShapePruning.Keep`: blendshapes a caller needs on an avatar it is building (My Avatar's VRM export keeps the
   shapes its expressions set): every prune counts them as used. `Prune` also takes the names to keep.
 - `HiddenAvatarBuild.Start` takes a step that changes the copy before the build (a setting the build reads).
 - `SurfaceFollow` no longer throws on a mesh renderer without a mesh filter.
+- `SafeArchive` stages into, and `SafePaths.ReplaceDirectory` sets the previous folder aside as, folders ending in "~"
+  (`SafePaths.HiddenSibling`): one that cannot be deleted is never imported beside the folder it was for (duplicate
+  GUIDs). `SafePaths.RequireLength` also refuses folders over the 247 characters Windows makes, and its message names
+  the project only when the path is in it (with a shorter example only when one is shorter). `IsDeviceName` also knows
+  COM0, LPT0, the superscript COM¹²³ and LPT¹²³, CONIN$, CONOUT$ and "NUL .txt".
+- `OrbitersMenuIcons` writes each icon with the same GUID in every project, so menus and gallery packages made in one
+  find them in another; a picture already there is never overwritten, and one written inside an asset-editing batch is
+  set up when it imports.
+- Props in one folder no longer overwrite each other's parameters, menu and sparkle (`HeldPropRig` numbers a taken name).
+- `AnimatorControllerCopy.Tree` keeps a direct blend tree's normalized blend values.
+- Window captures: a hidden copy whose Inspector could not be locked is closed, hidden copies are closed before scripts
+  reload (and any a reload kept, after it), and a dialog a hidden window opens is shown, not hidden with it.
+- `AssetPaths.FileName` is gone: `SafePaths.FileName` makes every file name from a display name (a device name gets a
+  "_" in front, at most 64 characters).
+- `ShortNames.Rename`: a step failing after the animations followed the new names moves them back with the objects.
+- Tests: the prop and attachment tests remove the menu icons folder they made (`SharedFolders`); the optimization and
+  blendshape tests build their avatars in preview scenes; `SafeArchiveTests` skips the path-length cases when the
+  temporary folder's path is too long for them.
+- `ProjectReferences.ReachableAsync` / `Reachable`: every project file some files use, directly or through other files,
+  read a slice per editor tick and kept per file in Library (only changed files are read again); a file missing for a
+  while counts again once it is back. `UnityPackageFiles.ReplaceAssets` swaps files inside a `.unitypackage`.
+- `VrcFury.LeaveWriteDefaults` and `VrcFury.MobileAlignment`, shared by hidden builds and MCB's validation.
+- A hidden build frees what its steps made for the copy (controllers, clips, menus, materials, meshes, textures)
+  when it is released.
+- `AuthenticationService.RegisterAuthForEnv` (clipboard Magic Sync) is gone: tools sign in through the browser login.
 
 ## 0.3.21 — 2026-10-11
 

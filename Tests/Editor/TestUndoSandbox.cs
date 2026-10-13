@@ -13,12 +13,14 @@ namespace Orbiters.Toolkit.Editor.Tests
     /// their Undo steps only when the whole run ends, so a step left behind replays later (then, or on the user's Ctrl+Z and
     /// Ctrl+Y) and can bring an object the test destroyed back into the user's scene. <see cref="Begin"/> fences the test's
     /// steps off from the user's; <see cref="End"/> reverts them all, destroys what the test or that revert left in a loaded
-    /// scene, and fails a test that left a root object there itself. Call it after the test's own cleanup.
+    /// scene, and fails a test that left a root object there itself. Call it after the test's own cleanup. The project's
+    /// shared folders a test made go too (<see cref="SharedFolders"/>).
     /// </summary>
     internal sealed class TestUndoSandbox
     {
         private const string FenceName = "Test Undo fence";
         private readonly HashSet<int> roots = new HashSet<int>();
+        private SharedFolders folders;
         private AnimationClip fence;
         private int group;
 
@@ -26,6 +28,7 @@ namespace Orbiters.Toolkit.Editor.Tests
         {
             var sandbox = new TestUndoSandbox();
             foreach (var root in SceneRoots()) sandbox.roots.Add(root.GetInstanceID());
+            sandbox.folders = SharedFolders.Begin();
             Undo.FlushUndoRecordObjects();
             Undo.IncrementCurrentGroup();
             sandbox.group = Undo.GetCurrentGroup();
@@ -72,6 +75,7 @@ namespace Orbiters.Toolkit.Editor.Tests
             foreach (var root in left) Object.DestroyImmediate(root);
             Undo.ClearUndo(fence);
             Object.DestroyImmediate(fence);
+            folders.End();
             if (leaked.Count > 0) Assert.Fail("The test left " + string.Join(", ", leaked) + " in the user's scene.");
         }
 

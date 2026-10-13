@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using Orbiters.Toolkit.Editor.Storage;
+using Orbiters.Toolkit.Storage;
 
 namespace Orbiters.Toolkit.Editor.Photoshoot
 {
@@ -47,7 +48,7 @@ namespace Orbiters.Toolkit.Editor.Photoshoot
         internal string NewPath(string name, string extension)
         {
             Directory.CreateDirectory(Folder);
-            name = AssetPaths.FileName(name);
+            name = SafePaths.FileName(name, "Untitled");
             string path = Path.Combine(Folder, name + extension);
             for (int i = 2; File.Exists(path); i++) path = Path.Combine(Folder, name + " " + i + extension);
             return path;

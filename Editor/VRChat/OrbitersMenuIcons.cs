@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Linq;
 using UnityEditor;
 using UnityEngine;
 
@@ -8,8 +9,12 @@ namespace Orbiters.Toolkit.Editor.VRChat
     /// <summary>
     /// The icons Orbiters gives VRChat menu items that have none of their own: a white dot for toggles and buttons, a gauge
     /// for sliders, a folder for submenus and an arrow for "Next" pages. They are 64×64 pictures written once per project into
-    /// <see cref="Folder"/>: Toolkit's own files get new GUIDs in every project, so menus, avatars and gallery packages
-    /// refer to these copies instead. A picture replaced there is kept.
+    /// <see cref="Folder"/>, each with the same GUID in every project (Toolkit's own files get new GUIDs in each), so menus,
+    /// avatars and gallery packages made in one project find them in another. A picture replaced there is kept, with its
+    /// import settings. Outside an asset-editing batch every call returns the icon (a new picture imports at once). Inside
+    /// <c>AssetDatabase.StartAssetEditing</c> a new picture imports only when the batch ends, so the call returns null:
+    /// every caller then leaves the item without an icon (a menu control's, VRCFury's toggle's, the "Next" page's), never
+    /// fails, and the next call after the batch gets the icon with its settings.
     /// </summary>
     public static class OrbitersMenuIcons
     {
@@ -38,21 +43,38 @@ namespace Orbiters.Toolkit.Editor.VRChat
                 if (!AssetDatabase.IsValidFolder(parent + "/" + part)) AssetDatabase.CreateFolder(parent, part);
                 parent += "/" + part;
             }
-            File.WriteAllBytes(path, Convert.FromBase64String(png));
-            AssetDatabase.ImportAsset(path, ImportAssetOptions.ForceSynchronousImport);
-            // VRChat's menu draws icons over itself: alpha is transparency, no mipmaps, compressed.
-            if (AssetImporter.GetAtPath(path) is TextureImporter importer)
+            // A picture already there (replaced, not imported yet) is the project's own.
+            bool written = !File.Exists(path);
+            if (written)
             {
-                importer.textureType = TextureImporterType.Default;
-                importer.alphaIsTransparency = true;
-                importer.mipmapEnabled = false;
-                importer.wrapMode = TextureWrapMode.Clamp;
-                importer.npotScale = TextureImporterNPOTScale.None;
-                importer.maxTextureSize = 64;
-                importer.textureCompression = TextureImporterCompression.Compressed;
-                importer.SaveAndReimport();
+                File.WriteAllBytes(path, Convert.FromBase64String(png));
+                if (!File.Exists(path + ".meta")) File.WriteAllText(path + ".meta", "fileFormatVersion: 2\nguid: " + GuidOf(name) + "\n");
             }
+            AssetDatabase.ImportAsset(path, ImportAssetOptions.ForceSynchronousImport);
+            if (written && !Configure(path)) EditorApplication.delayCall += () => Configure(path);
             return AssetDatabase.LoadAssetAtPath<Texture2D>(path);
+        }
+
+        // VRChat's menu draws icons over itself: alpha is transparency, no mipmaps, compressed. False while it isn't imported.
+        private static bool Configure(string path)
+        {
+            if (!(AssetImporter.GetAtPath(path) is TextureImporter importer)) return false;
+            importer.textureType = TextureImporterType.Default;
+            importer.alphaIsTransparency = true;
+            importer.mipmapEnabled = false;
+            importer.wrapMode = TextureWrapMode.Clamp;
+            importer.npotScale = TextureImporterNPOTScale.None;
+            importer.maxTextureSize = 64;
+            importer.textureCompression = TextureImporterCompression.Compressed;
+            importer.SaveAndReimport();
+            return true;
+        }
+
+        // The icon's GUID, the same in every project.
+        private static string GuidOf(string name)
+        {
+            using (var md5 = System.Security.Cryptography.MD5.Create())
+                return string.Concat(md5.ComputeHash(System.Text.Encoding.UTF8.GetBytes("orbiters.toolkit/menu icons/" + name)).Select(b => b.ToString("x2")));
         }
 
         // 64×64 white pictures, drawn from Orbiters' menu icon designs.

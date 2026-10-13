@@ -11,6 +11,7 @@ namespace Orbiters.Toolkit.Editor.Storage
     /// Validated, transactional ZIP extraction: every entry is checked before anything is written, files expand into a
     /// sibling staging folder within an <see cref="ArchiveBudget"/>, a single root folder is stripped, and the destination
     /// is replaced in one rename only once the caller validated the result. The previous folder stays intact on failure.
+    /// The staging folder and the previous one, set aside, end in "~": Unity never imports them.
     /// </summary>
     public static class SafeArchive
     {
@@ -29,7 +30,8 @@ namespace Orbiters.Toolkit.Editor.Storage
                 StringComparer.OrdinalIgnoreCase);
 
             string finalPath = Path.GetFullPath(destination);
-            string staging = SafePaths.Sibling(finalPath, StagingKind);
+            // Hidden from Unity ("~"): one that cannot be deleted is never imported beside the folder it was for.
+            string staging = SafePaths.HiddenSibling(finalPath, StagingKind);
             try
             {
                 // Open the archive before making a staging directory; the previous folder stays intact.
@@ -99,7 +101,7 @@ namespace Orbiters.Toolkit.Editor.Storage
         /// </summary>
         public static void RequireRoom(string destination, IEnumerable<string> relativeFiles)
         {
-            string staging = SafePaths.Sibling(destination, StagingKind);
+            string staging = SafePaths.HiddenSibling(destination, StagingKind);
             foreach (string relative in (relativeFiles ?? Enumerable.Empty<string>()).Select(Normalize).Where(path => !string.IsNullOrWhiteSpace(path)))
                 SafePaths.RequireLength(Path.Combine(staging, relative.Replace('/', Path.DirectorySeparatorChar)));
         }

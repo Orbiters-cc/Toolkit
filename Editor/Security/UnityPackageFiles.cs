@@ -72,6 +72,47 @@ namespace Orbiters.Toolkit.Editor
             }
         }
 
+        /// <summary>
+        /// Writes a copy of a package with the contents of some assets replaced (<paramref name="contents"/>, by GUID) and every
+        /// other record copied as stored: a file can leave the computer in another form (without its local paths) while the
+        /// project's own copy stays untouched.
+        /// </summary>
+        public static void ReplaceAssets(string source, string destination, IReadOnlyDictionary<string, byte[]> contents)
+        {
+            using (var output = new GZipStream(File.Create(destination), CompressionLevel.Optimal))
+            {
+                UnityPackageReader.Read(source, null, record =>
+                {
+                    byte[] header = record.Header;
+                    long size = record.Size;
+                    Stream content = record.Content;
+                    if (record.Part == UnityPackageReader.Part.Asset && contents != null && contents.TryGetValue(record.Guid, out var replaced))
+                    {
+                        header = (byte[])header.Clone();
+                        SetSize(header, header.Length - 512, size = replaced.LongLength);
+                        content = new MemoryStream(replaced, false);
+                    }
+                    output.Write(header, 0, header.Length);
+                    content.CopyTo(output);
+                    int padding = (int)((512 - size % 512) % 512);
+                    output.Write(new byte[padding], 0, padding);
+                });
+                output.Write(new byte[1024], 0, 1024);
+            }
+        }
+
+        // The octal size field of the 512-byte tar header at offset, and the header's checksum (counted with its own field as spaces).
+        private static void SetSize(byte[] header, int offset, long size)
+        {
+            byte[] field = System.Text.Encoding.ASCII.GetBytes(Convert.ToString(size, 8).PadLeft(11, '0') + "\0");
+            Array.Copy(field, 0, header, offset + 124, 12);
+            for (int i = 148; i < 156; i++) header[offset + i] = (byte)' ';
+            long sum = 0;
+            for (int i = 0; i < 512; i++) sum += header[offset + i];
+            byte[] checksum = System.Text.Encoding.ASCII.GetBytes(Convert.ToString(sum, 8).PadLeft(6, '0') + "\0 ");
+            Array.Copy(checksum, 0, header, offset + 148, 8);
+        }
+
         /// <summary>SHA-256 of a file, lowercase hex.</summary>
         public static string FileHash(string path)
         {

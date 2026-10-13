@@ -1,7 +1,9 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Reflection;
+using UnityEditor;
 using UnityEngine;
 
 namespace Orbiters.Toolkit.Editor.VRChat
@@ -26,10 +28,22 @@ namespace Orbiters.Toolkit.Editor.VRChat
         public static IWriter Writer { get; set; }
         public static bool Installed => Component != null;
 
-        private static Type component;
-        public static Type Component => component ??= Find("VF.Model.VRCFury");
+        public static Type Component => Find("VF.Model.VRCFury");
 
+        // Types by full name, those not found too: a package installed later comes with a domain reload, which empties it.
+        private static readonly Dictionary<string, Type> Types = new Dictionary<string, Type>(StringComparer.Ordinal);
+
+        /// <summary>A type by its full name, from VRCFury's assemblies or any loaded one (Modular Avatar's...); null when none has it.</summary>
         public static Type Find(string fullName)
+        {
+            lock (Types)
+            {
+                if (Types.TryGetValue(fullName, out var known)) return known;
+                return Types[fullName] = Search(fullName);
+            }
+        }
+
+        private static Type Search(string fullName)
         {
             foreach (var assembly in new[] { "VRCFury-Runtime", "VRCFury-Editor", "VRCFury" })
             {
@@ -44,11 +58,9 @@ namespace Orbiters.Toolkit.Editor.VRChat
             return null;
         }
 
-        private static Type anyComponent;
-
         /// <summary>Whether a component is one of VRCFury's (what it holds builds at upload).</summary>
         public static bool IsComponent(Component value) =>
-            value != null && (anyComponent ??= Find("VF.Component.VRCFuryComponent")) != null && anyComponent.IsInstanceOfType(value);
+            value != null && Find("VF.Component.VRCFuryComponent") is Type type && type.IsInstanceOfType(value);
 
         public static object Content(Component vrcFury) => vrcFury != null ? Component?.GetField("content")?.GetValue(vrcFury) : null;
 
@@ -62,6 +74,38 @@ namespace Orbiters.Toolkit.Editor.VRChat
             if (type == null) return false;
             var debug = Find("VF.Model.VRCFuryDebugInfo");
             return avatarRoot.GetComponentsInChildren(type, true).Any(c => debug == null || !debug.IsInstanceOfType(c));
+        }
+
+        /// <summary>Whether this is a copy VRCFury built already (its test copies): VRCFury refuses to build it again.</summary>
+        public static bool IsTestCopy(GameObject avatarRoot) =>
+            avatarRoot != null && Find("VF.Model.VRCFuryTest") is Type test && avatarRoot.GetComponent(test) != null;
+
+        /// <summary>
+        /// Makes VRCFury leave a build copy's Write Defaults as they are without asking: on a broken mix it would open a
+        /// question in the middle of a check and save the answer on the copy, which is thrown away. Only on an avatar
+        /// VRCFury builds whose own Fix Write Defaults doesn't decide already.
+        /// </summary>
+        public static void LeaveWriteDefaults(GameObject buildCopy)
+        {
+            var fix = Find("VF.Model.Feature.FixWriteDefaults");
+            if (fix == null || Component == null || !Builds(buildCopy) || Features(buildCopy).Any(f => fix.IsInstanceOfType(f.feature))) return;
+            var feature = Activator.CreateInstance(fix, true);
+            var mode = fix.GetField("mode");
+            mode.SetValue(feature, Enum.Parse(mode.FieldType, "Disabled"));
+            Component.GetField("content").SetValue(buildCopy.AddComponent(Component), feature);
+        }
+
+        /// <summary>
+        /// Whether VRCFury puts the synced parameters of this blueprint's Android and iOS uploads in the order of its PC
+        /// upload (its "align mobile parameters" setting, on by default), and whether it can yet: it reads the PC order
+        /// that this computer saved when it uploaded the PC version.
+        /// </summary>
+        public static (bool Aligns, bool PcOrderKnown) MobileAlignment(string blueprintId)
+        {
+            if (!Installed || !EditorPrefs.GetBool("com.vrcfury.alignMobile", true)) return (false, false);
+            if (string.IsNullOrEmpty(blueprintId)) return (true, false);
+            string data = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+            return (true, !string.IsNullOrEmpty(data) && File.Exists(Path.Combine(data, "VRCFury", "DesktopSyncData", blueprintId + ".json")));
         }
 
         /// <summary>Each VRCFury component under <paramref name="root"/> with its feature, e.g. "ArmatureLink", "Toggle", "FullController".</summary>

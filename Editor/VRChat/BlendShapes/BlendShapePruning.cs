@@ -26,28 +26,39 @@ namespace Orbiters.Toolkit.Editor.VRChat.BlendShapes
         }.Select(Normalize));
 
         /// <summary>
-        /// Blendshapes the built avatar uses on this renderer: animated by one of its controllers (playable layers,
-        /// Animator components), driven by the descriptor (visemes, jaw flap, eyelids), or a standard MMD morph on Body.
-        /// Call it once every build step that adds animations has run. With <paramref name="constantsUnused"/>, a shape every
-        /// animation only ever sets to the weight it already has never changes, and doesn't count.
-        /// </summary>
-        /// <summary>
         /// Blendshapes a caller needs on an avatar it is building, by the avatar's root (a VRM export keeps the shapes its
         /// expressions set, which no VRChat animation may use): <see cref="Used"/> counts them, on any of its meshes, so no
         /// build step removes them. Set before the build, removed after.
         /// </summary>
         public static readonly Dictionary<GameObject, HashSet<string>> Keep = new Dictionary<GameObject, HashSet<string>>();
 
+        /// <summary>
+        /// Blendshapes the built avatar uses on this renderer: animated by one of its clips (playable layers, Animator and
+        /// legacy Animation components, each from its own object), driven by the descriptor (visemes, jaw flap, eyelids), or
+        /// a standard MMD morph on Body. Every one counts on a renderer holding an optimizer's component that builds later
+        /// (<see cref="AvatarOptimizers"/>: it names shapes, to remove the mesh they move, say). Call it once every build step
+        /// that adds animations has run. With <paramref name="constantsUnused"/>, a shape every animation only ever sets to
+        /// the weight it already has never changes, and doesn't count.
+        /// </summary>
         public static HashSet<string> Used(GameObject avatarRoot, SkinnedMeshRenderer renderer, bool constantsUnused = false)
         {
             var mesh = renderer.sharedMesh;
             var used = new HashSet<string>();
+            if (renderer.GetComponents<Component>().Any(AvatarOptimizers.IsComponent))
+            {
+                used.UnionWith(Enumerable.Range(0, mesh.blendShapeCount).Select(mesh.GetBlendShapeName));
+                return used;
+            }
             string path = UnityEditor.AnimationUtility.CalculateTransformPath(renderer.transform, avatarRoot.transform);
             var changing = new HashSet<string>();
-            foreach (var clip in Controllers(avatarRoot).SelectMany(c => c.animationClips).Where(c => c != null).Distinct())
+            foreach (var (clip, animatorRoot) in Optimization.AvatarUsage.Clips(avatarRoot))
+            {
+                // A nested animator's paths start at its own object.
+                if (!renderer.transform.IsChildOf(animatorRoot)) continue;
+                string relative = UnityEditor.AnimationUtility.CalculateTransformPath(renderer.transform, animatorRoot);
                 foreach (var binding in UnityEditor.AnimationUtility.GetCurveBindings(clip))
                 {
-                    if (binding.path != path || binding.type != typeof(SkinnedMeshRenderer) || !binding.propertyName.StartsWith("blendShape.", StringComparison.Ordinal)) continue;
+                    if (binding.path != relative || binding.type != typeof(SkinnedMeshRenderer) || !binding.propertyName.StartsWith("blendShape.", StringComparison.Ordinal)) continue;
                     string name = binding.propertyName.Substring("blendShape.".Length);
                     used.Add(name);
                     if (!constantsUnused || changing.Contains(name)) continue;
@@ -55,6 +66,7 @@ namespace Orbiters.Toolkit.Editor.VRChat.BlendShapes
                     var curve = UnityEditor.AnimationUtility.GetEditorCurve(clip, binding);
                     if (index < 0 || curve == null || curve.keys.Any(k => Mathf.Abs(k.value - renderer.GetBlendShapeWeight(index)) > .01f)) changing.Add(name);
                 }
+            }
             if (constantsUnused) used.IntersectWith(changing);
             if (Keep.TryGetValue(avatarRoot, out var kept))
                 for (int i = 0; i < mesh.blendShapeCount; i++)
@@ -152,41 +164,17 @@ namespace Orbiters.Toolkit.Editor.VRChat.BlendShapes
             return copy;
         }
 
-        // A shape's offset at a weight, as Unity skins it: interpolated between frames, from zero below the first.
+        // A shape's offset at a weight, as Unity skins it, added to the mesh.
         private static void Bake(Mesh mesh, int shape, float weight, Vector3[] dv, Vector3[] dn, Vector3[] dt,
             Vector3[] vertices, Vector3[] normals, Vector4[] tangents)
         {
-            int frames = mesh.GetBlendShapeFrameCount(shape);
-            int upper = 0;
-            while (upper < frames - 1 && mesh.GetBlendShapeFrameWeight(shape, upper) < weight) upper++;
-            float upperWeight = mesh.GetBlendShapeFrameWeight(shape, upper);
-            float lowerWeight = upper == 0 ? 0 : mesh.GetBlendShapeFrameWeight(shape, upper - 1);
-            float t = upperWeight == lowerWeight ? 1 : (weight - lowerWeight) / (upperWeight - lowerWeight);
-            Add(mesh, shape, upper, t, dv, dn, dt, vertices, normals, tangents);
-            if (upper > 0) Add(mesh, shape, upper - 1, 1 - t, dv, dn, dt, vertices, normals, tangents);
-        }
-
-        private static void Add(Mesh mesh, int shape, int frame, float scale, Vector3[] dv, Vector3[] dn, Vector3[] dt,
-            Vector3[] vertices, Vector3[] normals, Vector4[] tangents)
-        {
-            if (scale == 0) return;
-            mesh.GetBlendShapeFrameVertices(shape, frame, dv, dn, dt);
+            Optimization.MeshParts.ShapeAt(mesh, shape, weight, dv, dn, dt);
             for (int v = 0; v < vertices.Length; v++)
             {
-                vertices[v] += dv[v] * scale;
-                if (normals != null) normals[v] += dn[v] * scale;
-                if (tangents != null) tangents[v] += (Vector4)(dt[v] * scale);
+                vertices[v] += dv[v];
+                if (normals != null) normals[v] += dn[v];
+                if (tangents != null) tangents[v] += (Vector4)dt[v];
             }
-        }
-
-        private static IEnumerable<RuntimeAnimatorController> Controllers(GameObject avatarRoot)
-        {
-            foreach (var descriptor in avatarRoot.GetComponentsInChildren<VRCAvatarDescriptor>(true))
-                foreach (var layer in (descriptor.baseAnimationLayers ?? Array.Empty<VRCAvatarDescriptor.CustomAnimLayer>())
-                    .Concat(descriptor.specialAnimationLayers ?? Array.Empty<VRCAvatarDescriptor.CustomAnimLayer>()))
-                    if (!layer.isDefault && layer.animatorController != null) yield return layer.animatorController;
-            foreach (var animator in avatarRoot.GetComponentsInChildren<Animator>(true))
-                if (animator.runtimeAnimatorController != null) yield return animator.runtimeAnimatorController;
         }
 
         // Full- and half-width forms, case and the "2" of alternate morphs ("ウィンク２") do not matter.

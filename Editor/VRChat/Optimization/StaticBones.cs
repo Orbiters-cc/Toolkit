@@ -3,7 +3,6 @@ using System.Collections.Generic;
 using System.Linq;
 using Unity.Collections;
 using UnityEngine;
-using UnityEngine.Animations;
 using VRC.Dynamics;
 using Object = UnityEngine.Object;
 
@@ -29,9 +28,13 @@ namespace Orbiters.Toolkit.Editor.VRChat.Optimization
         {
             var result = new Result();
             var root = usage.Root.transform;
-            var renderers = root.GetComponentsInChildren<SkinnedMeshRenderer>(true).Where(r => r.sharedMesh != null && r.bones.Length > 0 && r.GetComponent<Cloth>() == null).ToList();
+            // A mesh weighted to a bone it doesn't list can't be rebound safely.
+            var renderers = root.GetComponentsInChildren<SkinnedMeshRenderer>(true)
+                .Where(r => r.sharedMesh != null && r.bones.Length > 0 && r.GetComponent<Cloth>() == null && MeshOptimization.WeightsInRange(r.sharedMesh, r.bones.Length)).ToList();
             var listedBefore = new HashSet<Transform>(renderers.SelectMany(r => r.bones).Where(b => b != null));
-            var moving = Moving(usage);
+            // Bones something else moves (PhysBone chains, what constraints drive): what moves carries what is below it
+            // along, but those still stay put against it.
+            var moving = usage.Driven();
             var target = new Dictionary<Transform, Transform>();
             Transform Target(Transform bone)
             {
@@ -80,24 +83,6 @@ namespace Orbiters.Toolkit.Editor.VRChat.Optimization
             return usage.ReferencesTo(bone).All(r => Allowed(r.From, r.Property)) && usage.ReferencesTo(bone.gameObject).All(r => Allowed(r.From, r.Property));
         }
 
-        // Bones something else moves: PhysBone chains and what constraints drive.
-        private static HashSet<Transform> Moving(AvatarUsage usage)
-        {
-            var moving = new HashSet<Transform>();
-            foreach (var bone in usage.Root.GetComponentsInChildren<VRCPhysBoneBase>(true))
-            {
-                var chain = bone.rootTransform != null ? bone.rootTransform : bone.transform;
-                var ignored = (bone.ignoreTransforms ?? new List<Transform>()).Where(t => t != null).ToList();
-                moving.UnionWith(chain.GetComponentsInChildren<Transform>(true).Where(t => !ignored.Any(t.IsChildOf)));
-            }
-            foreach (var constraint in usage.Root.GetComponentsInChildren<VRCConstraintBase>(true))
-                moving.Add(constraint.TargetTransform != null ? constraint.TargetTransform : constraint.transform);
-            foreach (var constraint in usage.Root.GetComponentsInChildren<IConstraint>(true))
-                if (constraint is Component component) moving.Add(component.transform);
-            // What moves carries what is below it along, but those still stay put against it: only the movers themselves.
-            return moving;
-        }
-
         // A copy of the mesh with the new bind poses, entries of one bone at one bind pose merged.
         private static Mesh Rebind(SkinnedMeshRenderer renderer, Transform[] bones, Matrix4x4[] poses)
         {
@@ -109,7 +94,7 @@ namespace Orbiters.Toolkit.Editor.VRChat.Optimization
             {
                 int at = -1;
                 for (int k = 0; k < keptBones.Count && at < 0; k++)
-                    if (keptBones[k] == bones[i] && Close(keptPoses[k], poses[i])) at = k;
+                    if (keptBones[k] == bones[i] && MeshOptimization.Close(keptPoses[k], poses[i])) at = k;
                 if (at < 0) { at = keptBones.Count; keptBones.Add(bones[i]); keptPoses.Add(poses[i]); }
                 map[i] = at;
             }
@@ -123,7 +108,7 @@ namespace Orbiters.Toolkit.Editor.VRChat.Optimization
                 merged.Clear();
                 for (int n = 0; n < counts[v]; n++, k++)
                 {
-                    int bone = weights[k].boneIndex < map.Length ? map[weights[k].boneIndex] : weights[k].boneIndex;
+                    int bone = map[weights[k].boneIndex];
                     int found = merged.FindIndex(m => m.boneIndex == bone);
                     if (found >= 0) merged[found] = new BoneWeight1 { boneIndex = bone, weight = merged[found].weight + weights[k].weight };
                     else merged.Add(new BoneWeight1 { boneIndex = bone, weight = weights[k].weight });
@@ -140,12 +125,6 @@ namespace Orbiters.Toolkit.Editor.VRChat.Optimization
             MeshOptimization.SetMesh(renderer, copy);
             renderer.bones = keptBones.ToArray();
             return copy;
-        }
-
-        private static bool Close(Matrix4x4 a, Matrix4x4 b)
-        {
-            for (int i = 0; i < 16; i++) if (Mathf.Abs(a[i] - b[i]) > 1e-4f) return false;
-            return true;
         }
     }
 }

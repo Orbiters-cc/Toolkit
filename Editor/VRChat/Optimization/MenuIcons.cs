@@ -97,6 +97,8 @@ namespace Orbiters.Toolkit.Editor.VRChat.Optimization
         {
             float scale = (float)max / Mathf.Max(source.width, source.height);
             int width = Mathf.Max(1, Mathf.RoundToInt(source.width * scale)), height = Mathf.Max(1, Mathf.RoundToInt(source.height * scale));
+            // BC7 compresses blocks of 4 × 4 texels: each side a multiple of 4 (ASTC takes any size).
+            if (!mobile) { width = Mathf.Max(4, (width + 2) / 4 * 4); height = Mathf.Max(4, (height + 2) / 4 * 4); }
             var previous = RenderTexture.active;
             Texture current = source;
             RenderTexture step = null;

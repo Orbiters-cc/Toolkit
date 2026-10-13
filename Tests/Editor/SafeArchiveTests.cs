@@ -27,6 +27,7 @@ public sealed class SafeArchiveTests
     // A folder whose full path is exactly `length` characters long.
     private string Destination(int length)
     {
+        if (length - root.Length - 1 < 1) Assert.Ignore("The temporary folder's path is too long for this test.");
         string destination = root + Path.DirectorySeparatorChar + new string('d', length - root.Length - 1);
         Assert.That(destination.Length, Is.EqualTo(length));
         return destination;
@@ -46,13 +47,15 @@ public sealed class SafeArchiveTests
     {
         string folder = Destination(100);
         Assert.That(SafePaths.Sibling(folder, "building"), Does.Match("^" + System.Text.RegularExpressions.Regex.Escape(folder) + @"\.building-[0-9a-f]{8}$"));
+        Assert.That(SafePaths.HiddenSibling(folder, "trash"), Does.Match("^" + System.Text.RegularExpressions.Regex.Escape(folder) + @"\.trash-[0-9a-f]{8}~$"),
+            "Unity never imports a folder ending in ~.");
     }
 
     [Test]
     public void ExtractsFilesThatFitThroughTheShortStagingFolder()
     {
-        // Fits with the 18-character staging suffix; a 42-character one (".building-" and a whole GUID) went over the limit.
-        string destination = Destination(SafePaths.MaxPathLength - 18 - 1 - FileName.Length - 2);
+        // Fits with the 19-character staging suffix (".building-", 8 digits, "~"); a 42-character one (a whole GUID) went over.
+        string destination = Destination(SafePaths.MaxPathLength - 19 - 1 - FileName.Length - 1);
         using (var zip = Zip(FileName)) SafeArchive.Extract(zip, destination);
         Assert.That(File.ReadAllText(Path.Combine(destination, FileName)), Is.EqualTo("payload"));
     }
@@ -68,10 +71,30 @@ public sealed class SafeArchiveTests
         using (var zip = Zip(FileName))
         {
             var error = Assert.Throws<PathTooLongException>(() => SafeArchive.Extract(zip, destination));
-            StringAssert.Contains("Move the project", error.Message);
+            StringAssert.Contains("characters shorter", error.Message);
         }
         Assert.That(File.ReadAllText(Path.Combine(destination, "previous.txt")), Is.EqualTo("kept"));
         Assert.That(Directory.GetDirectories(root), Has.Length.EqualTo(1), "No staging folder is left behind.");
         Assert.Throws<PathTooLongException>(() => SafeArchive.RequireRoom(destination, new[] { FileName }));
+    }
+
+    [Test]
+    public void RefusesFoldersTooLongForWindowsEvenWhenTheFileNameFits()
+    {
+        if (Path.DirectorySeparatorChar != '\\') Assert.Ignore("Only Windows limits path length.");
+        // The staging folder is 248 characters: one more than Windows creates, though "a.bin" in it would fit 259.
+        string destination = Destination(SafePaths.MaxFolderPathLength - 19 + 1);
+        var error = Assert.Throws<PathTooLongException>(() => SafeArchive.RequireRoom(destination, new[] { "a.bin" }));
+        StringAssert.Contains("a folder would need", error.Message);
+        Assert.DoesNotThrow(() => SafeArchive.RequireRoom(Destination(SafePaths.MaxFolderPathLength - 19), new[] { "a.bin" }));
+    }
+
+    [Test]
+    public void DeviceNamesAreRefusedWhateverTheirExtension()
+    {
+        foreach (var name in new[] { "CON", "nul.txt", "NUL .txt", "COM0", "lpt9.bin", "COM¹", "LPT³.dat", "CONIN$", "conout$.log" })
+            Assert.That(SafePaths.IsDeviceName(name), Is.True, name);
+        foreach (var name in new[] { "CONSOLE", "COM10", "LPT", "nullable.txt", "auxiliary" })
+            Assert.That(SafePaths.IsDeviceName(name), Is.False, name);
     }
 }

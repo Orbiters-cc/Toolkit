@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using Orbiters.Toolkit.Editor.Storage;
+using Orbiters.Toolkit.Storage;
 using UnityEditor;
 using UnityEngine.UIElements;
 using static Orbiters.Toolkit.Editor.Animations.AnimationExtractorWindow;
@@ -161,7 +162,7 @@ namespace Orbiters.Toolkit.Editor.Animations
             row.Name.RegisterValueChangedCallback(evt =>
             {
                 // Shown as it will be saved: characters a file name cannot hold become "_".
-                entry.Name = AssetPaths.FileName(evt.newValue, AssetPaths.FileName(clip.Name, "Animation"));
+                entry.Name = SafePaths.FileName(evt.newValue, SafePaths.FileName(clip.Name, "Animation"));
                 row.Name.SetValueWithoutNotify(entry.Name);
             });
             body.Add(row.Name);

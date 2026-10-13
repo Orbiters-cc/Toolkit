@@ -71,7 +71,7 @@ namespace Orbiters.AlterMesh
         /// <param name="options">The options for this mesh simplification.</param>
         /// <param name="destination">The destination to write simplified mesh.</param>
         /// <remarks>To process multiple meshes at once, use <see cref="SimplifyBatch(IReadOnlyList{ValueTuple{Mesh, MeshSimplificationTarget, MeshSimplifierOptions, Mesh}})"/> instead.</remarks>
-        public static void Simplify(Mesh mesh, MeshSimplificationTarget target, MeshSimplifierOptions options, Mesh destination) 
+        public static void Simplify(Mesh mesh, MeshSimplificationTarget target, MeshSimplifierOptions options, Mesh destination)
             => Simplify(mesh, target, options, null, destination);
         /// <summary>
         /// Simplifies the given <paramref name="mesh"/> and writes the result to <paramref name="destination"/>.
@@ -83,121 +83,32 @@ namespace Orbiters.AlterMesh
         /// <remarks>To process multiple meshes at once, use <see cref="SimplifyBatch(IReadOnlyList{ValueTuple{Mesh, MeshSimplificationTarget, MeshSimplifierOptions, Mesh}})"/> instead.</remarks>
         public static void Simplify(Mesh mesh, MeshSimplificationTarget target, MeshSimplifierOptions options, BitArray? preserveBorderEdgesBoneIndices, Mesh destination)
         {
-            Allocator allocator = Unity.Collections.Allocator.TempJob;
-            var originalMeshDataArray = Mesh.AcquireReadOnlyMeshData(mesh);
-            var originalMeshData = originalMeshDataArray[0];
-            var blendShapes = BlendShapeData.GetMeshBlendShapes(mesh, allocator);
-
-            var meshSimplifier = new MeshSimplifier(allocator);
-
-            NativeBitArray nativePreserveBorderEdgesBoneIndices = new(preserveBorderEdgesBoneIndices?.Length ?? 0, allocator, NativeArrayOptions.UninitializedMemory);
-            if (preserveBorderEdgesBoneIndices is not null)
-            {
-                for (int i = 0; i < preserveBorderEdgesBoneIndices.Length; i++)
-                {
-                    nativePreserveBorderEdgesBoneIndices.Set(i, preserveBorderEdgesBoneIndices[i]);
-                }
-            }
-
-            var load = meshSimplifier.ScheduleLoadMeshData(originalMeshData, options);
-
-            var simplifiedMeshDataArray = Mesh.AllocateWritableMeshData(1);
-            NativeList<BlendShapeData> simplifiedBlendShapes = new(allocator);
-            var simplify = meshSimplifier.ScheduleSimplify(originalMeshData, blendShapes, target, nativePreserveBorderEdgesBoneIndices, load);
-            nativePreserveBorderEdgesBoneIndices.Dispose(simplify);
-            var write = meshSimplifier.ScheduleWriteMeshData(originalMeshData, blendShapes, simplifiedMeshDataArray[0], simplifiedBlendShapes, simplify);
-            meshSimplifier.Dispose(write);
-            JobHandle.ScheduleBatchedJobs();
-            write.Complete();
-
-            originalMeshDataArray.Dispose();
-
-            foreach (var blendShape in blendShapes)
-            {
-                blendShape.Dispose();
-            }
-            blendShapes.Dispose();
-
-            ApplySimplifiedMesh(mesh, simplifiedMeshDataArray, simplifiedBlendShapes.AsArray(), destination);
-
-            foreach (var simplifiedBlendShape in simplifiedBlendShapes)
-            {
-                simplifiedBlendShape.Dispose();
-            }
-            simplifiedBlendShapes.Dispose();
+            // Every native container goes, also when a step throws.
+            using var run = new Run();
+            run.Start(mesh, target, options, preserveBorderEdgesBoneIndices, Unity.Collections.Allocator.TempJob, preserveOnLoad: false);
+            run.Apply(mesh, destination);
         }
-        public static void SimplifyBatch(IReadOnlyList<(Mesh Mesh, MeshSimplificationTarget Target, MeshSimplifierOptions Options, Mesh Destination)> parameters) 
+        public static void SimplifyBatch(IReadOnlyList<(Mesh Mesh, MeshSimplificationTarget Target, MeshSimplifierOptions Options, Mesh Destination)> parameters)
             => SimplifyBatch(parameters.Select<(Mesh Mesh, MeshSimplificationTarget Target, MeshSimplifierOptions Options, Mesh Destination), (Mesh, MeshSimplificationTarget, MeshSimplifierOptions, BitArray?, Mesh)>(p => (p.Mesh, p.Target, p.Options, null, p.Destination)).ToList());
 
         public static void SimplifyBatch(IReadOnlyList<(Mesh Mesh, MeshSimplificationTarget Target, MeshSimplifierOptions Options, BitArray? PreserveBorderEdgesBoneIndices, Mesh Destination)> parameters)
         {
-            Allocator allocator = Unity.Collections.Allocator.TempJob;
-
-            using (ListPool<Mesh>.Get(out var meshes))
-            using (ListPool<Mesh>.Get(out var destinations))
+            // Every mesh is scheduled before any is waited for; every native container goes, also when a step throws.
+            var runs = new List<Run>(parameters.Count);
+            try
             {
-                Span<NativeList<BlendShapeData>> blendShapesList = stackalloc NativeList<BlendShapeData>[parameters.Count];
-                Span<NativeList<BlendShapeData>> simplifiedBlendShapesList = stackalloc NativeList<BlendShapeData>[parameters.Count];
-                Span<MeshSimplifier> meshSimplifiers = stackalloc MeshSimplifier[parameters.Count];
-                Span<JobHandle> jobHandles = stackalloc JobHandle[parameters.Count];
-                foreach (var parameter in parameters)
+                foreach (var (mesh, target, options, preserveBorderEdgesBoneIndices, _) in parameters)
                 {
-                    meshes.Add(parameter.Mesh);
-                    destinations.Add(parameter.Destination);
+                    var run = new Run();
+                    runs.Add(run);
+                    run.Start(mesh, target, options, preserveBorderEdgesBoneIndices, Unity.Collections.Allocator.TempJob, preserveOnLoad: false);
                 }
-
-                var originalMeshDataArray = Mesh.AcquireReadOnlyMeshData(meshes);
-                var simplifiedMeshDataArray = Mesh.AllocateWritableMeshData(originalMeshDataArray.Length);
-
-                for (int i = 0; i < parameters.Count; i++)
-                {
-                    var (mesh, target, options, preserveBorderEdgesBoneIndices, destination) = parameters[i];
-                    var originalMeshData = originalMeshDataArray[i];
-                    var blendShapes = BlendShapeData.GetMeshBlendShapes(mesh, allocator);
-                    blendShapesList[i] = blendShapes;
-                    var meshSimplifier = new MeshSimplifier(allocator);
-                    NativeBitArray nativePreserveBorderEdgesBoneIndices = new(preserveBorderEdgesBoneIndices?.Length ?? 0, allocator, NativeArrayOptions.UninitializedMemory);
-                    if (preserveBorderEdgesBoneIndices is not null)
-                    {
-                        for (int boneIndex = 0; boneIndex < preserveBorderEdgesBoneIndices.Length; boneIndex++)
-                        {
-                            nativePreserveBorderEdgesBoneIndices.Set(boneIndex, preserveBorderEdgesBoneIndices[boneIndex]);
-                        }
-                    }
-                    var load = meshSimplifier.ScheduleLoadMeshData(originalMeshData, options);
-                    NativeList<BlendShapeData> simplifiedBlendShapes = new(allocator);
-                    simplifiedBlendShapesList[i] = simplifiedBlendShapes;
-
-                    var simplify = meshSimplifier.ScheduleSimplify(originalMeshData, blendShapes, target, nativePreserveBorderEdgesBoneIndices, load);
-                    nativePreserveBorderEdgesBoneIndices.Dispose(simplify);
-                    var write = meshSimplifier.ScheduleWriteMeshData(originalMeshData, blendShapes, simplifiedMeshDataArray[i], simplifiedBlendShapes, simplify);
-                    meshSimplifier.Dispose(write);
-                    jobHandles[i] = write;
-
-                }
-                JobHandle.ScheduleBatchedJobs();
-                jobHandles.CombineDependencies().Complete();
-                originalMeshDataArray.Dispose();
-                foreach (var blendShapes in blendShapesList)
-                {
-                    foreach (var blendShape in blendShapes)
-                    {
-                        blendShape.Dispose();
-                    }
-                    blendShapes.Dispose();
-                }
-                ApplySimplifiedMeshes(meshes, simplifiedMeshDataArray, simplifiedBlendShapesList, destinations);
-                foreach (var simplifiedBlendShapes in simplifiedBlendShapesList)
-                {
-                    foreach (var simplifiedBlendShape in simplifiedBlendShapes)
-                    {
-                        simplifiedBlendShape.Dispose();
-                    }
-                    simplifiedBlendShapes.Dispose();
-                }
+                for (int i = 0; i < runs.Count; i++) runs[i].Apply(parameters[i].Mesh, parameters[i].Destination);
             }
-
-
+            finally
+            {
+                foreach (var run in runs) run.Dispose();
+            }
         }
         /// <summary>
         /// Asynchronously simplifies the given <paramref name="mesh"/> and writes the result to <paramref name="destination"/>.
@@ -218,72 +129,124 @@ namespace Orbiters.AlterMesh
         /// <param name="target">The simplification target for this mesh simplification.</param>
         /// <param name="options">The options for this mesh simplification.</param>
         /// <param name="destination">The destination to write simplified mesh.</param>
-        /// <param name="cancellationToken">The token to monitor for cancellation requests. The default value is <see cref="CancellationToken.None"/>.</param>
+        /// <param name="cancellationToken">The token to monitor for cancellation requests. The default value is <see cref="CancellationToken.None"/>.
+        /// Cancelled on the editor's thread (before a script reload, say), the jobs are completed and their native memory freed
+        /// at once, before the cancel returns: nothing is left for a reload to leak.</param>
         /// <returns>A task that represents the asynchronous mesh simplification operation.</returns>
         public static async Task SimplifyAsync(Mesh mesh, MeshSimplificationTarget target, MeshSimplifierOptions options, BitArray? preserveBorderEdgesBoneIndices, Mesh destination, CancellationToken cancellationToken = default)
         {
-            Allocator allocator = Unity.Collections.Allocator.Persistent;
-            var originalMeshDataArray = Mesh.AcquireReadOnlyMeshData(mesh);
-            var originalMeshData = originalMeshDataArray[0];
-            var blendShapes = BlendShapeData.GetMeshBlendShapes(mesh, allocator);
-
-            var meshSimplifier = new MeshSimplifier(allocator);
-
-            NativeBitArray nativePreserveBorderEdgesBoneIndices = new(preserveBorderEdgesBoneIndices?.Length ?? 0, allocator, NativeArrayOptions.UninitializedMemory);
-            if(preserveBorderEdgesBoneIndices is not null)
+            cancellationToken.ThrowIfCancellationRequested();
+            using var run = new Run();
+            run.Start(mesh, target, options, preserveBorderEdgesBoneIndices, Unity.Collections.Allocator.Persistent, preserveOnLoad: true);
+            // A cancel from another thread can't complete jobs: it is seen here, on the next frame.
+            int thread = Thread.CurrentThread.ManagedThreadId;
+            using (cancellationToken.Register(() => { if (Thread.CurrentThread.ManagedThreadId == thread) run.Dispose(); }))
             {
-                for (int i = 0; i < preserveBorderEdgesBoneIndices.Length; i++)
+                while (!run.Jobs.IsCompleted && !cancellationToken.IsCancellationRequested)
                 {
-                    nativePreserveBorderEdgesBoneIndices.Set(i, preserveBorderEdgesBoneIndices[i]);
+                    await Task.Yield();
                 }
             }
+            cancellationToken.ThrowIfCancellationRequested();
+            run.Apply(mesh, destination);
+        }
 
-            var load = meshSimplifier.ScheduleLoadMeshData(originalMeshData, options, nativePreserveBorderEdgesBoneIndices);
+        // The native memory of one simplification, freed in one place: once the result is written, when a step throws, or
+        // at once when it is cancelled (its jobs completed first). Main thread only.
+        private sealed class Run : IDisposable
+        {
+            /// <summary>Every job that reads or writes this run's memory.</summary>
+            public JobHandle Jobs;
+            private Mesh.MeshDataArray original, simplified;
+            private NativeList<BlendShapeData> blendShapes, simplifiedBlendShapes;
+            private MeshSimplifier simplifier;
+            private NativeBitArray preserve;
+            // What this run still has to free itself (the jobs free the simplifier and the preserved bones once they are done).
+            private bool hasOriginal, hasSimplified, simplifierHeld, preserveHeld, disposed;
 
-            var simplifiedMeshDataArray = Mesh.AllocateWritableMeshData(1);
-            NativeList<BlendShapeData> simplifiedBlendShapes = new(allocator);
-            var simplify = meshSimplifier.ScheduleSimplify(originalMeshData, blendShapes, target, nativePreserveBorderEdgesBoneIndices, load);
-            nativePreserveBorderEdgesBoneIndices.Dispose(simplify);
-            var write = meshSimplifier.ScheduleWriteMeshData(originalMeshData, blendShapes, simplifiedMeshDataArray[0], simplifiedBlendShapes, simplify);
-            meshSimplifier.Dispose(write);
-            JobHandle.ScheduleBatchedJobs();
-            while (!write.IsCompleted)
+            public void Start(Mesh mesh, MeshSimplificationTarget target, MeshSimplifierOptions options, BitArray? preserveBorderEdgesBoneIndices,
+                Unity.Collections.Allocator allocator, bool preserveOnLoad)
             {
-                await Task.Yield();
-            }
-            write.Complete();
-
-            originalMeshDataArray.Dispose();
-
-            foreach (var blendShape in blendShapes)
-            {
-                blendShape.Dispose();
-            }
-            blendShapes.Dispose();
-
-            try
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                ApplySimplifiedMesh(mesh, simplifiedMeshDataArray, simplifiedBlendShapes.AsArray(), destination);
-            }
-            catch (OperationCanceledException)
-            {
-                simplifiedMeshDataArray.Dispose();
-                throw;
-            }
-            finally
-            {
-                foreach (var simplifiedBlendShape in simplifiedBlendShapes)
+                original = Mesh.AcquireReadOnlyMeshData(mesh);
+                hasOriginal = true;
+                var originalMeshData = original[0];
+                blendShapes = BlendShapeData.GetMeshBlendShapes(mesh, allocator);
+                simplifier = new MeshSimplifier(allocator);
+                simplifierHeld = true;
+                preserve = new(preserveBorderEdgesBoneIndices?.Length ?? 0, allocator, NativeArrayOptions.UninitializedMemory);
+                preserveHeld = true;
+                if (preserveBorderEdgesBoneIndices is not null)
                 {
-                    simplifiedBlendShape.Dispose();
+                    for (int i = 0; i < preserveBorderEdgesBoneIndices.Length; i++)
+                    {
+                        preserve.Set(i, preserveBorderEdgesBoneIndices[i]);
+                    }
                 }
-                simplifiedBlendShapes.Dispose();
+
+                var load = preserveOnLoad ? simplifier.ScheduleLoadMeshData(originalMeshData, options, preserve) : simplifier.ScheduleLoadMeshData(originalMeshData, options);
+                Jobs = load;
+                simplified = Mesh.AllocateWritableMeshData(1);
+                hasSimplified = true;
+                simplifiedBlendShapes = new(allocator);
+                var simplify = simplifier.ScheduleSimplify(originalMeshData, blendShapes, target, preserve, load);
+                Jobs = simplify;
+                var preserveDisposed = preserve.Dispose(simplify);
+                preserveHeld = false;
+                var write = simplifier.ScheduleWriteMeshData(originalMeshData, blendShapes, simplified[0], simplifiedBlendShapes, simplify);
+                Jobs = JobHandle.CombineDependencies(write, preserveDisposed);
+                var simplifierDisposed = simplifier.Dispose(write);
+                simplifierHeld = false;
+                Jobs = JobHandle.CombineDependencies(Jobs, simplifierDisposed);
+                JobHandle.ScheduleBatchedJobs();
+            }
+
+            /// <summary>Waits for the jobs and writes the simplified mesh to <paramref name="destination"/>.</summary>
+            public void Apply(Mesh mesh, Mesh destination)
+            {
+                if (destination == null) throw new ArgumentNullException(nameof(destination));
+                Jobs.Complete();
+                original.Dispose();
+                hasOriginal = false;
+                Free(ref blendShapes);
+                // The mesh takes the writable data over and frees it: from then on it isn't this run's to free.
+                Mesh.ApplyAndDisposeWritableMeshData(simplified, destination, MeshUpdateFlags.DontValidateIndices);
+                hasSimplified = false;
+                FinishSimplifiedMesh(mesh, simplifiedBlendShapes.AsArray(), destination);
+                Free(ref simplifiedBlendShapes);
+            }
+
+            public void Dispose()
+            {
+                if (disposed) return;
+                disposed = true;
+                Jobs.Complete();
+                if (hasOriginal) original.Dispose();
+                // Not applied, or applying threw: if it freed the data before throwing, the first error is the one to see.
+                if (hasSimplified)
+                    try { simplified.Dispose(); }
+                    catch (Exception ex) when (ex is ObjectDisposedException || ex is InvalidOperationException) { }
+                if (simplifierHeld) simplifier.Dispose();
+                if (preserveHeld && preserve.IsCreated) preserve.Dispose();
+                hasOriginal = hasSimplified = simplifierHeld = preserveHeld = false;
+                Free(ref blendShapes);
+                Free(ref simplifiedBlendShapes);
+            }
+
+            private static void Free(ref NativeList<BlendShapeData> shapes)
+            {
+                if (!shapes.IsCreated) return;
+                foreach (var shape in shapes)
+                {
+                    shape.Dispose();
+                }
+                shapes.Dispose();
+                shapes = default;
             }
         }
 
-        private static void ApplySimplifiedMesh(Mesh mesh, Mesh.MeshDataArray simplifiedMeshDataArray, ReadOnlySpan<BlendShapeData> simplifiedBlendShapes, Mesh destination)
+        // What the simplified mesh takes besides its data: the source's bounds and bind poses, and its blend shapes.
+        private static void FinishSimplifiedMesh(Mesh mesh, ReadOnlySpan<BlendShapeData> simplifiedBlendShapes, Mesh destination)
         {
-            Mesh.ApplyAndDisposeWritableMeshData(simplifiedMeshDataArray, destination, MeshUpdateFlags.DontValidateIndices);
             CopyBoundsAndBindposes(mesh, destination);
 
             // https://github.com/RamType0/Meshia.MeshSimplification/issues/23
@@ -316,19 +279,6 @@ namespace Orbiters.AlterMesh
                     destination.bindposes = bindposes;
                 }
 #endif
-            }
-        }
-
-        private static void ApplySimplifiedMeshes(List<Mesh> meshes, Mesh.MeshDataArray simplifiedMeshDataArray, ReadOnlySpan<NativeList<BlendShapeData>> simplifiedBlendShapesList, List<Mesh> destinations)
-        {
-            Mesh.ApplyAndDisposeWritableMeshData(simplifiedMeshDataArray, destinations, MeshUpdateFlags.DontValidateIndices);
-            for (int i = 0; i < meshes.Count; i++)
-            {
-                var mesh = meshes[i];
-                var destination = destinations[i];
-                var simplifiedBlendShapes = simplifiedBlendShapesList[i];
-                CopyBoundsAndBindposes(mesh, destination);
-                BlendShapeData.SetBlendShapes(destination, simplifiedBlendShapes.AsArray());
             }
         }
 

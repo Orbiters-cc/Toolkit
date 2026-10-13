@@ -394,21 +394,22 @@ namespace Orbiters.Toolkit.Editor.VRChat
 
         /// <summary>
         /// Saves the prop's parameters and its menu (<paramref name="menuPath"/> opening <paramref name="controls"/>) next to
-        /// the controller, and merges all three into the avatar through VRCFury.
+        /// the controller, and merges all three into the avatar through VRCFury. Another prop's in the same folder stay: a
+        /// taken name gets a number.
         /// </summary>
         internal static void Install(GameObject root, string folder, AnimatorController controller, string menuPath, string subMenuName,
             List<VRCExpressionsMenu.Control> controls, VRCExpressionParameters.Parameter[] parameters)
         {
             var asset = ScriptableObject.CreateInstance<VRCExpressionParameters>();
             asset.parameters = parameters;
-            AssetDatabase.CreateAsset(asset, folder + "/Parameters.asset");
+            AssetDatabase.CreateAsset(asset, AssetDatabase.GenerateUniqueAssetPath(folder + "/Parameters.asset"));
             var sub = ScriptableObject.CreateInstance<VRCExpressionsMenu>();
             sub.controls = controls;
-            AssetDatabase.CreateAsset(sub, folder + "/" + subMenuName + ".asset");
+            AssetDatabase.CreateAsset(sub, AssetDatabase.GenerateUniqueAssetPath(folder + "/" + subMenuName + ".asset"));
             var menu = ScriptableObject.CreateInstance<VRCExpressionsMenu>();
             menu.controls = new List<VRCExpressionsMenu.Control>
             { new VRCExpressionsMenu.Control { name = menuPath, type = VRCExpressionsMenu.Control.ControlType.SubMenu, subMenu = sub, icon = OrbitersMenuIcons.Submenu } };
-            AssetDatabase.CreateAsset(menu, folder + "/Menu.asset");
+            AssetDatabase.CreateAsset(menu, AssetDatabase.GenerateUniqueAssetPath(folder + "/Menu.asset"));
             VrcFury.Writer.FullController(root, controller, menu, asset);
         }
 
@@ -454,7 +455,8 @@ namespace Orbiters.Toolkit.Editor.VRChat
 
         /// <summary>
         /// Saves <paramref name="width"/> × <paramref name="height"/> pixels from <paramref name="pixel"/> (x, y in 0..1) as
-        /// <paramref name="name"/>.png in <paramref name="folder"/>, imported clamped with its alpha as transparency.
+        /// <paramref name="name"/>.png in <paramref name="folder"/> (numbered when another prop's has the name), imported
+        /// clamped with its alpha as transparency.
         /// </summary>
         internal static Texture2D Png(string folder, string name, int width, int height, Func<float, float, Color> pixel)
         {
@@ -464,7 +466,7 @@ namespace Orbiters.Toolkit.Editor.VRChat
                 for (int y = 0; y < height; y++)
                 for (int x = 0; x < width; x++)
                     texture.SetPixel(x, y, pixel((x + .5f) / width, (y + .5f) / height));
-                string path = folder + "/" + name + ".png";
+                string path = AssetDatabase.GenerateUniqueAssetPath(folder + "/" + name + ".png");
                 System.IO.File.WriteAllBytes(path, texture.EncodeToPNG());
                 AssetDatabase.ImportAsset(path, ImportAssetOptions.ForceSynchronousImport);
                 var importer = (TextureImporter)AssetImporter.GetAtPath(path);

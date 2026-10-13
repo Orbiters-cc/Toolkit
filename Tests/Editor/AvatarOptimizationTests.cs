@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using System.Linq;
 using NUnit.Framework;
+using Orbiters.Toolkit.Editor.Animations;
 using Orbiters.Toolkit.Editor.VRChat.Attachments;
 using Orbiters.Toolkit.Editor.VRChat.Optimization;
 using UnityEditor;
@@ -12,6 +13,7 @@ using UnityEngine.SceneManagement;
 using VRC.Dynamics;
 using VRC.SDK3.Avatars.Components;
 using VRC.SDK3.Avatars.ScriptableObjects;
+using VRC.SDK3.Dynamics.Constraint.Components;
 using VRC.SDK3.Dynamics.Contact.Components;
 using VRC.SDK3.Dynamics.PhysBone.Components;
 using Object = UnityEngine.Object;
@@ -29,8 +31,7 @@ public sealed class AvatarOptimizationTests
     [SetUp] public void SetUp()
     {
         scene = EditorSceneManager.NewPreviewScene();
-        root = new GameObject("Avatar");
-        SceneManager.MoveGameObjectToScene(root, scene);
+        root = New("Avatar");
         descriptor = root.AddComponent<VRCAvatarDescriptor>();
         fx = Own(new AnimatorController()); fx.AddLayer("Base");
         descriptor.customizeAnimationLayers = true;
@@ -39,7 +40,7 @@ public sealed class AvatarOptimizationTests
         bones = new Transform[4];
         for (int i = 0; i < 4; i++)
         {
-            bones[i] = new GameObject("Bone" + i).transform;
+            bones[i] = New("Bone" + i).transform;
             bones[i].SetParent(i == 0 ? root.transform : bones[i - 1], false);
             bones[i].localPosition = i == 0 ? Vector3.zero : Vector3.up;
         }
@@ -50,6 +51,50 @@ public sealed class AvatarOptimizationTests
         EditorSceneManager.ClosePreviewScene(scene);
         foreach (var o in owned) if (o != null) Object.DestroyImmediate(o);
         owned.Clear();
+    }
+
+    // ---- What the avatar uses ----
+
+    [Test] public void NestedAnimatorsAndLegacyAnimationsAreReadFromTheirOwnObject()
+    {
+        // An Animator on a prop shows the prop's inner object, by a path from the prop.
+        var prop = Child("Prop");
+        var inner = Child("Inner", prop.transform); inner.SetActive(false);
+        var nested = Own(new AnimatorController()); nested.AddLayer("Base");
+        nested.AddParameter("PropOnly", AnimatorControllerParameterType.Bool);
+        var show = Own(new AnimationClip());
+        AnimationUtility.SetEditorCurve(show, EditorCurveBinding.FloatCurve("Inner", typeof(GameObject), "m_IsActive"), AnimationCurve.Constant(0, 1, 1));
+        nested.layers[0].stateMachine.AddState("Show").motion = show;
+        prop.AddComponent<Animator>().runtimeAnimatorController = nested;
+        // A legacy Animation on a lamp turns its bulb on, by a path from the lamp.
+        var lamp = Child("Lamp");
+        var bulb = Child("Bulb", lamp.transform); bulb.SetActive(false);
+        var glow = Own(new AnimationClip { legacy = true });
+        AnimationUtility.SetEditorCurve(glow, EditorCurveBinding.FloatCurve("Bulb", typeof(GameObject), "m_IsActive"), AnimationCurve.Constant(0, 1, 1));
+        var animation = lamp.AddComponent<Animation>();
+        animation.clip = glow;
+        AnimationUtility.SetAnimationClips(animation, new[] { glow });
+        fx.AddParameter("Menu", AnimatorControllerParameterType.Bool);
+
+        var usage = new AvatarUsage(root);
+
+        Assert.That(usage.CanTurnOn(inner), Is.True, "The nested Animator's path starts at the prop.");
+        Assert.That(usage.CanTurnOn(bulb), Is.True, "The legacy Animation's path starts at the lamp.");
+        Assert.That(usage.Animated(prop.transform), Is.False, "The prop itself is not animated: only its inner object is.");
+        Assert.That(ComponentCleanup.RemoveHiddenObjects(usage), Is.EqualTo(0));
+        Assert.That(usage.Reads("PropOnly") && usage.Reads("Menu"), Is.True);
+        Assert.That(usage.ReadsInPlayableLayers("Menu"), Is.True);
+        Assert.That(usage.ReadsInPlayableLayers("PropOnly"), Is.False, "VRChat sets no parameter on an Animator component of its own.");
+
+        var build = AttachmentAnimationBuild.Prepare(root);
+        try
+        {
+            var copy = LegacyAnimationClips.Of(animation);
+            Assert.That(copy.Count, Is.EqualTo(1));
+            Assert.That(copy[0], Is.Not.SameAs(glow), "The build plays its own copy of a legacy clip.");
+            Assert.That(build.Clips.Any(c => c.Clip == copy[0] && c.AnimatorRoot == lamp.transform), Is.True);
+        }
+        finally { AttachmentAnimationBuild.Release(root); }
     }
 
     // ---- Objects and components ----
@@ -131,7 +176,7 @@ public sealed class AvatarOptimizationTests
         var weighted = bones[1].gameObject.AddComponent<VRCPhysBone>();
         Skinned("Body", new[] { 0, 1, 2 });
         var charm = Chain("Charm", 2);
-        new GameObject("Bead").AddComponent<MeshRenderer>().transform.SetParent(charm.GetChild(0), false);
+        New("Bead").AddComponent<MeshRenderer>().transform.SetParent(charm.GetChild(0), false);
         var carrying = charm.gameObject.AddComponent<VRCPhysBone>();
         var ear = Chain("Ear", 2).gameObject.AddComponent<VRCPhysBone>();
         ear.parameter = "Ear";
@@ -144,6 +189,31 @@ public sealed class AvatarOptimizationTests
         Assert.That(ear != null, "An animator reads its grab parameter.");
     }
 
+    [Test] public void PhysBonesStayWhenAMeshFollowsABranchTheyIgnore()
+    {
+        var chain = Chain("Chain", 2);
+        var branch = New("Branch").transform; branch.SetParent(chain.GetChild(0), false);
+        var physBone = chain.gameObject.AddComponent<VRCPhysBone>();
+        physBone.ignoreTransforms = new List<Transform> { branch };
+        Weighted("Charm", branch);
+
+        Assert.That(ComponentCleanup.RemoveIdlePhysBones(new AvatarUsage(root)), Is.EqualTo(0), "The ignored branch still swings with the bone it hangs from.");
+        Assert.That(physBone != null);
+    }
+
+    [Test] public void EndBonesOfChainsTwoPhysBonesShareStay()
+    {
+        var tail = Chain("Tail", 3);
+        Weighted("Fur", tail, tail.GetChild(0));
+        var whole = tail.gameObject.AddComponent<VRCPhysBone>();
+        var tip = tail.GetChild(0).gameObject.AddComponent<VRCPhysBone>();
+        tip.rootTransform = tail.GetChild(0);
+
+        Assert.That(ComponentCleanup.TrimEndBones(new AvatarUsage(root)), Is.EqualTo(0));
+        Assert.That(tail.GetChild(0).childCount, Is.EqualTo(1), "Trimming one would change the other's chain.");
+        Assert.That(whole.endpointPosition == Vector3.zero && tip.endpointPosition == Vector3.zero);
+    }
+
     [Test] public void EndBonesBecomeTheEndpoint()
     {
         var tail = Chain("Tail", 3);
@@ -153,7 +223,7 @@ public sealed class AvatarOptimizationTests
         var bone = tail.gameObject.AddComponent<VRCPhysBone>();
         // Two ends at different offsets have no single endpoint.
         var fork = Chain("Fork", 2);
-        var second = new GameObject("Second").transform; second.SetParent(fork, false); second.localPosition = new Vector3(.3f, 0, 0);
+        var second = New("Second").transform; second.SetParent(fork, false); second.localPosition = new Vector3(.3f, 0, 0);
         var forked = fork.gameObject.AddComponent<VRCPhysBone>();
         // An end a mesh is weighted to is part of the look.
         var ear = Chain("Ear", 2);
@@ -392,6 +462,23 @@ public sealed class AvatarOptimizationTests
         finally { AttachmentAnimationBuild.Release(root); }
     }
 
+    [Test] public void ShortNamesKeepTheDefaultMenusParametersWithoutCustomExpressions()
+    {
+        descriptor.customExpressions = false;
+        fx.AddParameter("VRCEmote", AnimatorControllerParameterType.Int);
+        fx.AddParameter("VRCFaceBlendH", AnimatorControllerParameterType.Float);
+        fx.AddParameter("Local toggle", AnimatorControllerParameterType.Bool);
+        var build = AttachmentAnimationBuild.Prepare(root);
+        try
+        {
+            ShortNames.Rename(new AvatarUsage(root), build);
+            var names = build.Owned.OfType<AnimatorController>().Single().parameters.Select(p => p.name).ToList();
+            Assert.That(names, Does.Contain("VRCEmote").And.Contain("VRCFaceBlendH"), "VRChat's default menu sets them.");
+            Assert.That(names, Does.Not.Contain("Local toggle"));
+        }
+        finally { AttachmentAnimationBuild.Release(root); }
+    }
+
     // ---- Menu icons ----
 
     [Test] public void MenuIconsShrinkOnCopiesOfTheMenus()
@@ -427,11 +514,11 @@ public sealed class AvatarOptimizationTests
     [Test] public void BonesThatNeverMoveFollowTheBoneTheyHangFrom()
     {
         Animate("Bone0/Bone1", typeof(Transform), "m_LocalRotation.z", .2f);
-        var charm = new GameObject("Charm").transform; charm.SetParent(bones[1], false); charm.localPosition = new Vector3(.2f, .1f, 0); charm.localRotation = Quaternion.Euler(0, 30, 0);
-        var bead = new GameObject("Bead").transform; bead.SetParent(charm, false); bead.localPosition = new Vector3(0, .05f, 0);
-        var swing = new GameObject("Swing").transform; swing.SetParent(bones[1], false); swing.localPosition = new Vector3(-.2f, 0, 0);
+        var charm = New("Charm").transform; charm.SetParent(bones[1], false); charm.localPosition = new Vector3(.2f, .1f, 0); charm.localRotation = Quaternion.Euler(0, 30, 0);
+        var bead = New("Bead").transform; bead.SetParent(charm, false); bead.localPosition = new Vector3(0, .05f, 0);
+        var swing = New("Swing").transform; swing.SetParent(bones[1], false); swing.localPosition = new Vector3(-.2f, 0, 0);
         swing.gameObject.AddComponent<VRCPhysBone>();
-        var eye = new GameObject("Eye").transform; eye.SetParent(bones[2], false);
+        var eye = New("Eye").transform; eye.SetParent(bones[2], false);
         var look = descriptor.customEyeLookSettings; look.leftEye = eye; descriptor.customEyeLookSettings = look;
         var mesh = Weighted("Trinkets", bones[0], bones[1], charm, bead, swing, eye);
         Pose();
@@ -469,6 +556,33 @@ public sealed class AvatarOptimizationTests
         Assert.That(left.Any(t => t.y > .86f && t.y < .94f && t.x > .05f && Mathf.Abs(t.z) < .03f), "Skin under the hole stays.");
         Assert.That(left.Any(t => t.y > .86f && t.y < .94f && t.x < -.05f), Is.False, "Skin on the other side of the hole goes.");
         Assert.That(shirt != null);
+    }
+
+    [Test] public void ScaledMeshesAreMeasuredWhereTheyShow()
+    {
+        var body = (SkinnedMeshRenderer)Tube("Body", .1f, 0f, 1.6f, skinned: true);
+        var shirt = (SkinnedMeshRenderer)Tube("Shirt", .11f, .6f, 1.2f, skinned: true);
+        // Imported at another scale: the renderers' objects scale nothing the bones skin.
+        body.transform.localScale = Vector3.one * 100f;
+        shirt.transform.localScale = Vector3.one * .01f;
+        var original = Triangles(body.sharedMesh);
+
+        var result = BodyCover.HideCovered(new AvatarUsage(root), body);
+        owned.Add(result?.Mesh);
+
+        Assert.That(result, Is.Not.Null);
+        Assert.That(result.Triangles, Is.GreaterThan(original.Count / 5), "Most of the skin under the shirt goes, as at scale 1.");
+        Assert.That(shirt != null);
+    }
+
+    [Test] public void ClothingAPhysBoneSwingsHidesNothing()
+    {
+        var body = (SkinnedMeshRenderer)Tube("Body", .1f, 0f, 1.6f, skinned: true);
+        var skirtBone = Child("Skirt bone").transform;
+        skirtBone.gameObject.AddComponent<VRCPhysBone>();
+        Tube("Skirt", .11f, .6f, 1.2f, skinned: true, bone: skirtBone);
+
+        Assert.That(BodyCover.HideCovered(new AvatarUsage(root), body), Is.Null, "A skirt swings away from the legs.");
     }
 
     [Test] public void ClothingThatCanComeOffOrShowsThroughHidesNothing()
@@ -511,12 +625,91 @@ public sealed class AvatarOptimizationTests
         Assert.That(prop.localBounds, Is.EqualTo(propBox));
     }
 
+    [Test] public void MeshesOnABoneAVRChatConstraintMovesFromElsewhereKeepTheirBox()
+    {
+        var human = Humanoid();
+        Weighted("Shirt", human["Chest"], human["HandL"]);
+        var held = Child("Held", human["HandR"]).transform;
+        var prop = Weighted("Prop", held);
+        var propBox = prop.localBounds;
+        // The constraint sits on another object and moves the held bone (its target).
+        var driver = Child("Driver").AddComponent<VRCParentConstraint>();
+        driver.TargetTransform = held;
+
+        AvatarBounds.Unify(root);
+
+        Assert.That(prop.rootBone, Is.Not.SameAs(human["Hips"]));
+        Assert.That(prop.localBounds, Is.EqualTo(propBox));
+    }
+
+    [Test] public void TheRoomNeverTakesTheBoxOutOfTheExcellentRank()
+    {
+        var human = Humanoid();
+        // Wings 1 m out on each side: the avatar is 2 m wide, room would make it 3.2.
+        var left = Child("WingL", human["Chest"]).transform; left.localPosition = new Vector3(-1f, 0, 0);
+        var right = Child("WingR", human["Chest"]).transform; right.localPosition = new Vector3(1f, 0, 0);
+        var wings = Weighted("Wings", left, right, human["FootL"]);
+
+        AvatarBounds.Unify(root);
+
+        var size = wings.localBounds.size;
+        Assert.That(size.x, Is.LessThanOrEqualTo(AvatarBounds.ExcellentSize + 1e-4f));
+        Assert.That(size.x, Is.GreaterThanOrEqualTo(2f), "It still holds the whole avatar.");
+        Assert.That(size.y, Is.LessThanOrEqualTo(AvatarBounds.ExcellentSize + 1e-4f));
+    }
+
+    // ---- Mesh parts ----
+
+    [Test] public void LinesAndPointsStayWhenPartOfAMeshIsReplaced()
+    {
+        var mesh = Own(new Mesh { vertices = new[] { Vector3.zero, Vector3.right, Vector3.up, Vector3.one, Vector3.forward } });
+        mesh.subMeshCount = 2;
+        mesh.SetIndices(new[] { 0, 1, 2, 1, 3, 2 }, MeshTopology.Triangles, 0);
+        mesh.SetIndices(new[] { 3, 4 }, MeshTopology.Lines, 1);
+
+        var free = Own(MeshParts.Subset(mesh, (a, b, c) => a == 1));
+        Assert.That(free.GetTopology(1), Is.EqualTo(MeshTopology.Lines));
+        Assert.That(free.GetIndexCount(1), Is.EqualTo(0), "Lines are no triangles to choose.");
+        Assert.That(free.GetIndexCount(0), Is.EqualTo(3));
+
+        var replaced = Own(MeshParts.Replace(mesh, (a, b, c) => a == 0, free, new[] { 0, 1 }, _ => true));
+        Assert.That(replaced.GetTopology(1), Is.EqualTo(MeshTopology.Lines));
+        Assert.That(replaced.GetIndexCount(1), Is.EqualTo(2), "The lines stay with what is kept.");
+        Assert.That(replaced.GetIndexCount(0), Is.EqualTo(6));
+    }
+
+    [Test] public void JoinedShapesMoveAtEveryWeightEitherMeshHasAFrameAt()
+    {
+        var first = Own(new Mesh { vertices = new[] { Vector3.zero, Vector3.right, Vector3.up }, triangles = new[] { 0, 1, 2 } });
+        first.AddBlendShapeFrame("Puff", 100, new[] { Vector3.up, Vector3.up, Vector3.up }, null, null);
+        var second = Own(new Mesh { vertices = new[] { Vector3.zero, Vector3.right, Vector3.up }, triangles = new[] { 0, 1, 2 } });
+        second.AddBlendShapeFrame("Puff", 50, new[] { Vector3.forward, Vector3.forward, Vector3.forward }, null, null);
+        second.AddBlendShapeFrame("Puff", 100, new[] { Vector3.forward * 4, Vector3.forward * 4, Vector3.forward * 4 }, null, null);
+
+        var joined = Own(MeshParts.Join(first, second));
+
+        Assert.That(joined.GetBlendShapeFrameCount(0), Is.EqualTo(2));
+        Assert.That(joined.GetBlendShapeFrameWeight(0, 0), Is.EqualTo(50f));
+        var dv = new Vector3[6];
+        joined.GetBlendShapeFrameVertices(0, 0, dv, null, null);
+        Assert.That(dv[0], Is.EqualTo(Vector3.up * .5f), "The first mesh's one frame, halfway at 50.");
+        Assert.That(dv[3], Is.EqualTo(Vector3.forward), "The second mesh's own frame at 50.");
+        joined.GetBlendShapeFrameVertices(0, 1, dv, null, null);
+        Assert.That(dv[0], Is.EqualTo(Vector3.up));
+        Assert.That(dv[3], Is.EqualTo(Vector3.forward * 4));
+    }
+
     // ---- Fixture ----
 
-    private GameObject Child(string name, Transform parent = null)
+    private GameObject Child(string name, Transform parent = null) => New(name, parent != null ? parent : root.transform);
+
+    // Made hidden, then put in the preview scene (or under a parent there): never in the user's open scene.
+    private GameObject New(string name, Transform parent = null)
     {
-        var go = new GameObject(name);
-        go.transform.SetParent(parent != null ? parent : root.transform, false);
+        var go = EditorUtility.CreateGameObjectWithHideFlags(name, HideFlags.HideAndDontSave);
+        if (parent != null) go.transform.SetParent(parent, false);
+        else SceneManager.MoveGameObjectToScene(go, scene);
+        go.hideFlags = HideFlags.None;
         return go;
     }
 
@@ -527,7 +720,7 @@ public sealed class AvatarOptimizationTests
         var at = first;
         for (int i = 1; i < length; i++)
         {
-            var next = new GameObject(name + i).transform;
+            var next = New(name + i).transform;
             next.SetParent(at, false);
             next.localPosition = new Vector3(0, .1f, 0);
             at = next;
@@ -556,9 +749,9 @@ public sealed class AvatarOptimizationTests
         return renderer;
     }
 
-    // An open tube along Y with outward faces: skinned to the first bone, or a plain mesh. With a hole, the faces of the
-    // tube's side towards +X between 0.85 and 0.95 are left out.
-    private Renderer Tube(string name, float radius, float bottom, float top, bool skinned = false, bool hole = false)
+    // An open tube along Y with outward faces: skinned to the first bone (or another), or a plain mesh. With a hole, the
+    // faces of the tube's side towards +X between 0.85 and 0.95 are left out.
+    private Renderer Tube(string name, float radius, float bottom, float top, bool skinned = false, bool hole = false, Transform bone = null)
     {
         const int around = 48, rings = 64;
         var vertices = new List<Vector3>(); var normals = new List<Vector3>(); var indices = new List<int>();
@@ -588,10 +781,11 @@ public sealed class AvatarOptimizationTests
             var plain = go.AddComponent<MeshRenderer>(); plain.sharedMaterial = material;
             return plain;
         }
+        bone = bone != null ? bone : bones[0];
         mesh.boneWeights = vertices.Select(_ => new BoneWeight { boneIndex0 = 0, weight0 = 1 }).ToArray();
-        mesh.bindposes = new[] { bones[0].worldToLocalMatrix };
+        mesh.bindposes = new[] { bone.worldToLocalMatrix };
         var renderer = go.AddComponent<SkinnedMeshRenderer>();
-        renderer.sharedMesh = mesh; renderer.bones = new[] { bones[0] }; renderer.rootBone = bones[0]; renderer.sharedMaterial = material;
+        renderer.sharedMesh = mesh; renderer.bones = new[] { bone }; renderer.rootBone = bone; renderer.sharedMaterial = material;
         return renderer;
     }
 
@@ -676,7 +870,7 @@ public sealed class AvatarOptimizationTests
         var human = new Dictionary<string, Transform>();
         void Add(string name, string parent, Vector3 position)
         {
-            var bone = new GameObject(name).transform;
+            var bone = New(name).transform;
             bone.SetParent(parent == null ? root.transform : human[parent], false);
             bone.localPosition = position;
             human[name] = bone;

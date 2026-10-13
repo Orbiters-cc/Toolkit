@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using Orbiters.Toolkit.Editor.VRChat.Parameters;
 using UnityEngine;
 using UnityEngine.Animations;
 using VRC.Dynamics;
@@ -99,8 +100,9 @@ namespace Orbiters.Toolkit.Editor.VRChat.Optimization
         }
 
         /// <summary>
-        /// PhysBones that move nothing: no vertex is weighted to a bone of their chain, nothing else sits on it (a renderer,
-        /// a contact, a constraint's target) and no animator reads their parameters. Leftovers of a removed part, mostly.
+        /// PhysBones that move nothing: no vertex is weighted to a bone they move (their chain, and the ignored branches
+        /// hanging from it), nothing else sits on one (a renderer, a contact, a constraint's target) and no animator reads
+        /// their parameters. Leftovers of a removed part, mostly.
         /// </summary>
         public static int RemoveIdlePhysBones(AvatarUsage usage)
         {
@@ -108,12 +110,14 @@ namespace Orbiters.Toolkit.Editor.VRChat.Optimization
             int count = 0;
             foreach (var bone in usage.Root.GetComponentsInChildren<VRCPhysBoneBase>(true))
             {
-                var chain = Chain(bone);
-                if (chain.Count == 0 || usage.Pending(chain[0]) || bone.CompareTag("EditorOnly")) continue;
-                if (!string.IsNullOrEmpty(bone.parameter) && Suffixes.Any(s => usage.Reads(bone.parameter + s))) continue;
-                if (chain.Any(t => weighted.Contains(t) || usage.Humanoid(t) || t.GetComponents<Component>().Any(c => !(c is Transform || c is VRCPhysBoneBase || c is VRCPhysBoneColliderBase)))) continue;
+                var root = bone.rootTransform != null ? bone.rootTransform : bone.transform;
+                // Ignored branches aren't simulated, but they follow the bones they hang from.
+                var moved = root.GetComponentsInChildren<Transform>(true);
+                if (usage.Pending(root) || bone.CompareTag("EditorOnly")) continue;
+                if (!string.IsNullOrEmpty(bone.parameter) && VrcParameters.PhysBoneSuffixes.Any(s => usage.Reads(bone.parameter + s))) continue;
+                if (moved.Any(t => weighted.Contains(t) || usage.Humanoid(t) || t.GetComponents<Component>().Any(c => !(c is Transform || c is VRCPhysBoneBase || c is VRCPhysBoneColliderBase)))) continue;
                 // Something outside following a bone of the chain (a renderer's root bone, a constraint's source) is moved by it.
-                if (usage.UsedFromOutside(chain[0], (from, property) => from is VRCPhysBoneBase || from is VRCPhysBoneColliderBase ||
+                if (usage.UsedFromOutside(root, (from, property) => from is VRCPhysBoneBase || from is VRCPhysBoneColliderBase ||
                                                                             from is SkinnedMeshRenderer && property.StartsWith("m_Bones.", StringComparison.Ordinal))) continue;
                 Object.DestroyImmediate(bone);
                 count++;
@@ -124,19 +128,23 @@ namespace Orbiters.Toolkit.Editor.VRChat.Optimization
         /// <summary>
         /// The bones at the end of a PhysBone's chain that only mark where it ends (nothing weighted to them, on them,
         /// animating or pointing at them) become its endpoint position, and go: VRChat ranks every transform a PhysBone
-        /// moves. Only for a PhysBone without an endpoint whose ends all sit at the same offset from their bone, and ends no
-        /// skinned mesh lists any more (run it after <see cref="MeshOptimization.PruneBones"/>). Returns how many bones went.
+        /// moves. Only for a PhysBone without an endpoint whose ends all sit at the same offset from their bone, ends no
+        /// skinned mesh lists any more (run it after <see cref="MeshOptimization.PruneBones"/>), and a chain no other
+        /// PhysBone shares (trimming it would change the other's). Returns how many bones went.
         /// </summary>
         public static int TrimEndBones(AvatarUsage usage)
         {
             var weighted = WeightedBones(usage.Root);
             var listed = new HashSet<Transform>(usage.Root.GetComponentsInChildren<SkinnedMeshRenderer>(true).SelectMany(r => r.bones).Where(b => b != null));
+            var physBones = usage.Root.GetComponentsInChildren<VRCPhysBoneBase>(true);
+            var chains = physBones.ToDictionary(b => b, b => AvatarUsage.PhysBoneChain(b));
+            var shared = new HashSet<Transform>(chains.Values.SelectMany(c => c).GroupBy(t => t).Where(g => g.Count() > 1).Select(g => g.Key));
             int count = 0;
-            foreach (var bone in usage.Root.GetComponentsInChildren<VRCPhysBoneBase>(true))
+            foreach (var bone in physBones)
             {
                 if (bone.endpointPosition != Vector3.zero || bone.CompareTag("EditorOnly")) continue;
-                var chain = Chain(bone);
-                if (chain.Count < 2 || usage.Pending(chain[0])) continue;
+                var chain = chains[bone];
+                if (chain.Count < 2 || usage.Pending(chain[0]) || chain.Any(shared.Contains)) continue;
                 var ends = chain.Where(t => t.childCount == 0).ToList();
                 bool trimmable = ends.Count > 0 && ends.All(t =>
                     t != chain[0] && t.parent.childCount == 1 && !weighted.Contains(t) && !listed.Contains(t) && !usage.Humanoid(t) && !usage.Animated(t) &&
@@ -151,17 +159,6 @@ namespace Orbiters.Toolkit.Editor.VRChat.Optimization
                 count += ends.Count;
             }
             return count;
-        }
-
-        // The parameters a PhysBone sets, after its name.
-        private static readonly string[] Suffixes = { "_IsGrabbed", "_IsPosed", "_Angle", "_Stretch", "_Squish" };
-
-        // Its root and every transform below, without the ignored ones and what is below them.
-        private static List<Transform> Chain(VRCPhysBoneBase bone)
-        {
-            var root = bone.rootTransform != null ? bone.rootTransform : bone.transform;
-            var ignored = (bone.ignoreTransforms ?? new List<Transform>()).Where(t => t != null).ToList();
-            return root.GetComponentsInChildren<Transform>(true).Where(t => !ignored.Any(t.IsChildOf)).ToList();
         }
 
         // Bones some vertex of a skinned mesh is weighted to.

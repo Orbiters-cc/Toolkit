@@ -43,28 +43,6 @@ public static class AuthenticationService
         DeleteReversibleCopies(Folder);
         Changed?.Invoke();
     }
-    /// <summary>Magic Sync: reads a website token from the clipboard. Kept for MCB's per-environment developer tools.</summary>
-    public static async Task<bool> RegisterAuthForEnv(bool isDev)
-    {
-        var match = Regex.Match(EditorGUIUtility.systemCopyBuffer ?? "", @"orbit-\w{8}-\w{8}-\w{8}-\d{2}-\d{2}-\d{4}");
-        string token = match.Success ? match.Value : "notoken";
-        string url = OrbitersEnvironment.ApiUrl("mcb/token", isDev) + "?token=" + Uri.EscapeDataString(token);
-        try
-        {
-            for (int attempt = 0; attempt < 10; attempt++)
-            {
-                using var response = await OrbitersApi.Client.GetAsync(url);
-                if ((int)response.StatusCode == 425) { await Task.Delay(1000); continue; }
-                if (!response.IsSuccessStatusCode) return false;
-                var auth = JsonConvert.DeserializeObject<AuthData>(await response.Content.ReadAsStringAsync());
-                if (string.IsNullOrWhiteSpace(auth?.token)) return false;
-                SaveAuth(auth, isDev);
-                return true;
-            }
-        }
-        catch (Exception) { /* Callers show actionable inline authentication feedback. Never log tokens. */ }
-        return false;
-    }
     public static AuthData GetAuth() => GetAuthForEnv(OrbitersEnvironment.IsDevelopment);
     public static AuthData GetAuthForEnv(bool isDev) => Read(GetAuthFilePath(isDev));
     public static bool RemoveAuth()

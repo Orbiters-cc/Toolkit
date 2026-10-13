@@ -28,7 +28,7 @@ namespace Orbiters.Toolkit.Editor.VRChat.Optimization
             if (bindposes.Length != bones.Length) return null;
             var counts = mesh.GetBonesPerVertex();
             var weights = mesh.GetAllBoneWeights();
-            if (counts.Length == 0 || counts.Length != mesh.vertexCount) return null;
+            if (counts.Length == 0 || counts.Length != mesh.vertexCount || !WeightsInRange(mesh, bones.Length)) return null;
             var used = new bool[bones.Length];
             for (int v = 0, k = 0; v < counts.Length; v++)
             {
@@ -37,7 +37,6 @@ namespace Orbiters.Toolkit.Editor.VRChat.Optimization
                 {
                     var weight = weights[k];
                     if (weight.weight <= 0f) continue;
-                    if (weight.boneIndex < 0 || weight.boneIndex >= used.Length) return null;
                     used[weight.boneIndex] = true;
                     weighted = true;
                 }
@@ -112,6 +111,7 @@ namespace Orbiters.Toolkit.Editor.VRChat.Optimization
 
             var copy = Copy(mesh);
             var indices = slots.Select(s => s.Submeshes.SelectMany(i => mesh.GetIndices(i, true)).ToArray()).ToList();
+            FitIndices(copy, indices);
             copy.subMeshCount = slots.Count;
             for (int k = 0; k < slots.Count; k++)
                 copy.SetIndices(indices[k], slots[k].Topology, k, false, 0);
@@ -122,7 +122,38 @@ namespace Orbiters.Toolkit.Editor.VRChat.Optimization
         }
 
         // Opaque and cutout materials draw in any order; transparent ones would change how they layer.
-        private static bool Opaque(Material material) => material.renderQueue <= (int)RenderQueue.GeometryLast;
+        private static bool Opaque(Material material) => material.renderQueue <= (int)RenderQueue.GeometryLast && !Blends(material);
+
+        /// <summary>
+        /// Whether a material blends with what is behind it, whatever its queue: its shader says it is transparent, or it
+        /// adds to what is there (a destination blend factor other than zero, as Standard and Poiyomi set it).
+        /// </summary>
+        internal static bool Blends(Material material) =>
+            material.GetTag("RenderType", false, "") == "Transparent" || material.HasProperty("_DstBlend") && material.GetFloat("_DstBlend") != (float)BlendMode.Zero;
+
+        /// <summary>
+        /// Gives a mesh 32-bit indices when <paramref name="indices"/> (read with their base vertex added, to be set without
+        /// one) reach past what 16 bits hold.
+        /// </summary>
+        internal static void FitIndices(Mesh mesh, IEnumerable<int[]> indices)
+        {
+            if (mesh.indexFormat == IndexFormat.UInt16 && indices.Any(list => list.Any(i => i > ushort.MaxValue))) mesh.indexFormat = IndexFormat.UInt32;
+        }
+
+        /// <summary>Whether every bone weight of the mesh points at one of <paramref name="bones"/> bones (zero weights too).</summary>
+        internal static bool WeightsInRange(Mesh mesh, int bones)
+        {
+            foreach (var weight in mesh.GetAllBoneWeights())
+                if (weight.boneIndex < 0 || weight.boneIndex >= bones) return false;
+            return true;
+        }
+
+        /// <summary>Two matrices equal within 1e-4 per element (bind poses compared after maths).</summary>
+        internal static bool Close(Matrix4x4 a, Matrix4x4 b)
+        {
+            for (int i = 0; i < 16; i++) if (Mathf.Abs(a[i] - b[i]) > 1e-4f) return false;
+            return true;
+        }
 
         public static Mesh MeshOf(Renderer renderer) =>
             renderer is SkinnedMeshRenderer skinned ? skinned.sharedMesh :

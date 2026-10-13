@@ -34,39 +34,50 @@ namespace Orbiters.Toolkit.Editor.VRChat.Optimization
 
         /// <summary>
         /// The triangles of each submesh that <paramref name="keep"/> keeps (by their three vertex indices), with only the
-        /// vertices they use. The submeshes stay, empty ones too, so material slots line up. The blendshapes
-        /// <paramref name="shape"/> picks (by index) come along; none without it.
+        /// vertices they use. The submeshes stay, empty ones too, so material slots line up; one of lines or points has no
+        /// triangles to choose and stays empty. The blendshapes <paramref name="shape"/> picks (by index) come along; none
+        /// without it.
         /// </summary>
         public static Mesh Subset(Mesh mesh, Func<int, int, int, bool> keep, Func<int, bool> shape = null) => Subset(mesh, keep, shape, out _);
 
         /// <summary>The same, with the source vertex of each of the part's vertices.</summary>
-        public static Mesh Subset(Mesh mesh, Func<int, int, int, bool> keep, Func<int, bool> shape, out int[] vertices)
+        public static Mesh Subset(Mesh mesh, Func<int, int, int, bool> keep, Func<int, bool> shape, out int[] vertices) =>
+            Subset(mesh, keep, shape, out vertices, false);
+
+        // With otherTopologies, submeshes of lines or points come whole.
+        private static Mesh Subset(Mesh mesh, Func<int, int, int, bool> keep, Func<int, bool> shape, out int[] vertices, bool otherTopologies)
         {
             var map = new int[mesh.vertexCount];
             for (int i = 0; i < map.Length; i++) map[i] = -1;
             var used = new List<int>();
-            var submeshes = new List<int[]>();
+            var submeshes = new List<(int[] Indices, MeshTopology Topology)>();
+            int Map(int v)
+            {
+                if (map[v] < 0) { map[v] = used.Count; used.Add(v); }
+                return map[v];
+            }
             for (int s = 0; s < mesh.subMeshCount; s++)
             {
                 var indices = mesh.GetIndices(s);
+                var topology = mesh.GetTopology(s);
                 var kept = new List<int>();
-                for (int t = 0; t + 2 < indices.Length; t += 3)
+                if (topology != MeshTopology.Triangles)
                 {
-                    if (!keep(indices[t], indices[t + 1], indices[t + 2])) continue;
-                    for (int k = 0; k < 3; k++)
-                    {
-                        int v = indices[t + k];
-                        if (map[v] < 0) { map[v] = used.Count; used.Add(v); }
-                        kept.Add(map[v]);
-                    }
+                    if (otherTopologies) foreach (int v in indices) kept.Add(Map(v));
                 }
-                submeshes.Add(kept.ToArray());
+                else
+                    for (int t = 0; t + 2 < indices.Length; t += 3)
+                    {
+                        if (!keep(indices[t], indices[t + 1], indices[t + 2])) continue;
+                        for (int k = 0; k < 3; k++) kept.Add(Map(indices[t + k]));
+                    }
+                submeshes.Add((kept.ToArray(), topology));
             }
             vertices = used.ToArray();
             var part = new Mesh { name = mesh.name, indexFormat = used.Count > 65535 ? IndexFormat.UInt32 : IndexFormat.UInt16 };
             Copy(mesh, part, used);
             part.subMeshCount = submeshes.Count;
-            for (int s = 0; s < submeshes.Count; s++) part.SetIndices(submeshes[s], MeshTopology.Triangles, s, false);
+            for (int s = 0; s < submeshes.Count; s++) part.SetIndices(submeshes[s].Indices, submeshes[s].Topology, s, false);
             if (shape != null)
             {
                 var picked = vertices;
@@ -88,22 +99,23 @@ namespace Orbiters.Toolkit.Editor.VRChat.Optimization
             return part;
         }
 
-        /// <summary>Leaves out the submeshes without triangles; returns, for each one left, the submesh it was.</summary>
+        /// <summary>Leaves out the empty submeshes; returns, for each one left, the submesh it was.</summary>
         public static int[] DropEmptySubmeshes(Mesh mesh)
         {
             var slots = Enumerable.Range(0, mesh.subMeshCount).Where(s => mesh.GetIndexCount(s) > 0).ToArray();
             if (slots.Length == mesh.subMeshCount) return slots;
             var indices = slots.Select(s => mesh.GetIndices(s)).ToList();
+            var topologies = slots.Select(mesh.GetTopology).ToList();
             mesh.subMeshCount = slots.Length;
-            for (int s = 0; s < slots.Length; s++) mesh.SetIndices(indices[s], MeshTopology.Triangles, s, false);
+            for (int s = 0; s < slots.Length; s++) mesh.SetIndices(indices[s], topologies[s], s, false);
             return slots;
         }
 
         /// <summary>
         /// <paramref name="first"/> and <paramref name="second"/> as one mesh, with <paramref name="first"/>'s submeshes:
-        /// each of <paramref name="second"/>'s goes into the one <paramref name="slots"/> names (the same index without it).
-        /// Blendshapes join by name, in <paramref name="first"/>'s order: each moves what it moved in either mesh. Both use
-        /// the same bones and bind poses.
+        /// each of <paramref name="second"/>'s goes into the one <paramref name="slots"/> names (the same index without it),
+        /// which draws the same topology. Blendshapes join by name, in <paramref name="first"/>'s order: each moves what it
+        /// moved in either mesh, at every weight either has a frame at. Both use the same bones and bind poses.
         /// </summary>
         public static Mesh Join(Mesh first, Mesh second, int[] slots = null) => Join(first, second, slots, true);
 
@@ -113,31 +125,46 @@ namespace Orbiters.Toolkit.Editor.VRChat.Optimization
             var joined = new Mesh { name = first.name, indexFormat = total > 65535 ? IndexFormat.UInt32 : IndexFormat.UInt16 };
             Append(first, second, joined);
             var indices = Enumerable.Range(0, first.subMeshCount).Select(s => first.GetIndices(s).ToList()).ToList();
+            var topologies = Enumerable.Range(0, first.subMeshCount).Select(first.GetTopology).ToList();
             for (int s = 0; s < second.subMeshCount; s++)
             {
                 int slot = slots != null ? slots[s] : s;
-                while (indices.Count <= slot) indices.Add(new List<int>());
+                while (indices.Count <= slot) { indices.Add(new List<int>()); topologies.Add(second.GetTopology(s)); }
+                if (topologies[slot] != second.GetTopology(s) && indices[slot].Count > 0 && second.GetIndexCount(s) > 0)
+                    throw new ArgumentException("Submesh " + s + " draws " + second.GetTopology(s) + " into a slot of " + topologies[slot] + ".", nameof(slots));
+                if (indices[slot].Count == 0) topologies[slot] = second.GetTopology(s);
                 indices[slot].AddRange(second.GetIndices(s).Select(i => i + a));
             }
             joined.subMeshCount = indices.Count;
-            for (int s = 0; s < indices.Count; s++) joined.SetIndices(indices[s], MeshTopology.Triangles, s, false);
+            for (int s = 0; s < indices.Count; s++) joined.SetIndices(indices[s], topologies[s], s, false);
             joined.bindposes = first.bindposes;
             if (!shapes) { joined.RecalculateBounds(); return joined; }
 
             var names = Enumerable.Range(0, first.blendShapeCount).Select(first.GetBlendShapeName)
                 .Concat(Enumerable.Range(0, second.blendShapeCount).Select(second.GetBlendShapeName)).Distinct().ToList();
             var mv = new Vector3[total]; var mn = new Vector3[total]; var mt = new Vector3[total];
+            var dv = new Vector3[Math.Max(a, second.vertexCount)]; var dn = new Vector3[dv.Length]; var dt = new Vector3[dv.Length];
             foreach (var name in names)
             {
                 int i1 = first.GetBlendShapeIndex(name), i2 = second.GetBlendShapeIndex(name);
-                var reference = i1 >= 0 ? first : second;
-                int at = i1 >= 0 ? i1 : i2;
-                for (int frame = 0; frame < reference.GetBlendShapeFrameCount(at); frame++)
+                // Frames at every weight either mesh has one at; each mesh moves there as Unity would blend it.
+                var weights = new SortedSet<float>();
+                if (i1 >= 0) for (int f = 0; f < first.GetBlendShapeFrameCount(i1); f++) weights.Add(first.GetBlendShapeFrameWeight(i1, f));
+                if (i2 >= 0) for (int f = 0; f < second.GetBlendShapeFrameCount(i2); f++) weights.Add(second.GetBlendShapeFrameWeight(i2, f));
+                foreach (float weight in weights)
                 {
                     Array.Clear(mv, 0, total); Array.Clear(mn, 0, total); Array.Clear(mt, 0, total);
-                    if (i1 >= 0) Frame(first, i1, frame, mv, mn, mt, 0);
-                    if (i2 >= 0 && frame < second.GetBlendShapeFrameCount(i2)) Frame(second, i2, frame, mv, mn, mt, a);
-                    joined.AddBlendShapeFrame(name, reference.GetBlendShapeFrameWeight(at, frame), mv, mn, mt);
+                    if (i1 >= 0)
+                    {
+                        ShapeAt(first, i1, weight, dv, dn, dt);
+                        Array.Copy(dv, 0, mv, 0, a); Array.Copy(dn, 0, mn, 0, a); Array.Copy(dt, 0, mt, 0, a);
+                    }
+                    if (i2 >= 0)
+                    {
+                        ShapeAt(second, i2, weight, dv, dn, dt);
+                        Array.Copy(dv, 0, mv, a, second.vertexCount); Array.Copy(dn, 0, mn, a, second.vertexCount); Array.Copy(dt, 0, mt, a, second.vertexCount);
+                    }
+                    joined.AddBlendShapeFrame(name, weight, mv, mn, mt);
                 }
             }
             joined.bindposes = first.bindposes;
@@ -153,7 +180,8 @@ namespace Orbiters.Toolkit.Editor.VRChat.Optimization
         /// </summary>
         public static Mesh Replace(Mesh mesh, Func<int, int, int, bool> keep, Mesh replacement, int[] slots, Func<int, bool> shape)
         {
-            var kept = Subset(mesh, keep, null, out var vertices);
+            // Lines and points stay as they are with what is kept.
+            var kept = Subset(mesh, keep, null, out var vertices, true);
             try
             {
                 var joined = Join(kept, replacement, slots, false);
@@ -407,11 +435,34 @@ namespace Orbiters.Toolkit.Editor.VRChat.Optimization
             return (p - (a + ab * (vb * denominator) + ac * (vc * denominator))).magnitude;
         }
 
-        private static void Frame(Mesh mesh, int shape, int frame, Vector3[] mv, Vector3[] mn, Vector3[] mt, int offset)
+        /// <summary>
+        /// A blendshape's offsets at <paramref name="weight"/> as Unity blends them: between the frames around it, from zero
+        /// below the first, along the last two beyond the last. The arrays hold at least the mesh's vertices.
+        /// </summary>
+        public static void ShapeAt(Mesh mesh, int shape, float weight, Vector3[] dv, Vector3[] dn, Vector3[] dt)
         {
-            var dv = new Vector3[mesh.vertexCount]; var dn = new Vector3[mesh.vertexCount]; var dt = new Vector3[mesh.vertexCount];
-            mesh.GetBlendShapeFrameVertices(shape, frame, dv, dn, dt);
-            Array.Copy(dv, 0, mv, offset, dv.Length); Array.Copy(dn, 0, mn, offset, dn.Length); Array.Copy(dt, 0, mt, offset, dt.Length);
+            int frames = mesh.GetBlendShapeFrameCount(shape), n = mesh.vertexCount;
+            int upper = 0;
+            while (upper < frames - 1 && mesh.GetBlendShapeFrameWeight(shape, upper) < weight) upper++;
+            float upperWeight = mesh.GetBlendShapeFrameWeight(shape, upper);
+            float lowerWeight = upper == 0 ? 0 : mesh.GetBlendShapeFrameWeight(shape, upper - 1);
+            float t = upperWeight == lowerWeight ? 1 : (weight - lowerWeight) / (upperWeight - lowerWeight);
+            Read(mesh, shape, upper, dv, dn, dt);
+            for (int v = 0; v < n; v++) { dv[v] *= t; dn[v] *= t; dt[v] *= t; }
+            if (upper == 0 || t == 1) return;
+            var lv = new Vector3[n]; var ln = new Vector3[n]; var lt = new Vector3[n];
+            Read(mesh, shape, upper - 1, lv, ln, lt);
+            for (int v = 0; v < n; v++) { dv[v] += lv[v] * (1 - t); dn[v] += ln[v] * (1 - t); dt[v] += lt[v] * (1 - t); }
+        }
+
+        // A frame into arrays that may be longer than the mesh's vertices.
+        private static void Read(Mesh mesh, int shape, int frame, Vector3[] dv, Vector3[] dn, Vector3[] dt)
+        {
+            int n = mesh.vertexCount;
+            if (dv.Length == n) { mesh.GetBlendShapeFrameVertices(shape, frame, dv, dn, dt); return; }
+            var v = new Vector3[n]; var nn = new Vector3[n]; var tt = new Vector3[n];
+            mesh.GetBlendShapeFrameVertices(shape, frame, v, nn, tt);
+            Array.Copy(v, dv, n); Array.Copy(nn, dn, n); Array.Copy(tt, dt, n);
         }
 
         // The listed vertices of source, every attribute it has, into target.
@@ -469,7 +520,11 @@ namespace Orbiters.Toolkit.Editor.VRChat.Optimization
                 if (second.HasVertexAttribute(attribute)) second.GetUVs(channel, b); else b.AddRange(Enumerable.Repeat(Vector4.zero, second.vertexCount));
                 SetUVs(target, channel, dimension, a.Concat(b).ToList());
             }
-            var counts = first.GetBonesPerVertex().Concat(second.GetBonesPerVertex()).ToArray();
+            // A mesh without weights joining one with them keeps its vertices weighted to no bone; the other keeps its own.
+            var firstCounts = first.GetBonesPerVertex(); var secondCounts = second.GetBonesPerVertex();
+            if (firstCounts.Length == 0 && secondCounts.Length == 0) return;
+            var counts = (firstCounts.Length > 0 ? firstCounts.ToArray() : new byte[first.vertexCount])
+                .Concat(secondCounts.Length > 0 ? secondCounts.ToArray() : new byte[second.vertexCount]).ToArray();
             if (counts.Length != first.vertexCount + second.vertexCount) return;
             using (var perVertex = new NativeArray<byte>(counts, Allocator.Temp))
             using (var all = new NativeArray<BoneWeight1>(first.GetAllBoneWeights().Concat(second.GetAllBoneWeights()).ToArray(), Allocator.Temp))

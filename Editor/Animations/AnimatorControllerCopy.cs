@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using UnityEditor;
 using UnityEditor.Animations;
 using UnityEngine;
 using Object = UnityEngine.Object;
@@ -45,12 +46,28 @@ namespace Orbiters.Toolkit.Editor.Animations
         /// A new blend tree with <paramref name="source"/>'s settings and children (the same motions). Unity asserts when a
         /// blend tree holding other trees is instantiated, so trees are copied this way.
         /// </summary>
-        public static BlendTree Tree(BlendTree source) => new BlendTree
+        public static BlendTree Tree(BlendTree source)
         {
-            name = source.name, blendType = source.blendType, blendParameter = source.blendParameter, blendParameterY = source.blendParameterY,
-            minThreshold = source.minThreshold, maxThreshold = source.maxThreshold, useAutomaticThresholds = source.useAutomaticThresholds,
-            children = source.children,
-        };
+            var tree = new BlendTree
+            {
+                name = source.name, blendType = source.blendType, blendParameter = source.blendParameter, blendParameterY = source.blendParameterY,
+                minThreshold = source.minThreshold, maxThreshold = source.maxThreshold, useAutomaticThresholds = source.useAutomaticThresholds,
+                children = source.children,
+            };
+            // A direct tree's "Normalized Blend Values" has no property of its own.
+            using (var from = new SerializedObject(source))
+            using (var to = new SerializedObject(tree))
+            {
+                var normalized = from.FindProperty("m_NormalizedBlendValues");
+                var copy = to.FindProperty("m_NormalizedBlendValues");
+                if (normalized != null && copy != null && copy.boolValue != normalized.boolValue)
+                {
+                    copy.boolValue = normalized.boolValue;
+                    to.ApplyModifiedPropertiesWithoutUndo();
+                }
+            }
+            return tree;
+        }
 
         /// <summary>Everything the copy made, its clips too.</summary>
         public IReadOnlyList<Object> Made => made;

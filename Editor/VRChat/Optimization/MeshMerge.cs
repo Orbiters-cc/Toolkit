@@ -37,8 +37,10 @@ namespace Orbiters.Toolkit.Editor.VRChat.Optimization
         public static Result MergeStill(AvatarUsage usage)
         {
             var result = new Result();
-            var skinned = usage.Root.GetComponentsInChildren<SkinnedMeshRenderer>(true).Where(r => Shown(r, usage) && Mergeable(r)).ToList();
-            var props = usage.Root.GetComponentsInChildren<MeshRenderer>(true).Where(r => Shown(r, usage) && Prop(r) && Movable(r, usage)).ToList();
+            // What a build tool still works on stays as it is, merged into nothing and taking nothing in.
+            var skinned = usage.Root.GetComponentsInChildren<SkinnedMeshRenderer>(true)
+                .Where(r => usage.AlwaysShown(r) && Mergeable(r) && !Emits(r, usage) && !usage.Pending(r.transform)).ToList();
+            var props = usage.Root.GetComponentsInChildren<MeshRenderer>(true).Where(r => usage.AlwaysShown(r) && Prop(r) && Movable(r, usage)).ToList();
             // The largest groups first: a prop drawn like several of them joins the one with the most to share.
             foreach (var group in skinned.GroupBy(r => (Drawn(r), Skinning(r))).OrderByDescending(g => g.Sum(r => r.sharedMesh.vertexCount)))
             {
@@ -81,7 +83,7 @@ namespace Orbiters.Toolkit.Editor.VRChat.Optimization
             var result = new Result();
             var root = usage.Root.transform;
             var visibility = Visibility(usage);
-            var candidates = usage.Root.GetComponentsInChildren<SkinnedMeshRenderer>(true).Where(r => Mergeable(r) && Toggleable(r, usage)).ToList();
+            var candidates = usage.Root.GetComponentsInChildren<SkinnedMeshRenderer>(true).Where(r => Mergeable(r) && Toggleable(r, usage) && !Emits(r, usage)).ToList();
             foreach (var group in candidates.GroupBy(r => (Drawn(r), Skinning(r), Signature(r, usage, visibility))).Where(g => g.Count() > 1))
             {
                 var members = group.ToList();
@@ -103,23 +105,19 @@ namespace Orbiters.Toolkit.Editor.VRChat.Optimization
                 if (merged == null) continue;
                 result.Meshes.Add(merged.Mesh);
                 result.Merged += sources.Count;
-                if (build != null) MoveShapeAnimations(build, target, merged.Shapes);
-                foreach (var source in sources) Remove(source, target, usage);
+                // The joining renderers go even when their animations could not follow: never drawn twice.
+                try { if (build != null) MoveShapeAnimations(build, target, merged.Shapes); }
+                finally { foreach (var source in sources) Remove(source, target, usage); }
             }
             return result;
         }
 
         // ---- Who can merge ----
 
-        // Shown from the start and for good: on, in the hierarchy, never hidden or switched off by an animation.
-        private static bool Shown(Renderer renderer, AvatarUsage usage)
-        {
-            if (!renderer.enabled || usage.Toggled(renderer.transform) || usage.Switched(renderer)) return false;
-            // Active up to the avatar's root (what holds a hidden copy of it does not count).
-            for (var t = renderer.transform; t != null; t = t == usage.Root.transform ? null : t.parent)
-                if (!t.gameObject.activeSelf || t.CompareTag("EditorOnly")) return false;
-            return true;
-        }
+        // A particle system emitting from a renderer's mesh would emit from all the merged geometry: it stays as it is.
+        private static bool Emits(Renderer renderer, AvatarUsage usage) =>
+            usage.ReferencesTo(renderer).Any(r => r.From is ParticleSystem) ||
+            renderer is MeshRenderer && renderer.TryGetComponent<MeshFilter>(out var filter) && usage.ReferencesTo(filter).Any(r => r.From is ParticleSystem);
 
         // A skinned mesh whose every vertex follows its bones, drawn as triangles, one material per submesh.
         private static bool Mergeable(SkinnedMeshRenderer renderer)
@@ -164,11 +162,16 @@ namespace Orbiters.Toolkit.Editor.VRChat.Optimization
 
         private static (bool, bool, SkinQuality) Skinning(SkinnedMeshRenderer r) => (r.skinnedMotionVectors, r.updateWhenOffscreen, r.quality);
 
-        // A material property an animation sets on a renderer reaches every material it draws with that property: a mesh
-        // whose materials have one the merged renderer's animations set stays apart.
+        // What an animation sets on a renderer reaches everything it draws: a material property every material with that
+        // property, its own settings (shadows, probes, sorting, bounds) the whole renderer. A mesh whose materials have a
+        // property the merged renderer's animations set stays apart, and every mesh does when they change its settings.
+        // Blendshapes, swapped slots and its switch stay its own.
         private static bool Crosses(Renderer target, Renderer source, AvatarUsage usage)
         {
-            var properties = usage.AnimatedAt(target.transform).Where(p => p.StartsWith("material.", StringComparison.Ordinal))
+            var animated = usage.AnimatedAt(target.transform, target.GetType());
+            if (animated.Any(p => p != "m_Enabled" && !p.StartsWith("blendShape.", StringComparison.Ordinal) && !p.StartsWith("material.", StringComparison.Ordinal) &&
+                                  !p.StartsWith("m_Materials", StringComparison.Ordinal))) return true;
+            var properties = animated.Where(p => p.StartsWith("material.", StringComparison.Ordinal))
                 .Select(p => p.Substring("material.".Length).Split('.')[0]).Distinct().ToList();
             return properties.Count > 0 && source.sharedMaterials.Any(m => m != null && properties.Any(m.HasProperty));
         }
@@ -200,17 +203,17 @@ namespace Orbiters.Toolkit.Editor.VRChat.Optimization
         // toggles with the same fingerprint and the same state at rest are on and off at the same moments.
         private static Dictionary<(string Path, string Property), string> Visibility(AvatarUsage usage)
         {
-            var clips = AvatarUsage.Controllers(usage.Root).SelectMany(c => c.animationClips).Where(c => c != null).Distinct().ToList();
+            var clips = AvatarUsage.Clips(usage.Root).ToList();
             var keys = new Dictionary<(string, string), StringBuilder>();
             for (int i = 0; i < clips.Count; i++)
-                foreach (var binding in AnimationUtility.GetCurveBindings(clips[i]))
+                foreach (var binding in AnimationUtility.GetCurveBindings(clips[i].Clip))
                 {
                     bool active = binding.propertyName == "m_IsActive" && binding.type == typeof(GameObject);
                     bool enabled = binding.propertyName == "m_Enabled" && binding.type.IsAssignableFrom(typeof(SkinnedMeshRenderer));
                     if (!active && !enabled) continue;
-                    var curve = AnimationUtility.GetEditorCurve(clips[i], binding);
+                    var curve = AnimationUtility.GetEditorCurve(clips[i].Clip, binding);
                     if (curve == null) continue;
-                    var key = (binding.path, binding.propertyName);
+                    var key = (usage.PathOf(clips[i].AnimatorRoot, binding.path), binding.propertyName);
                     if (!keys.TryGetValue(key, out var text)) keys[key] = text = new StringBuilder();
                     text.Append(i).Append('[');
                     foreach (var k in curve.keys) text.Append(k.time.ToString("R")).Append(':').Append(k.value > .5f ? '1' : '0').Append(' ');
@@ -272,6 +275,8 @@ namespace Orbiters.Toolkit.Editor.VRChat.Optimization
             /// <summary>Maps the part's mesh space into the merged one (identity for the target).</summary>
             public Matrix4x4 Space = Matrix4x4.identity;
             public int[] BoneMap;
+            /// <summary>Whether Unity drew the part mirrored and draws the merged renderer not, or the other way round.</summary>
+            public bool Flip;
         }
 
         private sealed class Merged
@@ -297,6 +302,7 @@ namespace Orbiters.Toolkit.Editor.VRChat.Optimization
             foreach (var source in sources)
             {
                 var part = PartOf(source);
+                part.Flip = Mirrored(source) != Mirrored(target);
                 part.Offset = vertices;
                 vertices += part.Mesh.vertexCount;
                 Map(part, bones, poses);
@@ -347,14 +353,19 @@ namespace Orbiters.Toolkit.Editor.VRChat.Optimization
                 merged.SetBoneWeights(perVertex, all);
             merged.bindposes = poses.ToArray();
 
-            // The target's slots first, so animations swapping its materials keep their indices.
+            // The target's slots first, so animations swapping its materials keep their indices. A part drawn mirrored
+            // otherwise than the merged renderer turns its triangles round, or they would face inwards.
             var materials = new List<Material>();
             var submeshes = new List<int[]>();
             foreach (var part in parts)
             {
                 materials.AddRange(part.Renderer.sharedMaterials);
                 for (int i = 0; i < part.Mesh.subMeshCount; i++)
-                    submeshes.Add(part.Mesh.GetIndices(i, true).Select(index => index + part.Offset).ToArray());
+                {
+                    var indices = part.Mesh.GetIndices(i, true).Select(index => index + part.Offset).ToArray();
+                    if (part.Flip) for (int t = 0; t + 2 < indices.Length; t += 3) (indices[t + 1], indices[t + 2]) = (indices[t + 2], indices[t + 1]);
+                    submeshes.Add(indices);
+                }
             }
             merged.subMeshCount = submeshes.Count;
             for (int i = 0; i < submeshes.Count; i++) merged.SetIndices(submeshes[i], MeshTopology.Triangles, i, false, 0);
@@ -372,6 +383,10 @@ namespace Orbiters.Toolkit.Editor.VRChat.Optimization
                 var dv = new Vector3[count]; var dn = new Vector3[count]; var dt = new Vector3[count];
                 var skinned = part.Renderer as SkinnedMeshRenderer;
                 bool same = part.Space == Matrix4x4.identity;
+                // Shape offsets add to a vertex's normal and tangent before Unity skins and normalizes them: carried through
+                // the part's space and scaled like the part's own (unit length again), they turn them as they did.
+                var normalScale = same ? null : Lengths(shaped.normals, count, part.Space);
+                var tangentScale = same ? null : Lengths(shaped.tangents.Select(t => (Vector3)t).ToArray(), count, part.Space);
                 for (int shape = 0; shape < shaped.blendShapeCount; shape++)
                 {
                     string name = shaped.GetBlendShapeName(shape), unique = name;
@@ -386,8 +401,8 @@ namespace Orbiters.Toolkit.Editor.VRChat.Optimization
                             for (int v = 0; v < count; v++)
                             {
                                 mv[part.Offset + v] = part.Space.MultiplyVector(dv[v]);
-                                mn[part.Offset + v] = part.Space.MultiplyVector(dn[v]);
-                                mt[part.Offset + v] = part.Space.MultiplyVector(dt[v]);
+                                mn[part.Offset + v] = part.Space.MultiplyVector(dn[v]) * normalScale[v];
+                                mt[part.Offset + v] = part.Space.MultiplyVector(dt[v]) * tangentScale[v];
                             }
                         merged.AddBlendShapeFrame(unique, shaped.GetBlendShapeFrameWeight(shape, frame), mv, mn, mt);
                     }
@@ -399,8 +414,9 @@ namespace Orbiters.Toolkit.Editor.VRChat.Optimization
             }
             merged.RecalculateBounds();
 
-            // Culling bounds around every part as it stands, in the target's root bone space.
-            var bounds = parts.Select(p => p.Renderer.bounds).Aggregate((a, b) => { a.Encapsulate(b); return a; });
+            // Culling bounds around every part's own box as it stands (a hidden renderer's world bounds are empty), in the
+            // target's root bone space.
+            var bounds = parts.Select(p => Box(p.Renderer)).Aggregate((a, b) => { a.Encapsulate(b); return a; });
             target.sharedMesh = merged;
             target.bones = bones.ToArray();
             target.sharedMaterials = materials.ToArray();
@@ -427,7 +443,7 @@ namespace Orbiters.Toolkit.Editor.VRChat.Optimization
                 // poses[at] * space == ownPoses[i]: the part's mesh space seen from the merged one.
                 var candidate = poses[at].inverse * ownPoses[i];
                 if (space == null) space = candidate;
-                else consistent = Close(space.Value, candidate);
+                else consistent = MeshOptimization.Close(space.Value, candidate);
             }
             if (consistent && space != null)
             {
@@ -449,12 +465,8 @@ namespace Orbiters.Toolkit.Editor.VRChat.Optimization
             }
         }
 
-        private static bool Close(Matrix4x4 a, Matrix4x4 b)
-        {
-            for (int i = 0; i < 16; i++) if (Mathf.Abs(a[i] - b[i]) > 1e-4f) return false;
-            return true;
-        }
-
+        // Unity skins normals and tangents with the bone matrices themselves (then normalizes them): carried through the
+        // part's space the same way, they come out of the merged renderer's bones as they came out of the part's.
         private static IEnumerable<Vector3> Normals(Part part)
         {
             var normals = part.Mesh.normals;
@@ -463,12 +475,45 @@ namespace Orbiters.Toolkit.Editor.VRChat.Optimization
             return normals.Select(n => space.MultiplyVector(n).normalized);
         }
 
+        // Shaders turn a bitangent round on a renderer drawn mirrored: a part that changes sides turns its sign in w round.
         private static IEnumerable<Vector4> Tangents(Part part)
         {
             var tangents = part.Mesh.tangents;
             if (tangents.Length == 0) return Enumerable.Repeat(new Vector4(1, 0, 0, 1), part.Mesh.vertexCount);
             var space = part.Space;
-            return tangents.Select(t => { var v = space.MultiplyVector(t).normalized; return new Vector4(v.x, v.y, v.z, t.w); });
+            float flip = part.Flip ? -1f : 1f;
+            return tangents.Select(t => { var v = space.MultiplyVector(t).normalized; return new Vector4(v.x, v.y, v.z, t.w * flip); });
+        }
+
+        // For each vertex, one over the length a direction gets through the space (1 without one): what makes it unit length.
+        private static float[] Lengths(Vector3[] directions, int count, Matrix4x4 space)
+        {
+            var scale = new float[count];
+            for (int v = 0; v < count; v++)
+            {
+                float length = v < directions.Length ? space.MultiplyVector(directions[v]).magnitude : 0f;
+                scale[v] = length > 1e-12f ? 1f / length : 1f;
+            }
+            return scale;
+        }
+
+        // Whether Unity draws a renderer mirrored (an odd number of negative scales): it then turns its triangles round and
+        // its shaders the bitangents. A skinned mesh is drawn from its root bone.
+        private static bool Mirrored(Renderer renderer) =>
+            (renderer is SkinnedMeshRenderer skinned && skinned.rootBone != null ? skinned.rootBone : renderer.transform).localToWorldMatrix.determinant < 0f;
+
+        // A renderer's own culling box in world space: a skinned mesh's around its root bone, a prop's mesh around its object.
+        private static Bounds Box(Renderer renderer)
+        {
+            Bounds local;
+            Transform space;
+            if (renderer is SkinnedMeshRenderer skinned) { local = skinned.localBounds; space = skinned.rootBone != null ? skinned.rootBone : skinned.transform; }
+            else { var mesh = MeshOptimization.MeshOf(renderer); local = mesh != null ? mesh.bounds : default; space = renderer.transform; }
+            var box = new Bounds(space.TransformPoint(local.center), Vector3.zero);
+            var e = local.extents;
+            for (int i = 0; i < 8; i++)
+                box.Encapsulate(space.TransformPoint(local.center + Vector3.Scale(e, new Vector3((i & 1) == 0 ? -1 : 1, (i & 2) == 0 ? -1 : 1, (i & 4) == 0 ? -1 : 1))));
+            return box;
         }
 
         private static Bounds Local(Bounds world, Transform space)

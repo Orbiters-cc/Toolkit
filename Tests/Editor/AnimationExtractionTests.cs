@@ -5,6 +5,7 @@ using System.Linq;
 using NUnit.Framework;
 using Orbiters.Toolkit.Editor.Animations;
 using Orbiters.Toolkit.Editor.Storage;
+using Orbiters.Toolkit.Storage;
 using UnityEditor;
 using UnityEditor.Animations;
 using UnityEngine;
@@ -202,13 +203,13 @@ public sealed class AnimationExtractionTests
 
     [Test] public void ClipNamesBecomeValidFileNames()
     {
-        Assert.That(AssetPaths.FileName("Armature|Run:Fast"), Is.EqualTo("Armature_Run_Fast"));
-        Assert.That(AssetPaths.FileName("a/b\\c<d>e?f*g\"h"), Is.EqualTo("a_b_c_d_e_f_g_h"));
-        Assert.That(AssetPaths.FileName("tab\there"), Is.EqualTo("tab_here"));
-        Assert.That(AssetPaths.FileName("  Idle.. "), Is.EqualTo("Idle"));
-        Assert.That(AssetPaths.FileName("CON"), Is.EqualTo("CON_"));
-        Assert.That(AssetPaths.FileName("nul.take"), Is.EqualTo("nul_.take"));
-        Assert.That(AssetPaths.FileName(" . ", "Animation"), Is.EqualTo("Animation"));
+        Assert.That(SafePaths.FileName("Armature|Run:Fast"), Is.EqualTo("Armature_Run_Fast"));
+        Assert.That(SafePaths.FileName("a/b\\c<d>e?f*g\"h"), Is.EqualTo("a_b_c_d_e_f_g_h"));
+        Assert.That(SafePaths.FileName("tab\there"), Is.EqualTo("tab_here"));
+        Assert.That(SafePaths.FileName("  Idle.. "), Is.EqualTo("Idle"));
+        Assert.That(SafePaths.FileName("CON"), Is.EqualTo("_CON"));
+        Assert.That(SafePaths.FileName("nul.take"), Is.EqualTo("_nul.take"));
+        Assert.That(SafePaths.FileName(" . ", "Animation"), Is.EqualTo("Animation"));
 
         var result = Extract(ExistingAnimation.Replace, Job("Armature|Run:Fast")).Single();
 

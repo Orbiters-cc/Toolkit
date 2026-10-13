@@ -21,6 +21,8 @@ namespace Orbiters.Toolkit.Editor.VRChat.Parameters
         public int AvatarBits => TotalBeforeCompression - CustomBaseBits - FaceTrackingBits;
         public bool VrcFuryPresent;
         public string CompressionStatus;
+        /// <summary>VRCFury builds the avatar and may compress its synced parameters when they are over the limit (not disabled in its settings).</summary>
+        public bool CompressionAllowed;
         /// <summary>True when VRCFury will compress at build: over the limit, with compression allowed (or asked and accepted).</summary>
         public bool Compresses;
         /// <summary>Bits once VRCFury compressed them, when <see cref="Compresses"/>.</summary>
@@ -60,6 +62,8 @@ namespace Orbiters.Toolkit.Editor.VRChat.Parameters
         /// Parameters a build step leaves out of a VRCFury component's parameter assets (e.g. face tracking features My
         /// Avatar does not sync), or out of the avatar's own expression parameters when the component is its
         /// <see cref="VRCAvatarDescriptor"/> (e.g. those only menu items left out of the upload set): they are not counted.
+        /// The avatar's own include the global parameters Full Controllers share with it: a name the descriptor's answer
+        /// holds leaves the built avatar whichever asset declares it (a step after VRCFury removes it from the merged list).
         /// Each function returns the names for one component, or null.
         /// </summary>
         public static readonly List<Func<Component, ICollection<string>>> BuildRemovedParameters = new List<Func<Component, ICollection<string>>>();
@@ -118,6 +122,7 @@ namespace Orbiters.Toolkit.Editor.VRChat.Parameters
                 : mode == "Fail" ? "VRCFury compression is disabled in its global settings."
                 : mode == "Compress" ? "VRCFury compresses automatically when needed during build."
                 : "Compression is controlled by VRCFury during build.";
+            budget.CompressionAllowed = mode != "Fail";
             if (budget.TotalBeforeCompression > ParameterBudget.MaxSyncedBits && mode != "Fail") Compress(ref budget, parameters);
             return budget;
         }

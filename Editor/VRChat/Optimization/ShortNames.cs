@@ -9,6 +9,7 @@ using UnityEngine;
 using VRC.Dynamics;
 using VRC.SDK3.Avatars.Components;
 using VRC.SDK3.Avatars.ScriptableObjects;
+using Object = UnityEngine.Object;
 
 namespace Orbiters.Toolkit.Editor.VRChat.Optimization
 {
@@ -16,8 +17,9 @@ namespace Orbiters.Toolkit.Editor.VRChat.Optimization
     /// Gives a build copy's objects, and the parameters only its animators use, the shortest names: the upload and the
     /// game keep every name. What something finds by name keeps its own: the avatar's root, the bones of the humanoid's
     /// model (the Animator binds them by name), Body (MMD dance worlds animate it by name), VRChat's own parameters and
-    /// those of the expression menu (the menu, OSC and saved values use them). The build's copies of the animations follow
-    /// (paths, masks, conditions, blend trees, parameter drivers, audio), and so do PhysBones and contacts.
+    /// those of the expression menu or, without one, VRChat's default menu (the menu, OSC and saved values use them). The
+    /// build's copies of the animations follow (paths, masks, conditions, blend trees, parameter drivers, audio), and so do
+    /// PhysBones and contacts. A step that fails puts the names it changed back before the exception goes on.
     /// </summary>
     public static class ShortNames
     {
@@ -29,8 +31,7 @@ namespace Orbiters.Toolkit.Editor.VRChat.Optimization
         }
 
         private const string Letters = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
-        // The parameters a PhysBone sets from its own: its parameter with these after it.
-        private static readonly string[] PhysBoneSuffixes = { "_IsGrabbed", "_IsPosed", "_Angle", "_Stretch", "_Squish" };
+        private static IReadOnlyList<string> PhysBoneSuffixes => VrcParameters.PhysBoneSuffixes;
 
         /// <summary>The <paramref name="index"/>th shortest name: a, b, ..., 9, aa, ab...</summary>
         public static string Short(int index)
@@ -62,34 +63,87 @@ namespace Orbiters.Toolkit.Editor.VRChat.Optimization
 
             var all = root.GetComponentsInChildren<Transform>(true);
             var former = all.ToDictionary(t => t, t => AnimationUtility.CalculateTransformPath(t, root));
-            var moves = new List<(Transform, string)>();
-            foreach (var parent in all)
+            var owned = build.OwnedByAnimator.ToList();
+            // The names animations use under each object, missing objects included: a new name never picks up a binding left
+            // dangling.
+            var bound = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
+            foreach (var path in BoundPaths(usage, owned))
             {
-                var children = parent.Cast<Transform>().ToList();
-                // Every name there now stays taken: a name kept, or too short to shorten, never meets a new one.
-                var taken = new HashSet<string>(children.Select(c => c.name), StringComparer.Ordinal);
-                int next = 0;
-                foreach (var child in children.Where(c => !Keeps(c)))
+                var parts = (path ?? "").Split('/');
+                for (int i = 0; i < parts.Length; i++)
                 {
-                    string name;
-                    do name = Short(next++); while (taken.Contains(name));
-                    if (name.Length >= child.name.Length) continue;
-                    result.Characters += child.name.Length - name.Length;
-                    child.name = name;
-                    result.Objects++;
-                    moves.Add((child, former[child]));
+                    string parent = string.Join("/", parts, 0, i);
+                    if (!bound.TryGetValue(parent, out var under)) bound[parent] = under = new HashSet<string>(StringComparer.Ordinal);
+                    under.Add(parts[i]);
                 }
             }
-            if (moves.Count == 0) return;
-            build.Moved(moves);
-            // Audio a state plays names its source by path.
-            var byFormer = former.ToDictionary(p => p.Value, p => p.Key, StringComparer.Ordinal);
-            foreach (var audio in build.Owned.OfType<VRCAnimatorPlayAudio>())
-                if (!string.IsNullOrEmpty(audio.SourcePath) && byFormer.TryGetValue(audio.SourcePath, out var source) && source != null)
+            var moves = new List<(Transform, string)>();
+            var renamed = new List<(Transform Child, string Name)>();
+            var sources = new List<(VRCAnimatorPlayAudio Audio, string Path)>();
+            bool rewriting = false;
+            try
+            {
+                foreach (var parent in all)
                 {
-                    audio.SourcePath = AnimationUtility.CalculateTransformPath(source, root);
+                    var children = parent.Cast<Transform>().ToList();
+                    // Every name there now stays taken: a name kept, or too short to shorten, never meets a new one.
+                    var taken = new HashSet<string>(children.Select(c => c.name), StringComparer.Ordinal);
+                    if (bound.TryGetValue(former[parent], out var used)) taken.UnionWith(used);
+                    int next = 0;
+                    foreach (var child in children.Where(c => !Keeps(c)))
+                    {
+                        string name;
+                        do name = Short(next++); while (taken.Contains(name));
+                        if (name.Length >= child.name.Length) continue;
+                        result.Characters += child.name.Length - name.Length;
+                        renamed.Add((child, child.name));
+                        child.name = name;
+                        result.Objects++;
+                        moves.Add((child, former[child]));
+                    }
+                }
+                if (moves.Count == 0) return;
+                rewriting = true;
+                build.Moved(moves);
+                // Audio a state plays names its source by path, from the object its animator starts at.
+                var byFormer = former.ToDictionary(p => p.Value, p => p.Key, StringComparer.Ordinal);
+                foreach (var (copy, animatorRoot) in owned)
+                {
+                    if (!(copy is VRCAnimatorPlayAudio audio) || string.IsNullOrEmpty(audio.SourcePath) || animatorRoot == null) continue;
+                    string from = former.TryGetValue(animatorRoot, out var at) && at.Length > 0 ? at + "/" + audio.SourcePath : audio.SourcePath;
+                    if (!byFormer.TryGetValue(from, out var source) || source == null || !source.IsChildOf(animatorRoot)) continue;
+                    sources.Add((audio, audio.SourcePath));
+                    audio.SourcePath = AnimationUtility.CalculateTransformPath(source, animatorRoot);
                     EditorUtility.SetDirty(audio);
                 }
+            }
+            catch
+            {
+                // The animations may already bind the new names: they are moved back with the objects.
+                var back = rewriting ? renamed.Where(r => r.Child != null).Select(r => (r.Child, AnimationUtility.CalculateTransformPath(r.Child, root))).ToList() : null;
+                foreach (var (child, name) in renamed) if (child != null) child.name = name;
+                foreach (var (audio, path) in sources) audio.SourcePath = path;
+                if (back != null && back.Count > 0)
+                    try { build.Moved(back); }
+                    catch (Exception undo) { Debug.LogException(undo); }
+                result.Objects = 0; result.Characters = 0;
+                throw;
+            }
+        }
+
+        // Every path the build's animations bind (clips, masks), from the avatar's root.
+        private static IEnumerable<string> BoundPaths(AvatarUsage usage, List<(Object Copy, Transform AnimatorRoot)> owned)
+        {
+            foreach (var (copy, animatorRoot) in owned)
+            {
+                if (copy is AnimationClip clip)
+                {
+                    foreach (var binding in AnimationUtility.GetCurveBindings(clip)) yield return usage.PathOf(animatorRoot, binding.path);
+                    foreach (var binding in AnimationUtility.GetObjectReferenceCurveBindings(clip)) yield return usage.PathOf(animatorRoot, binding.path);
+                }
+                else if (copy is AvatarMask mask)
+                    for (int i = 0; i < mask.transformCount; i++) yield return usage.PathOf(animatorRoot, mask.GetTransformPath(i));
+            }
         }
 
         // ---- Parameters ----
@@ -104,6 +158,8 @@ namespace Orbiters.Toolkit.Editor.VRChat.Optimization
             if (descriptor != null && descriptor.expressionParameters != null && descriptor.expressionParameters.parameters != null)
                 kept.UnionWith(descriptor.expressionParameters.parameters.Where(p => p != null).Select(p => p.name));
             if (descriptor != null) kept.UnionWith(MenuParameters(descriptor.expressionsMenu));
+            // Without custom expressions VRChat's default menu sets its own parameters (emotes, the face blend).
+            if (descriptor != null && !descriptor.customExpressions) kept.UnionWith(VrcParameters.DefaultExpressionParameters);
             bool Keeps(string name) => VrcParameters.Protected(name) || kept.Contains(name);
 
             var names = new HashSet<string>(controllers.SelectMany(c => c.parameters.Select(p => p.name)), StringComparer.Ordinal);
@@ -139,12 +195,27 @@ namespace Orbiters.Toolkit.Editor.VRChat.Optimization
                 if (to.Length < name.Length) map[name] = to;
             }
             if (map.Count == 0) return;
-            string Rename(string name) => name != null && map.TryGetValue(name, out var to) ? to : name;
+            var back = map.ToDictionary(p => p.Value, p => p.Key, StringComparer.Ordinal);
+            try { Apply(map); }
+            catch
+            {
+                // New names never met an old one: mapping them back undoes what was done.
+                Apply(back);
+                throw;
+            }
+            result.Parameters = map.Count(p => !derived.Contains(p.Key));
+            result.Characters += map.Where(p => names.Contains(p.Key) || bases.Contains(p.Key)).Sum(p => (long)(p.Key.Length - p.Value.Length));
 
+            void Apply(Dictionary<string, string> to) => RenameAll(controllers, owned, physBones, receivers, name => name != null && to.TryGetValue(name, out var renamed) ? renamed : name);
+        }
+
+        private static void RenameAll(List<AnimatorController> controllers, List<Object> owned, List<VRCPhysBoneBase> physBones, List<ContactReceiver> receivers,
+            Func<string, string> rename)
+        {
             foreach (var controller in controllers)
             {
                 var parameters = controller.parameters;
-                foreach (var parameter in parameters) parameter.name = Rename(parameter.name);
+                foreach (var parameter in parameters) parameter.name = rename(parameter.name);
                 controller.parameters = parameters;
                 EditorUtility.SetDirty(controller);
             }
@@ -154,41 +225,39 @@ namespace Orbiters.Toolkit.Editor.VRChat.Optimization
                 {
                     case AnimatorTransitionBase transition:
                         var conditions = transition.conditions;
-                        for (int i = 0; i < conditions.Length; i++) conditions[i].parameter = Rename(conditions[i].parameter);
+                        for (int i = 0; i < conditions.Length; i++) conditions[i].parameter = rename(conditions[i].parameter);
                         transition.conditions = conditions;
                         break;
                     case AnimatorState state:
-                        state.speedParameter = Rename(state.speedParameter); state.cycleOffsetParameter = Rename(state.cycleOffsetParameter);
-                        state.mirrorParameter = Rename(state.mirrorParameter); state.timeParameter = Rename(state.timeParameter);
+                        state.speedParameter = rename(state.speedParameter); state.cycleOffsetParameter = rename(state.cycleOffsetParameter);
+                        state.mirrorParameter = rename(state.mirrorParameter); state.timeParameter = rename(state.timeParameter);
                         break;
                     case BlendTree tree:
-                        tree.blendParameter = Rename(tree.blendParameter); tree.blendParameterY = Rename(tree.blendParameterY);
+                        tree.blendParameter = rename(tree.blendParameter); tree.blendParameterY = rename(tree.blendParameterY);
                         var children = tree.children;
-                        for (int i = 0; i < children.Length; i++) children[i].directBlendParameter = Rename(children[i].directBlendParameter);
+                        for (int i = 0; i < children.Length; i++) children[i].directBlendParameter = rename(children[i].directBlendParameter);
                         tree.children = children;
                         break;
                     case VRCAvatarParameterDriver driver:
-                        foreach (var parameter in driver.parameters) { parameter.name = Rename(parameter.name); parameter.source = Rename(parameter.source); }
+                        foreach (var parameter in driver.parameters) { parameter.name = rename(parameter.name); parameter.source = rename(parameter.source); }
                         break;
                     case VRCAnimatorPlayAudio audio:
-                        audio.ParameterName = Rename(audio.ParameterName);
+                        audio.ParameterName = rename(audio.ParameterName);
                         break;
                     case AnimationClip clip:
                         // Animations setting parameters (animator parameters driven by a clip).
-                        var from = AnimationUtility.GetCurveBindings(clip).Where(b => b.type == typeof(Animator) && map.ContainsKey(b.propertyName)).ToArray();
+                        var from = AnimationUtility.GetCurveBindings(clip).Where(b => b.type == typeof(Animator) && rename(b.propertyName) != b.propertyName).ToArray();
                         if (from.Length == 0) continue;
                         var curves = from.Select(b => AnimationUtility.GetEditorCurve(clip, b)).ToArray();
                         AnimationUtility.SetEditorCurves(clip, from, new AnimationCurve[from.Length]);
-                        AnimationUtility.SetEditorCurves(clip, from.Select(b => EditorCurveBinding.FloatCurve(b.path, typeof(Animator), map[b.propertyName])).ToArray(), curves);
+                        AnimationUtility.SetEditorCurves(clip, from.Select(b => EditorCurveBinding.FloatCurve(b.path, typeof(Animator), rename(b.propertyName))).ToArray(), curves);
                         break;
                     default: continue;
                 }
                 EditorUtility.SetDirty(value);
             }
-            foreach (var physBone in physBones) physBone.parameter = Rename(physBone.parameter);
-            foreach (var receiver in receivers) receiver.parameter = Rename(receiver.parameter);
-            result.Parameters = map.Count(p => !derived.Contains(p.Key));
-            result.Characters += map.Where(p => names.Contains(p.Key) || bases.Contains(p.Key)).Sum(p => (long)(p.Key.Length - p.Value.Length));
+            foreach (var physBone in physBones) physBone.parameter = rename(physBone.parameter);
+            foreach (var receiver in receivers) receiver.parameter = rename(receiver.parameter);
         }
 
         private static IEnumerable<string> MenuParameters(VRCExpressionsMenu menu)

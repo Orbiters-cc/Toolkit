@@ -59,7 +59,9 @@ namespace Orbiters.AlterMesh
             }
             else
             {
-                first = new(list.Ptr, mid - 1);
+                // Meshia 3.2.0 took mid - 1 points here: the one just before the median was in neither half, so no query
+                // ever found it.
+                first = new(list.Ptr, mid);
 
                 second = new(list.Ptr + mid + 1, list.Length - mid - 1);
             }

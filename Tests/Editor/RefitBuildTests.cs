@@ -219,6 +219,8 @@ public sealed class RefitBuildTests
         go.transform.SetParent(root.transform, false);
         var renderer = go.AddComponent<SkinnedMeshRenderer>();
         renderer.sharedMesh = mesh;
+        // The fixture meshes have one bind pose: without a bone Unity logs "Bones do not match bindpose" when drawing them.
+        renderer.bones = new[] { go.transform };
         return renderer;
     }
 }

@@ -103,7 +103,9 @@ public sealed class RefitRecordsTests
         jacket.rootBone = bone;
         originalBase = new GameObject("Original base");
         SceneManager.MoveGameObjectToScene(originalBase, scene);
-        originalBase.AddComponent<SkinnedMeshRenderer>().sharedMesh = bodyMesh;
+        var originalBody = originalBase.AddComponent<SkinnedMeshRenderer>();
+        originalBody.sharedMesh = bodyMesh;
+        originalBody.bones = new[] { originalBase.transform };
     }
 
     [TearDown]
@@ -547,6 +549,8 @@ public sealed class RefitRecordsTests
         go.transform.SetParent(root.transform, false);
         var renderer = go.AddComponent<SkinnedMeshRenderer>();
         renderer.sharedMesh = mesh;
+        // The fixture meshes have one bind pose: without a bone Unity logs "Bones do not match bindpose" when drawing them.
+        renderer.bones = new[] { go.transform };
         return renderer;
     }
 

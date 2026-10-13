@@ -35,7 +35,9 @@ namespace Orbiters.Toolkit.Editor.Vpm
             var repositories = plan.Repositories.Where(url => !VpmDependencies.RepositoryAdded(url)).ToList();
             if (repositories.Count > 0)
             {
-                var note = new Label("Adds " + (repositories.Count == 1 ? "the VPM repository " : "these VPM repositories: ") + string.Join(", ", repositories.Select(Host)) + ".");
+                // They go into the user's Creator Companion settings, shared by every project: each is named in full.
+                var note = new Label("Adds " + (repositories.Count == 1 ? "this VPM repository" : "these VPM repositories") + " to your Creator Companion (every project uses them): " +
+                                     string.Join(", ", repositories.Select(Host)) + ".") { tooltip = string.Join("\n", repositories) };
                 note.AddToClassList("orb-plan__note"); Add(note);
             }
             if (!plan.CanApply)
@@ -53,6 +55,7 @@ namespace Orbiters.Toolkit.Editor.Vpm
             ButtonInteraction.RegisterImmediateClick(confirm, () => { confirm.SetEnabled(false); confirmed?.Invoke(plan); });
         }
 
-        private static string Host(string url) => Uri.TryCreate(url, UriKind.Absolute, out var uri) ? uri.Host : url;
+        // "vcc.vrcfury.com", "spokeek.github.io/goloco/index.json": the host alone does not tell repositories on a shared host apart.
+        private static string Host(string url) => Uri.TryCreate(url, UriKind.Absolute, out var uri) ? uri.Host + uri.AbsolutePath.TrimEnd('/') : url;
     }
 }

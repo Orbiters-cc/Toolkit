@@ -21,6 +21,9 @@ namespace Orbiters.Toolkit.Storage
         /// </summary>
         public const int MaxPathLength = 259;
 
+        /// <summary>The longest folder path Windows creates: MAX_PATH less room for an 8.3 file name.</summary>
+        public const int MaxFolderPathLength = 247;
+
         /// <summary>
         /// A sibling of <paramref name="path"/> named "&lt;name&gt;.&lt;kind&gt;-&lt;8 hex&gt;", to stage or set a folder aside. Its files
         /// keep their names in it, so the suffix stays short: they must still fit <see cref="MaxPathLength"/>.
@@ -28,16 +31,37 @@ namespace Orbiters.Toolkit.Storage
         public static string Sibling(string path, string kind) =>
             Path.GetFullPath(path).TrimEnd('/', '\\') + "." + kind + "-" + Guid.NewGuid().ToString("N").Substring(0, 8);
 
-        /// <summary>Refuses a path too long for Windows, saying how much shorter the project's folder must be.</summary>
+        /// <summary>
+        /// A <see cref="Sibling"/> ending in "~": Unity never imports it, so one left behind (a staging folder or a previous
+        /// folder that could not be deleted) never brings a second copy of its assets' GUIDs into the project.
+        /// </summary>
+        public static string HiddenSibling(string path, string kind) => Sibling(path, kind) + "~";
+
+        /// <summary>
+        /// Refuses a file path too long for Windows, or in a folder too long for it, saying how much shorter the folder
+        /// holding it must be: the project's, when it is in the project.
+        /// </summary>
         public static void RequireLength(string fullPath)
         {
-            if (Path.DirectorySeparatorChar != '\\' || fullPath == null || fullPath.Length <= MaxPathLength) return;
+            if (Path.DirectorySeparatorChar != '\\' || string.IsNullOrEmpty(fullPath)) return;
+            string folder = Path.GetDirectoryName(fullPath) ?? "";
+            int over = Math.Max(fullPath.Length - MaxPathLength, folder.Length - MaxFolderPathLength);
+            if (over <= 0) return;
+            string need = fullPath.Length - MaxPathLength >= folder.Length - MaxFolderPathLength
+                ? $"a file would need {fullPath.Length} characters, and Unity can use at most {MaxPathLength}"
+                : $"a folder would need {folder.Length} characters, and Windows makes them {MaxFolderPathLength} at most";
             string project = Directory.GetCurrentDirectory().TrimEnd('/', '\\');
-            string shorter = Path.Combine(Path.GetPathRoot(project) ?? "", "Unity", Path.GetFileName(project));
+            if (!IsSameOrChild(fullPath, project))
+                throw new PathTooLongException($"The folder path is too long for Windows: {need}. Use a folder path at least {over} characters shorter and try again.");
+            // The project's own folder is the part of the path that can change; a folder at a drive's root is as short as it gets.
+            string root = Path.GetPathRoot(project) ?? "";
+            if (project.Length - over < root.Length + 1)
+                throw new PathTooLongException($"Its files are nested too deeply for Windows: {need}, even with the project at the root of a drive.");
+            string shorter = Path.Combine(root, "Unity", Path.GetFileName(project));
+            string example = shorter.Length <= project.Length - over ? $" (for example {shorter})" : "";
             throw new PathTooLongException(
-                $"The project's folder path is too long for Windows: a file would need {fullPath.Length} characters, and Unity can use " +
-                $"at most {MaxPathLength}. Move the project to a folder path at least {fullPath.Length - MaxPathLength} characters " +
-                $"shorter (for example {shorter}) and try again.");
+                $"The project's folder path is too long for Windows: {need}. Move the project to a folder path at least {over} characters " +
+                $"shorter{example} and try again.");
         }
 
         /// <summary>A plain file or folder name: no separators, reserved characters or trailing dot.</summary>
@@ -67,11 +91,32 @@ namespace Orbiters.Toolkit.Storage
             return full;
         }
 
+        /// <summary>
+        /// Whether Windows keeps this name for a device (CON, PRN, AUX, NUL, CONIN$, CONOUT$, COM and LPT with a digit or a
+        /// superscript 1, 2 or 3), whatever its extension and the spaces before it ("NUL .txt").
+        /// </summary>
         public static bool IsDeviceName(string segment)
         {
-            string device = (segment ?? "").Split('.')[0].ToUpperInvariant();
-            return device == "CON" || device == "PRN" || device == "AUX" || device == "NUL" ||
-                   (device.Length == 4 && (device.StartsWith("COM", StringComparison.Ordinal) || device.StartsWith("LPT", StringComparison.Ordinal)) && device[3] >= '1' && device[3] <= '9');
+            string device = (segment ?? "").Split('.')[0].TrimEnd(' ').ToUpperInvariant();
+            if (device == "CON" || device == "PRN" || device == "AUX" || device == "NUL" || device == "CONIN$" || device == "CONOUT$") return true;
+            return device.Length == 4 && (device.StartsWith("COM", StringComparison.Ordinal) || device.StartsWith("LPT", StringComparison.Ordinal)) &&
+                   "0123456789\u00b9\u00b2\u00b3".IndexOf(device[3]) >= 0;
+        }
+
+        /// <summary>
+        /// <paramref name="name"/> (an object's, a menu's) as a plain file or folder name: separators, reserved and control
+        /// characters become "_", no leading or trailing spaces, no trailing dot (so never "." or ".."), never a device name,
+        /// at most <paramref name="maxLength"/> characters (paths must fit <see cref="MaxPathLength"/>); <paramref name="fallback"/>
+        /// when nothing is left.
+        /// </summary>
+        public static string FileName(string name, string fallback = "Unnamed", int maxLength = 64)
+        {
+            var invalid = Path.GetInvalidFileNameChars();
+            string clean = new string((name ?? "").Select(c => char.IsControl(c) || "<>:\"/\\|?*".IndexOf(c) >= 0 || invalid.Contains(c) ? '_' : c).ToArray())
+                .TrimStart().TrimEnd('.', ' ');
+            if (clean.Length > maxLength) clean = clean.Substring(0, maxLength).TrimEnd('.', ' ');
+            if (clean.Length == 0) clean = fallback;
+            return IsDeviceName(clean) ? "_" + clean : clean;
         }
 
         /// <summary>Refuses a path that goes through a symbolic link or junction between it and <paramref name="root"/>.</summary>
@@ -107,7 +152,7 @@ namespace Orbiters.Toolkit.Storage
                 throw new InvalidDataException("Replacement requires a distinct sibling staging folder.");
             RejectLinks(parent, staged);
             RejectLinks(parent, final);
-            string previous = Sibling(final, "trash");
+            string previous = HiddenSibling(final, "trash");
             bool moved = false;
             try
             {

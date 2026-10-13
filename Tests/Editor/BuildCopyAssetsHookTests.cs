@@ -36,13 +36,17 @@ public sealed class BuildCopyAssetsHookTests
     {
         var skinned = Child("Body").AddComponent<SkinnedMeshRenderer>();
         skinned.sharedMesh = Triangle("Body (twist)");
+        // One bind pose, one bone: else Unity logs "Bones do not match bindpose" when drawing it.
+        skinned.bones = new[] { skinned.transform };
         skinned.sharedMaterial = Own(new Material(Shader.Find("Standard")) { name = "Locked body" });
         var prop = Child("Prop");
         prop.AddComponent<MeshFilter>().sharedMesh = Triangle("Prop (follows body)");
         prop.AddComponent<MeshRenderer>();
         var gizmoMesh = Triangle("Gizmo");
         gizmoMesh.hideFlags = HideFlags.HideAndDontSave;
-        Child("Gizmo").AddComponent<SkinnedMeshRenderer>().sharedMesh = gizmoMesh;
+        var gizmo = Child("Gizmo").AddComponent<SkinnedMeshRenderer>();
+        gizmo.sharedMesh = gizmoMesh;
+        gizmo.bones = new[] { gizmo.transform };
 
         Assert.That(new BuildCopyAssetsHook().OnPreprocessAvatar(avatar), Is.True);
 

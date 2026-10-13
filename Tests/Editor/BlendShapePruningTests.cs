@@ -4,7 +4,9 @@ using NUnit.Framework;
 using Orbiters.Toolkit.Editor.VRChat.BlendShapes;
 using UnityEditor;
 using UnityEditor.Animations;
+using UnityEditor.SceneManagement;
 using UnityEngine;
+using UnityEngine.SceneManagement;
 using VRC.SDK3.Avatars.Components;
 using VRC.SDKBase;
 using Object = UnityEngine.Object;
@@ -12,18 +14,31 @@ using Object = UnityEngine.Object;
 public sealed class BlendShapePruningTests
 {
     private readonly List<Object> owned = new List<Object>();
+    private Scene scene;
+
+    [SetUp] public void SetUp() => scene = EditorSceneManager.NewPreviewScene();
 
     [TearDown] public void TearDown()
     {
+        EditorSceneManager.ClosePreviewScene(scene);
         foreach (var o in owned) if (o != null) Object.DestroyImmediate(o);
         owned.Clear();
     }
 
+    // Made hidden, then put in the preview scene: never in the user's open scene.
+    private GameObject New(string name)
+    {
+        var go = EditorUtility.CreateGameObjectWithHideFlags(name, HideFlags.HideAndDontSave);
+        SceneManager.MoveGameObjectToScene(go, scene);
+        go.hideFlags = HideFlags.None;
+        return go;
+    }
+
     [Test] public void KeepsShapesTheAvatarUsesAndBakesTheRestAtTheirWeight()
     {
-        var root = Own(new GameObject("Avatar"));
+        var root = New("Avatar");
         var descriptor = root.AddComponent<VRCAvatarDescriptor>();
-        var body = new GameObject("Body").AddComponent<SkinnedMeshRenderer>();
+        var body = New("Body").AddComponent<SkinnedMeshRenderer>();
         body.transform.SetParent(root.transform, false);
         var mesh = Own(new Mesh { vertices = new[] { Vector3.zero, Vector3.up, Vector3.right }, triangles = new[] { 0, 1, 2 } });
         mesh.RecalculateNormals();
@@ -71,9 +86,9 @@ public sealed class BlendShapePruningTests
 
     [Test] public void ShapesAnimationsOnlySetToTheirWeightCanBeBaked()
     {
-        var root = Own(new GameObject("Avatar"));
+        var root = New("Avatar");
         var descriptor = root.AddComponent<VRCAvatarDescriptor>();
-        var body = new GameObject("Body").AddComponent<SkinnedMeshRenderer>();
+        var body = New("Body").AddComponent<SkinnedMeshRenderer>();
         body.transform.SetParent(root.transform, false);
         var mesh = Own(new Mesh { vertices = new[] { Vector3.zero, Vector3.up, Vector3.right }, triangles = new[] { 0, 1, 2 } });
         foreach (var name in new[] { "held", "moving" }) mesh.AddBlendShapeFrame(name, 100, new[] { Vector3.forward, Vector3.zero, Vector3.zero }, new Vector3[3], new Vector3[3]);
@@ -91,6 +106,27 @@ public sealed class BlendShapePruningTests
         var copy = Own(BlendShapePruning.Prune(root, body, constantsUnused: true));
         Assert.That(copy.blendShapeCount, Is.EqualTo(1));
         Assert.That(copy.vertices[0].z, Is.EqualTo(.3f).Within(1e-5), "Baked in at its weight.");
+    }
+
+    [Test] public void ShapesANestedAnimatorAnimatesAreUsed()
+    {
+        var root = New("Avatar");
+        root.AddComponent<VRCAvatarDescriptor>();
+        var prop = New("Prop");
+        prop.transform.SetParent(root.transform, false);
+        var ears = New("Ears").AddComponent<SkinnedMeshRenderer>();
+        ears.transform.SetParent(prop.transform, false);
+        var mesh = Own(new Mesh { vertices = new[] { Vector3.zero, Vector3.up, Vector3.right }, triangles = new[] { 0, 1, 2 } });
+        foreach (var name in new[] { "wiggle", "unused" }) mesh.AddBlendShapeFrame(name, 100, new[] { Vector3.forward, Vector3.zero, Vector3.zero }, new Vector3[3], new Vector3[3]);
+        ears.sharedMesh = mesh;
+        // The prop's own Animator binds from the prop: "Ears", not "Prop/Ears".
+        var clip = Own(new AnimationClip());
+        AnimationUtility.SetEditorCurve(clip, EditorCurveBinding.FloatCurve("Ears", typeof(SkinnedMeshRenderer), "blendShape.wiggle"), AnimationCurve.Constant(0, 1, 100));
+        var controller = Own(new AnimatorController()); controller.AddLayer("Base");
+        controller.layers[0].stateMachine.AddState("Wiggle").motion = clip;
+        prop.AddComponent<Animator>().runtimeAnimatorController = controller;
+
+        Assert.That(BlendShapePruning.Used(root, ears), Is.EquivalentTo(new[] { "wiggle" }));
     }
 
     private T Own<T>(T value) where T : Object { owned.Add(value); return value; }

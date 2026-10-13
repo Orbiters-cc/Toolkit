@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using Orbiters.Toolkit.Editor.Storage;
+using Orbiters.Toolkit.Storage;
 using Orbiters.Toolkit.Editor.VRChat.Refit;
 using Orbiters.Toolkit.Meshes;
 using Orbiters.Toolkit.VRChat;
@@ -91,7 +92,7 @@ namespace Orbiters.Toolkit.Editor.VRChat.Attachments
                     // Keep authored split normals and all morphs; the smooth displacement retains the fabric detail.
                     const string folder = "Assets/Orbiters/Attachments/Fits";
                     AssetPaths.EnsureFolder(folder);
-                    string path = AssetDatabase.GenerateUniqueAssetPath(folder + "/" + AssetPaths.FileName(copy.name) + ".asset");
+                    string path = AssetDatabase.GenerateUniqueAssetPath(folder + "/" + SafePaths.FileName(copy.name, "Untitled") + ".asset");
                     AssetDatabase.CreateAsset(copy, path);
                     GeneratedAssets.Track(path);
                     Undo.RecordObjects(new UnityEngine.Object[] { attachment, renderer }, "Fit clothing to body volume");

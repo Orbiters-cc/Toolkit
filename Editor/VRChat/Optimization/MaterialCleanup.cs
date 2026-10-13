@@ -74,7 +74,8 @@ namespace Orbiters.Toolkit.Editor.VRChat.Optimization
         {
             string path = AssetDatabase.GetAssetPath(texture);
             if (string.IsNullOrEmpty(path) || !(AssetImporter.GetAtPath(path) is TextureImporter importer)) return null;
-            var file = new FileInfo(path);
+            // A package's files may live in the package cache: the full path finds them wherever they are.
+            var file = new FileInfo(Path.GetFullPath(path));
             if (!file.Exists) return null;
             if (!Hashes.TryGetValue(path, out var known) || known.Length != file.Length || known.Written != file.LastWriteTimeUtc.Ticks)
             {
@@ -91,12 +92,15 @@ namespace Orbiters.Toolkit.Editor.VRChat.Optimization
             return known.Hash + "|" + JsonUtility.ToJson(settings) + "|" + JsonUtility.ToJson(importer.GetDefaultPlatformTextureSettings()) + "|" + JsonUtility.ToJson(own);
         }
 
-        /// <summary>The texture properties of <paramref name="material"/> that hold a texture its shader does not declare.</summary>
+        /// <summary>
+        /// The texture properties of <paramref name="material"/> that hold a texture its shader does not declare. The main
+        /// texture stays: VRChat's fallback shader shows it to players who hide custom shaders.
+        /// </summary>
         public static List<string> UnusedTextures(Material material)
         {
             var shader = material != null ? material.shader : null;
             if (shader == null || !shader.isSupported || shader.name == "Hidden/InternalErrorShader") return new List<string>();
-            return material.GetTexturePropertyNames().Where(n => material.GetTexture(n) != null && shader.FindPropertyIndex(n) < 0).ToList();
+            return material.GetTexturePropertyNames().Where(n => n != "_MainTex" && material.GetTexture(n) != null && shader.FindPropertyIndex(n) < 0).ToList();
         }
 
         /// <summary>

@@ -26,7 +26,8 @@ namespace Orbiters.AlterMesh
             for (int subMeshIndex = 0; subMeshIndex < Mesh.subMeshCount; subMeshIndex++)
             {
                 var subMeshDescriptor = Mesh.GetSubMesh(subMeshIndex);
-                if (subMeshDescriptor.topology is not MeshTopology.Triangles)
+                // A lines or points submesh without vertices has no bits to set (Collections refuses a count of zero).
+                if (subMeshDescriptor.topology is not MeshTopology.Triangles && subMeshDescriptor.vertexCount > 0)
                 {
                     VertexIsDiscardedBits.SetBits(subMeshDescriptor.firstVertex, false, subMeshDescriptor.vertexCount);
                 }

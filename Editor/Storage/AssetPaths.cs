@@ -8,13 +8,11 @@ using UnityEngine;
 namespace Orbiters.Toolkit.Editor.Storage
 {
     /// <summary>
-    /// Paths of project assets: folders created with their parents, file names made from display names (clip, model or
-    /// object names), and asset paths of files on disk.
+    /// Paths of project assets: folders created with their parents and asset paths of files on disk. File names made from
+    /// display names are <see cref="SafePaths.FileName"/>'s.
     /// </summary>
     public static class AssetPaths
     {
-        private const string Reserved = "<>:\"/\\|?*";
-
         /// <summary>Forward slashes, no trailing slash; empty for null.</summary>
         public static string Normalize(string path) => (path ?? "").Replace('\\', '/').TrimEnd('/');
 
@@ -41,19 +39,6 @@ namespace Orbiters.Toolkit.Editor.Storage
             }
             // CreateFolder picks another name when a file already holds this one.
             return AssetDatabase.IsValidFolder(folder);
-        }
-
-        /// <summary>
-        /// A file name (without extension) for <paramref name="name"/> on every platform: reserved and control characters become
-        /// "_", surrounding spaces and trailing dots go, and device names (CON, NUL…) get a "_".
-        /// </summary>
-        public static string FileName(string name, string fallback = "Untitled")
-        {
-            string result = new string((name ?? "").Select(c => char.IsControl(c) || Reserved.IndexOf(c) >= 0 ? '_' : c).ToArray()).Trim().TrimEnd('.', ' ');
-            if (result.Length == 0) result = fallback;
-            if (!SafePaths.IsDeviceName(result)) return result;
-            int dot = result.IndexOf('.');
-            return result.Insert(dot < 0 ? result.Length : dot, "_");
         }
 
         /// <summary>The asset path ("Assets/…", "Packages/…") of a file or folder on disk, or null when it is outside the project.</summary>
