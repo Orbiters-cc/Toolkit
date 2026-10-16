@@ -1,5 +1,4 @@
 using System.Collections.Generic;
-using System.Linq;
 using NUnit.Framework;
 using Orbiters.Toolkit.Editor.VRChat.Attachments;
 using Orbiters.Toolkit.Editor.VRChat.Refit;
@@ -28,41 +27,6 @@ public sealed class AttachmentVolumeFitTests
         SceneManager.MoveGameObjectToScene(root, scene);
         return root;
     }
-    private MeshCollider Body()
-    {
-        var primitive = GameObject.CreatePrimitive(PrimitiveType.Cube);
-        SceneManager.MoveGameObjectToScene(primitive, scene);
-        var mesh = primitive.GetComponent<MeshFilter>().sharedMesh;
-        var collider = Root("Body surface").AddComponent<MeshCollider>();
-        collider.sharedMesh = mesh;
-        Object.DestroyImmediate(primitive);
-        return collider;
-    }
-
-    [Test] public void ClearancePreservesSplitSeamsAndDoesNotMoveAlreadyClearFabric()
-    {
-        var body = Body();
-        var vertices = new[] { new Vector3(.45f, 0, 0), new Vector3(.45f, .1f, 0), new Vector3(.45f, 0, .1f),
-            new Vector3(.45f, 0, 0), new Vector3(.8f, 0, 0) };
-        var original = (Vector3[])vertices.Clone();
-        var origins = vertices.Select(v => new Vector3(0, v.y, v.z)).ToArray();
-        var result = AttachmentVolumeFit.Expand(vertices, origins, new[] { 0, 1, 2, 3, 2, 1 }, body, 2, .02f);
-        Assert.That(result[0].x, Is.EqualTo(.52f).Within(.001f));
-        Assert.That(result[3], Is.EqualTo(result[0]), "UV seam copies remain coincident");
-        Assert.That(result[4], Is.EqualTo(original[4]), "already clear disconnected fabric stays as authored");
-        CollectionAssert.AreEqual(original, vertices, "the imported mesh data is read-only");
-    }
-
-    [Test] public void SleeveCannotExpandAgainstAnUnrelatedTorsoSurface()
-    {
-        var body = Body();
-        var vertices = new[] { new Vector3(.45f, 0, 0), new Vector3(.45f, .1f, 0), new Vector3(.45f, 0, .1f) };
-        var origins = vertices.Select(v => new Vector3(0, v.y, v.z)).ToArray();
-        var result = AttachmentVolumeFit.Expand(vertices, origins, new[] { 0, 1, 2 }, body, 2, .02f,
-            new[] { 2, 2, 2 }, Enumerable.Repeat(1, body.sharedMesh.triangles.Length / 3).ToArray());
-        CollectionAssert.AreEqual(vertices, result, "foreign surfaces must not make sleeve spikes");
-    }
-
     [Test] public void CancelRestoresOriginalMeshAndLeavesLaterManualReplacementAlone()
     {
         var root = Root("Jacket");

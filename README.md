@@ -1,5 +1,11 @@
 # Orbiters Toolkit
 
+## 0.3.23 — 2026-10-16
+
+- Clothing dropped on an avatar (My Avatar) is placed on its skeleton and left as it is, clipping included, for ReFit to
+  fit with a refit shape. It is no longer pushed out of the body by the volume of its bones, which made it blocky and
+  was never asked for. Clothing a drop fitted that way keeps its record: cancelling its fit puts its own mesh back.
+
 ## 0.3.22 — 2026-10-13
 
 - **Build-copy optimization** (`Orbiters.Toolkit.Editor.VRChat.Optimization`), shared by My Avatar's Optimization

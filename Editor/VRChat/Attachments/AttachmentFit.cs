@@ -167,7 +167,6 @@ namespace Orbiters.Toolkit.Editor.VRChat.Attachments
                 PrefabUtility.RecordPrefabInstancePropertyModifications(t);
             }
             AttachmentInstaller.Dirty(attachment);
-            AttachmentVolumeFit.Apply(attachment, avatarRoot, measure);
             return measure;
         }
 
