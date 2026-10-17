@@ -5,9 +5,7 @@ using System.Reflection;
 using Orbiters.Toolkit.Editor.VRChat.Attachments;
 using Orbiters.Toolkit.Editor.VRChat.Checks;
 using UnityEditor;
-using UnityEditor.SceneManagement;
 using UnityEngine;
-using UnityEngine.SceneManagement;
 using VRC.Dynamics;
 using VRC.SDK3.Avatars.Components;
 using VRC.SDKBase.Editor.BuildPipeline;
@@ -91,7 +89,7 @@ namespace Orbiters.Toolkit.Editor.VRChat
         private readonly List<string> folders = new List<string>();
         // The copy, kept once closed: the build cache finds its data by it.
         private GameObject made;
-        private Scene scene;
+        private HiddenAvatarCopy hidden;
         private bool started, notified;
 
         private HiddenAvatarBuild(GameObject source, List<Step> steps)
@@ -223,18 +221,8 @@ namespace Orbiters.Toolkit.Editor.VRChat
 
         private void Begin()
         {
-            scene = EditorSceneManager.NewPreviewScene();
-            // Made hidden and moved at once: an object made in the open scene would mark it changed.
-            var holder = EditorUtility.CreateGameObjectWithHideFlags("Hidden build", HideFlags.HideAndDontSave);
-            holder.SetActive(false);
-            SceneManager.MoveGameObjectToScene(holder, scene);
-            var copy = Object.Instantiate(Source, holder.transform);
-            copy.name = Source.name;
-            copy.transform.SetParent(null, false);
-            Object.DestroyImmediate(holder);
-            // The SDK panel lists every avatar whose object isn't flagged so: an upload must never pick the copy.
-            copy.hideFlags = HideFlags.NotEditable;
-            copy.SetActive(true);
+            hidden = new HiddenAvatarCopy(Source);
+            var copy = hidden.Copy;
             made = Copy = copy;
             before.UnionWith(InMemory(copy));
             VrcFury.LeaveWriteDefaults(copy);
@@ -353,8 +341,8 @@ namespace Orbiters.Toolkit.Editor.VRChat
                 foreach (var value in InMemory(copy))
                     if (!before.Contains(value) && !(value is Shader) && (value.hideFlags & HideFlags.DontUnloadUnusedAsset) == 0) Object.DestroyImmediate(value);
             }
-            if (scene.IsValid()) EditorSceneManager.ClosePreviewScene(scene);
-            scene = default;
+            hidden?.Dispose();
+            hidden = null;
             before.Clear();
             // The build cache's assets: deleted now, or by the cache itself once it sees the copy gone (after a reload, its
             // leftovers at the next start).

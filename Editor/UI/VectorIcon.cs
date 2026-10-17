@@ -4,7 +4,7 @@ using UnityEngine.UIElements;
 
 namespace Orbiters.Toolkit.Editor
 {
-    public enum IconGlyph { Bones, Mirror, Clothes, Refresh, Person, PersonOff, People, Robot, RobotOff, Lock, Unlock, Branch, Close, Chevron, Gauge, Sliders, Sound, Check, Sparkle, Male, Female, Key, External, Grid, Download, Broom, Plus, Camera, RefSheet, Brush }
+    public enum IconGlyph { Bones, Mirror, Clothes, Refresh, Person, PersonOff, People, Robot, RobotOff, Lock, Unlock, Branch, Close, Chevron, Gauge, Sliders, Sound, Check, Sparkle, Male, Female, Key, External, Grid, Download, Broom, Plus, Camera, RefSheet }
 
     /// <summary>
     /// A small line icon drawn with the vector API, crisp at any size. Its colour comes from the USS custom property
@@ -212,18 +212,6 @@ namespace Orbiters.Toolkit.Editor
                     painter.lineWidth = 2.4f * scale;
                     painter.BeginPath(); painter.MoveTo(P(12f, 5f)); painter.LineTo(P(12f, 19f)); painter.Stroke();
                     painter.BeginPath(); painter.MoveTo(P(5f, 12f)); painter.LineTo(P(19f, 12f)); painter.Stroke();
-                    break;
-                case IconGlyph.Brush:
-                    // A paintbrush: a long handle, its ferrule and a bristle tip that paints.
-                    painter.lineWidth = 2f * scale;
-                    painter.BeginPath(); painter.MoveTo(P(20.5f, 3.5f)); painter.LineTo(P(12.5f, 11.5f)); painter.Stroke();
-                    painter.lineWidth = 3.4f * scale;
-                    painter.BeginPath(); painter.MoveTo(P(12.8f, 11.2f)); painter.LineTo(P(10.6f, 13.4f)); painter.Stroke();
-                    painter.BeginPath();
-                    painter.MoveTo(P(9.6f, 12.6f)); painter.LineTo(P(11.4f, 14.4f));
-                    painter.QuadraticCurveTo(P(10.8f, 18.8f), P(4f, 20f));
-                    painter.QuadraticCurveTo(P(5.2f, 13.2f), P(9.6f, 12.6f));
-                    painter.ClosePath(); painter.Fill();
                     break;
                 case IconGlyph.Camera:
                     painter.lineWidth = 1.8f * scale;

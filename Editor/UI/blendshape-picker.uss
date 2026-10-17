@@ -20,3 +20,22 @@
 .orbiters-shape-action:hover { background-color: #5a5a5a; }
 .orbiters-shape-action:disabled { opacity: 0.45; }
 .orbiters-help { color: #999999; font-size: 11px; white-space: normal; margin-top: 4px; margin-bottom: 10px; }
+
+/* Flat, for windows in the Orbiters look (ReFit, Substance Painter): round search, pills, no borders. */
+.orbiters-shape-picker--flat .orbiters-shape-search { margin: 0 0 10px 0; height: 30px; min-height: 30px; padding: 0 4px; border-width: 0; border-radius: 15px; background-color: #2c2c2c; }
+.orbiters-shape-picker--flat .orbiters-shape-search .unity-text-field__input { min-height: 24px; padding: 3px 8px; border-radius: 12px; color: #e6e6e6; font-size: 11px; }
+.orbiters-shape-picker--flat .orbiters-shape-search .unity-text-field__input:focus { background-color: #333333; }
+.orbiters-shape-picker--flat .unity-toolbar-search-field__search-button, .orbiters-shape-picker--flat .unity-search-field-base__search-button { margin-left: 6px; opacity: 0.6; }
+.orbiters-shape-picker--flat .orbiters-shape-toolbar { margin-bottom: 8px; }
+.orbiters-shape-picker--flat .orbiters-shape-count { margin: 0 8px 0 2px; padding: 0; color: #8f8f8f; font-size: 11px; }
+.orbiters-shape-picker--flat .orbiters-shape-action { height: 24px; min-height: 24px; margin: 0 0 0 6px; padding: 0 10px; border-width: 0; border-radius: 6px; background-color: rgba(255, 255, 255, 0.06); color: #d0d0d0; font-size: 11px; transition-property: background-color, scale; transition-duration: 0.12s, 0.18s; }
+.orbiters-shape-picker--flat .orbiters-shape-action:hover { background-color: rgba(255, 255, 255, 0.12); color: #ffffff; }
+.orbiters-shape-picker--flat .orbiters-shape-action:active { scale: 0.96 0.96; }
+.orbiters-shape-picker--flat .orbiters-shape-suggestion { height: 24px; min-height: 24px; margin: 0 4px 4px 0; padding: 0 10px; border-width: 0; border-radius: 12px; background-color: #2e2e2e; color: #d0d0d0; font-size: 11px; white-space: nowrap; transition-property: background-color, scale; transition-duration: 0.12s, 0.18s; }
+.orbiters-shape-picker--flat .orbiters-shape-suggestion:hover { background-color: #363636; color: #ffffff; }
+.orbiters-shape-picker--flat .orbiters-shape-suggestion:active { scale: 0.95 0.95; background-color: #3a3a3a; }
+.orbiters-shape-picker--flat .orbiters-shape-suggestion--selected, .orbiters-shape-picker--flat .orbiters-shape-suggestion--selected:hover { background-color: rgba(0, 218, 109, 0.14); color: #00DA6D; }
+.orbiters-shape-picker--flat .orbiters-shape-scroll { margin-bottom: 6px; }
+.orbiters-shape-picker--flat .orbiters-selection-scroll { padding-top: 8px; border-top-width: 1px; border-color: rgba(255, 255, 255, 0.05); }
+.orbiters-shape-picker--flat .orbiters-help { margin: 2px 2px 8px 2px; color: #8f8f8f; }
+.orbiters-shape-picker--flat .unity-scroller--vertical { width: 6px; }
