@@ -15,7 +15,11 @@ public sealed class OrbitersVectorLogo : VisualElement
 {
     private sealed class PathData { public readonly List<Command> commands = new List<Command>(); public FillRule rule; public Color? color; }
     private sealed class Command { public char kind; public Vector2[] points; }
-    private readonly List<PathData> paths = new List<PathData>();
+    // A logo read once: its paths never change after, so every element showing it draws the same ones (an inspector rebuilt
+    // at each selection parsed the same SVG again, a few hundred milliseconds for a detailed one).
+    private sealed class Parsed { public Vector2 origin, size; public readonly List<PathData> paths = new List<PathData>(); }
+    private static readonly Dictionary<string, Parsed> Logos = new Dictionary<string, Parsed>(StringComparer.Ordinal);
+    private readonly List<PathData> paths;
     private readonly Vector2 origin, size;
     private Color fill = Color.white;
 
@@ -28,15 +32,25 @@ public sealed class OrbitersVectorLogo : VisualElement
     private OrbitersVectorLogo(string svg, Vector2? viewBoxSize)
     {
         pickingMode = PickingMode.Ignore;
+        string key = (viewBoxSize.HasValue ? viewBoxSize.Value.x.ToString("R", CultureInfo.InvariantCulture) + "x" +
+                      viewBoxSize.Value.y.ToString("R", CultureInfo.InvariantCulture) : "") + "|" + svg;
+        if (!Logos.TryGetValue(key, out var logo)) Logos[key] = logo = Load(svg, viewBoxSize);
+        origin = logo.origin; size = logo.size; paths = logo.paths;
+        generateVisualContent += Draw;
+    }
+
+    private static Parsed Load(string svg, Vector2? viewBoxSize)
+    {
+        var logo = new Parsed();
         var doc = new XmlDocument { XmlResolver = null };
         doc.LoadXml(svg);
         var box = doc.DocumentElement?.Attributes?["viewBox"]?.Value;
         var numbers = box != null ? Regex.Matches(box, Number) : null;
-        if (viewBoxSize.HasValue) size = viewBoxSize.Value;
+        if (viewBoxSize.HasValue) logo.size = viewBoxSize.Value;
         else if (numbers != null && numbers.Count == 4)
         {
-            origin = new Vector2(Parse(numbers[0].Value), Parse(numbers[1].Value));
-            size = new Vector2(Parse(numbers[2].Value), Parse(numbers[3].Value));
+            logo.origin = new Vector2(Parse(numbers[0].Value), Parse(numbers[1].Value));
+            logo.size = new Vector2(Parse(numbers[2].Value), Parse(numbers[3].Value));
         }
         else throw new FormatException("The SVG logo has no viewBox.");
         foreach (XmlNode path in doc.GetElementsByTagName("path"))
@@ -46,9 +60,9 @@ public sealed class OrbitersVectorLogo : VisualElement
             if (color == "none") continue;
             // Unity knows "grey" but not CSS's "gray" spellings.
             if (color != null && ColorUtility.TryParseHtmlString(color.Replace("gray", "grey"), out var parsed)) data.color = parsed;
-            paths.Add(data);
+            logo.paths.Add(data);
         }
-        generateVisualContent += Draw;
+        return logo;
     }
 
     /// <summary>The fill colour of paths without their own (white by default).</summary>

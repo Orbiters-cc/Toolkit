@@ -75,18 +75,32 @@ public static class AuthenticationService
         finally { Array.Clear(json, 0, json.Length); }
     }
 
+    // The account last read, with its file's path, size and time: inspectors ask for it dozens of times while they are built,
+    // and each read decrypted the file again. Callers get their own copy (some fill in the username).
+    private static (string Path, long Length, DateTime Written, AuthData Auth) lastRead;
+
     internal static AuthData Read(string path)
     {
         try
         {
-            if (!File.Exists(path)) return null;
+            var file = new FileInfo(path);
+            if (!file.Exists) return null;
+            var known = lastRead;
+            if (known.Auth != null && known.Path == path && known.Length == file.Length && known.Written == file.LastWriteTimeUtc) return Copy(known.Auth);
             byte[] data = File.ReadAllBytes(path);
             if (Application.platform == RuntimePlatform.WindowsEditor) data = Dpapi(data, protect: false);
-            try { return JsonConvert.DeserializeObject<AuthData>(Encoding.UTF8.GetString(data)); }
+            try
+            {
+                var auth = JsonConvert.DeserializeObject<AuthData>(Encoding.UTF8.GetString(data));
+                lastRead = auth != null ? (path, file.Length, file.LastWriteTimeUtc, Copy(auth)) : default;
+                return auth;
+            }
             finally { Array.Clear(data, 0, data.Length); }
         }
         catch (Exception) { return null; }
     }
+
+    private static AuthData Copy(AuthData auth) => new AuthData { token = auth.token, user = auth.user, username = auth.username, avatarUrl = auth.avatarUrl };
 
     // Earlier versions kept the account in auth.dat, only XOR-obfuscated with a key anyone can read: not migrated, and
     // deleted when this version signs in or out (not on every load: projects still on an older Toolkit share this folder,

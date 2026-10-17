@@ -248,43 +248,82 @@ namespace Orbiters.Toolkit.Editor.VRChat.Optimization
         /// </summary>
         public static void TransferShapes(Mesh from, Mesh to, Func<int, bool> shape)
         {
-            var vertices = from.vertices;
-            var triangles = from.triangles;
-            var normals = from.normals.Length == vertices.Length ? from.normals : null;
-            double edges = 0;
-            for (int t = 0; t + 2 < triangles.Length; t += 3) edges += (vertices[triangles[t]] - vertices[triangles[t + 1]]).magnitude;
-            // A new vertex lies on the surface it was made from or next to it: a triangle and a half around is far enough.
-            float reach = triangles.Length > 0 ? 1.5f * (float)(edges / (triangles.Length / 3)) : 1f;
-            var surface = new Surface(vertices, triangles, reach);
-            var targets = to.vertices;
-            var targetNormals = to.normals.Length == targets.Length ? to.normals : null;
-            // For each new vertex: three of the source's vertices and how much each counts.
-            var corners = new int[targets.Length * 3];
-            var weights = new float[targets.Length * 3];
-            for (int i = 0; i < targets.Length; i++)
+            var source = new ShapeSource(from);
+            source.Apply(to, source.Match(to.vertices, to.normals), shape);
+        }
+
+        /// <summary>
+        /// <see cref="TransferShapes"/> in three steps, for a mesh whose blendshapes go to several meshes made from it (each
+        /// try of a simplification): its surface is read once, here (on the editor's thread); <see cref="Match"/> pairs a
+        /// made mesh's vertices with it on any thread (the slow part: a body's tens of thousands of searches); then
+        /// <see cref="Apply"/> adds the blendshapes (on the editor's thread).
+        /// </summary>
+        public sealed class ShapeSource
+        {
+            private readonly Mesh from;
+            private readonly int[] triangles;
+            private readonly Vector3[] normals;
+            private readonly float reach;
+            private readonly Lazy<Surface> surface;
+
+            /// <summary>For each made vertex, three of the source's vertices and how much each counts.</summary>
+            public sealed class Matches { internal int[] Corners; internal float[] Weights; }
+
+            public ShapeSource(Mesh from)
             {
-                var (t, b) = surface.Closest(targets[i], targetNormals != null ? targetNormals[i] : (Vector3?)null, normals, reach / 16f);
-                if (t < 0) { corners[3 * i] = corners[3 * i + 1] = corners[3 * i + 2] = 0; weights[3 * i] = weights[3 * i + 1] = weights[3 * i + 2] = 0f; continue; }
-                corners[3 * i] = triangles[t]; corners[3 * i + 1] = triangles[t + 1]; corners[3 * i + 2] = triangles[t + 2];
-                weights[3 * i] = b.x; weights[3 * i + 1] = b.y; weights[3 * i + 2] = b.z;
+                this.from = from;
+                var vertices = from.vertices;
+                triangles = from.triangles;
+                var all = from.normals;
+                normals = all.Length == vertices.Length ? all : null;
+                double edges = 0;
+                for (int t = 0; t + 2 < triangles.Length; t += 3) edges += (vertices[triangles[t]] - vertices[triangles[t + 1]]).magnitude;
+                // A new vertex lies on the surface it was made from or next to it: a triangle and a half around is far enough.
+                reach = triangles.Length > 0 ? 1.5f * (float)(edges / (triangles.Length / 3)) : 1f;
+                // Built by the first match, wherever it runs.
+                surface = new Lazy<Surface>(() => new Surface(vertices, triangles, reach));
             }
-            var dv = new Vector3[from.vertexCount]; var dn = new Vector3[from.vertexCount]; var dt = new Vector3[from.vertexCount];
-            var mv = new Vector3[targets.Length]; var mn = new Vector3[targets.Length]; var mt = new Vector3[targets.Length];
-            for (int index = 0; index < from.blendShapeCount; index++)
+
+            /// <summary>Pairs the made mesh's vertices (and normals, when it has one per vertex) with the source's surface. Any thread.</summary>
+            public Matches Match(Vector3[] targets, Vector3[] targetNormals)
             {
-                if (!shape(index)) continue;
-                for (int frame = 0; frame < from.GetBlendShapeFrameCount(index); frame++)
+                if (targetNormals != null && targetNormals.Length != targets.Length) targetNormals = null;
+                var found = surface.Value;
+                var corners = new int[targets.Length * 3];
+                var weights = new float[targets.Length * 3];
+                for (int i = 0; i < targets.Length; i++)
                 {
-                    from.GetBlendShapeFrameVertices(index, frame, dv, dn, dt);
-                    for (int i = 0; i < targets.Length; i++)
+                    var (t, b) = found.Closest(targets[i], targetNormals != null ? targetNormals[i] : (Vector3?)null, normals, reach / 16f);
+                    if (t < 0) continue;
+                    corners[3 * i] = triangles[t]; corners[3 * i + 1] = triangles[t + 1]; corners[3 * i + 2] = triangles[t + 2];
+                    weights[3 * i] = b.x; weights[3 * i + 1] = b.y; weights[3 * i + 2] = b.z;
+                }
+                return new Matches { Corners = corners, Weights = weights };
+            }
+
+            /// <summary>Gives <paramref name="to"/> the blendshapes <paramref name="shape"/> picks, as matched.</summary>
+            public void Apply(Mesh to, Matches matches, Func<int, bool> shape)
+            {
+                var corners = matches.Corners; var weights = matches.Weights;
+                int count = corners.Length / 3;
+                var dv = new Vector3[from.vertexCount]; var dn = new Vector3[from.vertexCount]; var dt = new Vector3[from.vertexCount];
+                var mv = new Vector3[count]; var mn = new Vector3[count]; var mt = new Vector3[count];
+                for (int index = 0; index < from.blendShapeCount; index++)
+                {
+                    if (!shape(index)) continue;
+                    for (int frame = 0; frame < from.GetBlendShapeFrameCount(index); frame++)
                     {
-                        int a = corners[3 * i], b = corners[3 * i + 1], c = corners[3 * i + 2];
-                        float wa = weights[3 * i], wb = weights[3 * i + 1], wc = weights[3 * i + 2];
-                        mv[i] = dv[a] * wa + dv[b] * wb + dv[c] * wc;
-                        mn[i] = dn[a] * wa + dn[b] * wb + dn[c] * wc;
-                        mt[i] = dt[a] * wa + dt[b] * wb + dt[c] * wc;
+                        from.GetBlendShapeFrameVertices(index, frame, dv, dn, dt);
+                        for (int i = 0; i < count; i++)
+                        {
+                            int a = corners[3 * i], b = corners[3 * i + 1], c = corners[3 * i + 2];
+                            float wa = weights[3 * i], wb = weights[3 * i + 1], wc = weights[3 * i + 2];
+                            mv[i] = dv[a] * wa + dv[b] * wb + dv[c] * wc;
+                            mn[i] = dn[a] * wa + dn[b] * wb + dn[c] * wc;
+                            mt[i] = dt[a] * wa + dt[b] * wb + dt[c] * wc;
+                        }
+                        to.AddBlendShapeFrame(from.GetBlendShapeName(index), from.GetBlendShapeFrameWeight(index, frame), mv, mn, mt);
                     }
-                    to.AddBlendShapeFrame(from.GetBlendShapeName(index), from.GetBlendShapeFrameWeight(index, frame), mv, mn, mt);
                 }
             }
         }
