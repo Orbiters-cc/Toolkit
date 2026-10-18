@@ -4,20 +4,29 @@ using UnityEngine;
 namespace Orbiters.Toolkit.Editor.Meshes
 {
     /// <summary>
-    /// An avatar's meshes were changed for good by another tool (MCB applying an export from Blender): what was made from
-    /// them elsewhere (My Avatar's Substance 3D Painter project) can be made again. Tools raise it once the change is done,
-    /// with the avatar's root.
+    /// An avatar's meshes were changed by another tool: for good (<see cref="Applied"/>: MCB applying an export from
+    /// Blender), or for a while (<see cref="Previewed"/>: MCB showing Blender's edits live on temporary meshes, or putting
+    /// the avatar's own back). What was made from them elsewhere (My Avatar's Substance 3D Painter project) can follow.
+    /// Tools raise them once the change is done, with the avatar's root.
     /// </summary>
     public static class AvatarMeshEdits
     {
         /// <summary>Raised on the main thread, with the avatar root, after the meshes changed.</summary>
         public static event Action<Transform> Applied;
 
+        /// <summary>Raised on the main thread, with the avatar root, each time the meshes it shows changed for a while.</summary>
+        public static event Action<Transform> Previewed;
+
         /// <summary>Tells every listener; one that fails is logged and the others still hear it.</summary>
-        public static void NotifyApplied(Transform avatarRoot)
+        public static void NotifyApplied(Transform avatarRoot) => Notify(Applied, avatarRoot);
+
+        /// <summary>The avatar shows other meshes for a while (a live preview), or its own again.</summary>
+        public static void NotifyPreviewed(Transform avatarRoot) => Notify(Previewed, avatarRoot);
+
+        private static void Notify(Action<Transform> listeners, Transform avatarRoot)
         {
-            if (avatarRoot == null || Applied == null) return;
-            foreach (Action<Transform> listener in Applied.GetInvocationList())
+            if (avatarRoot == null || listeners == null) return;
+            foreach (Action<Transform> listener in listeners.GetInvocationList())
             {
                 try { listener(avatarRoot); }
                 catch (Exception ex) { Debug.LogException(ex); }
