@@ -28,6 +28,8 @@ namespace Orbiters.Toolkit.Editor.VRChat
                 var copy = Object.Instantiate(source, holder.transform);
                 copy.name = source.name;
                 copy.transform.SetParent(null, false);
+                // A copy of an object never saved (a tool's own hidden copy) lands in the open scene when unparented.
+                if (copy.scene != Scene) SceneManager.MoveGameObjectToScene(copy, Scene);
                 Object.DestroyImmediate(holder);
                 // The SDK panel lists every avatar whose object isn't flagged so: an upload must never pick the copy.
                 copy.hideFlags = HideFlags.NotEditable;
@@ -43,6 +45,7 @@ namespace Orbiters.Toolkit.Editor.VRChat
 
         public void Dispose()
         {
+            if (Copy != null && Copy.scene != Scene) Object.DestroyImmediate(Copy);
             Copy = null;
             if (Scene.IsValid()) EditorSceneManager.ClosePreviewScene(Scene);
             Scene = default;

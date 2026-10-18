@@ -1,5 +1,6 @@
 using System;
 using System.Linq;
+using Orbiters.Toolkit.Armature;
 using UnityEditor;
 using UnityEngine;
 using UnityEngine.Rendering;
@@ -17,8 +18,11 @@ namespace Orbiters.Toolkit.Editor.VRChat.Refit
         private GameObject root;
         private Material material;
 
-        /// <summary>The original base's hips, to line clothing up with; null for a rig without a humanoid avatar.</summary>
+        /// <summary>The original base's hips, to line clothing up with: its humanoid avatar's, or the bone named so; null without.</summary>
         public Transform Hips { get; private set; }
+
+        /// <summary>The original base shown, to fit clothing onto its armature; null once disposed.</summary>
+        public Transform Root => root != null ? root.transform : null;
 
         public bool Visible => root != null;
 
@@ -35,7 +39,10 @@ namespace Orbiters.Toolkit.Editor.VRChat.Refit
             string bodyPath = AnimationUtility.CalculateTransformPath(originalBody.transform, original.transform);
             var body = bodyPath.Length == 0 ? ghost.root.transform : ghost.root.transform.Find(bodyPath);
             var animator = ghost.root.GetComponentInChildren<Animator>(true);
-            ghost.Hips = animator != null && animator.isHuman ? animator.GetBoneTransform(HumanBodyBones.Hips) : null;
+            // An original base imported without a humanoid avatar (Generic) still names its hips.
+            var bodyRenderer = body != null ? body.GetComponent<SkinnedMeshRenderer>() : null;
+            ghost.Hips = AvatarBoneIndex.Build(ghost.root.transform, bodyRenderer != null ? bodyRenderer.bones : ghost.root.GetComponentsInChildren<Transform>(true),
+                animator).Humanoid(HumanBodyBones.Hips);
 
             // Only renderers stay: nothing of the original runs (animators, physics, scripts).
             foreach (var component in ghost.root.GetComponentsInChildren<Component>(true).Reverse())

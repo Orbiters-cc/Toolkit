@@ -10,6 +10,11 @@
   pick one at a time (`RefitKeptFitsBuild`). Fits kept for another custom base are dropped with it.
 - `orbiters_editor_window` captures a hidden window a script opened with `EditorWindowHiddenHost.Open` and set up (a
   page in a given state) as it is, by its window ID, and leaves it open for the script.
+- The original base shown to line clothing up before a refit (`RefitGhost`) finds its hips by name when its model has no
+  humanoid avatar (MCB's Masculine Canine imports as Generic: the line-up did nothing), and gives its root (`Root`) to fit
+  the clothing's armature onto.
+- A hidden copy of an avatar (`HiddenAvatarCopy`) made from an object that is never saved (a tool's own hidden copy, like
+  the bodies ReFit's replays pose) stays in its preview scene: it landed in the open scene and stayed there.
 
 ## 0.3.23 — 2026-10-16
 
