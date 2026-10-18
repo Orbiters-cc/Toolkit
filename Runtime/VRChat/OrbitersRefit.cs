@@ -66,6 +66,22 @@ namespace Orbiters.Toolkit.VRChat
     }
 
     /// <summary>
+    /// A fit of a refitted renderer kept to choose from (looser, tighter...): the renderer as that fit left it, and its
+    /// generated blendshapes. In VRChat the avatar's menu picks one of the kept fits.
+    /// </summary>
+    [Serializable]
+    public sealed class RefitKeptFit
+    {
+        public string name;
+        /// <summary>The renderer as this fit left it (mesh, skinning, pose): what using it again puts back.</summary>
+        public RefitRendererState state = new RefitRendererState();
+        public string meshPath;
+        public List<RefitShape> shapes = new List<RefitShape>();
+
+        public Mesh Mesh => state != null ? state.mesh : null;
+    }
+
+    /// <summary>
     /// A clothing or accessory mesh refitted by an Orbiters tool: how it was before (Restore puts it back) and which of its
     /// blendshapes follow which body blendshapes. When the avatar is built, every animation of those body blendshapes also
     /// drives them. Applies only while the renderer still uses <see cref="mesh"/>.
@@ -95,6 +111,25 @@ namespace Orbiters.Toolkit.VRChat
         [HideInInspector] public string baseName;
         /// <summary>The tool that made it ("MCB", "My Avatar", "ReFit").</summary>
         [HideInInspector] public string tool;
+
+        /// <summary>
+        /// Skin of <see cref="body"/> moved inwards while this clothing is worn (where ReFit's motion check found it coming
+        /// through in motion): body vertices and their offsets in the body mesh's space, before skinning. Empty for none. The
+        /// build adds it to the body as a blendshape that follows whatever shows the clothing.
+        /// </summary>
+        [HideInInspector] public List<int> bodyShrinkVertices = new List<int>();
+        [HideInInspector] public List<Vector3> bodyShrinkOffsets = new List<Vector3>();
+        /// <summary>The body mesh the shrink was planned on: on another mesh (a version switched since) it is left out.</summary>
+        [HideInInspector] public Mesh bodyShrinkMesh;
+
+        /// <summary>
+        /// Fits of this renderer kept to choose from, the current one among them when it was kept. When the avatar is built,
+        /// each other kept fit becomes a blendshape of the current mesh, and the avatar's menu ("Fits") picks one of them.
+        /// </summary>
+        [HideInInspector] public List<RefitKeptFit> keptFits = new List<RefitKeptFit>();
+
+        public bool HasBodyShrink => bodyShrinkVertices != null && bodyShrinkVertices.Count > 0 && bodyShrinkOffsets != null &&
+                                     bodyShrinkOffsets.Count == bodyShrinkVertices.Count;
 
         public bool Applied => mesh != null && TryGetComponent<SkinnedMeshRenderer>(out var renderer) && renderer.sharedMesh == mesh;
     }

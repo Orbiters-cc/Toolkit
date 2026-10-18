@@ -34,6 +34,20 @@ namespace Orbiters.Toolkit.Editor.VRCFury
             }, Icon);
         }
 
+        public Component ShapeChoice(GameObject host, string menuPath, string exclusiveTag, Renderer renderer, string shape)
+        {
+            var before = host.GetComponents(VRChat.VrcFury.Component).ToList();
+            var toggle = FuryComponents.CreateToggle(host);
+            toggle.SetMenuPath(menuPath);
+            toggle.SetSaved();
+            toggle.AddExclusiveTag(exclusiveTag);
+            if (shape == null) toggle.SetExclusiveOffState();
+            else toggle.GetActions().AddBlendshape(shape, 100f, renderer);
+            var added = host.GetComponents(VRChat.VrcFury.Component).FirstOrDefault(c => !before.Contains(c));
+            if (added != null) Icon(added);
+            return added;
+        }
+
         // Orbiters' default toggle icon (VRCFury's public API has none): set on the new component's model.
         private static void Icon(Component toggle)
         {

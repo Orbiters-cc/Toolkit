@@ -1,5 +1,16 @@
 # Orbiters Toolkit
 
+## 0.3.24 — 2026-10-18
+
+- Body shrinks for refitted clothing: a refit record can keep skin of the body to move in while the clothing is worn
+  (ReFit plans it from its motion check). At upload the body gets it as a blendshape on a copy of its mesh, on while the
+  clothing shows: every animation turning the clothing or an object above it on or off sets it too. A new fit drops it.
+- Kept fits: a refitted renderer can keep several fits (`RefitRecords.KeepFit`, `UseFit`, `RemoveKeptFit`). At upload
+  each kept fit other than the worn one becomes a blendshape of the worn mesh, and VRCFury toggles under "Fits/piece"
+  pick one at a time (`RefitKeptFitsBuild`). Fits kept for another custom base are dropped with it.
+- `orbiters_editor_window` captures a hidden window a script opened with `EditorWindowHiddenHost.Open` and set up (a
+  page in a given state) as it is, by its window ID, and leaves it open for the script.
+
 ## 0.3.23 — 2026-10-16
 
 - Clothing dropped on an avatar (My Avatar) is placed on its skeleton and left as it is, clipping included, for ReFit to

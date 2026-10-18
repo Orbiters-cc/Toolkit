@@ -237,6 +237,10 @@ namespace Orbiters.Toolkit.Editor.VRChat.Refit
             if (record == null) record = Undo.AddComponent<OrbitersRefit>(renderer.gameObject);
             else Undo.RecordObject(record, "Refit");
             record.original = original ?? new RefitRendererState();
+            // A body shrink was planned for the earlier fit: a new one has to be checked again.
+            if (record.mesh != mesh) ClearBodyShrink(record);
+            // Fits kept for another custom base (or version) do not fit this one.
+            if (record.keptFits.Count > 0 && (record.baseKey ?? "") != (baseKey ?? "")) record.keptFits.Clear();
             record.mesh = mesh;
             record.meshPath = meshPath;
             record.body = body;
@@ -249,6 +253,97 @@ namespace Orbiters.Toolkit.Editor.VRChat.Refit
             SyncWeights(record);
             Changed?.Invoke(renderer);
             return record;
+        }
+
+        /// <summary>
+        /// Records a body shrink for this refit (see <see cref="OrbitersRefit.bodyShrinkVertices"/>), with Undo: the build adds
+        /// it to the body while the clothing shows. Empty arrays remove it.
+        /// </summary>
+        public static void SetBodyShrink(OrbitersRefit record, Mesh bodyMesh, IReadOnlyList<int> vertices, IReadOnlyList<Vector3> offsets)
+        {
+            if (record == null) throw new ArgumentNullException(nameof(record));
+            if (vertices == null || offsets == null || vertices.Count != offsets.Count) throw new ArgumentException("One offset per vertex.");
+            Undo.RecordObject(record, vertices.Count > 0 ? "Shrink the body under the clothing" : "Remove the body shrink");
+            record.bodyShrinkVertices = new List<int>(vertices);
+            record.bodyShrinkOffsets = new List<Vector3>(offsets);
+            record.bodyShrinkMesh = vertices.Count > 0 ? bodyMesh : null;
+            Dirty(record);
+            var renderer = record.GetComponent<SkinnedMeshRenderer>();
+            if (renderer != null) Changed?.Invoke(renderer);
+        }
+
+        private static void ClearBodyShrink(OrbitersRefit record)
+        {
+            record.bodyShrinkVertices?.Clear();
+            record.bodyShrinkOffsets?.Clear();
+            record.bodyShrinkMesh = null;
+        }
+
+        // ---- Kept fits --------------------------------------------------------------------------------------------------
+
+        /// <summary>The kept fit the renderer wears now, or null.</summary>
+        public static RefitKeptFit CurrentFit(OrbitersRefit record) =>
+            record != null && record.mesh != null ? record.keptFits.FirstOrDefault(f => f != null && f.Mesh == record.mesh) : null;
+
+        /// <summary>
+        /// Keeps the current fit under <paramref name="name"/> (renames it when kept already), with Undo: another refit then
+        /// adds a fit instead of replacing it.
+        /// </summary>
+        public static RefitKeptFit KeepFit(OrbitersRefit record, string name)
+        {
+            if (record == null || !record.Applied) return null;
+            Undo.RecordObject(record, "Keep this fit");
+            var fit = CurrentFit(record);
+            if (fit == null)
+            {
+                var renderer = record.GetComponent<SkinnedMeshRenderer>();
+                fit = new RefitKeptFit { state = Capture(AvatarRoot(renderer.transform), renderer), meshPath = record.meshPath, shapes = record.shapes.ToList() };
+                record.keptFits.Add(fit);
+            }
+            fit.name = UniqueFitName(record, fit, string.IsNullOrWhiteSpace(name) ? "Fit " + record.keptFits.Count : name.Trim());
+            Dirty(record);
+            Changed?.Invoke(record.GetComponent<SkinnedMeshRenderer>());
+            return fit;
+        }
+
+        /// <summary>
+        /// Puts a kept fit back on the renderer (its mesh, skinning and pose), with Undo; the current fit is kept first so
+        /// nothing is lost. False when it cannot be: its mesh is gone, or bones it was skinned to.
+        /// </summary>
+        public static bool UseFit(OrbitersRefit record, RefitKeptFit fit)
+        {
+            if (record == null || fit == null || fit.Mesh == null || !record.keptFits.Contains(fit)) return false;
+            var renderer = record.GetComponent<SkinnedMeshRenderer>();
+            if (renderer == null) return false;
+            var root = AvatarRoot(renderer.transform);
+            if (!CanResolve(root, fit.state)) return false;
+            if (record.Applied && CurrentFit(record) == null) KeepFit(record, null);
+            if (!Restore(root, renderer, fit.state, "Use a kept fit")) return false;
+            Undo.RecordObject(record, "Use a kept fit");
+            record.mesh = fit.Mesh;
+            record.meshPath = fit.meshPath;
+            record.shapes = fit.shapes.ToList();
+            Dirty(record);
+            SyncWeights(record);
+            Changed?.Invoke(renderer);
+            return true;
+        }
+
+        /// <summary>Forgets a kept fit (the renderer keeps wearing it when it is the current one), with Undo.</summary>
+        public static void RemoveKeptFit(OrbitersRefit record, RefitKeptFit fit)
+        {
+            if (record == null || fit == null || !record.keptFits.Contains(fit)) return;
+            Undo.RecordObject(record, "Forget a kept fit");
+            record.keptFits.Remove(fit);
+            Dirty(record);
+            Changed?.Invoke(record.GetComponent<SkinnedMeshRenderer>());
+        }
+
+        private static string UniqueFitName(OrbitersRefit record, RefitKeptFit fit, string name)
+        {
+            string unique = name;
+            for (int n = 2; record.keptFits.Any(f => f != fit && f.name == unique); n++) unique = name + " " + n;
+            return unique;
         }
 
         /// <summary>Restores the renderer to how it was before its refit (when still applied) and removes the record, with Undo.</summary>

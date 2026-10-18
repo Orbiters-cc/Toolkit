@@ -55,8 +55,9 @@ namespace Orbiters.Toolkit.Editor.VRChat.Refit
             var links = Collect(avatarRoot);
             Captured.Remove(avatarRoot);
             Captured.Add(avatarRoot, links);
-            // Without VRCFury nothing else builds private controllers: Toolkit copies them so the links can be written.
-            if (links.Count > 0 && !VrcFury.Builds(avatarRoot)) AttachmentAnimationBuild.Prepare(avatarRoot);
+            // Without VRCFury nothing else builds private controllers: Toolkit copies them so the links (and the body shrinks'
+            // toggles, see RefitShrinkBuild) can be written.
+            if ((links.Count > 0 || RefitShrinkBuild.Any(avatarRoot)) && !VrcFury.Builds(avatarRoot)) AttachmentAnimationBuild.Prepare(avatarRoot);
         }
 
         /// <summary>

@@ -36,6 +36,8 @@ namespace Orbiters.Toolkit.Editor
             internal string Id;
             internal EditorWindow Window;
             internal bool Hidden;
+            // A copy the capture opened: closed once captured.
+            internal bool Owned;
             internal string ScrollTo;
             internal bool Scrolled;
             internal int MaxResolution;
@@ -78,7 +80,10 @@ namespace Orbiters.Toolkit.Editor
         }
 
         // Hidden copies made for captures are not the user's windows.
-        private static EditorWindow[] Windows() => Resources.FindObjectsOfTypeAll<EditorWindow>().Where(w => (w.hideFlags & HideFlags.HideAndDontSave) != HideFlags.HideAndDontSave).ToArray();
+        // The windows the user has, and hidden ones a script opened through EditorWindowHiddenHost.Open and set up (a page in
+        // a given state): those are captured as they are, by window_id, and left open for the script to close.
+        private static EditorWindow[] Windows() => Resources.FindObjectsOfTypeAll<EditorWindow>()
+            .Where(w => (w.hideFlags & HideFlags.HideAndDontSave) != HideFlags.HideAndDontSave || (EditorWindowHiddenHost.IsOpen(w) && w != active?.Window)).ToArray();
 
         private static object Start(Parameters p)
         {
@@ -92,7 +97,7 @@ namespace Orbiters.Toolkit.Editor
             if (p.width < 0 || p.height < 0 || p.width > 8000 || p.height > 8000) throw new ArgumentException("width and height must be between 1 and 8000 points.");
 
             EditorWindow window;
-            bool hidden;
+            bool hidden, prepared = false;
             if (!string.IsNullOrWhiteSpace(p.inspect))
             {
                 if (p.window_id.HasValue || !string.IsNullOrWhiteSpace(p.window_type)) throw new ArgumentException("inspect replaces window_id and window_type.");
@@ -110,8 +115,9 @@ namespace Orbiters.Toolkit.Editor
                 var open = matches.SingleOrDefault();
                 if (open == null && !(p.open_if_missing && !string.IsNullOrWhiteSpace(p.window_type)))
                     throw new ArgumentException("Window not found. Use list, or set open_if_missing with window_type to capture a hidden one.");
-                hidden = open == null || !EditorWindowCapture.IsShown(open) || p.width > 0 || p.height > 0 || !string.IsNullOrWhiteSpace(p.scroll_to);
-                if (hidden)
+                prepared = open != null && EditorWindowHiddenHost.IsOpen(open);
+                hidden = open == null || prepared || !EditorWindowCapture.IsShown(open) || p.width > 0 || p.height > 0 || !string.IsNullOrWhiteSpace(p.scroll_to);
+                if (hidden && !prepared)
                 {
                     var type = open != null ? open.GetType() : TypeCache.GetTypesDerivedFrom<EditorWindow>().SingleOrDefault(t => t.FullName == p.window_type);
                     if (type == null || type.IsAbstract) throw new ArgumentException("No concrete EditorWindow type matches.");
@@ -124,7 +130,7 @@ namespace Orbiters.Toolkit.Editor
 
             foreach (var key in Jobs.Where(pair => pair.Value.Result != null).Select(pair => pair.Key).ToArray())
                 if (Jobs.Count >= 16) Jobs.Remove(key);
-            var job = new Job { Id = Guid.NewGuid().ToString("N"), Window = window, Hidden = hidden, ScrollTo = string.IsNullOrWhiteSpace(p.scroll_to) ? null : p.scroll_to.Trim(),
+            var job = new Job { Id = Guid.NewGuid().ToString("N"), Window = window, Hidden = hidden, Owned = hidden && !prepared, ScrollTo = string.IsNullOrWhiteSpace(p.scroll_to) ? null : p.scroll_to.Trim(),
                 MaxResolution = p.max_resolution, Delay = p.delay_ms / 1000d, Started = EditorApplication.timeSinceStartup };
             Jobs.Add(job.Id, job);
             latestJobId = job.Id;
@@ -167,7 +173,7 @@ namespace Orbiters.Toolkit.Editor
             if (job.Result == null) return;
             active = null;
             EditorApplication.update -= Tick;
-            if (job.Hidden && job.Window != null) job.Window.Close();
+            if (job.Owned && job.Window != null) job.Window.Close();
         }
     }
 }

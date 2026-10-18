@@ -23,6 +23,12 @@ namespace Orbiters.Toolkit.Editor.VRChat
             Component Toggle(GameObject host, string menuPath, GameObject target, bool defaultOn);
             /// <summary>Merges a prop's controller, menu and parameters without changing the avatar's authored assets.</summary>
             Component FullController(GameObject host, RuntimeAnimatorController controller, ScriptableObject menu, ScriptableObject parameters);
+            /// <summary>
+            /// For a build copy (no Undo): a saved menu toggle, one at a time among those sharing <paramref name="exclusiveTag"/>,
+            /// setting <paramref name="shape"/> of <paramref name="renderer"/> to 100; with <paramref name="shape"/> null, the choice
+            /// that is on while all the others are off.
+            /// </summary>
+            Component ShapeChoice(GameObject host, string menuPath, string exclusiveTag, Renderer renderer, string shape);
         }
 
         public static IWriter Writer { get; set; }

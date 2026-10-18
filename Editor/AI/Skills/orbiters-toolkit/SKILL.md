@@ -29,6 +29,7 @@ MCP server starts and can lag behind the package).
    | A section far down | add `"scroll_to":"Face tracking"` (text shown, element name, or USS class) |
    | An animated state, or after it settles | add `"delay_ms":2500` (up to 8000) before the capture |
    | Any object's Inspector, without selecting it | `{"action":"capture","inspect":"Rexouium1.6 Default Setup","height":1400,"scroll_to":"Face tracking"}` |
+   | A window in a state only a script can set up (a result page) | from `execute_code`, open it with `Orbiters.Toolkit.Editor.EditorWindowHiddenHost.Open(type, size)` (by reflection), set it up, then capture its `window_id`: it is captured as it is and left open; close it yourself |
 
    `inspect` takes an instance ID, a hierarchy path (`"Root/Child"`, or `"Scene:Root/Child"`), or an asset path
    (`"Assets/…"`, `"Packages/…"`). Hidden copies (`captureMode: "hidden_copy_framebuffer"`) are shown without focus

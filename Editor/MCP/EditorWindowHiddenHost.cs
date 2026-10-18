@@ -47,6 +47,9 @@ namespace Orbiters.Toolkit.Editor
             Opened.Clear();
         }
 
+        /// <summary>Whether this host opened the window and it is still open (a capture's copy, or one a script set up).</summary>
+        internal static bool IsOpen(EditorWindow window) => window != null && Opened.Contains(window);
+
         /// <summary>Whether a window is one of these copies: never saved, far outside every display.</summary>
         internal static bool IsHidden(EditorWindow window) =>
             window.hideFlags == HideFlags.HideAndDontSave && window.position.x <= Offscreen.x / 2f && window.position.y <= Offscreen.y / 2f;
