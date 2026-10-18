@@ -2,6 +2,7 @@ using System.Collections.Generic;
 using System.Linq;
 using Orbiters.Toolkit.Armature;
 using Orbiters.Toolkit.Editor.Posing;
+using Orbiters.Toolkit.Editor.Refit;
 using Orbiters.Toolkit.Editor.Storage;
 using Orbiters.Toolkit.Editor.VRChat.Posing;
 using Orbiters.Toolkit.VRChat;
@@ -69,7 +70,12 @@ namespace Orbiters.Toolkit.Editor.VRChat.Attachments
             var body = AttachmentPlanner.Body(avatarRoot, root.transform);
             var skeleton = AvatarSkeleton.Bones(avatarRoot, body);
             skeleton.RemoveWhere(b => b.IsChildOf(root.transform));
-            var index = AvatarBoneIndex.Build(avatarRoot, skeleton);
+            return Compare(root, AvatarBoneIndex.Build(avatarRoot, skeleton), avatarRoot);
+        }
+
+        // With the armature of index: the avatar's, or the original base's over its body.
+        private static Measure Compare(GameObject root, AvatarBoneIndex index, Transform avatarRoot)
+        {
             var bones = root.GetComponentsInChildren<SkinnedMeshRenderer>(true).Where(r => r.sharedMesh != null)
                 .SelectMany(r => r.bones).Where(b => b != null && b.IsChildOf(root.transform) && b != root.transform).Distinct().ToList();
             if (bones.Count == 0) return null;
@@ -119,18 +125,28 @@ namespace Orbiters.Toolkit.Editor.VRChat.Attachments
 
         /// <summary>
         /// Fits the attachment's armature to the avatar when it needs it (see <see cref="Measure.NeedsFit"/>), with Undo.
-        /// Returns the measure that led to the fit, null when nothing was changed.
+        /// On an avatar whose custom base gives its original, it is fitted onto the original base's armature placed over the
+        /// body (<see cref="OriginalArmature"/>), as it would be worn on the original: a custom base may move its bones on the
+        /// same body, and clothing aligned with them sits that much off (8 cm high on the Ultipaw). Clothing made for the
+        /// original then stays where it is, fitted all the same so that it keeps its offsets from the avatar's bones at build
+        /// (a creator's VRCFury link would put its bones on them). Clothing that matches the avatar's own armature is left
+        /// alone. Returns the measure that led to the fit, null when nothing was changed.
         /// </summary>
         public static Measure Fit(OrbitersAttachment attachment, Transform avatarRoot)
         {
             if (attachment == null) return null;
-            using (AccessoryPoseSync.Pause(avatarRoot)) return FitAtRest(attachment, avatarRoot);
+            // Measured and moved where the clothing rests, not where a posing preview shows it.
+            using (AccessoryPoseSync.Pause(avatarRoot))
+            {
+                var measure = Compare(attachment.gameObject, avatarRoot);
+                if (measure == null || !measure.NeedsFit) return null;
+                using (var original = OriginalArmature.Over(avatarRoot))
+                    return Apply(attachment, original != null ? Compare(attachment.gameObject, original.Index, avatarRoot) ?? measure : measure);
+            }
         }
 
-        private static Measure FitAtRest(OrbitersAttachment attachment, Transform avatarRoot)
+        private static Measure Apply(OrbitersAttachment attachment, Measure measure)
         {
-            var measure = Compare(attachment.gameObject, avatarRoot);
-            if (measure == null || !measure.NeedsFit) return null;
             var root = attachment.transform;
             var touched = new List<Transform> { root };
             touched.AddRange(measure.Pairs.Select(p => p.source).Where(t => t != root));

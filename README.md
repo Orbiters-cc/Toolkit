@@ -13,6 +13,14 @@
 - The original base shown to line clothing up before a refit (`RefitGhost`) finds its hips by name when its model has no
   humanoid avatar (MCB's Masculine Canine imports as Generic: the line-up did nothing), and gives its root (`Root`) to fit
   the clothing's armature onto.
+- Clothing fitted onto an avatar on a custom base (`AttachmentFit.Fit`, My Avatar and gallery installs) goes onto the
+  original base's armature, placed over the avatar's body (`OriginalArmature`), instead of the custom base's: a custom
+  base can move its bones on the same body, and the Rexouium FishingOutfit sat 8 cm high on the Ultipaw (its hips, spine
+  and legs stand 8 cm above the Masculine Canine's). Clothing made for the original stays where it is, fitted all the
+  same so the build keeps its offsets from the avatar's bones (a creator's VRCFury link put them on the bones); clothing
+  that matches the custom base's own armature is left alone. The original's armature is read once per custom base
+  version (resolving the original can import its model, half a minute for a body with hundreds of blendshapes) and kept
+  in `Library/Orbiters/original-armatures.json`.
 - A hidden copy of an avatar (`HiddenAvatarCopy`) made from an object that is never saved (a tool's own hidden copy, like
   the bodies ReFit's replays pose) stays in its preview scene: it landed in the open scene and stayed there.
 

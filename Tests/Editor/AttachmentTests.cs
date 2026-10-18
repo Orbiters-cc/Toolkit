@@ -205,6 +205,69 @@ public sealed class AttachmentTests
         Assert.False(AttachmentFit.Fitted(attachment));
     }
 
+    // A custom base that stands its bones higher on the same body (the Ultipaw's hips 8 cm above the Masculine Canine's):
+    // clothing made for another body goes onto the original base's armature over the avatar's body and keeps that offset
+    // from the avatar's bones once built; clothing made for the original stays, fitted so it keeps it too; clothing made
+    // for the custom base is left alone.
+    [Test] public void ClothingOnACustomBaseIsFittedOntoItsOriginalBasesArmature()
+    {
+        var original = Own(Object.Instantiate(avatar));
+        original.name = "Original base";
+        Named(original, "Hips").position += Vector3.down * .08f;
+        var provider = new TestCustomBase { Avatar = avatar.transform, Original = original };
+        Orbiters.Toolkit.Editor.Refit.CustomBases.Register(provider);
+        try
+        {
+            var chain = new[] { ("hips", "", ""), ("spine", "hips", ""), ("chest", "spine", ""), ("neck", "chest", ""),
+                ("shoulder.L", "chest", ""), ("upper_arm.L", "shoulder.L", ""), ("forearm.L", "upper_arm.L", "") };
+            var shirt = Clothing("Shirt", chain);
+            shirt.transform.localScale = Vector3.one * 1.3f;
+            shirt.transform.position += Vector3.up * .4f;
+            var fit = AttachmentFit.Fit(AttachmentInstaller.Install(AttachmentPlanner.Analyze(shirt, avatar.transform), new AttachmentOptions { Created = true, AddToggle = false }), avatar.transform);
+            Assert.NotNull(fit, "made for another body");
+            Assert.AreEqual(1f / 1.3f, fit.Scale, .02f);
+            foreach (var (name, avatarBone) in new[] { ("hips", "Hips"), ("chest", "Chest"), ("forearm.L", "Left elbow") })
+                Assert.Less(Vector3.Distance(Named(shirt, name).position, bones[avatarBone].position + Vector3.down * .08f), 1e-3f, name + " on the original's bone");
+
+            var jacket = Clothing("Jacket", chain);
+            jacket.transform.position += Vector3.down * .08f;
+            var chest = Named(jacket, "chest").position;
+            var attachment = AttachmentInstaller.Install(AttachmentPlanner.Analyze(jacket, avatar.transform), new AttachmentOptions { Created = true, AddToggle = false });
+            Assert.NotNull(AttachmentFit.Fit(attachment, avatar.transform), "8 cm off the avatar's bones");
+            Assert.True(AttachmentFit.Fitted(attachment));
+            Assert.Less(Vector3.Distance(Named(jacket, "chest").position, chest), .025f, "made for the original: stays");
+
+            var coat = Clothing("Coat", chain);
+            Assert.Null(AttachmentFit.Fit(AttachmentInstaller.Install(AttachmentPlanner.Analyze(coat, avatar.transform), new AttachmentOptions { Created = true, AddToggle = false }), avatar.transform),
+                "made for the custom base");
+
+            var clone = Own(Object.Instantiate(avatar));
+            var built = new[] { "Shirt", "Jacket" }.Select(name => Named(clone.transform.Find(name).gameObject, "hips")).ToList();
+            AttachmentBuild.Apply(clone);
+            var hips = Named(clone, "Hips");
+            foreach (var bone in built)
+                Assert.AreEqual(-.08f, hips.InverseTransformPoint(bone.position).y, .001f, "kept 8 cm under the avatar's hips once built");
+            AttachmentBuild.Finish(clone);
+        }
+        finally { Orbiters.Toolkit.Editor.Refit.CustomBases.Unregister(provider); }
+    }
+
+    private static Transform Named(GameObject root, string name) => root.GetComponentsInChildren<Transform>(true).Single(t => t.name == name);
+
+    // Describes the test avatar as a custom base of the given original.
+    private sealed class TestCustomBase : Orbiters.Toolkit.Editor.Refit.ICustomBaseProvider
+    {
+        public Transform Avatar;
+        public GameObject Original;
+
+        public Orbiters.Toolkit.Editor.Refit.CustomBaseInfo Describe(Transform avatarRoot) => avatarRoot != Avatar ? null : new Orbiters.Toolkit.Editor.Refit.CustomBaseInfo
+        {
+            Name = "Test custom base",
+            Body = Named(Avatar.gameObject, "Body").GetComponent<SkinnedMeshRenderer>(),
+            ResolveOriginal = () => new Orbiters.Toolkit.Editor.Refit.CustomBaseOriginal { Avatar = Original, Body = Named(Original, "Body").GetComponent<SkinnedMeshRenderer>() },
+        };
+    }
+
     [Test] public void PropNamedAfterItsPlaceFollowsThatBoneAndIsPlacedOnItWhenFar()
     {
         var hat = GameObject.CreatePrimitive(PrimitiveType.Cube);
