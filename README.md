@@ -7,6 +7,7 @@
 - `BlenderInstalls` finds the Blender executables (moved from MCB; the chosen one is EditorPrefs `Orbiters.Blender.Executable`) and `BlenderCli` runs Blender without its window on a thread of its own, with a log file and the result back on the main thread.
 - `LiveLinkJson` and `LiveLinkEndpointFile` for live links' JSON payloads and endpoint files.
 - Icons: Sculpt, Weights, Armature, Join, Render, Blender, Hierarchy, Eye, EyeOff, Link, Undo, Redo, Layers, Search, Trash, Settings, Minus.
+- `XRayWeightPaintService.Pin` shows the weight overlay for a renderer and bones (or per-vertex weights of a tool's own) whatever the selection, `Repaint` recolours it in place, `Unpin` lets the selection drive it again.
 
 ## 0.3.24 — 2026-10-18
 
