@@ -106,12 +106,12 @@ namespace Orbiters.Toolkit.Editor.XRay
             Enabled = enabled;
             if (!enabled)
             {
-                LastStatus = "XRay Gizmos disabled.";
+                LastStatus = "Bones hidden.";
                 ClearAll();
             }
             else
             {
-                LastStatus = "XRay Gizmos enabled.";
+                LastStatus = "Bones shown.";
                 Refresh();
             }
 

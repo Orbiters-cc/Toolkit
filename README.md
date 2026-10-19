@@ -2,13 +2,14 @@
 
 ## 0.4.0 — 2026-10-19
 
-- XRay gizmos are part of the Toolkit: the bones, weight paint, mesh edges and avatar budget overlays, the Scene toolbar and the XRay Gizmos window (Tools › Orbiters › XRay Gizmos) moved here from the XRay Gizmos package, which no longer exists. Namespaces `Orbiters.Toolkit.XRay` and `Orbiters.Toolkit.Editor.XRay`; settings and overlay ids unchanged.
+- Avatar gizmos are part of the Toolkit: the bones, weight paint, mesh edges and avatar budget overlays, their Scene toolbar and the Avatar Gizmos window (Tools › Orbiters › Avatar Gizmos) moved here from their former package, which no longer exists. Namespaces `Orbiters.Toolkit.XRay` and `Orbiters.Toolkit.Editor.XRay`; settings and overlay ids unchanged.
 - Mesh editing primitives for Mixer and the other tools: `MeshNeighbors` (vertices welded by position, or also only where their normals agree and caller keys match, their edges and triangles), `MeshBvh` (triangles and vertices in a sphere, rays, closest points, partial refits), `MeshAssets` (meshes saved as native assets: `Save` writes a new file and never takes the place of another mesh's file of the same name, `Replace` updates an existing asset in place so what points at it follows), `VirtualList` (the Logger's list of pooled fixed-height rows).
 - `BlenderInstalls` finds the Blender executables (moved from MCB; the chosen one is EditorPrefs `Orbiters.Blender.Executable`) and `BlenderCli` runs Blender without its window on a thread of its own, with a log file and the result back on the main thread.
 - `LiveLinkJson` and `LiveLinkEndpointFile` for live links' JSON payloads and endpoint files.
 - `SceneReference.Resolve` names a scene object the way MCP tools take it: an instance ID, or a hierarchy path (`Root/Child`, `Scene:Root/Child`), refusing a path several objects answer to.
 - Icons: Sculpt, Weights, Armature, Join, Render, Blender, Hierarchy, Eye, EyeOff, Link, Undo, Redo, Layers, Search, Trash, Settings, Minus.
 - The live link server writes on a thread per connection (a peer that is busy rendering or stopped at a breakpoint no longer freezes the editor; one that stops reading for 512 MB is cut off), keeps collapsed frames in their place among the others (positions sent before a whole mesh are handled before it), and on single-client links lets a new connection replace the current one only once it sent a frame with the session's token, announcing the replaced one's departure first. A wrong token now ends a connection before its payload is read.
+- Weight paint with only a mesh selected shows a bone's weights instead of nothing: the bone it showed last, else the one weighing most on the mesh (`XRayWeightPaintService.MostWeightedBone`), and its status says how to pick another.
 - The weight paint overlay no longer leaves its hidden copy of the mesh behind each time it is rebuilt (every bone switch kept one in memory until Unity restarted).
 - `XRayWeightPaintService.Pin` shows the weight overlay for a renderer and bones (or per-vertex weights of a tool's own) whatever the selection, `Repaint` recolours it in place, `Unpin` lets the selection drive it again.
 
@@ -391,8 +392,8 @@ button and hides once X is installed.
 
 ## Mirror posing
 
-In XRay Gizmos, select an avatar or one of its bones and enable **Mirror** in the
-Scene-view toolbar or the XRay Gizmos window. Rotate or move one paired bone in
+Select an avatar or one of its bones and enable **Mirror** in the Avatar Gizmos
+Scene-view toolbar or the Avatar Gizmos window. Rotate or move one paired bone in
 the Scene view or Inspector; Toolkit mirrors the edited channels to its partner
 across the avatar root's **local X** plane. The mirror remains scoped to that rig
 when selection changes. Toggle it off and on with another avatar selected to switch.

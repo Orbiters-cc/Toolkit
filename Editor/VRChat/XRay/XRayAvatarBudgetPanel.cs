@@ -123,7 +123,7 @@ namespace Orbiters.Toolkit.Editor.VRChat.XRay
                 foreach (var part in new VisualElement[] { avatarName, legend, metrics, compression }) part.style.display = DisplayStyle.None;
                 empty.text = "Budget unavailable for now.";
                 empty.style.display = DisplayStyle.Flex;
-                if (!warned) Debug.LogWarning("[XRay Gizmos] Could not count the avatar budget: " + ex.Message);
+                if (!warned) Debug.LogWarning("[Orbiters Toolkit] Could not count the avatar budget: " + ex.Message);
                 warned = true;
                 ScheduleRefresh(2000);
             }

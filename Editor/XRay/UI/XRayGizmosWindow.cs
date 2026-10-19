@@ -13,11 +13,11 @@ namespace Orbiters.Toolkit.Editor.XRay
     {
         private ScrollView content;
 
-        [MenuItem("Tools/Orbiters/XRay Gizmos")]
+        [MenuItem("Tools/Orbiters/Avatar Gizmos")]
         public static void Open()
         {
             var window = GetWindow<XRayGizmosWindow>();
-            window.titleContent = new GUIContent("XRay Gizmos");
+            window.titleContent = new GUIContent("Avatar Gizmos");
             window.minSize = new Vector2(520f, 520f);
             window.Show();
         }
@@ -59,7 +59,7 @@ namespace Orbiters.Toolkit.Editor.XRay
             var header = new VisualElement();
             header.AddToClassList("xray-header");
             header.Add(XRayGizmosLogo.Create(1.05f));
-            var title = new Label("XRay Gizmos");
+            var title = new Label("Avatar Gizmos");
             title.AddToClassList("xray-title");
             header.Add(title);
             root.Add(header);
@@ -97,7 +97,7 @@ namespace Orbiters.Toolkit.Editor.XRay
 
             Question("Armature display");
 
-            var enabled = new Toggle("Show XRay armatures") { value = XRayGizmoService.Enabled };
+            var enabled = new Toggle("Show armatures") { value = XRayGizmoService.Enabled };
             enabled.AddToClassList("xray-field");
             enabled.RegisterValueChangedCallback(evt => XRayGizmoService.SetEnabled(evt.newValue));
             content.Add(enabled);
@@ -159,7 +159,7 @@ namespace Orbiters.Toolkit.Editor.XRay
             {
                 var hovered = XRayBonePickingService.HoveredBone;
                 SummaryRow("Hover", hovered != null ? hovered.name : "-");
-                Help("Hover xray bones in the Scene view for a white highlight; click to select the matching bone transform.");
+                Help("Hover bones in the Scene view for a white highlight; click to select the matching bone transform.");
             }
 
             Section("Weight paint");

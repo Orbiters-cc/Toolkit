@@ -5,7 +5,7 @@ using UnityEngine.UIElements;
 namespace Orbiters.Toolkit.Editor.XRay
 {
     /// <summary>
-    /// More posing controls for the XRay Gizmos window, from assemblies that need what this one does not (the VRChat
+    /// More posing controls for the Avatar Gizmos window, from assemblies that need what this one does not (the VRChat
     /// clothing preview). The Scene toolbar lists their elements by id; an id nothing registers shows nothing.
     /// </summary>
     public static class XRayPosingExtensions

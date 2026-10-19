@@ -26,6 +26,9 @@ namespace Orbiters.Toolkit.Editor.XRay
         private static SkinnedMeshRenderer pinnedRenderer;
         private static List<Transform> pinnedBones = new List<Transform>();
         private static float[] pinnedWeights;
+        // Per renderer, the bone it showed last: what it shows again when the mesh is selected without any of its bones.
+        private static readonly Dictionary<int, int> lastBoneOf = new Dictionary<int, int>();
+        private static string fallbackNote;
 
         public static event Action Changed;
 
@@ -166,6 +169,38 @@ namespace Orbiters.Toolkit.Editor.XRay
             return true;
         }
 
+        /// <summary>
+        /// The bone with the most weight over a renderer's mesh, or -1: what weight paint shows first on a mesh selected
+        /// without any of its bones (Blender's weight paint always shows a group).
+        /// </summary>
+        public static int MostWeightedBone(SkinnedMeshRenderer renderer)
+        {
+            var mesh = renderer != null ? renderer.sharedMesh : null;
+            var bones = renderer != null ? renderer.bones : null;
+            if (mesh == null || bones == null || bones.Length == 0 || !mesh.HasVertexAttribute(UnityEngine.Rendering.VertexAttribute.BlendWeight)) return -1;
+            var totals = new float[bones.Length];
+            foreach (var weight in mesh.GetAllBoneWeights())
+                if (weight.boneIndex >= 0 && weight.boneIndex < totals.Length) totals[weight.boneIndex] += weight.weight;
+            int best = -1;
+            for (int i = 0; i < totals.Length; i++)
+                if (bones[i] != null && totals[i] > 0f && (best < 0 || totals[i] > totals[best])) best = i;
+            return best;
+        }
+
+        // The bone a selected mesh shows while none of its bones is selected: the last one it showed, else the heaviest.
+        private static bool TryFallbackBone(SkinnedMeshRenderer renderer, out HashSet<int> boneIndices, out List<Transform> selectedBones)
+        {
+            boneIndices = new HashSet<int>();
+            selectedBones = new List<Transform>();
+            var bones = renderer.bones;
+            if (!lastBoneOf.TryGetValue(renderer.GetInstanceID(), out int bone) || bone < 0 || bone >= bones.Length || bones[bone] == null)
+                bone = MostWeightedBone(renderer);
+            if (bone < 0) return false;
+            boneIndices.Add(bone);
+            selectedBones.Add(bones[bone]);
+            return true;
+        }
+
         private static Color32[] BuildCustomColors(float[] weights)
         {
             var colors = new Color32[weights.Length];
@@ -214,6 +249,7 @@ namespace Orbiters.Toolkit.Editor.XRay
                 var targets = new List<WeightPaintTarget>();
                 var targetIds = new HashSet<int>();
                 var boneSet = new HashSet<Transform>();
+                fallbackNote = null;
 
                 foreach (var renderer in renderers)
                 {
@@ -224,9 +260,17 @@ namespace Orbiters.Toolkit.Editor.XRay
                         boneIndices = new HashSet<int>();
                         selectedBones = new List<Transform>();
                     }
-                    else if (!TryResolveSelectedBoneIndices(renderer, selection, out boneIndices, out selectedBones))
+                    else if (TryResolveSelectedBoneIndices(renderer, selection, out boneIndices, out selectedBones))
+                    {
+                        lastBoneOf[renderer.GetInstanceID()] = boneIndices.First();
+                    }
+                    else if (searchedSceneByBone || !Selection.Contains(renderer.gameObject) || !TryFallbackBone(renderer, out boneIndices, out selectedBones))
                     {
                         continue;
+                    }
+                    else
+                    {
+                        fallbackNote = $"Showing {selectedBones[0].name} on {renderer.name}: select a bone (or click one in the Scene view) to see its weights.";
                     }
 
                     var target = new WeightPaintTarget(renderer, boneIndices);
@@ -717,6 +761,11 @@ namespace Orbiters.Toolkit.Editor.XRay
             if (activeRenderers.Count == 0)
             {
                 return "Selected bones do not affect selected mesh.";
+            }
+
+            if (fallbackNote != null && activeRenderers.Count == 1)
+            {
+                return fallbackNote;
             }
 
             return $"Showing weight paint on {activeRenderers.Count} mesh(es) for {activeBones.Count} bone(s).";

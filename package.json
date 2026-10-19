@@ -2,7 +2,7 @@
   "name": "orbiters.toolkit",
   "version": "0.4.0",
   "displayName": "Orbiters Toolkit",
-  "description": "Shared Orbiters account, editor UI, feature flags, VPM dependency prompts, bone matching, accessory attachment and posing preview, blendshape links, custom base refits (records, build-time blendshape links, fit checks), avatar photoshoot, mirror posing, XRay scene gizmos (bones, weight paint, mesh edges, avatar budget), mesh editing primitives (BVH, neighbors, FBX writer) and background window capture.",
+  "description": "Shared Orbiters account, editor UI, feature flags, VPM dependency prompts, bone matching, accessory attachment and posing preview, blendshape links, custom base refits (records, build-time blendshape links, fit checks), avatar photoshoot, mirror posing, Scene view gizmos (bones, weight paint, mesh edges, avatar budget), mesh editing primitives (BVH, neighbors, FBX writer) and background window capture.",
   "unity": "2022.3",
   "author": {
     "name": "Orbiters",

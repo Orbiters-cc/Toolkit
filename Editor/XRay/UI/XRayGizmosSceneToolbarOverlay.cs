@@ -10,7 +10,7 @@ namespace Orbiters.Toolkit.Editor.XRay
     [Overlay(
         typeof(SceneView),
         "Orbiters/XRayGizmos/SceneToolbar",
-        "XRay Gizmos",
+        "Avatar Gizmos",
         true,
         defaultDockPosition = DockPosition.Top,
         defaultDockZone = DockZone.TopToolbar)]
@@ -88,7 +88,7 @@ namespace Orbiters.Toolkit.Editor.XRay
             }
 
             menu.AddSeparator(string.Empty);
-            menu.AddItem(new GUIContent("Open XRay Gizmos Window"), false, XRayGizmosWindow.Open);
+            menu.AddItem(new GUIContent("Open Avatar Gizmos Window"), false, XRayGizmosWindow.Open);
             menu.DropDown(worldBound);
         }
 
@@ -119,7 +119,7 @@ namespace Orbiters.Toolkit.Editor.XRay
                 ? "selected object"
                 : "whole scene";
             string picking = XRayBonePickingService.Enabled ? "clickable" : "not clickable";
-            return $"XRay bones ({scope}, {picking}). Click to show whole-scene clickable bones.";
+            return $"Bones ({scope}, {picking}). Click to show whole-scene clickable bones.";
         }
 
         private void Attach()

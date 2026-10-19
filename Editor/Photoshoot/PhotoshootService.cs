@@ -484,7 +484,7 @@ namespace Orbiters.Toolkit.Editor.Photoshoot
                 return true;
             }
 
-            // Helpers other editor tools hang on the avatar without ever saving them (XRay Gizmos' armature): not part of
+            // Helpers other editor tools hang on the avatar without ever saving them (the avatar gizmos' armature): not part of
             // the photo, nor of its framing. Turned off rather than removed, so the copy's bones keep matching the source's.
             private static void HideEditorHelpers(Transform[] source, Transform[] copy)
             {
