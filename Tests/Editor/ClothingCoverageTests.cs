@@ -13,6 +13,11 @@ public class ClothingCoverageTests
     [TestCase("Underwear", true)]
     [TestCase("Glowsticks", false)]
     [TestCase("ShirtButton", false)]
+    [TestCase("FashionSuitJacket", true)]
+    [TestCase("FashionSuitPants", true)]
+    [TestCase("FashionSuitVest", true)]
+    [TestCase("FashionSuitBowtie", false)]
+    [TestCase("FashionSuitTie", false)]
     public void OnlyBodyClothingWithDimensionEvidenceOptsIn(string name, bool eligible)
     {
         var go = new GameObject(name);
@@ -25,8 +30,10 @@ public class ClothingCoverageTests
                 after = new OrbitersAttachment.LocalPose { scale = Vector3.one, rotation = Quaternion.Euler(30, 0, 0), position = Vector3.one } };
             item.fitted.Add(pose);
             Assert.IsFalse(ClothingCoverage.Eligible(item), "Pose and placement do not prove a different base.");
+            Assert.IsFalse(ClothingCoverage.Resized(item));
             pose.after.scale = Vector3.one * .9f; item.fitted[0] = pose;
             Assert.AreEqual(eligible, ClothingCoverage.Eligible(item));
+            Assert.IsTrue(ClothingCoverage.Resized(item), "Resized onto the avatar: made for another body.");
         }
         finally { Object.DestroyImmediate(go); }
     }
@@ -51,5 +58,25 @@ public class ClothingCoverageTests
                     ClothingCoverage.Eligible(item, renderer, true), renderer.name);
         }
         finally { Object.DestroyImmediate(root); UnityEditor.SceneManagement.EditorSceneManager.ClosePreviewScene(scene); }
+    }
+
+    [Test] public void GarmentsAreFittedFromTheInnermostOut()
+    {
+        var root = new GameObject("FashionSuit");
+        try
+        {
+            int Layer(string name)
+            {
+                var go = new GameObject(name); go.transform.SetParent(root.transform, false);
+                return ClothingCoverage.Layer(go.AddComponent<SkinnedMeshRenderer>());
+            }
+            int underwear = Layer("Underwear"), shirt = Layer("Shirt"), pants = Layer("FashionSuitPants"), vest = Layer("FashionSuitVest"),
+                jacket = Layer("FashionSuitJacket");
+            Assert.Less(underwear, shirt);
+            Assert.AreEqual(shirt, pants);
+            Assert.Less(shirt, vest, "A vest is worn over the shirt.");
+            Assert.Less(vest, jacket, "A jacket is worn over the vest.");
+        }
+        finally { Object.DestroyImmediate(root); }
     }
 }

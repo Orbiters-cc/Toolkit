@@ -14,11 +14,13 @@ namespace Orbiters.Toolkit.Editor.VRChat.Refit
     /// </summary>
     public static class ClothingCoverage
     {
-        private static readonly Regex Clothing = new Regex(@"\b(pants|shorts|trousers|hoodie|jacket|shirt|underwear|briefs|boxers|thong|bra|jock|speedo|trunks)\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+        private static readonly Regex Clothing = new Regex(@"\b(pants|shorts|trousers|hoodie|jacket|vest|waistcoat|shirt|underwear|briefs|boxers|thong|bra|jock|speedo|trunks)\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
         // Distinctive enough to count inside longer names ("classicJockstrap", "WickerOnesie").
         private static readonly Regex Garments = new Regex("jockstrap|underwear|lingerie|panties|bikini|swimsuit|swimwear|leotard|bodysuit|onesie|jumpsuit", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
         private static readonly Regex Underwear = new Regex(@"\b(underwear|briefs|boxers|thong|bra|jock|speedo|trunks)\b|jockstrap|lingerie|panties|bikini", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
         private static readonly Regex OnePiece = new Regex("swimsuit|swimwear|leotard|bodysuit|onesie|jumpsuit", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+        // Where a word of a joined name ("FashionSuitJacket") starts.
+        private static readonly Regex WordStart = new Regex(@"(?<=\p{Ll})(?=\p{Lu})", RegexOptions.CultureInvariant);
 
         public static bool Eligible(OrbitersAttachment attachment, bool madeForDifferentBase = false)
         {
@@ -40,6 +42,12 @@ namespace Orbiters.Toolkit.Editor.VRChat.Refit
             return named && DifferentBase(attachment, madeForDifferentBase);
         }
 
+        /// <summary>
+        /// Resized or reproportioned onto the avatar (recorded by <see cref="AttachmentFit"/>): made for another body than the
+        /// one it was put on, unless it was made for the avatar's original base.
+        /// </summary>
+        public static bool Resized(OrbitersAttachment attachment) => attachment != null && DifferentBase(attachment, false);
+
         private static bool IsBodyClothing(SkinnedMeshRenderer renderer) => renderer != null &&
             NamedClothing(renderer.name + " " + (renderer.sharedMesh != null ? renderer.sharedMesh.name : ""));
 
@@ -52,17 +60,27 @@ namespace Orbiters.Toolkit.Editor.VRChat.Refit
 
         private static int NamedLayer(string name)
         {
-            name = name.Replace('_', ' ').Replace('-', ' ');
-            if (Regex.IsMatch(name, @"\b(jacket|hoodie)\b", RegexOptions.IgnoreCase)) return 2;
-            if (Regex.IsMatch(name, @"\b(shirt|pants|shorts|trousers)\b", RegexOptions.IgnoreCase) || OnePiece.IsMatch(name)) return 1;
+            name = Words(name);
+            if (Named(name, @"\b(jacket|hoodie)\b")) return 3;
+            if (Named(name, @"\b(vest|waistcoat)\b")) return 2;
+            if (Named(name, @"\b(shirt|pants|shorts|trousers)\b") || OnePiece.IsMatch(name)) return 1;
             return Underwear.IsMatch(name) ? 0 : -1;
         }
 
+        private static bool Named(string words, string pattern) =>
+            Regex.IsMatch(words, pattern, RegexOptions.IgnoreCase) || Regex.IsMatch(Heads(words), pattern, RegexOptions.IgnoreCase);
+
         private static bool NamedClothing(string name)
         {
-            name = name.Replace('_', ' ').Replace('-', ' ');
-            return Clothing.IsMatch(name) || Garments.IsMatch(name);
+            name = Words(name);
+            return Clothing.IsMatch(name) || Garments.IsMatch(name) || Clothing.IsMatch(Heads(name));
         }
+
+        private static string Words(string name) => name.Replace('_', ' ').Replace('-', ' ');
+
+        // A joined name is the thing its last word names: "FashionSuitJacket" a jacket, "ShirtButton" a button.
+        private static string Heads(string words) =>
+            string.Join(" ", words.Split(' ').Select(word => WordStart.Split(word).Last()));
 
         private static bool DifferentBase(OrbitersAttachment attachment, bool madeForDifferentBase)
         {

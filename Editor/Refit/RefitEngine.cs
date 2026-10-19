@@ -29,6 +29,11 @@ namespace Orbiters.Toolkit.Editor.Refit
         public RefitMode Mode;
         /// <summary>Expand residual clipped fabric on clothing detected on a different avatar base.</summary>
         public bool CoverDifferentBaseBody;
+        /// <summary>
+        /// With <see cref="CoverDifferentBaseBody"/>: the mesh was made for another body than the original base and resized
+        /// onto this avatar, so what of it lay under the skin as put on was never meant and is covered after the fit.
+        /// </summary>
+        public bool MadeForAnotherBody;
         /// <summary>Already fitted inner garments from the same outfit, in target-avatar space.</summary>
         public List<SkinnedMeshRenderer> CoverageLayers = new List<SkinnedMeshRenderer>();
         /// <summary>0: loose, best for accessories; 1: tight, best for clothing.</summary>

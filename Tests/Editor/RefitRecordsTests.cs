@@ -402,6 +402,9 @@ public sealed class RefitRecordsTests
         coverageJob.CoverDifferentBaseBody = true;
         Assert.That(RefitCache.Key(coverageJob, root.transform, "test-engine"), Is.Not.EqualTo(normalKey), "Coverage requests must not reuse normal geometry.");
         string bodyOnly = RefitCache.Key(coverageJob, root.transform, "test-engine");
+        coverageJob.MadeForAnotherBody = true;
+        Assert.That(RefitCache.Key(coverageJob, root.transform, "test-engine"), Is.Not.EqualTo(bodyOnly), "Clothing made for another body is covered differently.");
+        coverageJob.MadeForAnotherBody = false;
         var inner = AddRenderer("Shirt", jacketMesh);
         coverageJob.CoverageLayers.Add(inner);
         string layered = RefitCache.Key(coverageJob, root.transform, "test-engine");
@@ -508,9 +511,11 @@ public sealed class RefitRecordsTests
         batch.CoverageByRenderer[jacket] = true;
         batch.CoverageByRenderer[shirt] = true;
         batch.CoverageByRenderer[prop] = false;
+        batch.MadeForAnotherBody = true;
         var result = Run(batch);
         Assert.That(result.Failed, Is.Empty);
         var jacketJob = engine.Jobs.Single(j => j.Renderer == jacket);
+        Assert.That(jacketJob.MadeForAnotherBody, Is.True, "The outfit was resized from another body.");
         Assert.That(engine.Jobs.IndexOf(engine.Jobs.Single(j => j.Renderer == shirt)), Is.LessThan(engine.Jobs.IndexOf(jacketJob)));
         Assert.That(jacketJob.CoverageLayers, Is.EqualTo(new[] { shirt }));
         Assert.That(engine.Jobs.Single(j => j.Renderer == prop).CoverDifferentBaseBody, Is.False);

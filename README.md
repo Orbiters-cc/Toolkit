@@ -23,6 +23,12 @@
   in `Library/Orbiters/original-armatures.json`.
 - A hidden copy of an avatar (`HiddenAvatarCopy`) made from an object that is never saved (a tool's own hidden copy, like
   the bodies ReFit's replays pose) stays in its preview scene: it landed in the open scene and stayed there.
+- Garments named in one word are recognized for coverage (`ClothingCoverage`): a joined name is the thing its last word
+  names, so `FashionSuitJacket` is a jacket and `ShirtButton` still a button. Vests and waistcoats count too, fitted
+  between the shirt and the jacket. The FashionSuit's pieces were none of them: refitted onto the Ultipaw, its jacket
+  and trousers were never covered and the arms and calves came through.
+- A refit can say the clothing was made for another body and resized onto the avatar (`RefitJob.MadeForAnotherBody`,
+  `RefitBatch.MadeForAnotherBody`, part of the cache key; `ClothingCoverage.Resized` tells it from the recorded fit).
 
 ## 0.3.23 — 2026-10-16
 

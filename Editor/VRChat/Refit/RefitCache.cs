@@ -31,7 +31,7 @@ namespace Orbiters.Toolkit.Editor.VRChat.Refit
             if (mesh == null || body == null) return null;
             var text = new StringBuilder();
             text.Append(Format).Append('|').Append(engine).Append('|').Append(job.Mode).Append('|').Append(Mathf.RoundToInt(job.Tightness * 100)).Append('|');
-            text.Append(job.CoverDifferentBaseBody).Append('|');
+            text.Append(job.CoverDifferentBaseBody).Append('|').Append(job.MadeForAnotherBody).Append('|');
             foreach (var layer in job.CoverageLayers)
             {
                 string identity = layer != null ? Identity(layer.sharedMesh) : null;

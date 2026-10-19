@@ -27,6 +27,8 @@ namespace Orbiters.Toolkit.Editor.VRChat.Refit
         public bool CoverDifferentBaseBody;
         /// <summary>Optional per-renderer coverage policy for packs containing both garments and props.</summary>
         public Dictionary<SkinnedMeshRenderer, bool> CoverageByRenderer = new Dictionary<SkinnedMeshRenderer, bool>();
+        /// <summary>The meshes were made for another body than the original base and resized onto the avatar (<see cref="RefitJob.MadeForAnotherBody"/>).</summary>
+        public bool MadeForAnotherBody;
         /// <summary>The original base, for <see cref="RefitMode.Fit"/>.</summary>
         public CustomBaseOriginal Original;
         public string BaseKey, BaseName, Tool;
@@ -183,6 +185,7 @@ namespace Orbiters.Toolkit.Editor.VRChat.Refit
                 {
                     Renderer = renderer, Avatar = root.gameObject, Body = batch.Body, Mode = mode, Tightness = batch.Tightness,
                     CoverDifferentBaseBody = batch.CoverageByRenderer.TryGetValue(renderer, out var cover) ? cover : batch.CoverDifferentBaseBody,
+                    MadeForAnotherBody = batch.MadeForAnotherBody,
                     SourceAvatar = batch.Original?.Avatar, SourceBody = batch.Original?.Body,
                     Shapes = Missing(renderer.sharedMesh, requested),
                 };
