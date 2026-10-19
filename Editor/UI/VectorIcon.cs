@@ -4,7 +4,12 @@ using UnityEngine.UIElements;
 
 namespace Orbiters.Toolkit.Editor
 {
-    public enum IconGlyph { Bones, Mirror, Clothes, Refresh, Person, PersonOff, People, Robot, RobotOff, Lock, Unlock, Branch, Close, Chevron, Gauge, Sliders, Sound, Check, Sparkle, Male, Female, Key, External, Grid, Download, Broom, Plus, Camera, RefSheet }
+    public enum IconGlyph
+    {
+        Bones, Mirror, Clothes, Refresh, Person, PersonOff, People, Robot, RobotOff, Lock, Unlock, Branch, Close, Chevron, Gauge, Sliders, Sound, Check, Sparkle, Male, Female, Key, External, Grid, Download, Broom, Plus, Camera, RefSheet,
+        // Mixer and the Hierarchy.
+        Sculpt, Weights, Armature, Join, Render, Blender, Hierarchy, Eye, EyeOff, Link, Undo, Redo, Layers, Search, Trash, Settings, Minus
+    }
 
     /// <summary>
     /// A small line icon drawn with the vector API, crisp at any size. Its colour comes from the USS custom property
@@ -228,6 +233,122 @@ namespace Orbiters.Toolkit.Editor
                     Standing(painter, P, scale, 4.4f, 2.4f);
                     Standing(painter, P, scale, 12f, 2.4f);
                     Standing(painter, P, scale, 19.6f, 1.3f);
+                    break;
+                case IconGlyph.Sculpt:
+                    // A mound with a brush pressing into it.
+                    painter.lineWidth = 2f * scale;
+                    painter.BeginPath(); painter.MoveTo(P(3f, 19.5f)); painter.BezierCurveTo(P(6f, 11f), P(12f, 9f), P(14f, 13f)); painter.BezierCurveTo(P(16f, 16f), P(19f, 17f), P(21f, 19.5f)); painter.Stroke();
+                    painter.BeginPath(); painter.MoveTo(P(13.5f, 11f)); painter.LineTo(P(19.5f, 3.5f)); painter.Stroke();
+                    painter.BeginPath(); painter.Arc(P(13.2f, 11.6f), 1.8f * scale, 0f, 360f); painter.Fill();
+                    break;
+                case IconGlyph.Weights:
+                    // A bone with a soft falloff ring around its joint.
+                    painter.lineWidth = 2.2f * scale;
+                    painter.BeginPath(); painter.MoveTo(P(6.5f, 17.5f)); painter.LineTo(P(14f, 10f)); painter.Stroke();
+                    painter.BeginPath(); painter.Arc(P(6.5f, 17.5f), 2.2f * scale, 0f, 360f); painter.Fill();
+                    painter.lineWidth = 1.6f * scale;
+                    painter.BeginPath(); painter.Arc(P(14f, 10f), 2.6f * scale, 0f, 360f); painter.Fill();
+                    painter.BeginPath(); painter.Arc(P(14f, 10f), 6.2f * scale, 0f, 360f); painter.Stroke();
+                    break;
+                case IconGlyph.Armature:
+                    // A joint with two bones leaving it.
+                    painter.lineWidth = 2.2f * scale;
+                    painter.BeginPath(); painter.MoveTo(P(12f, 12f)); painter.LineTo(P(5f, 20f)); painter.Stroke();
+                    painter.BeginPath(); painter.MoveTo(P(12f, 12f)); painter.LineTo(P(19f, 20f)); painter.Stroke();
+                    painter.BeginPath(); painter.MoveTo(P(12f, 12f)); painter.LineTo(P(12f, 3.5f)); painter.Stroke();
+                    painter.BeginPath(); painter.Arc(P(12f, 12f), 2.6f * scale, 0f, 360f); painter.Fill();
+                    foreach (var (x, y) in new[] { (5f, 20f), (19f, 20f), (12f, 3.5f) }) { painter.BeginPath(); painter.Arc(P(x, y), 1.6f * scale, 0f, 360f); painter.Fill(); }
+                    break;
+                case IconGlyph.Join:
+                    // Two tiles becoming one: overlapping rounded squares.
+                    painter.lineWidth = 1.9f * scale;
+                    RoundRect(painter, P, 3.5f, 3.5f, 11f, 11f, 2.4f); painter.Stroke();
+                    RoundRect(painter, P, 9.5f, 9.5f, 11f, 11f, 2.4f); painter.Fill();
+                    break;
+                case IconGlyph.Render:
+                    // A picture: a frame with a sun and a hill.
+                    painter.lineWidth = 1.9f * scale;
+                    RoundRect(painter, P, 3f, 4f, 18f, 16f, 2.6f); painter.Stroke();
+                    painter.BeginPath(); painter.Arc(P(8.5f, 9.5f), 1.8f * scale, 0f, 360f); painter.Fill();
+                    painter.BeginPath(); painter.MoveTo(P(4.5f, 18.5f)); painter.LineTo(P(10f, 12.5f)); painter.LineTo(P(13.5f, 15.5f)); painter.LineTo(P(16f, 13f)); painter.LineTo(P(19.5f, 17f)); painter.LineTo(P(19.5f, 18.5f)); painter.ClosePath(); painter.Fill();
+                    break;
+                case IconGlyph.Blender:
+                    // Blender's mark in a stroke: a ring with a spoke leaving it.
+                    painter.lineWidth = 2.2f * scale;
+                    painter.BeginPath(); painter.Arc(P(14f, 13.5f), 5.5f * scale, 0f, 360f); painter.Stroke();
+                    painter.BeginPath(); painter.Arc(P(14f, 13.5f), 1.8f * scale, 0f, 360f); painter.Fill();
+                    painter.BeginPath(); painter.MoveTo(P(8.8f, 10.2f)); painter.LineTo(P(3f, 10.2f)); painter.Stroke();
+                    painter.BeginPath(); painter.MoveTo(P(10.2f, 6.2f)); painter.LineTo(P(5f, 6.2f)); painter.Stroke();
+                    painter.BeginPath(); painter.MoveTo(P(13f, 3f)); painter.LineTo(P(8.5f, 3f)); painter.Stroke();
+                    break;
+                case IconGlyph.Hierarchy:
+                    // A tree: a parent with two indented children.
+                    painter.lineWidth = 2f * scale;
+                    painter.BeginPath(); painter.MoveTo(P(6f, 5f)); painter.LineTo(P(6f, 17.5f)); painter.LineTo(P(12f, 17.5f)); painter.Stroke();
+                    painter.BeginPath(); painter.MoveTo(P(6f, 11f)); painter.LineTo(P(12f, 11f)); painter.Stroke();
+                    foreach (var (x, y) in new[] { (6f, 5f), (15f, 11f), (15f, 17.5f) }) { RoundRect(painter, P, x - 2.2f, y - 2.2f, 4.4f, 4.4f, 1.2f); painter.Fill(); }
+                    break;
+                case IconGlyph.Eye:
+                case IconGlyph.EyeOff:
+                    painter.lineWidth = 1.9f * scale;
+                    painter.BeginPath(); painter.MoveTo(P(2.5f, 12f)); painter.BezierCurveTo(P(6f, 5.5f), P(18f, 5.5f), P(21.5f, 12f)); painter.BezierCurveTo(P(18f, 18.5f), P(6f, 18.5f), P(2.5f, 12f)); painter.ClosePath(); painter.Stroke();
+                    painter.BeginPath(); painter.Arc(P(12f, 12f), 3f * scale, 0f, 360f); painter.Fill();
+                    if (glyph == IconGlyph.EyeOff) Slash(painter, P);
+                    break;
+                case IconGlyph.Link:
+                    // Two chain links.
+                    painter.lineWidth = 2f * scale;
+                    painter.BeginPath(); painter.MoveTo(P(10.5f, 13.5f)); painter.LineTo(P(13.5f, 10.5f)); painter.Stroke();
+                    painter.BeginPath(); painter.MoveTo(P(9f, 15f)); painter.BezierCurveTo(P(6.5f, 17.5f), P(3f, 15.5f), P(4.5f, 12.5f)); painter.LineTo(P(7.5f, 9.5f)); painter.BezierCurveTo(P(9.5f, 7.5f), P(12.5f, 8.5f), P(13f, 10.5f)); painter.Stroke();
+                    painter.BeginPath(); painter.MoveTo(P(15f, 9f)); painter.BezierCurveTo(P(17.5f, 6.5f), P(21f, 8.5f), P(19.5f, 11.5f)); painter.LineTo(P(16.5f, 14.5f)); painter.BezierCurveTo(P(14.5f, 16.5f), P(11.5f, 15.5f), P(11f, 13.5f)); painter.Stroke();
+                    break;
+                case IconGlyph.Undo:
+                case IconGlyph.Redo:
+                {
+                    painter.lineWidth = 2f * scale;
+                    float dir = glyph == IconGlyph.Undo ? 1f : -1f;
+                    float cx = 12f;
+                    Vector2 Q(float x, float y) => P(cx + (x - cx) * dir, y);
+                    painter.BeginPath(); painter.MoveTo(Q(6f, 9.5f)); painter.LineTo(Q(15f, 9.5f)); painter.BezierCurveTo(Q(21f, 9.5f), Q(21f, 18f), Q(15f, 18f)); painter.LineTo(Q(10f, 18f)); painter.Stroke();
+                    painter.BeginPath(); painter.MoveTo(Q(9.5f, 5.5f)); painter.LineTo(Q(5.5f, 9.5f)); painter.LineTo(Q(9.5f, 13.5f)); painter.Stroke();
+                    break;
+                }
+                case IconGlyph.Layers:
+                    // Three stacked sheets.
+                    painter.lineWidth = 1.9f * scale;
+                    painter.BeginPath(); painter.MoveTo(P(12f, 3.5f)); painter.LineTo(P(21f, 8f)); painter.LineTo(P(12f, 12.5f)); painter.LineTo(P(3f, 8f)); painter.ClosePath(); painter.Fill();
+                    painter.BeginPath(); painter.MoveTo(P(4.5f, 12.2f)); painter.LineTo(P(12f, 16f)); painter.LineTo(P(19.5f, 12.2f)); painter.Stroke();
+                    painter.BeginPath(); painter.MoveTo(P(4.5f, 16.2f)); painter.LineTo(P(12f, 20f)); painter.LineTo(P(19.5f, 16.2f)); painter.Stroke();
+                    break;
+                case IconGlyph.Search:
+                    painter.lineWidth = 2.1f * scale;
+                    painter.BeginPath(); painter.Arc(P(10.5f, 10.5f), 6f * scale, 0f, 360f); painter.Stroke();
+                    painter.BeginPath(); painter.MoveTo(P(15f, 15f)); painter.LineTo(P(20.5f, 20.5f)); painter.Stroke();
+                    break;
+                case IconGlyph.Trash:
+                    painter.lineWidth = 1.9f * scale;
+                    painter.BeginPath(); painter.MoveTo(P(4.5f, 6.5f)); painter.LineTo(P(19.5f, 6.5f)); painter.Stroke();
+                    painter.BeginPath(); painter.MoveTo(P(9.5f, 6.5f)); painter.LineTo(P(9.5f, 4f)); painter.LineTo(P(14.5f, 4f)); painter.LineTo(P(14.5f, 6.5f)); painter.Stroke();
+                    painter.BeginPath(); painter.MoveTo(P(6.5f, 6.5f)); painter.LineTo(P(7.5f, 20f)); painter.LineTo(P(16.5f, 20f)); painter.LineTo(P(17.5f, 6.5f)); painter.Stroke();
+                    painter.BeginPath(); painter.MoveTo(P(10.2f, 10f)); painter.LineTo(P(10.5f, 17f)); painter.Stroke();
+                    painter.BeginPath(); painter.MoveTo(P(13.8f, 10f)); painter.LineTo(P(13.5f, 17f)); painter.Stroke();
+                    break;
+                case IconGlyph.Settings:
+                    // A gear: a ring with eight teeth.
+                    painter.lineWidth = 2.4f * scale;
+                    painter.BeginPath(); painter.Arc(P(12f, 12f), 5.5f * scale, 0f, 360f); painter.Stroke();
+                    painter.lineWidth = 2.6f * scale;
+                    for (int i = 0; i < 8; i++)
+                    {
+                        float a = i * Mathf.PI / 4f;
+                        var d = new Vector2(Mathf.Cos(a), Mathf.Sin(a));
+                        painter.BeginPath(); painter.MoveTo(P(12f + d.x * 7f, 12f + d.y * 7f)); painter.LineTo(P(12f + d.x * 9.8f, 12f + d.y * 9.8f)); painter.Stroke();
+                    }
+                    painter.BeginPath(); painter.Arc(P(12f, 12f), 2f * scale, 0f, 360f); painter.Fill();
+                    break;
+                case IconGlyph.Minus:
+                    painter.lineWidth = 2.4f * scale;
+                    painter.BeginPath(); painter.MoveTo(P(5f, 12f)); painter.LineTo(P(19f, 12f)); painter.Stroke();
                     break;
             }
         }

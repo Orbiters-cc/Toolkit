@@ -8,6 +8,8 @@
     "Editor"
   ],
   "overrideReferences": true,
-  "precompiledReferences": [],
+  "precompiledReferences": [
+    "Newtonsoft.Json.dll"
+  ],
   "autoReferenced": true
 }

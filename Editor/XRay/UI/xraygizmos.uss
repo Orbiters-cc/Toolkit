@@ -1,0 +1,157 @@
+.xray-root {
+    flex-grow: 1;
+    background-color: #2d2d2d;
+}
+
+.xray-header {
+    flex-direction: row;
+    justify-content: center;
+    align-items: center;
+    background-color: #383838;
+    height: 64px;
+    flex-shrink: 0;
+}
+
+.xray-title {
+    color: #ffffff;
+    font-size: 22px;
+    -unity-font-style: bold;
+    margin-left: 12px;
+}
+
+.xray-body {
+    flex-grow: 1;
+    padding: 18px 24px 18px 24px;
+}
+
+.xray-question {
+    color: #e6e6e6;
+    font-size: 14px;
+    -unity-text-align: middle-center;
+    margin-top: 18px;
+    margin-bottom: 18px;
+    white-space: normal;
+}
+
+.xray-cards {
+    flex-direction: row;
+    justify-content: center;
+    flex-wrap: wrap;
+}
+
+.xray-card {
+    width: 190px;
+    height: 190px;
+    margin: 12px;
+    background-color: #2f2f2f;
+    border-width: 1px;
+    border-color: #6a6a6a;
+    border-radius: 10px;
+    justify-content: center;
+    align-items: center;
+    cursor: link;
+    padding: 10px;
+}
+
+.xray-card:hover {
+    background-color: #3a3a3a;
+    border-color: #9a9a9a;
+}
+
+.xray-card--active {
+    border-color: #00DA6D;
+    background-color: #324037;
+}
+
+.xray-card--small {
+    width: 150px;
+    height: 98px;
+}
+
+.xray-card-label {
+    color: #e6e6e6;
+    font-size: 13px;
+    -unity-text-align: middle-center;
+    white-space: normal;
+}
+
+.xray-card-sublabel {
+    color: #999999;
+    font-size: 11px;
+    -unity-text-align: middle-center;
+    white-space: normal;
+    margin-top: 4px;
+}
+
+.xray-field {
+    margin-top: 8px;
+    margin-bottom: 8px;
+}
+
+.xray-field Label {
+    color: #cccccc;
+    min-width: 120px;
+}
+
+.xray-help {
+    color: #999999;
+    font-size: 11px;
+    white-space: normal;
+    margin-top: 4px;
+    margin-bottom: 10px;
+}
+
+.xray-section {
+    color: #c8c8c8;
+    font-size: 12px;
+    -unity-font-style: bold;
+    margin-top: 18px;
+    margin-bottom: 6px;
+}
+
+.xray-back {
+    height: 24px;
+    background-color: #494949;
+    color: #dddddd;
+    border-width: 0;
+    border-radius: 8px;
+    padding: 2px 12px 2px 12px;
+    cursor: link;
+    margin-right: 6px;
+}
+
+.xray-back:hover {
+    background-color: #5a5a5a;
+}
+
+.xray-row {
+    flex-direction: row;
+    align-items: center;
+    margin-top: 8px;
+}
+
+.xray-summary-row {
+    flex-direction: row;
+    align-items: center;
+    margin-top: 4px;
+}
+
+.xray-summary-key {
+    color: #999999;
+    width: 90px;
+}
+
+.xray-summary-value {
+    color: #e6e6e6;
+    flex-shrink: 1;
+    white-space: normal;
+}
+
+.xray-scroll {
+    flex-grow: 1;
+}
+
+.xray-logo-bar {
+    position: absolute;
+    background-color: #D9D9D9;
+}

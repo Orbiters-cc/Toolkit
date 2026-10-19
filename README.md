@@ -1,5 +1,13 @@
 # Orbiters Toolkit
 
+## 0.4.0 — 2026-10-19
+
+- XRay gizmos are part of the Toolkit: the bones, weight paint, mesh edges and avatar budget overlays, the Scene toolbar and the XRay Gizmos window (Tools › Orbiters › XRay Gizmos) moved here from the XRay Gizmos package, which no longer exists. Namespaces `Orbiters.Toolkit.XRay` and `Orbiters.Toolkit.Editor.XRay`; settings and overlay ids unchanged.
+- Mesh editing primitives for Mixer and the other tools: `MeshNeighbors` (vertices welded by position, their edges and triangles), `MeshBvh` (triangles and vertices in a sphere, rays, closest points, partial refits), `MeshAssets` (meshes saved as native assets, overwritten in place), `VirtualList` (the Logger's list of pooled fixed-height rows).
+- `BlenderInstalls` finds the Blender executables (moved from MCB; the chosen one is EditorPrefs `Orbiters.Blender.Executable`) and `BlenderCli` runs Blender without its window on a thread of its own, with a log file and the result back on the main thread.
+- `LiveLinkJson` and `LiveLinkEndpointFile` for live links' JSON payloads and endpoint files.
+- Icons: Sculpt, Weights, Armature, Join, Render, Blender, Hierarchy, Eye, EyeOff, Link, Undo, Redo, Layers, Search, Trash, Settings, Minus.
+
 ## 0.3.24 — 2026-10-18
 
 - Body shrinks for refitted clothing: a refit record can keep skin of the body to move in while the clothing is worn
