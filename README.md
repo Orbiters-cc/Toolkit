@@ -6,6 +6,7 @@
 - Mesh editing primitives for Mixer and the other tools: `MeshNeighbors` (vertices welded by position, their edges and triangles), `MeshBvh` (triangles and vertices in a sphere, rays, closest points, partial refits), `MeshAssets` (meshes saved as native assets, overwritten in place), `VirtualList` (the Logger's list of pooled fixed-height rows).
 - `BlenderInstalls` finds the Blender executables (moved from MCB; the chosen one is EditorPrefs `Orbiters.Blender.Executable`) and `BlenderCli` runs Blender without its window on a thread of its own, with a log file and the result back on the main thread.
 - `LiveLinkJson` and `LiveLinkEndpointFile` for live links' JSON payloads and endpoint files.
+- `SceneReference.Resolve` names a scene object the way MCP tools take it: an instance ID, or a hierarchy path (`Root/Child`, `Scene:Root/Child`), refusing a path several objects answer to.
 - Icons: Sculpt, Weights, Armature, Join, Render, Blender, Hierarchy, Eye, EyeOff, Link, Undo, Redo, Layers, Search, Trash, Settings, Minus.
 - `XRayWeightPaintService.Pin` shows the weight overlay for a renderer and bones (or per-vertex weights of a tool's own) whatever the selection, `Repaint` recolours it in place, `Unpin` lets the selection drive it again.
 
