@@ -645,11 +645,7 @@ namespace Orbiters.Toolkit.Editor.XRay
                 return;
             }
 
-            if (instance.MeshObject != null)
-            {
-                UnityEngine.Object.DestroyImmediate(instance.MeshObject);
-            }
-
+            DestroyOverlay(instance.MeshObject);
             Instances.Remove(id);
         }
 
@@ -659,8 +655,26 @@ namespace Orbiters.Toolkit.Editor.XRay
             {
                 if (IsWeightPaintOverlay(go))
                 {
-                    UnityEngine.Object.DestroyImmediate(go);
+                    DestroyOverlay(go);
                 }
+            }
+        }
+
+        // The overlay object and its mesh: a hidden copy of the source mesh, which nothing unloads (it never leaves memory
+        // on its own, every rebuild of the overlay would leave one behind).
+        private static void DestroyOverlay(GameObject overlay)
+        {
+            if (overlay == null)
+            {
+                return;
+            }
+
+            var overlayRenderer = overlay.GetComponent<SkinnedMeshRenderer>();
+            var mesh = overlayRenderer != null ? overlayRenderer.sharedMesh : null;
+            UnityEngine.Object.DestroyImmediate(overlay);
+            if (mesh != null && !EditorUtility.IsPersistent(mesh) && (mesh.hideFlags & HideFlags.DontSave) != 0)
+            {
+                UnityEngine.Object.DestroyImmediate(mesh);
             }
         }
 

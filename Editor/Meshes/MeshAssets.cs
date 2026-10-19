@@ -7,8 +7,9 @@ namespace Orbiters.Toolkit.Editor.Meshes
     /// <summary>
     /// Saves meshes as native <c>.asset</c> files: the only kind of import that costs milliseconds, since no model
     /// importer runs. A tool that edits meshes commits here instead of rewriting an FBX, which would re-import for
-    /// tens of seconds on a body with many blendshapes. An existing asset is overwritten in place so every renderer
-    /// and prefab that points at it keeps pointing at it.
+    /// tens of seconds on a body with many blendshapes. A new mesh never takes the place of another asset that has
+    /// its name (two avatars both have a "Body"); a mesh made again from one of the tool's own assets replaces that
+    /// asset in place, so every renderer and prefab that points at it keeps pointing at it.
     /// </summary>
     public static class MeshAssets
     {
@@ -17,30 +18,37 @@ namespace Orbiters.Toolkit.Editor.Meshes
             "Assets/Orbiters/" + Clean(product) + "/Meshes/" + Clean(owner);
 
         /// <summary>
-        /// Writes <paramref name="mesh"/> at <c>folder/name.asset</c> and returns the asset (the same object as
-        /// <paramref name="mesh"/> when the file is new, the existing asset when one was there). The caller must not
-        /// keep using <paramref name="mesh"/> afterwards: when an asset existed, the data was copied into it and the
-        /// given mesh is destroyed.
+        /// Writes <paramref name="mesh"/> as a new asset: <c>folder/name.asset</c>, or <c>name 1.asset</c>,
+        /// <c>name 2.asset</c>… when that file exists already. Returns the asset (<paramref name="mesh"/> itself).
         /// </summary>
         public static Mesh Save(Mesh mesh, string folder, string name)
         {
             if (mesh == null) throw new System.ArgumentNullException(nameof(mesh));
             EnsureFolder(folder);
-            string path = folder + "/" + Clean(name) + ".asset";
-            var existing = AssetDatabase.LoadAssetAtPath<Mesh>(path);
-            if (existing != null)
-            {
-                EditorUtility.CopySerialized(mesh, existing);
-                existing.name = Clean(name);
-                EditorUtility.SetDirty(existing);
-                AssetDatabase.SaveAssetIfDirty(existing);
-                if (!AssetDatabase.Contains(mesh)) Object.DestroyImmediate(mesh);
-                return existing;
-            }
-            mesh.name = Clean(name);
+            string path = AssetDatabase.GenerateUniqueAssetPath(folder + "/" + Clean(name) + ".asset");
+            mesh.name = Path.GetFileNameWithoutExtension(path);
             AssetDatabase.CreateAsset(mesh, path);
             AssetDatabase.SaveAssetIfDirty(mesh);
             return mesh;
+        }
+
+        /// <summary>
+        /// Copies <paramref name="mesh"/> into the asset <paramref name="existing"/> (its file, name and GUID stay, so
+        /// references to it hold) and returns <paramref name="existing"/>. <paramref name="mesh"/> is destroyed unless it
+        /// is an asset itself: the caller must not keep using it.
+        /// </summary>
+        public static Mesh Replace(Mesh mesh, Mesh existing)
+        {
+            if (mesh == null) throw new System.ArgumentNullException(nameof(mesh));
+            if (existing == null || !AssetDatabase.Contains(existing)) throw new System.ArgumentException("Not a mesh asset.", nameof(existing));
+            if (mesh == existing) return existing;
+            string name = existing.name;
+            EditorUtility.CopySerialized(mesh, existing);
+            existing.name = name;
+            EditorUtility.SetDirty(existing);
+            AssetDatabase.SaveAssetIfDirty(existing);
+            if (!AssetDatabase.Contains(mesh)) Object.DestroyImmediate(mesh);
+            return existing;
         }
 
         /// <summary>Whether <paramref name="mesh"/> is an asset under a product's folder.</summary>

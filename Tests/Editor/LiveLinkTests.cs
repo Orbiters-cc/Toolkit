@@ -110,9 +110,10 @@ namespace Orbiters.Toolkit.Editor.Tests
             Assert.That(frames.Count(f => f != "end"), Is.InRange(1, 3), "Collapsing only drops older ones.");
         }
 
-        // One application at a time: a reconnection replaces the previous connection, which leaves without a word.
+        // One application at a time: a reconnection that proves it belongs to the session (its first frame carries the
+        // token) replaces the previous connection, whose departure is announced first; a stranger replaces nothing.
         [UnityTest]
-        public IEnumerator SingleClientLinksReplaceTheOldConnectionQuietly()
+        public IEnumerator SingleClientLinksReplaceTheOldConnectionOnlyForTheSession()
         {
             var changes = new List<(int, bool)>();
             using (var server = new LiveLinkServer(Format, "secret", singleClient: true))
@@ -120,16 +121,55 @@ namespace Orbiters.Toolkit.Editor.Tests
                 server.ConnectionChanged += (id, up) => changes.Add((id, up));
                 using (var first = Connect(server))
                 {
+                    yield return Until(() => false, .2);
+                    Assert.That(changes, Is.Empty, "a connection is announced once it sent a frame of the session");
+                    Send(first, 1, "secret", "hello");
                     yield return Until(() => changes.Count >= 1);
+                    using (var stranger = Connect(server))
+                    {
+                        Send(stranger, 1, "wrong", "hello");
+                        yield return Until(() => false, .3);
+                        Assert.That(changes.Count, Is.EqualTo(1), "a stranger neither replaces the client nor is announced");
+                        Assert.That(server.Connections, Is.EqualTo(new[] { changes[0].Item1 }));
+                    }
                     using (var second = Connect(server))
                     {
-                        yield return Until(() => changes.Count >= 2);
+                        Send(second, 1, "secret", "hello");
+                        yield return Until(() => changes.Count >= 3);
                         yield return Until(() => false, .3);
-                        Assert.That(changes.Select(c => c.Item2), Is.EqualTo(new[] { true, true }), "No disconnection for the replaced connection.");
-                        Assert.That(server.Connections, Is.EqualTo(new[] { changes[1].Item1 }));
+                        Assert.That(changes.Select(c => c.Item2), Is.EqualTo(new[] { true, false, true }), "the replaced connection leaves, then the new one comes");
+                        Assert.That(changes[1].Item1, Is.EqualTo(changes[0].Item1));
+                        Assert.That(server.Connections, Is.EqualTo(new[] { changes[2].Item1 }));
                     }
                 }
             }
+        }
+
+        // A frame that does not collapse, sent after collapsing ones, is still handled after them.
+        [UnityTest]
+        public IEnumerator CollapsedFramesKeepTheirPlaceInTheOrder()
+        {
+            var frames = new List<string>();
+            bool up = false;
+            using (var server = new LiveLinkServer(Format, "secret", collapseKey: f => f.Type == 2 ? "positions" : null))
+            {
+                server.ConnectionChanged += (_, connected) => up = connected;
+                server.Received += f => frames.Add(Encoding.UTF8.GetString(f.Payload));
+                using (var client = Connect(server))
+                {
+                    yield return Until(() => up);
+                    var stream = client.GetStream();
+                    foreach (var (type, text) in new[] { (2, "p0"), (2, "p1"), (1, "mesh"), (2, "p2"), (1, "end") })
+                    {
+                        var data = Format.Encode((byte)type, "secret", Encoding.UTF8.GetBytes(text));
+                        stream.Write(data, 0, data.Length);
+                    }
+                    yield return Until(() => frames.Contains("end"));
+                }
+            }
+            int mesh = frames.IndexOf("mesh");
+            Assert.That(frames.Take(mesh).All(f => f == "p0" || f == "p1"), Is.True, "positions sent before the mesh come before it: " + string.Join(",", frames));
+            Assert.That(frames.Skip(mesh + 1).First(), Is.EqualTo("p2"), "positions sent after it come after it");
         }
 
         [Test]

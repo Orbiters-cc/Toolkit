@@ -94,7 +94,7 @@ namespace Orbiters.Toolkit.Editor.Tests
         }
 
         [Test]
-        public void MeshAssetsSaveAndOverwriteInPlace()
+        public void MeshAssetsSaveKeepsOthersAndReplaceInPlace()
         {
             const string folder = "Assets/Orbiters/ToolkitTests/Meshes/Fixture";
             var mesh = new Mesh { vertices = new[] { Vector3.zero, Vector3.right, Vector3.up }, triangles = new[] { 0, 1, 2 } };
@@ -104,10 +104,17 @@ namespace Orbiters.Toolkit.Editor.Tests
                 Assert.That(AssetDatabase.Contains(saved), Is.True);
                 Assert.That(AssetDatabase.GetAssetPath(saved), Is.EqualTo(folder + "/Tri_angle.asset"));
                 Assert.That(MeshAssets.IsOwnedBy(saved, "ToolkitTests"), Is.True);
+                // Another mesh with the same name (a second avatar's "Body") gets a file of its own.
+                var other = new Mesh { vertices = new[] { Vector3.zero, Vector3.up, Vector3.forward }, triangles = new[] { 0, 1, 2 } };
+                var second = MeshAssets.Save(other, folder, "Tri:angle");
+                Assert.That(second, Is.Not.SameAs(saved));
+                Assert.That(AssetDatabase.GetAssetPath(second), Is.Not.EqualTo(AssetDatabase.GetAssetPath(saved)));
+                Assert.That(saved.vertexCount, Is.EqualTo(3), "the first asset is untouched");
                 var replacement = new Mesh { vertices = new[] { Vector3.zero, Vector3.right, Vector3.up, Vector3.one }, triangles = new[] { 0, 1, 2, 1, 3, 2 } };
-                var again = MeshAssets.Save(replacement, folder, "Tri:angle");
+                var again = MeshAssets.Replace(replacement, saved);
                 Assert.That(again, Is.SameAs(saved), "the existing asset is kept, so references to it stay valid");
                 Assert.That(saved.vertexCount, Is.EqualTo(4));
+                Assert.That(saved.name, Is.EqualTo("Tri_angle"));
                 Assert.That(replacement == null, Is.True, "the replacement was copied in and destroyed");
             }
             finally

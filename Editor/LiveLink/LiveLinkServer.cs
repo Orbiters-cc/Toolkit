@@ -93,7 +93,9 @@ namespace Orbiters.Toolkit.Editor.LiveLink
     /// Unity's end of a live link: a listener on 127.0.0.1 whose connections are read on background threads, their frames
     /// handed to the editor's main thread through <see cref="EditorApplication.update"/>, in the order they came (with
     /// connections and disconnections). Frames waiting with the same collapse key (the positions of one mesh, the newest
-    /// image of one texture) collapse to the newest. Closed before script reloads.
+    /// image of one texture) collapse to the newest, in the place of the first of them: a frame that came after them
+    /// (a whole mesh, a goodbye) is still handled after them. Sends are queued and written by a thread per connection, so
+    /// the editor never waits on a peer that is busy. Closed before script reloads.
     /// </summary>
     public sealed class LiveLinkServer : IDisposable
     {
@@ -102,19 +104,29 @@ namespace Orbiters.Toolkit.Editor.LiveLink
             public int Id;
             public TcpClient Client;
             public NetworkStream Stream;
-            public readonly object SendLock = new object();
-            // Replaced by a newer connection (single-client links): it leaves without a word.
+            // What waits to be written, in order, and its size (a peer that stops reading is cut off past a cap).
+            public readonly BlockingCollection<byte[]> Outgoing = new BlockingCollection<byte[]>(new ConcurrentQueue<byte[]>());
+            public long QueuedBytes;
+            public Thread Writer;
+            // Replaced by a newer connection (single-client links): its departure was announced already.
             public volatile bool Superseded;
+            // Single-client links announce a connection (and replace the previous one) only once it sent a frame with
+            // the session's token, so a stranger connecting cannot push the real client off.
+            public volatile bool Announced;
         }
 
-        // A connection or a disconnection (Frame null), or a frame.
+        // A connection or a disconnection (Frame and Collapsed null), a frame, or the place of collapsed frames.
         private readonly struct Item
         {
             public readonly int Connection;
             public readonly bool Up;
             public readonly LiveLinkFrame Frame;
-            public Item(int connection, bool up, LiveLinkFrame frame) { Connection = connection; Up = up; Frame = frame; }
+            public readonly (int, string, int)? Collapsed;
+            public Item(int connection, bool up, LiveLinkFrame frame, (int, string, int)? collapsed = null) { Connection = connection; Up = up; Frame = frame; Collapsed = collapsed; }
         }
+
+        /// <summary>Bytes a connection may have waiting to be written before it is closed as not reading.</summary>
+        public const long MaxQueuedBytes = 512L * 1024 * 1024;
 
         private readonly LiveLinkFormat format;
         private readonly string token;
@@ -126,7 +138,9 @@ namespace Orbiters.Toolkit.Editor.LiveLink
         private readonly Thread acceptThread;
         private readonly Dictionary<int, Connection> connections = new Dictionary<int, Connection>();
         private readonly ConcurrentQueue<Item> items = new ConcurrentQueue<Item>();
-        private readonly ConcurrentDictionary<(int, string), LiveLinkFrame> latest = new ConcurrentDictionary<(int, string), LiveLinkFrame>();
+        // Newest waiting frame per (connection, collapse key, run): a run ends when a frame that does not collapse comes.
+        private readonly ConcurrentDictionary<(int, string, int), LiveLinkFrame> latest = new ConcurrentDictionary<(int, string, int), LiveLinkFrame>();
+        private readonly HashSet<Connection> unannounced = new HashSet<Connection>();
         private int nextId;
         private volatile bool disposed;
 
@@ -172,7 +186,7 @@ namespace Orbiters.Toolkit.Editor.LiveLink
             AssemblyReloadEvents.beforeAssemblyReload += Dispose;
         }
 
-        /// <summary>Sends a frame on one connection; false when it is gone or the send failed.</summary>
+        /// <summary>Queues a frame on one connection; false when it is gone (or was cut off for not reading).</summary>
         public bool Send(int connection, byte type, byte[] payload = null)
         {
             Connection target;
@@ -180,7 +194,7 @@ namespace Orbiters.Toolkit.Editor.LiveLink
             return target != null && Write(target, format.Encode(type, token, payload));
         }
 
-        /// <summary>Sends a frame on every connection; how many it reached.</summary>
+        /// <summary>Queues a frame on every connection; how many took it.</summary>
         public int Broadcast(byte type, byte[] payload = null)
         {
             Connection[] all;
@@ -201,14 +215,40 @@ namespace Orbiters.Toolkit.Editor.LiveLink
 
         private static bool Write(Connection connection, byte[] data)
         {
+            if (connection.Outgoing.IsAddingCompleted) return false;
+            if (Interlocked.Add(ref connection.QueuedBytes, data.Length) > MaxQueuedBytes)
+            {
+                // The peer stopped reading long ago: better a reconnect than the editor's memory filling up.
+                try { connection.Client.Close(); }
+                catch (Exception) { }
+                return false;
+            }
             try
             {
-                lock (connection.SendLock) connection.Stream.Write(data, 0, data.Length);
+                connection.Outgoing.Add(data);
                 return true;
+            }
+            catch (InvalidOperationException)
+            {
+                return false;
+            }
+        }
+
+        private static void WriteLoop(Connection connection)
+        {
+            try
+            {
+                foreach (var data in connection.Outgoing.GetConsumingEnumerable())
+                {
+                    connection.Stream.Write(data, 0, data.Length);
+                    Interlocked.Add(ref connection.QueuedBytes, -data.Length);
+                }
             }
             catch (Exception ex) when (ex is IOException || ex is ObjectDisposedException || ex is SocketException || ex is InvalidOperationException)
             {
-                return false;
+                // The peer went away: the reader sees it too and announces it.
+                try { connection.Client.Close(); }
+                catch (Exception) { }
             }
         }
 
@@ -234,17 +274,14 @@ namespace Orbiters.Toolkit.Editor.LiveLink
 
                 accepted.NoDelay = true;
                 var connection = new Connection { Id = Interlocked.Increment(ref nextId), Client = accepted, Stream = accepted.GetStream() };
-                Connection[] replaced;
                 lock (connections)
                 {
-                    replaced = singleClient ? connections.Values.ToArray() : Array.Empty<Connection>();
-                    foreach (var old in replaced) { old.Superseded = true; connections.Remove(old.Id); }
-                    connections[connection.Id] = connection;
+                    if (singleClient) unannounced.Add(connection);
+                    else { connections[connection.Id] = connection; connection.Announced = true; }
                 }
-                foreach (var old in replaced)
-                    try { old.Client.Close(); }
-                    catch (Exception) { }
-                items.Enqueue(new Item(connection.Id, true, null));
+                if (connection.Announced) items.Enqueue(new Item(connection.Id, true, null));
+                connection.Writer = new Thread(() => WriteLoop(connection)) { IsBackground = true, Name = acceptThread.Name + " writer" };
+                connection.Writer.Start();
                 var reader = new Thread(() => ReadLoop(connection)) { IsBackground = true, Name = acceptThread.Name + " reader" };
                 reader.Start();
             }
@@ -253,6 +290,7 @@ namespace Orbiters.Toolkit.Editor.LiveLink
         private void ReadLoop(Connection connection)
         {
             var header = new byte[LiveLinkFormat.HeaderBytes];
+            int run = 0;
             try
             {
                 while (!disposed && connection.Client.Connected)
@@ -261,15 +299,28 @@ namespace Orbiters.Toolkit.Editor.LiveLink
                     if (!format.TryReadHeader(header, out byte type, out int tokenLength, out int payloadLength)) return;
                     var tokenBytes = new byte[tokenLength];
                     if (!ReadExactly(connection.Stream, tokenBytes)) return;
+                    string frameToken = Encoding.UTF8.GetString(tokenBytes);
+                    // Anything not of this session ends the connection: nothing it sent is used, nor its payload read.
+                    if (!LiveLinkFormat.SameToken(frameToken, token)) return;
                     var payload = new byte[payloadLength];
                     if (!ReadExactly(connection.Stream, payload)) return;
-                    var frame = new LiveLinkFrame { Connection = connection.Id, Type = type, Token = Encoding.UTF8.GetString(tokenBytes), Payload = payload };
-                    // Anything not of this session ends the connection: nothing it sent is used.
-                    if (!LiveLinkFormat.SameToken(frame.Token, token)) return;
+                    var frame = new LiveLinkFrame { Connection = connection.Id, Type = type, Token = frameToken, Payload = payload };
                     if (accept != null && !accept(frame)) return;
+                    if (!connection.Announced) Announce(connection);
                     string key = collapseKey?.Invoke(frame);
-                    if (key != null) latest[(connection.Id, key)] = frame;
-                    else items.Enqueue(new Item(connection.Id, true, frame));
+                    if (key == null)
+                    {
+                        run++;
+                        items.Enqueue(new Item(connection.Id, true, frame));
+                    }
+                    else
+                    {
+                        // The first frame of a run takes a place in the order; later ones only replace what it delivers.
+                        var slot = (connection.Id, key, run);
+                        bool added = false;
+                        latest.AddOrUpdate(slot, _ => { added = true; return frame; }, (_, __) => frame);
+                        if (added) items.Enqueue(new Item(connection.Id, true, null, slot));
+                    }
                     if (closingType.HasValue && type == closingType.Value) return;
                 }
             }
@@ -279,12 +330,35 @@ namespace Orbiters.Toolkit.Editor.LiveLink
             }
             finally
             {
-                bool known;
-                lock (connections) known = connections.Remove(connection.Id);
+                lock (connections) { connections.Remove(connection.Id); unannounced.Remove(connection); }
+                connection.Outgoing.CompleteAdding();
                 try { connection.Client.Close(); }
                 catch (Exception) { }
-                if (known || !connection.Superseded) items.Enqueue(new Item(connection.Id, false, null));
+                if (connection.Announced && !connection.Superseded) items.Enqueue(new Item(connection.Id, false, null));
             }
+        }
+
+        // A single-client connection proved it belongs to the session: it replaces the previous one, whose departure is
+        // announced first, so the app can let go of what that one held.
+        private void Announce(Connection connection)
+        {
+            Connection[] replaced;
+            lock (connections)
+            {
+                unannounced.Remove(connection);
+                replaced = connections.Values.ToArray();
+                foreach (var old in replaced) { old.Superseded = true; connections.Remove(old.Id); }
+                connections[connection.Id] = connection;
+                connection.Announced = true;
+            }
+            foreach (var old in replaced)
+            {
+                items.Enqueue(new Item(old.Id, false, null));
+                old.Outgoing.CompleteAdding();
+                try { old.Client.Close(); }
+                catch (Exception) { }
+            }
+            items.Enqueue(new Item(connection.Id, true, null));
         }
 
         private static bool ReadExactly(NetworkStream input, byte[] buffer)
@@ -299,22 +373,24 @@ namespace Orbiters.Toolkit.Editor.LiveLink
             return true;
         }
 
-        // Main thread: connections, disconnections and frames in arrival order, then the newest collapsed frames.
+        // Main thread: connections, disconnections and frames in arrival order; collapsed frames in the place of the
+        // first of their run, as the newest of it.
         private void Pump()
         {
             while (items.TryDequeue(out var item))
             {
+                if (item.Collapsed.HasValue)
+                {
+                    if (latest.TryRemove(item.Collapsed.Value, out var newest)) Received?.Invoke(newest);
+                    continue;
+                }
                 if (item.Frame == null)
                 {
-                    // A replaced connection (single client) leaves silently: the new one is already up.
                     ConnectionChanged?.Invoke(item.Connection, item.Up);
                     continue;
                 }
                 Received?.Invoke(item.Frame);
             }
-            foreach (var key in latest.Keys)
-                if (latest.TryRemove(key, out var frame))
-                    Received?.Invoke(frame);
         }
 
         public void Dispose()
@@ -325,7 +401,10 @@ namespace Orbiters.Toolkit.Editor.LiveLink
             AssemblyReloadEvents.beforeAssemblyReload -= Dispose;
             if (closingType.HasValue) Broadcast(closingType.Value);
             Connection[] all;
-            lock (connections) { all = connections.Values.ToArray(); connections.Clear(); }
+            lock (connections) { all = connections.Values.Concat(unannounced).ToArray(); connections.Clear(); unannounced.Clear(); }
+            // The goodbye gets a moment to leave; a peer that is not reading does not hold the reload up.
+            foreach (var connection in all) connection.Outgoing.CompleteAdding();
+            foreach (var connection in all) connection.Writer?.Join(200);
             foreach (var connection in all)
                 try { connection.Client.Close(); }
                 catch (Exception) { }
