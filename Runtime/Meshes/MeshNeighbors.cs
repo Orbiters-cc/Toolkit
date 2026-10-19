@@ -24,10 +24,17 @@ namespace Orbiters.Toolkit.Meshes
         public int[] Representative;
         public int WeldedCount => Members.Length;
 
-        public static MeshNeighbors Build(Vector3[] vertices, int[] triangles, float weldTolerance = 1e-5f)
+        /// <param name="normals">With <paramref name="minNormalDot"/>: vertices at one place weld only when their normals
+        /// agree that much (two sheets that touch, as the front and back of double-sided cloth or closed lips, face apart
+        /// and stay apart; UV seams and hard edges still weld). Null welds by position alone.</param>
+        /// <param name="weldKeys">Per vertex: vertices at one place weld only when their keys are equal (a caller's
+        /// signature of what else must agree, as skin and blendshape motion). Null: no such condition.</param>
+        public static MeshNeighbors Build(Vector3[] vertices, int[] triangles, float weldTolerance = 1e-5f, Vector3[] normals = null, float minNormalDot = -1f, long[] weldKeys = null)
         {
             if (vertices == null) throw new ArgumentNullException(nameof(vertices));
             if (triangles == null) throw new ArgumentNullException(nameof(triangles));
+            bool byNormal = normals != null && normals.Length == vertices.Length && minNormalDot > -1f;
+            bool byKey = weldKeys != null && weldKeys.Length == vertices.Length;
             int n = vertices.Length;
             var weld = new int[n];
             var membersList = new List<List<int>>();
@@ -47,9 +54,14 @@ namespace Orbiters.Toolkit.Meshes
                             for (int i = 0; i < bucket.Count; i++)
                             {
                                 int w = bucket[i];
-                                var q = vertices[membersList[w][0]];
+                                int first = membersList[w][0];
+                                var q = vertices[first];
                                 float ddx = q.x - p.x, ddy = q.y - p.y, ddz = q.z - p.z;
-                                if (ddx * ddx + ddy * ddy + ddz * ddz <= tol2) { found = w; break; }
+                                if (ddx * ddx + ddy * ddy + ddz * ddz > tol2) continue;
+                                if (byNormal && !NormalsAgree(normals[first], normals[v], minNormalDot)) continue;
+                                if (byKey && weldKeys[first] != weldKeys[v]) continue;
+                                found = w;
+                                break;
                             }
                         }
                 if (found < 0)
@@ -87,6 +99,14 @@ namespace Orbiters.Toolkit.Meshes
                 trianglesOf[w] = triangleLists[w] != null ? triangleLists[w].ToArray() : Array.Empty<int>();
             }
             return new MeshNeighbors { Weld = weld, Members = members, Adjacent = adjacent, TrianglesOf = trianglesOf, Representative = representative };
+        }
+
+        // A missing (zero) normal agrees with any.
+        private static bool NormalsAgree(Vector3 a, Vector3 b, float minDot)
+        {
+            float la = a.sqrMagnitude, lb = b.sqrMagnitude;
+            if (la < 1e-12f || lb < 1e-12f) return true;
+            return Vector3.Dot(a, b) >= minDot * Mathf.Sqrt(la * lb);
         }
 
         private static long Key(int x, int y, int z) => ((long)(x & 0x1FFFFF) << 42) | ((long)(y & 0x1FFFFF) << 21) | (long)(z & 0x1FFFFF);

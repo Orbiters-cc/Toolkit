@@ -53,6 +53,29 @@ namespace Orbiters.Toolkit.Editor.Tests
             Assert.That(ring.Count, Is.EqualTo(7));
         }
 
+        // Double-sided cloth: a front quad and its back copy (same places, normals facing apart) with a hard edge
+        // (a second quad at a right angle sharing an edge, its own normals there).
+        [Test]
+        public void NormalsKeepTouchingSheetsApartButWeldHardEdges()
+        {
+            var vertices = new[]
+            {
+                new Vector3(0, 0, 0), new Vector3(1, 0, 0), new Vector3(0, 1, 0), new Vector3(1, 1, 0),   // front, normal -Z
+                new Vector3(0, 0, 0), new Vector3(1, 0, 0), new Vector3(0, 1, 0), new Vector3(1, 1, 0),   // back, normal +Z
+                new Vector3(1, 0, 0), new Vector3(1, 1, 0), new Vector3(1, 0, 1), new Vector3(1, 1, 1),   // side, normal +X
+            };
+            var normals = new Vector3[12];
+            for (int i = 0; i < 4; i++) { normals[i] = Vector3.back; normals[4 + i] = Vector3.forward; normals[8 + i] = Vector3.right; }
+            var triangles = new[] { 0, 2, 1, 1, 2, 3, 4, 5, 6, 5, 7, 6, 8, 9, 10, 9, 11, 10 };
+
+            var byPlace = MeshNeighbors.Build(vertices, triangles, 1e-5f);
+            Assert.That(byPlace.Weld[0], Is.EqualTo(byPlace.Weld[4]), "by place alone the two sides weld");
+            var byNormal = MeshNeighbors.Build(vertices, triangles, 1e-5f, normals, -0.5f);
+            Assert.That(byNormal.Weld[0], Is.Not.EqualTo(byNormal.Weld[4]), "front and back stay two sheets");
+            Assert.That(byNormal.Weld[1], Is.EqualTo(byNormal.Weld[8]), "a hard edge (normals at a right angle) still welds");
+            Assert.That(byNormal.WeldedCount, Is.EqualTo(10));
+        }
+
         [Test]
         public void RaycastAndClosestPointFindTheSurface()
         {
