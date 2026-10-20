@@ -5,6 +5,7 @@ using System.IO;
 using System.Linq;
 using System.Net.Sockets;
 using System.Text;
+using System.Text.RegularExpressions;
 using NUnit.Framework;
 using Orbiters.Toolkit.Editor.LiveLink;
 using Orbiters.Toolkit.Editor.Meshes;
@@ -188,6 +189,94 @@ namespace Orbiters.Toolkit.Editor.Tests
             {
                 if (Directory.Exists(folder)) Directory.Delete(folder, true);
             }
+        }
+
+        // A reader that does not share writing keeps the file as it was: the write says so in the Console instead of throwing.
+        [Test]
+        public void AnEndpointFileHeldWithoutWriteSharingIsLeftAsItWas()
+        {
+            if (Application.platform != RuntimePlatform.WindowsEditor) Assert.Ignore("Only Windows refuses to write a file a reader holds.");
+            string folder = Path.Combine(Path.GetTempPath(), "OrbitersLiveLinkTest-" + Guid.NewGuid().ToString("N"));
+            try
+            {
+                string path = Path.Combine(folder, "endpoint.json");
+                LiveLinkServer.WriteAtomically(path, "{\"port\":1}");
+                LogAssert.Expect(LogType.Warning, new Regex("endpoint\\.json could not be updated"));
+                using (new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read))
+                    Assert.DoesNotThrow(() => LiveLinkServer.WriteAtomically(path, "{\"port\":2}"));
+                Assert.That(File.ReadAllText(path), Is.EqualTo("{\"port\":1}"));
+                Assert.That(Directory.GetFiles(folder), Is.EqualTo(new[] { path }), "no temporary file is left");
+            }
+            finally
+            {
+                if (Directory.Exists(folder)) Directory.Delete(folder, true);
+            }
+        }
+
+        // Strangers holding every place of the connections waiting to prove themselves do not keep the client out: the
+        // oldest of them makes room.
+        [UnityTest]
+        public IEnumerator StrangersHoldingEveryWaitingPlaceDoNotKeepTheClientOut()
+        {
+            var changes = new List<(int, bool)>();
+            var strangers = new List<TcpClient>();
+            using (var server = new LiveLinkServer(Format, "secret"))
+            {
+                server.ConnectionChanged += (id, up) => changes.Add((id, up));
+                try
+                {
+                    for (int i = 0; i < LiveLinkServer.MaxPendingConnections; i++) strangers.Add(Connect(server));
+                    yield return Until(() => false, .3);
+                    using (var client = Connect(server))
+                    {
+                        Send(client, 1, "secret", "hello");
+                        yield return Until(() => changes.Count >= 1);
+                        Assert.That(changes.Count(c => c.Item2), Is.EqualTo(1), "the client is in");
+
+                        strangers[0].ReceiveTimeout = 3000;
+                        int read;
+                        try { read = strangers[0].GetStream().Read(new byte[16], 0, 16); }
+                        catch (IOException) { read = -1; }
+                        Assert.That(read, Is.EqualTo(0), "the oldest stranger was closed to make room");
+                    }
+                }
+                finally
+                {
+                    foreach (var stranger in strangers) stranger.Close();
+                }
+            }
+        }
+
+        // A link whose accept check lets go of the raw payload once decoded keeps reading: what waits is counted as read.
+        [UnityTest]
+        public IEnumerator AnAcceptCheckMayLetGoOfThePayload()
+        {
+            var frames = new List<string>();
+            bool up = false;
+            using (var server = new LiveLinkServer(Format, "secret", accept: f =>
+                   {
+                       f.Decoded = Encoding.UTF8.GetString(f.Payload);
+                       f.Payload = null;
+                       return true;
+                   }, collapseKey: f => f.Type == 2 ? "image" : null))
+            {
+                server.ConnectionChanged += (_, connected) => up = connected;
+                server.Received += f => frames.Add((string)f.Decoded);
+                using (var client = Connect(server))
+                {
+                    var stream = client.GetStream();
+                    foreach (var (type, text) in new[] { (1, "hello"), (2, "old"), (2, "new"), (1, "end") })
+                    {
+                        var data = Format.Encode((byte)type, "secret", Encoding.UTF8.GetBytes(text));
+                        stream.Write(data, 0, data.Length);
+                    }
+                    yield return Until(() => frames.Contains("end"));
+                    Assert.That(up, Is.True, "the connection is still there");
+                }
+            }
+            Assert.That(frames.First(), Is.EqualTo("hello"));
+            Assert.That(frames.Last(), Is.EqualTo("end"));
+            Assert.That(frames.Contains("new"), Is.True, string.Join(",", frames));
         }
 
         // Frames sharing a collapse key keep only the newest waiting one (images of one texture rendered faster than shown).

@@ -19,17 +19,14 @@ namespace Orbiters.Toolkit.Editor.LiveLink
     }
 
     /// <summary>
-    /// The file an external application reads to find a live-link server: written atomically (a client never sees
-    /// a half file) and deleted when the server goes. One file per editor process, so several editors coexist.
+    /// The file an external application reads to find a live-link server: written through a temporary file put in its
+    /// place (<see cref="LiveLinkServer.WriteAtomically"/>: a client that holds it open as it changes may read it half
+    /// written, and reads it again) and deleted when the server goes. One file per editor process, so several editors coexist.
     /// </summary>
     public static class LiveLinkEndpointFile
     {
         /// <summary>Writes the endpoint description (any serializable object) at <paramref name="path"/>.</summary>
-        public static void Write(string path, object endpoint)
-        {
-            Directory.CreateDirectory(Path.GetDirectoryName(path));
-            LiveLinkServer.WriteAtomically(path, LiveLinkJson.Text(endpoint));
-        }
+        public static void Write(string path, object endpoint) => LiveLinkServer.WriteAtomically(path, LiveLinkJson.Text(endpoint));
 
         public static T Read<T>(string path) where T : class
         {

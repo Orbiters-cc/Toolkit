@@ -152,21 +152,31 @@ namespace Orbiters.Toolkit.Editor.LiveLink
             // with the session's token: a stranger that connects is told nothing and cannot push the real client off.
             public volatile bool Announced;
             public bool ProofSent;
+            // Its reader and writer threads: the last one to end disposes what they shared.
+            public int Running = 2;
         }
 
-        // A connection or a disconnection (Frame and Collapsed null), a frame, or the place of collapsed frames.
+        // A connection or a disconnection (Frame and Collapsed null), a frame and the payload bytes it was counted for, or the
+        // place of collapsed frames.
         private readonly struct Item
         {
             public readonly Connection Owner;
             public readonly bool Up;
             public readonly LiveLinkFrame Frame;
+            public readonly int Bytes;
             public readonly (int, string, int)? Collapsed;
-            public Item(Connection owner, bool up, LiveLinkFrame frame, (int, string, int)? collapsed = null) { Owner = owner; Up = up; Frame = frame; Collapsed = collapsed; }
+            public Item(Connection owner, bool up, LiveLinkFrame frame, int bytes = 0, (int, string, int)? collapsed = null)
+            {
+                Owner = owner; Up = up; Frame = frame; Bytes = bytes; Collapsed = collapsed;
+            }
         }
 
         /// <summary>Bytes a connection may have waiting to be written before it is closed as not reading.</summary>
         public const long MaxQueuedBytes = 512L * 1024 * 1024;
-        /// <summary>Connections that have not proved they belong to the session yet, at most; more are closed at once.</summary>
+        /// <summary>
+        /// Connections that have not proved they belong to the session yet, at most: one more closes the oldest of them that
+        /// has not sent the token (strangers holding every place cannot keep the client out).
+        /// </summary>
         public const int MaxPendingConnections = 16;
         /// <summary>How long a new connection has to send a frame with the session's token.</summary>
         internal static int HandshakeMilliseconds = 10000;
@@ -183,8 +193,9 @@ namespace Orbiters.Toolkit.Editor.LiveLink
         private readonly long maxInboundBytes;
         private readonly Dictionary<int, Connection> connections = new Dictionary<int, Connection>();
         private readonly ConcurrentQueue<Item> items = new ConcurrentQueue<Item>();
-        // Newest waiting frame per (connection, collapse key, run): a run ends when a frame that does not collapse comes.
-        private readonly Dictionary<(int, string, int), LiveLinkFrame> latest = new Dictionary<(int, string, int), LiveLinkFrame>();
+        // Newest waiting frame per (connection, collapse key, run), with the payload bytes it was counted for (an accept check
+        // may let go of the payload): a run ends when a frame that does not collapse comes.
+        private readonly Dictionary<(int, string, int), (LiveLinkFrame Frame, int Bytes)> latest = new Dictionary<(int, string, int), (LiveLinkFrame, int)>();
         private readonly HashSet<Connection> unannounced = new HashSet<Connection>();
         // Main thread: the connections announced and not gone yet (frames of any other are dropped).
         private readonly HashSet<int> live = new HashSet<int>();
@@ -269,22 +280,46 @@ namespace Orbiters.Toolkit.Editor.LiveLink
 
         private static bool Write(Connection connection, byte[] data)
         {
-            if (connection.Outgoing.IsAddingCompleted) return false;
-            if (Interlocked.Add(ref connection.QueuedBytes, data.Length) > MaxQueuedBytes)
-            {
-                // The peer stopped reading long ago: better a reconnect than the editor's memory filling up.
-                Close(connection);
-                return false;
-            }
             try
             {
+                if (connection.Outgoing.IsAddingCompleted) return false;
+                if (Interlocked.Add(ref connection.QueuedBytes, data.Length) > MaxQueuedBytes)
+                {
+                    // The peer stopped reading long ago: better a reconnect than the editor's memory filling up.
+                    Close(connection);
+                    return false;
+                }
                 connection.Outgoing.Add(data);
                 return true;
             }
+            // Completed, or disposed once its threads ended (ObjectDisposedException is one).
             catch (InvalidOperationException)
             {
                 return false;
             }
+        }
+
+        // No more sends: the writer ends once it wrote what waits. Nothing when the connection is over already.
+        private static void Complete(Connection connection)
+        {
+            try { connection.Outgoing.CompleteAdding(); }
+            catch (ObjectDisposedException) { }
+        }
+
+        // The reader may read again.
+        private static void Wake(Connection connection)
+        {
+            try { connection.Drained.Set(); }
+            catch (ObjectDisposedException) { }
+        }
+
+        // A connection's reader or writer ended: the last of them disposes what they shared.
+        private static void Finished(Connection connection)
+        {
+            if (Interlocked.Decrement(ref connection.Running) != 0) return;
+            connection.Deadline?.Dispose();
+            connection.Outgoing.Dispose();
+            connection.Drained.Dispose();
         }
 
         private static void WriteLoop(Connection connection)
@@ -302,19 +337,24 @@ namespace Orbiters.Toolkit.Editor.LiveLink
                 // The peer went away (or the stream was closed under the writer): the reader sees it too and announces it.
                 Close(connection);
             }
+            finally
+            {
+                Finished(connection);
+            }
         }
 
         /// <summary>
-        /// Writes a small file whole or not at all (an endpoint the other application reads while it may change). The file
-        /// is written beside it under a name of its own, then put in its place; while a reader holds it open (Windows refuses
-        /// the replacement then), it is tried again a few times, and finally overwritten in place.
+        /// Writes a small file (an endpoint the other application reads while it may change), at best whole or not at all.
+        /// The file is written beside it under a name of its own, then put in its place; while a reader holds it open
+        /// (Windows refuses the replacement then), it is tried again a few times, then overwritten in place, which a reader
+        /// may see half done. Never throws: a file that cannot be written is said in the Console.
         /// </summary>
         public static void WriteAtomically(string path, string text)
         {
-            Directory.CreateDirectory(Path.GetDirectoryName(path));
             string temp = path + "." + Guid.NewGuid().ToString("N").Substring(0, 8) + ".tmp";
             try
             {
+                Directory.CreateDirectory(Path.GetDirectoryName(path));
                 File.WriteAllText(temp, text);
                 for (int attempt = 0; ; attempt++)
                 {
@@ -335,6 +375,11 @@ namespace Orbiters.Toolkit.Editor.LiveLink
                         return;
                     }
                 }
+            }
+            catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException)
+            {
+                // Held without sharing writes, or not writable: the caller goes on, the next write may succeed.
+                UnityEngine.Debug.LogWarning("[Orbiters] " + Path.GetFileName(path) + " could not be updated: " + ex.Message);
             }
             finally
             {
@@ -372,8 +417,15 @@ namespace Orbiters.Toolkit.Editor.LiveLink
         {
             accepted.NoDelay = true;
             var connection = new Connection { Id = Interlocked.Increment(ref nextId), Client = accepted, Stream = accepted.GetStream() };
+            Connection evicted = null;
             lock (connections)
             {
+                if (!disposed && unannounced.Count >= MaxPendingConnections)
+                {
+                    // The oldest that has not sent the token makes room: a client connecting now proves itself at once.
+                    evicted = unannounced.Where(c => !c.Proved).OrderBy(c => c.Id).FirstOrDefault();
+                    if (evicted != null) unannounced.Remove(evicted);
+                }
                 if (disposed || unannounced.Count >= MaxPendingConnections)
                 {
                     accepted.Close();
@@ -381,6 +433,7 @@ namespace Orbiters.Toolkit.Editor.LiveLink
                 }
                 unannounced.Add(connection);
             }
+            Close(evicted);
             connection.Deadline = new Timer(_ => { if (!connection.Proved) Close(connection); }, null, HandshakeMilliseconds, Timeout.Infinite);
             connection.Writer = new Thread(() => WriteLoop(connection)) { IsBackground = true, Name = threadName + " writer" };
             connection.Writer.Start();
@@ -426,11 +479,12 @@ namespace Orbiters.Toolkit.Editor.LiveLink
                     if (connection.Superseded) return;
                     if (!connection.Announced) Announce(connection);
                     string key = collapseKey?.Invoke(frame);
+                    // Counted as read: what the frame holds by then may differ (an accept check that lets go of the payload).
                     if (key == null)
                     {
                         run++;
                         Interlocked.Add(ref connection.InboundBytes, payload.Length);
-                        items.Enqueue(new Item(connection, true, frame));
+                        items.Enqueue(new Item(connection, true, frame, payload.Length));
                     }
                     else
                     {
@@ -440,10 +494,10 @@ namespace Orbiters.Toolkit.Editor.LiveLink
                         lock (latest)
                         {
                             added = !latest.TryGetValue(slot, out var older);
-                            Interlocked.Add(ref connection.InboundBytes, payload.Length - (older?.Payload.Length ?? 0));
-                            latest[slot] = frame;
+                            Interlocked.Add(ref connection.InboundBytes, payload.Length - (added ? 0 : older.Bytes));
+                            latest[slot] = (frame, payload.Length);
                         }
-                        if (added) items.Enqueue(new Item(connection, true, null, slot));
+                        if (added) items.Enqueue(new Item(connection, true, null, collapsed: slot));
                     }
                     if (closingType.HasValue && type == closingType.Value) return;
                 }
@@ -461,9 +515,10 @@ namespace Orbiters.Toolkit.Editor.LiveLink
             {
                 lock (connections) { connections.Remove(connection.Id); unannounced.Remove(connection); }
                 connection.Deadline?.Dispose();
-                connection.Outgoing.CompleteAdding();
+                Complete(connection);
                 Close(connection);
                 if (connection.Announced && !connection.Superseded) items.Enqueue(new Item(connection, false, null));
+                Finished(connection);
             }
         }
 
@@ -498,8 +553,8 @@ namespace Orbiters.Toolkit.Editor.LiveLink
             foreach (var old in replaced)
             {
                 items.Enqueue(new Item(old, false, null));
-                old.Outgoing.CompleteAdding();
-                old.Drained.Set();
+                Complete(old);
+                Wake(old);
                 Close(old);
             }
             items.Enqueue(new Item(connection, true, null));
@@ -525,11 +580,16 @@ namespace Orbiters.Toolkit.Editor.LiveLink
             {
                 var owner = item.Owner;
                 LiveLinkFrame frame = item.Frame;
+                int bytes = item.Bytes;
                 if (item.Collapsed.HasValue)
                 {
                     lock (latest)
                     {
-                        if (latest.TryGetValue(item.Collapsed.Value, out frame)) latest.Remove(item.Collapsed.Value);
+                        if (latest.TryGetValue(item.Collapsed.Value, out var newest))
+                        {
+                            latest.Remove(item.Collapsed.Value);
+                            (frame, bytes) = newest;
+                        }
                     }
                     if (frame == null) continue;
                 }
@@ -540,7 +600,7 @@ namespace Orbiters.Toolkit.Editor.LiveLink
                     ConnectionChanged?.Invoke(owner.Id, item.Up);
                     continue;
                 }
-                if (Interlocked.Add(ref owner.InboundBytes, -frame.Payload.Length) <= maxInboundBytes) owner.Drained.Set();
+                if (Interlocked.Add(ref owner.InboundBytes, -bytes) <= maxInboundBytes) Wake(owner);
                 if (live.Contains(owner.Id)) Received?.Invoke(frame);
             }
         }
@@ -556,7 +616,7 @@ namespace Orbiters.Toolkit.Editor.LiveLink
             Connection[] all;
             lock (connections) { all = connections.Values.Concat(unannounced).ToArray(); connections.Clear(); unannounced.Clear(); }
             // The goodbye gets a moment to leave; a peer that is not reading does not hold the reload up.
-            foreach (var connection in all) { connection.Outgoing.CompleteAdding(); connection.Drained.Set(); connection.Deadline?.Dispose(); }
+            foreach (var connection in all) { Complete(connection); Wake(connection); connection.Deadline?.Dispose(); }
             var until = DateTime.UtcNow.AddMilliseconds(250);
             foreach (var connection in all)
             {
