@@ -145,34 +145,79 @@ namespace Orbiters.Toolkit.Meshes
         public void RefitTriangles(IReadOnlyList<int> movedTriangles)
         {
             if (movedTriangles == null || movedTriangles.Count == 0) return;
-            var dirtyLeaves = new HashSet<int>();
-            for (int i = 0; i < movedTriangles.Count; i++) dirtyLeaves.Add(leafOfTriangle[movedTriangles[i]]);
-            var ancestors = new SortedSet<int>(); // refit deepest (highest index) first: children before parents
-            foreach (int leaf in dirtyLeaves)
-            {
-                ref var node = ref nodes[leaf];
-                Bounds(node.Start, node.Count, out node.Min, out node.Max);
-                for (int p = node.Parent; p >= 0; p = nodes[p].Parent)
-                    if (!ancestors.Add(p)) break;
-            }
-            foreach (int i in ancestors.Reverse())
-            {
-                ref var node = ref nodes[i];
-                node.Min = Vector3.Min(nodes[node.Left].Min, nodes[node.Right].Min);
-                node.Max = Vector3.Max(nodes[node.Left].Max, nodes[node.Right].Max);
-            }
+            NextStamp();
+            dirtyNodes.Clear();
+            for (int i = 0; i < movedTriangles.Count; i++) MarkLeaf(leafOfTriangle[movedTriangles[i]]);
+            RefitMarked();
         }
 
         /// <summary>Refits the leaves holding the triangles around <paramref name="movedVertices"/>.</summary>
         public void RefitVertices(IReadOnlyList<int> movedVertices, MeshNeighbors neighbors)
         {
             if (movedVertices == null || movedVertices.Count == 0) return;
-            var moved = new List<int>();
-            var seen = new HashSet<int>();
+            NextStamp();
+            dirtyNodes.Clear();
             for (int i = 0; i < movedVertices.Count; i++)
+            {
                 foreach (int t in neighbors.TrianglesOf[neighbors.Weld[movedVertices[i]]])
-                    if (seen.Add(t)) moved.Add(t);
-            RefitTriangles(moved);
+                {
+                    if (triangleStamp[t] == stamp) continue;
+                    triangleStamp[t] = stamp;
+                    MarkLeaf(leafOfTriangle[t]);
+                }
+            }
+            RefitMarked();
+        }
+
+        // Refits mark what they visit with a stamp instead of filling sets: a stroke refits thousands of triangles a step.
+        private int[] triangleStamp, nodeStamp;
+        private int stamp;
+        private readonly List<int> dirtyNodes = new List<int>();
+        private static readonly IComparer<int> Descending = Comparer<int>.Create((a, b) => b.CompareTo(a));
+
+        private void NextStamp()
+        {
+            if (nodeStamp == null || nodeStamp.Length < nodeCount) nodeStamp = new int[nodes.Length];
+            if (triangleStamp == null || triangleStamp.Length != leafOfTriangle.Length) triangleStamp = new int[leafOfTriangle.Length];
+            if (++stamp == int.MaxValue)
+            {
+                Array.Clear(nodeStamp, 0, nodeStamp.Length);
+                Array.Clear(triangleStamp, 0, triangleStamp.Length);
+                stamp = 1;
+            }
+        }
+
+        private void MarkLeaf(int leaf)
+        {
+            if (nodeStamp[leaf] == stamp) return;
+            nodeStamp[leaf] = stamp;
+            dirtyNodes.Add(leaf);
+        }
+
+        // The marked leaves, then their ancestors deepest first (children have higher indices than their parents).
+        private void RefitMarked()
+        {
+            int leaves = dirtyNodes.Count;
+            if (leaves == 0) return;
+            // A large part of the tree: one pass over every node is cheaper than walking up from each leaf.
+            if (leaves * 4 > nodeCount) { Refit(); return; }
+            for (int i = 0; i < leaves; i++)
+            {
+                ref var node = ref nodes[dirtyNodes[i]];
+                Bounds(node.Start, node.Count, out node.Min, out node.Max);
+                for (int p = node.Parent; p >= 0 && nodeStamp[p] != stamp; p = nodes[p].Parent)
+                {
+                    nodeStamp[p] = stamp;
+                    dirtyNodes.Add(p);
+                }
+            }
+            dirtyNodes.Sort(leaves, dirtyNodes.Count - leaves, Descending);
+            for (int i = leaves; i < dirtyNodes.Count; i++)
+            {
+                ref var node = ref nodes[dirtyNodes[i]];
+                node.Min = Vector3.Min(nodes[node.Left].Min, nodes[node.Right].Min);
+                node.Max = Vector3.Max(nodes[node.Left].Max, nodes[node.Right].Max);
+            }
         }
 
         /// <summary>The triangles whose bounds overlap the sphere (a superset of those really inside).</summary>
