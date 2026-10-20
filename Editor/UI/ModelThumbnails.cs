@@ -26,18 +26,28 @@ namespace Orbiters.Toolkit.Editor
         private static readonly string Folder = Path.Combine("Library", "Orbiters", "Thumbnails");
         private static readonly Dictionary<string, Texture2D> Made = new Dictionary<string, Texture2D>();
         private static readonly Dictionary<string, GameObject> Queue = new Dictionary<string, GameObject>();
+        // Keys (hashed) of pictures made without a background.
+        private static readonly HashSet<string> Clear = new HashSet<string>();
         private static readonly HashSet<string> Failed = new HashSet<string>();
         private static bool pumping;
 
         /// <summary>The picture of <paramref name="root"/> for <paramref name="key"/>, or null while it is made.</summary>
-        public static Texture2D Get(GameObject root, string key)
+        public static Texture2D Get(GameObject root, string key) => Get(root, key, false);
+
+        /// <summary>
+        /// The picture of <paramref name="root"/> for <paramref name="key"/>, or null while it is made; with
+        /// <paramref name="transparent"/>, without a background (the model alone, its edges blended), for rows and cards
+        /// that have their own.
+        /// </summary>
+        public static Texture2D Get(GameObject root, string key, bool transparent)
         {
             if (root == null || string.IsNullOrEmpty(key)) return null;
-            key = Hash(key);
+            key = Hash((transparent ? "clear|" : "") + key);
             if (Made.TryGetValue(key, out var texture) && texture != null) return texture;
             if (Failed.Contains(key)) return null;
-            texture = Load(key);
+            texture = Load(key, transparent);
             if (texture != null) return Made[key] = texture;
+            if (transparent) Clear.Add(key);
             Queue[key] = root;
             if (!pumping) { pumping = true; EditorApplication.update += Pump; }
             return null;
@@ -57,7 +67,7 @@ namespace Orbiters.Toolkit.Editor
             Queue.Remove(key);
             try
             {
-                var texture = root != null ? Render(root) : null;
+                var texture = root != null ? Render(root, Clear.Contains(key)) : null;
                 if (texture == null) { Failed.Add(key); return; }
                 Made[key] = texture;
                 Save(key, texture);
@@ -71,7 +81,7 @@ namespace Orbiters.Toolkit.Editor
 
         private struct Part { public Mesh Mesh; public Matrix4x4 Matrix; public Material[] Materials; }
 
-        private static Texture2D Render(GameObject root)
+        private static Texture2D Render(GameObject root, bool transparent)
         {
             var parts = new List<Part>();
             var preview = new PreviewRenderUtility();
@@ -138,35 +148,23 @@ namespace Orbiters.Toolkit.Editor
                 preview.lights[1].intensity = 0.9f;
                 preview.lights[1].transform.rotation = camera.transform.rotation * Quaternion.Euler(-10, 150, 0);
 
-                preview.BeginPreview(new Rect(0, 0, Size, Size), GUIStyle.none);
-                // BeginPreview clears the camera to its own colour: ours is set after it.
-                camera.clearFlags = CameraClearFlags.SolidColor;
-                camera.backgroundColor = Background;
-                foreach (var part in parts)
-                    for (int submesh = 0; submesh < part.Mesh.subMeshCount; submesh++)
-                    {
-                        var material = part.Materials.Length > 0 ? part.Materials[Mathf.Min(submesh, part.Materials.Length - 1)] : null;
-                        if (material != null) preview.DrawMesh(part.Mesh, part.Matrix, material, submesh);
-                    }
-                preview.Render(true);
-                var render = (RenderTexture)preview.EndPreview();
-                var previous = RenderTexture.active;
-                var texture = new Texture2D(render.width, render.height, TextureFormat.RGB24, false) { hideFlags = HideFlags.HideAndDontSave, name = root.name + " picture" };
-                try
+                // Without a background: the model over black, then over white. Where both agree it covers the pixel;
+                // where they differ by the whole range nothing does. Shaders' own alpha (often odd on avatar shaders)
+                // is never read.
+                var overBlack = Pass(preview, parts, transparent ? Color.black : Background);
+                var texture = new Texture2D(Size, Size, transparent ? TextureFormat.RGBA32 : TextureFormat.RGB24, false) { hideFlags = HideFlags.HideAndDontSave, name = root.name + " picture" };
+                if (transparent)
                 {
-                    RenderTexture.active = render;
-                    texture.ReadPixels(new Rect(0, 0, render.width, render.height), 0, 0);
-                    // A linear project renders linear values into the preview texture: shown as they are, everything
-                    // looks far too dark. Converted to sRGB like the Game view does.
-                    if (QualitySettings.activeColorSpace == ColorSpace.Linear && !render.sRGB)
+                    var overWhite = Pass(preview, parts, Color.white);
+                    for (int i = 0; i < overBlack.Length; i++)
                     {
-                        var pixels = texture.GetPixels();
-                        for (int i = 0; i < pixels.Length; i++) pixels[i] = pixels[i].gamma;
-                        texture.SetPixels(pixels);
+                        Color b = overBlack[i], w = overWhite[i];
+                        float alpha = Mathf.Clamp01(1f - ((w.r - b.r) + (w.g - b.g) + (w.b - b.b)) / 3f);
+                        overBlack[i] = alpha > 0.002f ? new Color(Mathf.Clamp01(b.r / alpha), Mathf.Clamp01(b.g / alpha), Mathf.Clamp01(b.b / alpha), alpha) : new Color(0f, 0f, 0f, 0f);
                     }
-                    texture.Apply();
                 }
-                finally { RenderTexture.active = previous; }
+                texture.SetPixels(overBlack);
+                texture.Apply();
                 return texture;
             }
             finally
@@ -175,6 +173,42 @@ namespace Orbiters.Toolkit.Editor
                 // Only the meshes baked here: built-in ones (primitives) share the flags but are assets.
                 foreach (var part in parts)
                     if (part.Mesh != null && part.Mesh.hideFlags == HideFlags.HideAndDontSave && !EditorUtility.IsPersistent(part.Mesh)) Object.DestroyImmediate(part.Mesh);
+            }
+        }
+
+        // One render of the parts over a background, read back in sRGB.
+        private static Color[] Pass(PreviewRenderUtility preview, List<Part> parts, Color background)
+        {
+            var camera = preview.camera;
+            preview.BeginPreview(new Rect(0, 0, Size, Size), GUIStyle.none);
+            // BeginPreview clears the camera to its own colour: ours is set after it.
+            camera.clearFlags = CameraClearFlags.SolidColor;
+            camera.backgroundColor = background;
+            foreach (var part in parts)
+                for (int submesh = 0; submesh < part.Mesh.subMeshCount; submesh++)
+                {
+                    var material = part.Materials.Length > 0 ? part.Materials[Mathf.Min(submesh, part.Materials.Length - 1)] : null;
+                    if (material != null) preview.DrawMesh(part.Mesh, part.Matrix, material, submesh);
+                }
+            preview.Render(true);
+            var render = (RenderTexture)preview.EndPreview();
+            var previous = RenderTexture.active;
+            var read = new Texture2D(render.width, render.height, TextureFormat.RGB24, false) { hideFlags = HideFlags.HideAndDontSave };
+            try
+            {
+                RenderTexture.active = render;
+                read.ReadPixels(new Rect(0, 0, render.width, render.height), 0, 0);
+                var pixels = read.GetPixels();
+                // A linear project renders linear values into the preview texture: shown as they are, everything
+                // looks far too dark. Converted to sRGB like the Game view does.
+                if (QualitySettings.activeColorSpace == ColorSpace.Linear && !render.sRGB)
+                    for (int i = 0; i < pixels.Length; i++) pixels[i] = pixels[i].gamma;
+                return pixels;
+            }
+            finally
+            {
+                RenderTexture.active = previous;
+                Object.DestroyImmediate(read);
             }
         }
 
@@ -188,11 +222,11 @@ namespace Orbiters.Toolkit.Editor
             return false;
         }
 
-        private static Texture2D Load(string key)
+        private static Texture2D Load(string key, bool transparent)
         {
             string path = Path.Combine(Folder, key + ".png");
             if (!File.Exists(path)) return null;
-            var texture = new Texture2D(2, 2, TextureFormat.RGB24, false) { hideFlags = HideFlags.HideAndDontSave };
+            var texture = new Texture2D(2, 2, transparent ? TextureFormat.RGBA32 : TextureFormat.RGB24, false) { hideFlags = HideFlags.HideAndDontSave };
             if (texture.LoadImage(File.ReadAllBytes(path))) return texture;
             Object.DestroyImmediate(texture);
             return null;

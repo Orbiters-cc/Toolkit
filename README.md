@@ -2,6 +2,14 @@
 
 ## 0.4.1 — 2026-10-20
 
+- `VirtualList.SpanOf`: an item may take several rows' height (positions, scrolling and `Reveal` count rows; `TopOf`
+  and `HeightOf` say where an item is). Without it the list behaves as before.
+- `AvatarObjectTools` / `IAvatarObjectTool`: avatar tools (My Avatar) offer drops on an avatar root and the ReFit question
+  of an item they added to views that are not their own, such as Mixer's Hierarchy.
+- `VRChatLogo.Create()`: VRChat's logo (36 × 18 points, rasterized from VRChat's SVG at 1× and 2×, so it stays smooth
+  where vectors or a shrunk image were jagged), to mark VRChat avatars.
+- `ModelThumbnails.Get(root, key, transparent: true)`: pictures without a background, the model's alpha worked out from
+  a render over black and one over white (avatar shaders' own alpha is never read).
 - `MeshBvh.RefitVertices` and `RefitTriangles` mark the triangles and nodes they visit instead of filling sets, and
   refit the whole tree in one pass when a quarter of it moved: a sculpt step over tens of thousands of vertices refits
   in about a millisecond.
