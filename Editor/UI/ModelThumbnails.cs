@@ -13,7 +13,8 @@ namespace Orbiters.Toolkit.Editor
     /// Small pictures of models in the scene (clothing, accessories), framed on the model itself over a dark background.
     /// <see cref="Get"/> never waits: it returns the picture once made and queues it otherwise; one picture is rendered per
     /// editor frame. Pictures are kept for the session and in Library/Orbiters/Thumbnails, by a key the caller changes
-    /// when the model does (e.g. its prefab's dependency hash).
+    /// when the model does (e.g. its prefab's dependency hash). Keys made of session ids (instance ids) are kept for the
+    /// session only (<c>keepOnDisk: false</c>); a caller whose key changed <see cref="Release"/>s the old picture.
     /// </summary>
     public static class ModelThumbnails
     {
@@ -29,7 +30,12 @@ namespace Orbiters.Toolkit.Editor
         // Keys (hashed) of pictures made without a background.
         private static readonly HashSet<string> Clear = new HashSet<string>();
         private static readonly HashSet<string> Failed = new HashSet<string>();
-        private static bool pumping;
+        // Keys (hashed) whose pictures never go to the disk.
+        private static readonly HashSet<string> SessionOnly = new HashSet<string>();
+        // Pictures on the disk not used for this long are deleted, once per editor session.
+        private static readonly TimeSpan KeptOnDisk = TimeSpan.FromDays(30);
+        private const string PrunedKey = "Orbiters.Toolkit.Thumbnails.Pruned";
+        private static bool pumping, hooked;
 
         /// <summary>The picture of <paramref name="root"/> for <paramref name="key"/>, or null while it is made.</summary>
         public static Texture2D Get(GameObject root, string key) => Get(root, key, false);
@@ -39,18 +45,78 @@ namespace Orbiters.Toolkit.Editor
         /// <paramref name="transparent"/>, without a background (the model alone, its edges blended), for rows and cards
         /// that have their own.
         /// </summary>
-        public static Texture2D Get(GameObject root, string key, bool transparent)
+        public static Texture2D Get(GameObject root, string key, bool transparent) => Get(root, key, transparent, true);
+
+        /// <summary>
+        /// As <see cref="Get(GameObject, string, bool)"/>; with <paramref name="keepOnDisk"/> false the picture is never
+        /// saved to or read from the disk (keys that hold instance ids mean nothing after a restart).
+        /// </summary>
+        public static Texture2D Get(GameObject root, string key, bool transparent, bool keepOnDisk)
         {
             if (root == null || string.IsNullOrEmpty(key)) return null;
-            key = Hash((transparent ? "clear|" : "") + key);
+            Hook();
+            key = KeyOf(key, transparent);
             if (Made.TryGetValue(key, out var texture) && texture != null) return texture;
             if (Failed.Contains(key)) return null;
-            texture = Load(key, transparent);
+            if (!keepOnDisk) SessionOnly.Add(key);
+            texture = keepOnDisk ? Load(key, transparent) : null;
             if (texture != null) return Made[key] = texture;
             if (transparent) Clear.Add(key);
             Queue[key] = root;
             if (!pumping) { pumping = true; EditorApplication.update += Pump; }
             return null;
+        }
+
+        /// <summary>Whether the picture for <paramref name="key"/> could not be made (nothing to show, or an error):
+        /// <see cref="Get(GameObject, string, bool)"/> then returns null for good, not while it is made.</summary>
+        public static bool HasFailed(string key, bool transparent = false) =>
+            !string.IsNullOrEmpty(key) && Failed.Contains(KeyOf(key, transparent));
+
+        /// <summary>Frees the picture made for <paramref name="key"/> (and forgets a request still queued), for a caller
+        /// whose key changed: the old picture is no longer shown anywhere.</summary>
+        public static void Release(string key, bool transparent = false)
+        {
+            if (string.IsNullOrEmpty(key)) return;
+            key = KeyOf(key, transparent);
+            Queue.Remove(key);
+            Failed.Remove(key);
+            Clear.Remove(key);
+            SessionOnly.Remove(key);
+            if (Made.TryGetValue(key, out var texture))
+            {
+                Made.Remove(key);
+                if (texture != null) Object.DestroyImmediate(texture);
+            }
+        }
+
+        private static string KeyOf(string key, bool transparent) => Hash((transparent ? "clear|" : "") + key);
+
+        // The pictures are native objects a script reload would orphan: freed before it (Load makes them again).
+        // Old pictures on the disk are pruned once per editor session.
+        private static void Hook()
+        {
+            if (hooked) return;
+            hooked = true;
+            AssemblyReloadEvents.beforeAssemblyReload += ReleaseAll;
+            if (SessionState.GetBool(PrunedKey, false)) return;
+            SessionState.SetBool(PrunedKey, true);
+            try
+            {
+                if (!Directory.Exists(Folder)) return;
+                var oldest = DateTime.UtcNow - KeptOnDisk;
+                foreach (var file in new DirectoryInfo(Folder).GetFiles("*.png"))
+                    if (file.LastWriteTimeUtc < oldest) file.Delete();
+            }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
+        }
+
+        private static void ReleaseAll()
+        {
+            foreach (var texture in Made.Values)
+                if (texture != null) Object.DestroyImmediate(texture);
+            Made.Clear();
+            Queue.Clear();
         }
 
         /// <summary>A key for a model made from an asset: changes when the asset or what it uses changes.</summary>
@@ -70,7 +136,7 @@ namespace Orbiters.Toolkit.Editor
                 var texture = root != null ? Render(root, Clear.Contains(key)) : null;
                 if (texture == null) { Failed.Add(key); return; }
                 Made[key] = texture;
-                Save(key, texture);
+                if (!SessionOnly.Contains(key)) Save(key, texture);
             }
             catch (Exception ex)
             {
@@ -79,7 +145,8 @@ namespace Orbiters.Toolkit.Editor
             }
         }
 
-        private struct Part { public Mesh Mesh; public Matrix4x4 Matrix; public Material[] Materials; }
+        // Baked: a mesh made here (a skinned renderer's pose), destroyed afterwards. Any other mesh is the renderer's own.
+        private struct Part { public Mesh Mesh; public Matrix4x4 Matrix; public Material[] Materials; public bool Baked; }
 
         private static Texture2D Render(GameObject root, bool transparent)
         {
@@ -96,11 +163,14 @@ namespace Orbiters.Toolkit.Editor
                     // Only what is worn: not editor helpers (gizmo overlays, previews) hidden in the hierarchy or tagged EditorOnly.
                     if (!renderer.enabled || Helper(renderer.transform, root.transform)) continue;
                     Mesh mesh = null;
+                    bool baked = false;
                     if (renderer is SkinnedMeshRenderer skinned && skinned.sharedMesh != null)
                     {
                         // Baked as posed, with its blendshapes, in the renderer's space.
                         mesh = new Mesh { hideFlags = HideFlags.HideAndDontSave };
+                        baked = true;
                         skinned.BakeMesh(mesh, true);
+                        if (mesh.vertexCount == 0) { Object.DestroyImmediate(mesh); continue; }
                     }
                     else if (renderer is MeshRenderer)
                     {
@@ -110,8 +180,10 @@ namespace Orbiters.Toolkit.Editor
                     if (mesh == null || mesh.vertexCount == 0) continue;
                     // A baked mesh already has the renderer's scale.
                     var matrix = renderer is SkinnedMeshRenderer ? Matrix4x4.TRS(renderer.transform.position, renderer.transform.rotation, Vector3.one) : renderer.localToWorldMatrix;
-                    parts.Add(new Part { Mesh = mesh, Matrix = matrix, Materials = renderer.sharedMaterials });
-                    mesh.RecalculateBounds();
+                    parts.Add(new Part { Mesh = mesh, Matrix = matrix, Materials = renderer.sharedMaterials, Baked = baked });
+                    // The renderer's own mesh is read as it is: its bounds may be kept by a tool on purpose (Mixer's
+                    // working mesh), and a shared asset must not change.
+                    if (baked) mesh.RecalculateBounds();
                     var local = mesh.bounds;
                     for (int corner = 0; corner < 8; corner++)
                     {
@@ -170,9 +242,10 @@ namespace Orbiters.Toolkit.Editor
             finally
             {
                 preview.Cleanup();
-                // Only the meshes baked here: built-in ones (primitives) share the flags but are assets.
+                // Only the meshes baked here: a renderer's own mesh may be another tool's in-memory mesh (Mixer's
+                // working mesh has the same flags).
                 foreach (var part in parts)
-                    if (part.Mesh != null && part.Mesh.hideFlags == HideFlags.HideAndDontSave && !EditorUtility.IsPersistent(part.Mesh)) Object.DestroyImmediate(part.Mesh);
+                    if (part.Baked && part.Mesh != null) Object.DestroyImmediate(part.Mesh);
             }
         }
 
@@ -181,17 +254,26 @@ namespace Orbiters.Toolkit.Editor
         {
             var camera = preview.camera;
             preview.BeginPreview(new Rect(0, 0, Size, Size), GUIStyle.none);
-            // BeginPreview clears the camera to its own colour: ours is set after it.
-            camera.clearFlags = CameraClearFlags.SolidColor;
-            camera.backgroundColor = background;
-            foreach (var part in parts)
-                for (int submesh = 0; submesh < part.Mesh.subMeshCount; submesh++)
-                {
-                    var material = part.Materials.Length > 0 ? part.Materials[Mathf.Min(submesh, part.Materials.Length - 1)] : null;
-                    if (material != null) preview.DrawMesh(part.Mesh, part.Matrix, material, submesh);
-                }
-            preview.Render(true);
-            var render = (RenderTexture)preview.EndPreview();
+            RenderTexture render;
+            // EndPreview always runs: it restores the editor's lighting, which Render points at the preview scene, and
+            // the preview scene goes with Cleanup.
+            try
+            {
+                // BeginPreview clears the camera to its own colour: ours is set after it.
+                camera.clearFlags = CameraClearFlags.SolidColor;
+                camera.backgroundColor = background;
+                foreach (var part in parts)
+                    for (int submesh = 0; submesh < part.Mesh.subMeshCount; submesh++)
+                    {
+                        var material = part.Materials.Length > 0 ? part.Materials[Mathf.Min(submesh, part.Materials.Length - 1)] : null;
+                        if (material != null) preview.DrawMesh(part.Mesh, part.Matrix, material, submesh);
+                    }
+                preview.Render(true);
+            }
+            finally
+            {
+                render = (RenderTexture)preview.EndPreview();
+            }
             var previous = RenderTexture.active;
             var read = new Texture2D(render.width, render.height, TextureFormat.RGB24, false) { hideFlags = HideFlags.HideAndDontSave };
             try
@@ -227,7 +309,14 @@ namespace Orbiters.Toolkit.Editor
             string path = Path.Combine(Folder, key + ".png");
             if (!File.Exists(path)) return null;
             var texture = new Texture2D(2, 2, transparent ? TextureFormat.RGBA32 : TextureFormat.RGB24, false) { hideFlags = HideFlags.HideAndDontSave };
-            if (texture.LoadImage(File.ReadAllBytes(path))) return texture;
+            if (texture.LoadImage(File.ReadAllBytes(path)))
+            {
+                // Used: kept past the next prune.
+                try { File.SetLastWriteTimeUtc(path, DateTime.UtcNow); }
+                catch (IOException) { }
+                catch (UnauthorizedAccessException) { }
+                return texture;
+            }
             Object.DestroyImmediate(texture);
             return null;
         }

@@ -18,6 +18,7 @@ namespace Orbiters.Toolkit.Editor
         public const float Width = 36f, Height = 18f;
 
         private static Texture2D texture1x, texture2x;
+        private static bool hooked;
 
         /// <summary>The logo at its size; null when its image is missing.</summary>
         public static VisualElement Create()
@@ -37,9 +38,20 @@ namespace Orbiters.Toolkit.Editor
             ? texture2x != null ? texture2x : texture2x = Load(ImagePath2x)
             : texture1x != null ? texture1x : texture1x = Load(ImagePath1x);
 
-        // Read from the file itself: the importer's defaults (compression, a power-of-two resize) would blur it.
+        // Read from the file itself: the importer's defaults (compression, a power-of-two resize) would blur it. Freed
+        // before a script reload, which would orphan them.
         private static Texture2D Load(string assetPath)
         {
+            if (!hooked)
+            {
+                hooked = true;
+                AssemblyReloadEvents.beforeAssemblyReload += () =>
+                {
+                    if (texture1x != null) Object.DestroyImmediate(texture1x);
+                    if (texture2x != null) Object.DestroyImmediate(texture2x);
+                    texture1x = texture2x = null;
+                };
+            }
             string path = Path.GetFullPath(assetPath);
             if (!File.Exists(path)) return null;
             var loaded = new Texture2D(2, 2, TextureFormat.RGBA32, false) { hideFlags = HideFlags.HideAndDontSave, name = "VRChat logo", filterMode = FilterMode.Bilinear, wrapMode = TextureWrapMode.Clamp };
