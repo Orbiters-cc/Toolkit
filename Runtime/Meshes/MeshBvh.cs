@@ -220,24 +220,29 @@ namespace Orbiters.Toolkit.Meshes
             }
         }
 
+        // The deepest a walk's stack gets: a median split keeps the tree about log2(triangles / LeafSize) deep, and a walk
+        // holds at most one pending sibling per level (plus the two children just pushed).
+        private const int StackSize = 128;
+
         /// <summary>The triangles whose bounds overlap the sphere (a superset of those really inside).</summary>
         public void TrianglesNear(Vector3 center, float radius, List<int> result)
         {
             result.Clear();
             if (nodeCount == 0) return;
             float r2 = radius * radius;
-            var stack = new Stack<int>();
-            stack.Push(0);
-            while (stack.Count > 0)
+            Span<int> stack = stackalloc int[StackSize];
+            int top = 0;
+            stack[top++] = 0;
+            while (top > 0)
             {
-                int i = stack.Pop();
+                int i = stack[--top];
                 ref var node = ref nodes[i];
                 if (BoxDistance2(center, node.Min, node.Max) > r2) continue;
                 if (node.Left < 0)
                 {
                     for (int k = node.Start; k < node.Start + node.Count; k++) result.Add(order[k]);
                 }
-                else { stack.Push(node.Left); stack.Push(node.Right); }
+                else { stack[top++] = node.Left; stack[top++] = node.Right; }
             }
         }
 
@@ -269,11 +274,12 @@ namespace Orbiters.Toolkit.Meshes
             if (nodeCount == 0) return best;
             direction.Normalize();
             var inv = new Vector3(1f / (direction.x == 0f ? 1e-20f : direction.x), 1f / (direction.y == 0f ? 1e-20f : direction.y), 1f / (direction.z == 0f ? 1e-20f : direction.z));
-            var stack = new Stack<int>();
-            stack.Push(0);
-            while (stack.Count > 0)
+            Span<int> stack = stackalloc int[StackSize];
+            int top = 0;
+            stack[top++] = 0;
+            while (top > 0)
             {
-                int i = stack.Pop();
+                int i = stack[--top];
                 ref var node = ref nodes[i];
                 if (!RayBox(origin, inv, node.Min, node.Max, best.Distance)) continue;
                 if (node.Left < 0)
@@ -288,7 +294,7 @@ namespace Orbiters.Toolkit.Meshes
                         }
                     }
                 }
-                else { stack.Push(node.Left); stack.Push(node.Right); }
+                else { stack[top++] = node.Left; stack[top++] = node.Right; }
             }
             return best;
         }
@@ -298,11 +304,12 @@ namespace Orbiters.Toolkit.Meshes
             var best = new Hit { Distance = maxDistance };
             if (nodeCount == 0) return best;
             float best2 = maxDistance * maxDistance;
-            var stack = new Stack<int>();
-            stack.Push(0);
-            while (stack.Count > 0)
+            Span<int> stack = stackalloc int[StackSize];
+            int top = 0;
+            stack[top++] = 0;
+            while (top > 0)
             {
-                int i = stack.Pop();
+                int i = stack[--top];
                 ref var node = ref nodes[i];
                 if (BoxDistance2(point, node.Min, node.Max) > best2) continue;
                 if (node.Left < 0)
@@ -320,7 +327,7 @@ namespace Orbiters.Toolkit.Meshes
                     // Nearer child first so the bound tightens early.
                     float dl = BoxDistance2(point, nodes[node.Left].Min, nodes[node.Left].Max);
                     float dr = BoxDistance2(point, nodes[node.Right].Min, nodes[node.Right].Max);
-                    if (dl < dr) { stack.Push(node.Right); stack.Push(node.Left); } else { stack.Push(node.Left); stack.Push(node.Right); }
+                    if (dl < dr) { stack[top++] = node.Right; stack[top++] = node.Left; } else { stack[top++] = node.Left; stack[top++] = node.Right; }
                 }
             }
             return best;

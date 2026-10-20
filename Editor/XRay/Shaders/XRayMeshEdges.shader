@@ -8,7 +8,7 @@ Shader "Hidden/Orbiters/XRayGizmos/MeshEdges"
         _Color ("Color", Color) = (1, 1, 1, 0.65)
         _LineWidth ("Line Width (pixels)", Float) = 1.25
         _DepthPull ("Depth Pull", Float) = 0.0006
-        [Enum(UnityEngine.Rendering.CompareFunction)] _ZTest ("ZTest", Float) = 8
+        [Enum(UnityEngine.Rendering.CompareFunction)] _ZTest ("ZTest", Float) = 4
     }
 
     CGINCLUDE

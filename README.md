@@ -10,6 +10,10 @@
   where vectors or a shrunk image were jagged), to mark VRChat avatars.
 - `ModelThumbnails.Get(root, key, transparent: true)`: pictures without a background, the model's alpha worked out from
   a render over black and one over white (avatar shaders' own alpha is never read).
+- `MeshBvh` queries (rays, spheres, closest points) walk the tree with a stack on the call's frame: no garbage per
+  pointer move.
+- Polygon edges show on the surface that is seen only (depth-tested): the back of the mesh and hidden parts no longer
+  show through. The "See through" option is gone.
 - `MeshBvh.RefitVertices` and `RefitTriangles` mark the triangles and nodes they visit instead of filling sets, and
   refit the whole tree in one pass when a quarter of it moved: a sculpt step over tens of thousands of vertices refits
   in about a millisecond.

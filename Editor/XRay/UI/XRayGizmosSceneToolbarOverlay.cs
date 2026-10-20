@@ -388,15 +388,6 @@ namespace Orbiters.Toolkit.Editor.XRay
                 XRayMeshEdgeService.SetEdgeColor(color);
             }
 
-            EditorGUI.BeginChangeCheck();
-            bool seeThrough = EditorGUILayout.Toggle(
-                new GUIContent("See through", "Show the edges of the whole mesh, back and hidden parts included"),
-                XRayMeshEdgeService.SeeThrough);
-            if (EditorGUI.EndChangeCheck())
-            {
-                XRayMeshEdgeService.SetSeeThrough(seeThrough);
-            }
-
             EditorGUILayout.Space(4f);
             using (new EditorGUILayout.HorizontalScope())
             {

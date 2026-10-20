@@ -23,7 +23,6 @@ namespace Orbiters.Toolkit.Editor.XRay
         private const string EnabledKey = "Orbiters.XRayGizmos.MeshEdges.Enabled";
         private const string AlphaKey = "Orbiters.XRayGizmos.MeshEdges.Alpha";
         private const string ColorKey = "Orbiters.XRayGizmos.MeshEdges.Color";
-        private const string SeeThroughKey = "Orbiters.XRayGizmos.MeshEdges.SeeThrough";
         internal const string BufferName = "Orbiters mesh edges";
         internal const CameraEvent BufferEvent = CameraEvent.AfterForwardAlpha;
         private const float LineWidthPixels = 1.25f;
@@ -73,12 +72,7 @@ namespace Orbiters.Toolkit.Editor.XRay
             private set => EditorPrefs.SetString(ColorKey, ColorUtility.ToHtmlStringRGBA(value));
         }
 
-        /// <summary>Whether the edges show through everything (the whole mesh, back included) or only where the surface is seen.</summary>
-        public static bool SeeThrough
-        {
-            get => EditorPrefs.GetBool(SeeThroughKey, true);
-            private set => EditorPrefs.SetBool(SeeThroughKey, value);
-        }
+
 
         public static string LastStatus { get; private set; }
 
@@ -137,18 +131,6 @@ namespace Orbiters.Toolkit.Editor.XRay
             NotifyChanged();
         }
 
-        public static void SetSeeThrough(bool seeThrough)
-        {
-            if (SeeThrough == seeThrough)
-            {
-                return;
-            }
-
-            SeeThrough = seeThrough;
-            ApplyMaterialSettings();
-            SceneView.RepaintAll();
-            NotifyChanged();
-        }
 
         /// <summary>Records the edges again from scratch (a new material and command buffer).</summary>
         public static void RebuildAll()
@@ -639,9 +621,10 @@ namespace Orbiters.Toolkit.Editor.XRay
                 material.SetFloat("_DepthPull", DepthPull);
             }
 
+            // Only the edges of the surface that shows: hidden parts and the back of the mesh are left out.
             if (material.HasProperty("_ZTest"))
             {
-                material.SetFloat("_ZTest", (float)(SeeThrough ? CompareFunction.Always : CompareFunction.LessEqual));
+                material.SetFloat("_ZTest", (float)CompareFunction.LessEqual);
             }
         }
 

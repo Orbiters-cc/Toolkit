@@ -285,16 +285,6 @@ namespace Orbiters.Toolkit.Editor.XRay
             content.Add(edgeColor);
             liveValues.Add(() => edgeColor.SetValueWithoutNotify(XRayMeshEdgeService.EdgeColor));
 
-            var seeThrough = new Toggle("See through the mesh")
-            {
-                value = XRayMeshEdgeService.SeeThrough,
-                tooltip = "Show the edges of the whole mesh, back and hidden parts included"
-            };
-            seeThrough.AddToClassList("xray-field");
-            seeThrough.RegisterValueChangedCallback(evt => XRayMeshEdgeService.SetSeeThrough(evt.newValue));
-            content.Add(seeThrough);
-            liveValues.Add(() => seeThrough.SetValueWithoutNotify(XRayMeshEdgeService.SeeThrough));
-
             if (XRayMeshEdgeService.Enabled)
             {
                 SummaryRow("Meshes", FormatRenderers(XRayMeshEdgeService.ActiveRenderers));
