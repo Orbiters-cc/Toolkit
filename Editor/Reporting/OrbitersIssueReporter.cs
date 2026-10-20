@@ -47,7 +47,7 @@ namespace Orbiters.Toolkit.Editor
     /// and per computer (EditorPrefs); the lowest level sent is the tool's choice. A log is the tool's when its stack trace
     /// says so (<see cref="IssueReporterOptions.Namespaces"/>), or when the tool's logger hands it over
     /// (<see cref="Submit"/>); each log belongs to one tool at most, tests' logs to none. Reports wait in a bounded queue
-    /// (<see cref="IssueReportQueue"/>), at most 60 go per editor session, and each is masked
+    /// (<see cref="IssueReportQueue"/>), at most 60 go per editor session (the limits are each tool's), and each is masked
     /// (<see cref="IssueRedactor"/>) on the main thread right before it is sent, with the signed-in token when there is one.
     /// </summary>
     public sealed class OrbitersIssueReporter
@@ -68,6 +68,7 @@ namespace Orbiters.Toolkit.Editor
         private readonly string shareKey;
         private readonly string levelKey;
         private readonly string sentKey;
+        private readonly string signaturesKey;
         internal readonly IssueReportQueue Queue = new IssueReportQueue();
         private volatile bool sharing;
         private volatile int minSeverity = 2;
@@ -103,6 +104,10 @@ namespace Orbiters.Toolkit.Editor
             shareKey = options.SettingsKey + "_ShareIssueLogs";
             levelKey = options.SettingsKey + "_MinIssueSeverity";
             sentKey = "Orbiters.IssueReports." + options.SettingsKey + ".Sent";
+            signaturesKey = "Orbiters.IssueReports." + options.SettingsKey + ".Signatures";
+            // What was reported before a script reload or Play mode is not reported again within the hour.
+            Queue.LoadSignatures(SessionState.GetString(signaturesKey, string.Empty));
+            SessionState.EraseString(signaturesKey);
         }
 
         /// <summary>The reporter of a tool, created once at load ([InitializeOnLoad]); a second one with the same tool name replaces the first.</summary>
@@ -258,6 +263,13 @@ namespace Orbiters.Toolkit.Editor
 
             if (Queue.TryTake(now, out var report))
             {
+                // Sharing may have been turned off in another editor meanwhile: the choice is kept for the whole computer.
+                if (!ShareIssueLogs)
+                {
+                    Refresh();
+                    return;
+                }
+
                 _ = SendAsync(report);
             }
         }
@@ -321,9 +333,14 @@ namespace Orbiters.Toolkit.Editor
             }
         }
 
-        /// <summary>Script reload or quitting: nothing waits and nothing is in flight.</summary>
+        /// <summary>Script reload or quitting: nothing waits and nothing is in flight; what was reported is remembered for the session.</summary>
         internal void Stop()
         {
+            if (sharing)
+            {
+                SessionState.SetString(signaturesKey, Queue.SaveSignatures());
+            }
+
             Queue.Clear();
             try
             {
@@ -348,8 +365,9 @@ namespace Orbiters.Toolkit.Editor
         }
 
         /// <summary>
-        /// The start of <paramref name="text"/> kept until it is masked, cut at a space or a line end: a secret is never
-        /// cut in half (half of one is no longer recognised).
+        /// The start of <paramref name="text"/> kept until it is masked, cut at a space or a line end, else at a character no
+        /// token holds (quotes, commas, brackets), else before the run of token characters the cut falls in: a secret is
+        /// never cut in half (half of one is no longer recognised).
         /// </summary>
         internal static string Keep(string text, int length)
         {
@@ -363,9 +381,31 @@ namespace Orbiters.Toolkit.Editor
                 return text;
             }
 
-            int cut = text.LastIndexOfAny(Whitespace, length - 1, Math.Min(length, 400));
-            return text.Substring(0, cut > 0 ? cut : Math.Max(0, length - 400));
+            int window = Math.Min(length, 400);
+            int cut = text.LastIndexOfAny(Whitespace, length - 1, window);
+            for (int i = length - 1; cut <= 0 && i >= length - window; i--)
+            {
+                if (!IsTokenCharacter(text[i]))
+                {
+                    cut = i;
+                }
+            }
+
+            if (cut <= 0)
+            {
+                cut = length;
+                while (cut > 0 && IsTokenCharacter(text[cut - 1]))
+                {
+                    cut--;
+                }
+            }
+
+            return text.Substring(0, cut);
         }
+
+        // What tokens, keys, JSON web tokens, base64 and e-mails are made of.
+        private static bool IsTokenCharacter(char c) => char.IsLetterOrDigit(c) || c == '-' || c == '_' || c == '.' || c == '+' || c == '/' ||
+                                                        c == '=' || c == '%' || c == '@' || c == '~';
 
         private static string[] Copy(string[] values)
         {

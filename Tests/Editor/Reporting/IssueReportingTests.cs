@@ -106,6 +106,14 @@ namespace Orbiters.Toolkit.Editor.Tests
             string kept = OrbitersIssueReporter.Keep(new string('x', IssueReportQueue.MessageKeep - 20) + " " + OtherToken + " tail", IssueReportQueue.MessageKeep);
             Assert.AreEqual(IssueReportQueue.MessageKeep - 20, kept.Length);
             StringAssert.DoesNotContain("orbit", kept);
+
+            // Without spaces (minified JSON), at a character no token holds; inside one long run, before the run.
+            string jwt = "eyJhbGciOiJIUzI1NiJ9." + new string('a', 300) + "." + new string('b', 300);
+            string json = "{\"body\":\"" + new string('x', IssueReportQueue.MessageKeep - 200) + "\",\"token\":\"" + jwt + "\"}";
+            kept = OrbitersIssueReporter.Keep(json, IssueReportQueue.MessageKeep);
+            StringAssert.EndsWith("\"token\":", kept);
+            StringAssert.DoesNotContain("eyJ", kept);
+            Assert.AreEqual("Data: ", OrbitersIssueReporter.Keep("Data: " + new string('Q', IssueReportQueue.MessageKeep), IssueReportQueue.MessageKeep));
         }
 
         // ---- Whose log it is ----------------------------------------------------------------------------------------
@@ -234,6 +242,7 @@ namespace Orbiters.Toolkit.Editor.Tests
                 EditorPrefs.DeleteKey(key + "_ShareIssueLogs");
                 EditorPrefs.DeleteKey(key + "_MinIssueSeverity");
                 SessionState.EraseInt("Orbiters.IssueReports." + key + ".Sent");
+                SessionState.EraseString("Orbiters.IssueReports." + key + ".Signatures");
             }
 
             keys.Clear();
@@ -246,10 +255,14 @@ namespace Orbiters.Toolkit.Editor.Tests
             public IssuePayload Payload;
         }
 
-        private OrbitersIssueReporter Reporter(List<Sent> sent, Func<Task> answer = null, Action<OrbitersIssueReporter, bool> feed = null, bool share = true)
+        private OrbitersIssueReporter Reporter(List<Sent> sent, Func<Task> answer = null, Action<OrbitersIssueReporter, bool> feed = null, bool share = true,
+            string key = null)
         {
-            string key = "OrbitersIssueReportingTests_" + Guid.NewGuid().ToString("N");
-            keys.Add(key);
+            if (key == null)
+            {
+                key = "OrbitersIssueReportingTests_" + Guid.NewGuid().ToString("N");
+                keys.Add(key);
+            }
             var reporter = new OrbitersIssueReporter(new IssueReporterOptions
             {
                 ToolName = "Test Tool",
@@ -351,6 +364,32 @@ namespace Orbiters.Toolkit.Editor.Tests
             reporter.Pump(now);
             Assert.AreEqual(0, sent.Count);
             Assert.AreEqual(0, reporter.Queue.PendingCount);
+        }
+
+        [Test]
+        public void WhatWasReportedIsRememberedAcrossScriptReloads()
+        {
+            var before = Reporter(null);
+            string key = keys[keys.Count - 1];
+            var now = DateTime.UtcNow;
+            Assert.True(before.Accept("Mesh 12 is gone", "Orbiters.TestTool.X:Y ()", LogType.Warning, now));
+            before.Stop();
+            var after = Reporter(null, key: key);
+            Assert.False(after.Accept("Mesh 13 is gone", "Orbiters.TestTool.X:Y ()", LogType.Warning, now.AddMinutes(1)), "The same problem within the hour.");
+            Assert.True(after.Accept("Mesh 14 is gone", "Orbiters.TestTool.X:Y ()", LogType.Warning, now.AddMinutes(61)), "An hour later it goes again.");
+        }
+
+        [Test]
+        public void SharingTurnedOffInAnotherEditorStopsSending()
+        {
+            var sent = new List<Sent>();
+            var reporter = Reporter(sent);
+            var now = DateTime.UtcNow;
+            Assert.True(reporter.Accept("A problem", "Orbiters.TestTool.X:Y ()", LogType.Warning, now));
+            EditorPrefs.SetBool(keys[keys.Count - 1] + "_ShareIssueLogs", false);
+            reporter.Pump(now);
+            Assert.AreEqual(0, sent.Count);
+            Assert.False(reporter.Sharing);
         }
 
         [Test]

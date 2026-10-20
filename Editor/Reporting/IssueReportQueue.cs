@@ -18,8 +18,8 @@ namespace Orbiters.Toolkit.Editor
     /// <summary>
     /// The reports one tool has waiting, bounded in memory and in rate: at most <see cref="QueueLimit"/> waiting, one taken
     /// every 10 seconds, the same problem once an hour (messages that only differ by numbers, ids or quoted names are one
-    /// problem), and the warning a tool logs right after an exception, repeating its message, folded into it. Thread-safe:
-    /// logs come from any thread.
+    /// problem; what was reported is kept across script reloads with <see cref="SaveSignatures"/>), and the warning a tool
+    /// logs right after an exception, repeating its message, folded into it. Thread-safe: logs come from any thread.
     /// </summary>
     internal sealed class IssueReportQueue
     {
@@ -99,6 +99,61 @@ namespace Orbiters.Toolkit.Editor
                 nextSend = now + SendInterval;
                 report = pending.Dequeue();
                 return true;
+            }
+        }
+
+        [Serializable]
+        private sealed class SavedSignatures
+        {
+            public string[] signatures = Array.Empty<string>();
+            public long[] ticks = Array.Empty<long>();
+        }
+
+        /// <summary>The problems reported within the hour and when, for <see cref="LoadSignatures"/> after a script reload.</summary>
+        internal string SaveSignatures()
+        {
+            lock (gate)
+            {
+                return JsonUtility.ToJson(new SavedSignatures
+                {
+                    signatures = signatures.Keys.ToArray(),
+                    ticks = signatures.Values.Select(time => time.Ticks).ToArray()
+                });
+            }
+        }
+
+        /// <summary>Remembers again the problems <see cref="SaveSignatures"/> gave; anything unreadable is left out.</summary>
+        internal void LoadSignatures(string saved)
+        {
+            if (string.IsNullOrEmpty(saved))
+            {
+                return;
+            }
+
+            SavedSignatures data;
+            try
+            {
+                data = JsonUtility.FromJson<SavedSignatures>(saved);
+            }
+            catch (ArgumentException)
+            {
+                return;
+            }
+
+            if (data?.signatures == null || data.ticks == null)
+            {
+                return;
+            }
+
+            lock (gate)
+            {
+                for (int i = 0; i < data.signatures.Length && i < data.ticks.Length && signatures.Count < SignatureLimit; i++)
+                {
+                    if (!string.IsNullOrEmpty(data.signatures[i]) && data.ticks[i] >= DateTime.MinValue.Ticks && data.ticks[i] <= DateTime.MaxValue.Ticks)
+                    {
+                        signatures[data.signatures[i]] = new DateTime(data.ticks[i], DateTimeKind.Utc);
+                    }
+                }
             }
         }
 
