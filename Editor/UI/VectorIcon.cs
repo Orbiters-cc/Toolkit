@@ -10,7 +10,7 @@ namespace Orbiters.Toolkit.Editor
         // Mixer and the Hierarchy.
         Sculpt, Weights, Armature, Join, Render, Blender, Hierarchy, Eye, EyeOff, Link, Undo, Redo, Layers, Search, Trash, Settings, Minus,
         // The Mixer Project window.
-        Target, Clock, Sort, UnfoldAll, FoldAll
+        Target, Clock, Sort, UnfoldAll, FoldAll, Star, StarFilled
     }
 
     /// <summary>
@@ -331,6 +331,22 @@ namespace Orbiters.Toolkit.Editor
                     painter.BeginPath(); painter.MoveTo(P(2.5f, 12f)); painter.LineTo(P(7f, 12f)); painter.Stroke();
                     painter.BeginPath(); painter.MoveTo(P(17f, 12f)); painter.LineTo(P(21.5f, 12f)); painter.Stroke();
                     painter.BeginPath(); painter.Arc(P(12f, 12f), 1.6f * scale, 0f, 360f); painter.Fill();
+                    break;
+                case IconGlyph.Star:
+                case IconGlyph.StarFilled:
+                    // Five points: favourites (filled once something is one).
+                    painter.lineWidth = 1.7f * scale;
+                    painter.lineJoin = LineJoin.Round;
+                    painter.BeginPath();
+                    for (int i = 0; i < 10; i++)
+                    {
+                        float angle = (-90f + i * 36f) * Mathf.Deg2Rad;
+                        float radius = i % 2 == 0 ? 9f : 3.9f;
+                        var point = P(12f + Mathf.Cos(angle) * radius, 12.8f + Mathf.Sin(angle) * radius);
+                        if (i == 0) painter.MoveTo(point); else painter.LineTo(point);
+                    }
+                    painter.ClosePath();
+                    if (glyph == IconGlyph.StarFilled) painter.Fill(); else painter.Stroke();
                     break;
                 case IconGlyph.Clock:
                     painter.lineWidth = 1.9f * scale;

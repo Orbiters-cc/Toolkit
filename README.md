@@ -16,7 +16,11 @@
   pointer move.
 - Polygon edges show on the surface that is seen only (depth-tested): the back of the mesh and hidden parts no longer
   show through.
-- `IconGlyph` gains Target, Clock, Sort, UnfoldAll and FoldAll (Mixer's Project window).
+- `IconGlyph` gains Target, Clock, Sort, UnfoldAll, FoldAll, Star and StarFilled (Mixer's Project window).
+- `SearchPattern`: what a search field asks for, a piece of text or a .NET regular expression, with an optional match
+  case, as the Logger's search does (an invalid expression matches everything and says why). Mixer's search fields use it.
+- Avatar Gizmos sit at the right end of the Scene view's top toolbar by default (a Scene view that already placed them
+  keeps its place).
 - `MeshBvh.RefitVertices` and `RefitTriangles` mark the triangles and nodes they visit instead of filling sets, and
   refit the whole tree in one pass when a quarter of it moved: a sculpt step over tens of thousands of vertices refits
   in about a millisecond.

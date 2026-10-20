@@ -7,12 +7,14 @@ using UnityEngine.UIElements;
 
 namespace Orbiters.Toolkit.Editor.XRay
 {
+    // At the right end of the Scene view's top toolbar by default (a horizontal toolbar's "bottom" end), beside Unity's
+    // own view options.
     [Overlay(
         typeof(SceneView),
         "Orbiters/XRayGizmos/SceneToolbar",
         "Avatar Gizmos",
         true,
-        defaultDockPosition = DockPosition.Top,
+        defaultDockPosition = DockPosition.Bottom,
         defaultDockZone = DockZone.TopToolbar)]
     [Icon(XRayGizmosSceneToolbarIcons.BonesIconPath)]
     internal sealed class XRayGizmosSceneToolbarOverlay : ToolbarOverlay
