@@ -143,8 +143,8 @@ namespace Orbiters.Toolkit.Editor.VRChat.Refit
         /// <summary>
         /// Removes the entries no engine finds any more: the folders of the other versions of <paramref name="engine"/> (same
         /// name up to its first space: "ReFit 0.7.1 r10" for "ReFit 0.7.2 r11") and, with <paramref name="legacy"/>, the entries
-        /// of the layout before engine folders (directly in <paramref name="folder"/>). Other engines' entries stay; the meshes
-        /// entries point to are never touched. Returns the paths removed.
+        /// of the layout before engine folders (directly in <paramref name="folder"/>; other assets there stay). Other engines'
+        /// entries stay; the meshes entries point to are never touched. Returns the paths removed.
         /// </summary>
         internal static List<string> Prune(string engine, string folder = Folder, bool legacy = false)
         {
@@ -154,9 +154,13 @@ namespace Orbiters.Toolkit.Editor.VRChat.Refit
             string own = SafePaths.FileName(engine, "none"), product = Product(engine);
             try
             {
+                // Only cache entries: whatever else a user or another tool keeps there stays.
                 if (legacy)
                     foreach (string file in Directory.GetFiles(Path.Combine(root, folder), "*.asset", SearchOption.TopDirectoryOnly))
-                        removed.Add(folder + "/" + Path.GetFileName(file));
+                    {
+                        string path = folder + "/" + Path.GetFileName(file);
+                        if (AssetDatabase.GetMainAssetTypeAtPath(path) == typeof(RefitCacheEntry)) removed.Add(path);
+                    }
                 foreach (string directory in Directory.GetDirectories(Path.Combine(root, folder)))
                 {
                     string name = Path.GetFileName(directory);

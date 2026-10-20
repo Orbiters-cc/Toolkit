@@ -32,9 +32,11 @@ namespace Orbiters.Toolkit.Editor.Refit
         [Serializable] private sealed class Entry { public string key, source, hash; public List<Bone> bones = new List<Bone>(); }
         [Serializable] private sealed class Bone { public string name; public int parent; public Vector3 position; public Quaternion rotation; public Vector3 scale; }
 
+        // Custom bases whose original could not be read this session, one key a line: kept across script reloads and Play
+        // mode, each of which would otherwise spend half a minute on it again.
+        private const string FailedKey = "Orbiters.Toolkit.OriginalArmature.Failed";
+
         private static Cache cache;
-        // Custom bases whose original could not be read this session.
-        private static readonly HashSet<string> Failed = new HashSet<string>(StringComparer.Ordinal);
         private GameObject root;
 
         /// <summary>The bones, under a root lying where the avatar's body is; null once disposed.</summary>
@@ -44,7 +46,16 @@ namespace Orbiters.Toolkit.Editor.Refit
         public AvatarBoneIndex Index { get; private set; }
 
         [InitializeOnLoadMethod]
-        private static void ForgetFailuresOnChange() => CustomBases.Changed += _ => Failed.Clear();
+        private static void ForgetFailuresOnChange() => CustomBases.Changed += _ => SessionState.EraseString(FailedKey);
+
+        private static string[] Failures() => SessionState.GetString(FailedKey, "").Split(new[] { '\n' }, StringSplitOptions.RemoveEmptyEntries);
+
+        private static bool HasFailed(string key) => Failures().Contains(key, StringComparer.Ordinal);
+
+        private static void AddFailure(string key)
+        {
+            if (!HasFailed(key)) SessionState.SetString(FailedKey, string.Join("\n", Failures().Append(key)));
+        }
 
         /// <summary>
         /// The original base's armature over the avatar's body. Null when no custom base is known for the avatar, when it
@@ -55,7 +66,7 @@ namespace Orbiters.Toolkit.Editor.Refit
             var info = CustomBases.Describe(avatarRoot);
             if (info == null || !info.CanFit || info.Body == null) return null;
             bool keep = !string.IsNullOrEmpty(info.Key);
-            if (keep && Failed.Contains(info.Key)) return null;
+            if (keep && HasFailed(info.Key)) return null;
             List<Bone> bones;
             try { bones = Bones(info); }
             catch (Exception ex)
@@ -65,7 +76,7 @@ namespace Orbiters.Toolkit.Editor.Refit
             }
             if (bones == null || bones.Count == 0)
             {
-                if (keep) Failed.Add(info.Key);
+                if (keep) AddFailure(info.Key);
                 return null;
             }
             try { return Build(bones, info.Body.transform); }
@@ -91,9 +102,13 @@ namespace Orbiters.Toolkit.Editor.Refit
             var entry = keep ? data.entries.FirstOrDefault(e => e.key == info.Key) : null;
             if (entry != null && Valid(entry))
             {
-                // Most recently used last: the oldest go first.
-                data.entries.Remove(entry);
-                data.entries.Add(entry);
+                // Most recently used last, in the file too: the least recently used go first.
+                if (data.entries[data.entries.Count - 1] != entry)
+                {
+                    data.entries.Remove(entry);
+                    data.entries.Add(entry);
+                    Save(data);
+                }
                 return entry.bones;
             }
             List<Bone> bones;

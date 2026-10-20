@@ -553,6 +553,8 @@ public sealed class RefitRecordsTests
             return folder + "/" + name;
         }
         string legacy = Entry(folder);
+        string kept = folder + "/Kept.asset";
+        AssetDatabase.CreateAsset(new Mesh(), kept);
         string older = Entry(Version("Pruned 0.1.0 r1")), current = Entry(Version("Pruned 0.2.0 r2")), other = Entry(Version("Other 0.1.0 r1"));
 
         var removed = RefitCache.Prune("Pruned 0.2.0 r2", folder);
@@ -563,6 +565,7 @@ public sealed class RefitRecordsTests
         Assert.That(AssetDatabase.LoadAssetAtPath<RefitCacheEntry>(legacy), Is.Not.Null, "Entries of the earlier layout go only when asked.");
 
         Assert.That(RefitCache.Prune("Pruned 0.2.0 r2", folder, legacy: true), Is.EqualTo(new[] { legacy }));
+        Assert.That(AssetDatabase.LoadAssetAtPath<Mesh>(kept), Is.Not.Null, "Assets other than cache entries stay.");
         Assert.That(AssetDatabase.LoadAssetAtPath<RefitCacheEntry>(current), Is.Not.Null);
         Assert.That(RefitCache.EngineFolder("ReFit 0.7.2 r11"), Is.EqualTo(RefitCache.Folder + "/ReFit 0.7.2 r11"));
     }
