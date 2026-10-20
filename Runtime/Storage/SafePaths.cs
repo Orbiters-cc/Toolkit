@@ -142,6 +142,30 @@ namespace Orbiters.Toolkit.Storage
                    candidate.StartsWith(root + Path.AltDirectorySeparatorChar, PathComparison);
         }
 
+        /// <summary>
+        /// Writes a small text file (settings, lists kept for the user) through a temporary file beside it, replaced in one
+        /// step: a crash or a full disk mid-write leaves the previous file whole, never a cut one. Throws what the write
+        /// throws (IOException, UnauthorizedAccessException); the temporary file is removed then.
+        /// </summary>
+        public static void ReplaceFile(string path, string text)
+        {
+            string folder = Path.GetDirectoryName(Path.GetFullPath(path));
+            if (!string.IsNullOrEmpty(folder)) Directory.CreateDirectory(folder);
+            string temp = path + "." + Guid.NewGuid().ToString("N").Substring(0, 8) + ".tmp";
+            try
+            {
+                File.WriteAllText(temp, text);
+                if (File.Exists(path)) File.Replace(temp, path, null);
+                else File.Move(temp, path);
+            }
+            finally
+            {
+                try { if (File.Exists(temp)) File.Delete(temp); }
+                catch (IOException) { }
+                catch (UnauthorizedAccessException) { }
+            }
+        }
+
         /// <summary>Stage must be a sibling on the same volume. Keep the previous directory until the rename succeeds.</summary>
         public static void ReplaceDirectory(string staging, string destination)
         {

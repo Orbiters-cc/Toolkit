@@ -9,7 +9,13 @@
 - `VRChatLogo.Create()`: VRChat's logo (36 × 18 points, rasterized from VRChat's SVG at 1× and 2×, so it stays smooth
   where vectors or a shrunk image were jagged), to mark VRChat avatars.
 - `ModelThumbnails.Get(root, key, transparent: true)`: pictures without a background, the model's alpha worked out from
-  a render over black and one over white (avatar shaders' own alpha is never read).
+  a render over black and one over white (avatar shaders' own alpha is never read). `keepOnDisk: false` keeps a picture
+  for the session only (keys made of instance ids), `Release` frees one whose key changed, `HasFailed` tells a picture
+  that cannot be made from one still waiting. Pictures are freed before script reloads, and those on the disk unused for
+  30 days are deleted. A picture no longer destroys a renderer's own in-memory mesh (Mixer's working mesh was), nor
+  changes a mesh's bounds.
+- `SafePaths.ReplaceFile`: writes a small text file through a temporary file replaced in one step, so a crash mid-write
+  leaves the previous file whole.
 - `AvatarMeshEdits.LiveEditing` / `IsLiveEditing(root)`: tools say when they edit an avatar's meshes live (Mixer's
   sculpt and paint modes), and work that reads those meshes and can wait (My Avatar's optimization estimate) waits.
   Asking allocates nothing.
@@ -20,6 +26,8 @@
 - `IconGlyph` gains Target, Clock, Sort, UnfoldAll, FoldAll, Star and StarFilled (Mixer's Project window).
 - `SearchPattern`: what a search field asks for, a piece of text or a .NET regular expression, with an optional match
   case, as the Logger's search does (an invalid expression matches everything and says why). Mixer's search fields use it.
+  An expression that times out on one value (nested repeats such as `(a+)+`) matches nothing more and says so
+  (`TooSlow`): a long list costs one timeout, not one per item.
 - Avatar Gizmos sit at the right end of the Scene view's top toolbar by default (a Scene view that already placed them
   keeps its place).
 - `MeshBvh.RefitVertices` and `RefitTriangles` mark the triangles and nodes they visit instead of filling sets, and
