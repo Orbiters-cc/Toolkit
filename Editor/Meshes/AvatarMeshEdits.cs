@@ -24,18 +24,37 @@ namespace Orbiters.Toolkit.Editor.Meshes
         /// <summary>The avatar shows other meshes for a while (a live preview), or its own again.</summary>
         public static void NotifyPreviewed(Transform avatarRoot) => Notify(Previewed, avatarRoot);
 
+        private static Func<Transform, bool> liveEditing;
+        // The tests one by one, listed once per change: work that waits asks every frame, without garbage.
+        private static Func<Transform, bool>[] liveTests = Array.Empty<Func<Transform, bool>>();
+
         /// <summary>
         /// Asked by work that reads an avatar's meshes and can wait (My Avatar's optimization estimate): true while a tool
         /// edits them live (Mixer's sculpt or paint modes), when every frame matters to the user and the meshes shown are
         /// temporary. Tools add a test answering for an avatar root.
         /// </summary>
-        public static event Func<Transform, bool> LiveEditing;
+        public static event Func<Transform, bool> LiveEditing
+        {
+            add
+            {
+                liveEditing += value;
+                liveTests = Tests(liveEditing);
+            }
+            remove
+            {
+                liveEditing -= value;
+                liveTests = Tests(liveEditing);
+            }
+        }
+
+        private static Func<Transform, bool>[] Tests(Func<Transform, bool> all) =>
+            all == null ? Array.Empty<Func<Transform, bool>>() : Array.ConvertAll(all.GetInvocationList(), test => (Func<Transform, bool>)test);
 
         /// <summary>Whether a tool edits <paramref name="avatarRoot"/>'s meshes live (see <see cref="LiveEditing"/>).</summary>
         public static bool IsLiveEditing(Transform avatarRoot)
         {
-            if (avatarRoot == null || LiveEditing == null) return false;
-            foreach (Func<Transform, bool> test in LiveEditing.GetInvocationList())
+            if (avatarRoot == null) return false;
+            foreach (var test in liveTests)
             {
                 try { if (test(avatarRoot)) return true; }
                 catch (Exception ex) { Debug.LogException(ex); }

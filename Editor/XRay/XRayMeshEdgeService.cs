@@ -31,7 +31,9 @@ namespace Orbiters.Toolkit.Editor.XRay
 
         private static readonly List<SkinnedMeshRenderer> activeRenderers = new List<SkinnedMeshRenderer>();
         private static readonly List<Drawn> drawn = new List<Drawn>();
-        private static readonly HashSet<Camera> cameras = new HashSet<Camera>();
+        // The cameras running the buffer, with their buffer count once it was added: a count that changed (another tool
+        // removed every buffer, say) has it checked and added again.
+        private static readonly Dictionary<Camera, int> cameras = new Dictionary<Camera, int>();
         private static readonly Dictionary<int, Mesh> bakedForWire = new Dictionary<int, Mesh>();
         private static CommandBuffer buffer;
         private static Material material;
@@ -426,20 +428,24 @@ namespace Orbiters.Toolkit.Editor.XRay
 
         private static void Attach(Camera camera)
         {
-            if (buffer == null || cameras.Contains(camera))
+            if (buffer == null || cameras.TryGetValue(camera, out int count) && camera.commandBufferCount == count)
             {
                 return;
             }
 
-            cameras.RemoveWhere(c => c == null);
+            foreach (var gone in cameras.Keys.Where(c => c == null).ToList())
+            {
+                cameras.Remove(gone);
+            }
+
             RemoveNamedBuffers(camera);
             camera.AddCommandBuffer(BufferEvent, buffer);
-            cameras.Add(camera);
+            cameras[camera] = camera.commandBufferCount;
         }
 
         private static void Detach()
         {
-            foreach (var camera in cameras)
+            foreach (var camera in cameras.Keys)
             {
                 if (camera != null && buffer != null)
                 {

@@ -86,6 +86,11 @@ namespace Orbiters.Toolkit.Editor.Tests.XRay
                 Check(drawn.Mesh == fixture.WorkingCopy, "The edge buffer still names the replaced mesh.");
                 Check(CountOurs(fixture.SceneCamera) == 1, "Re-recording attached the edge buffer twice.");
 
+                // Another tool clears the camera's buffers: the edges come back at the next render.
+                fixture.SceneCamera.RemoveAllCommandBuffers();
+                XRayMeshEdgeService.BeforeCameraRender(fixture.SceneCamera);
+                Check(CountOurs(fixture.SceneCamera) == 1, "The edge buffer was not added again after the camera's buffers were cleared.");
+
                 // A hidden renderer is not skinned by Unity: its edges go away until it shows again.
                 fixture.Source.enabled = false;
                 XRayMeshEdgeService.BeforeCameraRender(fixture.SceneCamera);

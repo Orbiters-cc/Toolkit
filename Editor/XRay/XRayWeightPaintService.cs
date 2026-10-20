@@ -226,10 +226,13 @@ namespace Orbiters.Toolkit.Editor.XRay
             Refresh();
         }
 
-        // A mesh swapped under a shown renderer raises no hierarchy change: compared a few times a second while shown.
+        // A mesh swapped under a shown renderer raises no hierarchy change: compared a few times a second while shown. The
+        // blendshape weights are followed before each repaint (sliders, animation previews, tools' shape edits).
         private static void WatchSourceMeshes(SceneView _)
         {
-            if (Instances.Count == 0 || isRefreshing || EditorApplication.timeSinceStartup < nextSourceCheck) return;
+            if (Instances.Count == 0 || isRefreshing) return;
+            if (Event.current != null && Event.current.type == EventType.Layout) FollowBlendShapeWeights();
+            if (EditorApplication.timeSinceStartup < nextSourceCheck) return;
             nextSourceCheck = EditorApplication.timeSinceStartup + 0.25;
             foreach (var pair in Instances)
             {
@@ -725,6 +728,23 @@ namespace Orbiters.Toolkit.Editor.XRay
             }
 
             return materials;
+        }
+
+        // The overlay shows the shape its renderer shows: weights that changed are copied (not every one at every repaint).
+        private static void FollowBlendShapeWeights()
+        {
+            foreach (var instance in Instances.Values)
+            {
+                var renderer = instance.Renderer;
+                if (renderer == null || instance.MeshObject == null || instance.Mesh == null || renderer.sharedMesh != instance.Source) continue;
+                var overlay = instance.MeshObject.GetComponent<SkinnedMeshRenderer>();
+                if (overlay == null) continue;
+                for (int i = 0; i < instance.Mesh.blendShapeCount; i++)
+                {
+                    float weight = renderer.GetBlendShapeWeight(i);
+                    if (overlay.GetBlendShapeWeight(i) != weight) overlay.SetBlendShapeWeight(i, weight);
+                }
+            }
         }
 
         private static void CopyBlendShapeWeights(
