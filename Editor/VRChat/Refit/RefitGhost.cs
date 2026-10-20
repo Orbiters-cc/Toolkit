@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using Orbiters.Toolkit.Armature;
 using UnityEditor;
@@ -10,11 +11,14 @@ namespace Orbiters.Toolkit.Editor.VRChat.Refit
 {
     /// <summary>
     /// A see-through preview of an avatar's original base, placed over the avatar's body, to line up clothing made for the
-    /// original before refitting it. Never saved, not in the hierarchy; removed on Dispose and before scripts reload.
+    /// original before refitting it. Never saved, not in the hierarchy; removed on Dispose and before scripts reload. The
+    /// original is not instantiated: its objects and renderers are made again hidden from the start, so the open scene is
+    /// never marked changed and none of the original's scripts runs.
     /// </summary>
     public sealed class RefitGhost : IDisposable
     {
         private static readonly Color Tint = new Color(0.25f, 0.62f, 1f, 0.3f);
+        private const HideFlags Hidden = HideFlags.HideAndDontSave;
         private GameObject root;
         private Material material;
 
@@ -31,50 +35,118 @@ namespace Orbiters.Toolkit.Editor.VRChat.Refit
         {
             if (original == null || originalBody == null || avatarBody == null) throw new ArgumentNullException(nameof(original));
             var ghost = new RefitGhost();
-            ghost.root = Object.Instantiate(original);
-            ghost.root.name = original.name + " (original base)";
-            foreach (var t in ghost.root.GetComponentsInChildren<Transform>(true)) t.gameObject.hideFlags = HideFlags.HideAndDontSave;
-
-            // The copy of the original body, found by its path in the original.
-            string bodyPath = AnimationUtility.CalculateTransformPath(originalBody.transform, original.transform);
-            var body = bodyPath.Length == 0 ? ghost.root.transform : ghost.root.transform.Find(bodyPath);
-            var animator = ghost.root.GetComponentInChildren<Animator>(true);
-            // An original base imported without a humanoid avatar (Generic) still names its hips.
-            var bodyRenderer = body != null ? body.GetComponent<SkinnedMeshRenderer>() : null;
-            ghost.Hips = AvatarBoneIndex.Build(ghost.root.transform, bodyRenderer != null ? bodyRenderer.bones : ghost.root.GetComponentsInChildren<Transform>(true),
-                animator).Humanoid(HumanBodyBones.Hips);
-
-            // Only renderers stay: nothing of the original runs (animators, physics, scripts).
-            foreach (var component in ghost.root.GetComponentsInChildren<Component>(true).Reverse())
-                if (!(component is Transform) && !(component is Renderer) && !(component is MeshFilter)) Object.DestroyImmediate(component);
-
-            // Its body where the avatar's body is: same world matrix.
-            if (body != null)
+            try
             {
-                ghost.root.transform.SetPositionAndRotation(Vector3.zero, Quaternion.identity);
-                ghost.root.transform.localScale = Vector3.one;
-                var target = avatarBody.transform.localToWorldMatrix * body.localToWorldMatrix.inverse;
-                ghost.root.transform.SetPositionAndRotation(target.GetColumn(3), target.rotation);
-                ghost.root.transform.localScale = target.lossyScale;
+                var made = new Dictionary<Transform, Transform>();
+                ghost.root = Rebuild(original.transform, null, made);
+                ghost.root.name = original.name + " (original base)";
+
+                // The copy of the original body: the one made from it, else found by its path in the original.
+                Transform body = null;
+                if (!made.TryGetValue(originalBody.transform, out body))
+                {
+                    string bodyPath = originalBody.transform.IsChildOf(original.transform)
+                        ? AnimationUtility.CalculateTransformPath(originalBody.transform, original.transform) : null;
+                    body = bodyPath == null ? null : bodyPath.Length == 0 ? ghost.root.transform : ghost.root.transform.Find(bodyPath);
+                }
+                var renderers = CopyRenderers(original.transform, made);
+                var bodyRenderer = body != null ? body.GetComponent<SkinnedMeshRenderer>() : null;
+                // Its humanoid avatar, given for a moment to the copy (an original imported Generic still names its hips).
+                var sourceAnimator = original.GetComponentsInChildren<Animator>(true).FirstOrDefault(a => a.avatar != null && a.avatar.isValid && a.avatar.isHuman);
+                var bones = bodyRenderer != null ? bodyRenderer.bones : ghost.root.GetComponentsInChildren<Transform>(true);
+                if (sourceAnimator != null && made.TryGetValue(sourceAnimator.transform, out var animated))
+                {
+                    var animator = animated.gameObject.AddComponent<Animator>();
+                    animator.avatar = sourceAnimator.avatar;
+                    animator.Rebind();
+                    ghost.Hips = AvatarBoneIndex.Build(ghost.root.transform, bones, animator).Humanoid(HumanBodyBones.Hips);
+                    // Only renderers stay.
+                    Object.DestroyImmediate(animator);
+                }
+                if (ghost.Hips == null) ghost.Hips = AvatarBoneIndex.Build(ghost.root.transform, bones).Humanoid(HumanBodyBones.Hips);
+
+                // Its body where the avatar's body is: same world matrix.
+                if (body != null)
+                {
+                    ghost.root.transform.SetPositionAndRotation(Vector3.zero, Quaternion.identity);
+                    ghost.root.transform.localScale = Vector3.one;
+                    var target = avatarBody.transform.localToWorldMatrix * body.localToWorldMatrix.inverse;
+                    ghost.root.transform.SetPositionAndRotation(target.GetColumn(3), target.rotation);
+                    ghost.root.transform.localScale = target.lossyScale;
+                }
+
+                ghost.material = new Material(Shader.Find("Hidden/Internal-Colored")) { hideFlags = Hidden, name = "Original base preview" };
+                ghost.material.SetColor("_Color", Tint);
+                ghost.material.SetInt("_SrcBlend", (int)BlendMode.SrcAlpha);
+                ghost.material.SetInt("_DstBlend", (int)BlendMode.OneMinusSrcAlpha);
+                ghost.material.SetInt("_Cull", (int)CullMode.Off);
+                ghost.material.SetInt("_ZWrite", 0);
+                ghost.material.renderQueue = (int)RenderQueue.Transparent;
+                foreach (var (renderer, slots) in renderers)
+                {
+                    renderer.sharedMaterials = Enumerable.Repeat(ghost.material, Mathf.Max(1, slots)).ToArray();
+                    renderer.shadowCastingMode = ShadowCastingMode.Off;
+                    renderer.receiveShadows = false;
+                }
             }
-
-            ghost.material = new Material(Shader.Find("Hidden/Internal-Colored")) { hideFlags = HideFlags.HideAndDontSave, name = "Original base preview" };
-            ghost.material.SetColor("_Color", Tint);
-            ghost.material.SetInt("_SrcBlend", (int)BlendMode.SrcAlpha);
-            ghost.material.SetInt("_DstBlend", (int)BlendMode.OneMinusSrcAlpha);
-            ghost.material.SetInt("_Cull", (int)CullMode.Off);
-            ghost.material.SetInt("_ZWrite", 0);
-            ghost.material.renderQueue = (int)RenderQueue.Transparent;
-            foreach (var renderer in ghost.root.GetComponentsInChildren<Renderer>(true))
+            catch
             {
-                renderer.sharedMaterials = Enumerable.Repeat(ghost.material, Mathf.Max(1, renderer.sharedMaterials.Length)).ToArray();
-                renderer.shadowCastingMode = ShadowCastingMode.Off;
-                renderer.receiveShadows = false;
+                ghost.Dispose();
+                throw;
             }
             AssemblyReloadEvents.beforeAssemblyReload += ghost.Dispose;
             EditorApplication.playModeStateChanged += ghost.PlayModeChanged;
             SceneView.RepaintAll();
             return ghost;
+        }
+
+        // The objects of the original, made again hidden from their creation (their names, places and active states).
+        private static GameObject Rebuild(Transform source, Transform parent, Dictionary<Transform, Transform> made)
+        {
+            var go = EditorUtility.CreateGameObjectWithHideFlags(source.name, Hidden);
+            var t = go.transform;
+            if (parent != null) t.SetParent(parent, false);
+            t.localPosition = source.localPosition;
+            t.localRotation = source.localRotation;
+            t.localScale = source.localScale;
+            made[source] = t;
+            foreach (Transform child in source) Rebuild(child, t, made);
+            go.SetActive(source.gameObject.activeSelf);
+            return go;
+        }
+
+        // The original's mesh renderers on the objects made from theirs, skinned to the bones made from theirs, with as many
+        // material slots each.
+        private static List<(Renderer renderer, int slots)> CopyRenderers(Transform source, Dictionary<Transform, Transform> made)
+        {
+            var copies = new List<(Renderer, int)>();
+            Transform Made(Transform t) => t != null && made.TryGetValue(t, out var copy) ? copy : null;
+            foreach (var skinned in source.GetComponentsInChildren<SkinnedMeshRenderer>(true))
+            {
+                var at = Made(skinned.transform);
+                if (at == null) continue;
+                var copy = at.gameObject.AddComponent<SkinnedMeshRenderer>();
+                copy.sharedMesh = skinned.sharedMesh;
+                copy.bones = (skinned.bones ?? Array.Empty<Transform>()).Select(Made).ToArray();
+                copy.rootBone = Made(skinned.rootBone);
+                copy.updateWhenOffscreen = true;
+                copy.enabled = skinned.enabled;
+                var mesh = skinned.sharedMesh;
+                if (mesh != null)
+                    for (int i = 0; i < mesh.blendShapeCount; i++) copy.SetBlendShapeWeight(i, skinned.GetBlendShapeWeight(i));
+                copies.Add((copy, skinned.sharedMaterials.Length));
+            }
+            foreach (var filter in source.GetComponentsInChildren<MeshFilter>(true))
+            {
+                var meshRenderer = filter.GetComponent<MeshRenderer>();
+                var at = Made(filter.transform);
+                if (meshRenderer == null || at == null) continue;
+                at.gameObject.AddComponent<MeshFilter>().sharedMesh = filter.sharedMesh;
+                var copy = at.gameObject.AddComponent<MeshRenderer>();
+                copy.enabled = meshRenderer.enabled;
+                copies.Add((copy, meshRenderer.sharedMaterials.Length));
+            }
+            return copies;
         }
 
         private void PlayModeChanged(PlayModeStateChange change) => Dispose();

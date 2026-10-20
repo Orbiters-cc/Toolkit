@@ -14,10 +14,19 @@ namespace Orbiters.Toolkit.Editor.VRChat
 {
     /// <summary>
     /// The hand screen: the video the world is playing, on a screen held by a handle on each side. One hand carries it
-    /// (both handles follow that wrist), both hands stretch it (each handle follows its own wrist and the screen spans
-    /// them, 16:9, like pulling a picture bigger on a phone), and let go it stays in the world. Native avatar components
-    /// only: the size needs no animator maths, constraints work the corners out from the two handles. Grabbing is the
-    /// drawing pen's method (<see cref="HeldPropRig"/>): a PhysBone pickup latched to the wrist where it was grabbed.
+    /// whole from where it was taken, turned to face its owner; both hands stretch it (each handle sits in its palm and the
+    /// screen spans them, 16:9, like pulling a picture bigger on a phone), and let go it stays in the world. Native avatar
+    /// components only: the size needs no animator maths, constraints work the corners out from the two handles. Grabbing
+    /// is the drawing pen's method (<see cref="HeldPropRig"/>): a PhysBone pickup latched to the hand.
+    /// <para>
+    /// Everyone sees it where its owner does: the owner's hands are only known to others through their synced pose and 4
+    /// synced bools, which reach each of them a little later than the pose, so every client works the screen out again on
+    /// its own. It therefore never depends on the wrists' turn (the least exact part of a remote pose, and multiplied by
+    /// the screen's width): a handle in a hand follows a frame at the middle of the palm that faces the owner's head and
+    /// stands upright as the head does. Held in both hands, each handle sits exactly on its palm; carried in one hand, the
+    /// screen keeps where it was taken from that frame. A late guest sees it again where the owner does as soon as it is
+    /// held in both hands.
+    /// </para>
     /// The prefab is avatar-independent and <see cref="Bind"/> fits it to the avatar it is attached to. It carries its own
     /// shader and no Orbiters script: Toolkit releases ship without .meta files, so its files get other GUIDs in every
     /// project and a gallery copy referring to them would find nothing there.
@@ -34,6 +43,13 @@ namespace Orbiters.Toolkit.Editor.VRChat
         internal const string LeftAtLeft = "HandScreen/LeftHandAtLeft", RightAtLeft = "HandScreen/RightHandAtLeft";
         internal const string LeftAtRight = "HandScreen/LeftHandAtRight", RightAtRight = "HandScreen/RightHandAtRight";
         internal const string LeftHandle = "Left handle", RightHandle = "Right handle", Frame = "Left handle/Frame", Far = "Left handle/Frame/Far";
+        // The owner's head and palms as the prop follows them (Bind ties them to the avatar's bones).
+        internal const string Head = "Head", LeftGrip = "Left grip", RightGrip = "Right grip", Carry = "Carry";
+        // A handle's constraint sources: its home, a palm's Carry frame with the handle on it (offsets always 0), and the
+        // same frames again with the offsets measured where the screen was taken (carried whole in one hand). The animator
+        // writes back the last value it set every update (Write Defaults off or not), so a source whose offsets it sets
+        // can't keep measured ones: each Carry frame is listed twice.
+        internal const int AtHome = 0, InLeftHand = 1, InRightHand = 2, CarriedLeft = 3, CarriedRight = 4, HandleSources = 5;
         internal const float DefaultWidth = .6f, Aspect = 16f / 9;
         private const float Margin = .012f;
         internal static readonly Color Accent = new Color(.1f, .85f, 1f);
@@ -70,11 +86,18 @@ namespace Orbiters.Toolkit.Editor.VRChat
             var home = HeldPropRig.Home(root.transform, DefaultSpawn);
             var leftHome = HeldPropRig.Child(home, "Left home"); leftHome.localPosition = Vector3.left * DefaultWidth / 2;
             var rightHome = HeldPropRig.Child(home, "Right home"); rightHome.localPosition = Vector3.right * DefaultWidth / 2;
-            var left = Handle(root.transform, LeftHandle, leftHome, GrabLeftHandle, LeftAtLeft, RightAtLeft);
-            var right = Handle(root.transform, RightHandle, rightHome, GrabRightHandle, LeftAtRight, RightAtRight);
+            // The head, upright as the avatar stands: what a carried screen faces and what keeps the screen upright.
+            var head = HeldPropRig.Child(root.transform, Head); head.localPosition = DefaultSpawn - FromHead;
+            var follow = head.gameObject.AddComponent<VRCParentConstraint>();
+            follow.Sources.Add(new VRCConstraintSource(null, 1));
+            follow.IsActive = true; follow.Locked = true;
+            var grips = new[] { Grip(root.transform, LeftGrip, leftHome, head), Grip(root.transform, RightGrip, rightHome, head) };
+            var left = Handle(root.transform, LeftHandle, leftHome, grips, GrabLeftHandle, LeftAtLeft, RightAtLeft);
+            var right = Handle(root.transform, RightHandle, rightHome, grips, GrabRightHandle, LeftAtRight, RightAtRight);
 
-            // The frame runs from the left handle towards the right one, upright as the left handle is; Far sits on the
-            // right handle, so its position in the frame is the screen's width.
+            // The frame runs from the left handle towards the right one, upright as the left handle is (turned as a palm's
+            // Carry frame, never as a wrist); Far sits on the right handle, so its position in the frame is the screen's
+            // width. Held from behind (crossed), it shows its back.
             var frame = HeldPropRig.Child(left, "Frame");
             var aim = frame.gameObject.AddComponent<VRCAimConstraint>();
             aim.Sources.Add(new VRCConstraintSource(right, 1));
@@ -108,14 +131,38 @@ namespace Orbiters.Toolkit.Editor.VRChat
             foreach (var grab in root.GetComponentsInChildren<VRCPhysBone>(true)) grab.enabled = false;
         }
 
-        // A handle follows its home, then a wrist. Its short PhysBone chain only reports the grab; nothing follows it.
-        private static Transform Handle(Transform root, string name, Transform home, string grab, string leftAt, string rightAt)
+        /// <summary>
+        /// The middle of a palm (Bind ties it to the hand bone). Its Carry child stays there facing the head, upright as the
+        /// head is: what a handle in that hand follows, whatever way the wrist turns.
+        /// </summary>
+        private static Transform Grip(Transform root, string name, Transform waits, Transform head)
+        {
+            var grip = HeldPropRig.Child(root, name); grip.position = waits.position;
+            var follow = grip.gameObject.AddComponent<VRCParentConstraint>();
+            follow.Sources.Add(new VRCConstraintSource(null, 1));
+            follow.IsActive = true; follow.Locked = true;
+            var carry = HeldPropRig.Child(grip, Carry);
+            var face = carry.gameObject.AddComponent<VRCAimConstraint>();
+            face.Sources.Add(new VRCConstraintSource(head, 1));
+            face.AimAxis = Vector3.back; face.UpAxis = Vector3.up;
+            face.WorldUp = VRCConstraintBase.WorldUpType.ObjectRotationUp; face.WorldUpTransform = head; face.WorldUpVector = Vector3.up;
+            face.IsActive = true; face.Locked = true;
+            return grip;
+        }
+
+        // A handle follows its home or a palm's Carry frame (its sources: AtHome, InLeftHand… CarriedRight). Unfreezing
+        // measures each source's offset where the handle is: the carried ones keep it, so a screen carried in one hand stays
+        // where it was taken; the animator sets the others back to 0, so a handle in a hand sits on its palm. Its short
+        // PhysBone chain only reports the grab; nothing follows it.
+        private static Transform Handle(Transform root, string name, Transform home, Transform[] grips, string grab, string leftAt, string rightAt)
         {
             var handle = HeldPropRig.Child(root, name); handle.position = home.position;
             var follow = handle.gameObject.AddComponent<VRCParentConstraint>();
             follow.Sources.Add(new VRCConstraintSource(home, 1));
-            follow.Sources.Add(new VRCConstraintSource(null, 0));
-            follow.Sources.Add(new VRCConstraintSource(null, 0));
+            follow.Sources.Add(new VRCConstraintSource(grips[0].Find(Carry), 0));
+            follow.Sources.Add(new VRCConstraintSource(grips[1].Find(Carry), 0));
+            follow.Sources.Add(new VRCConstraintSource(grips[0].Find(Carry), 0));
+            follow.Sources.Add(new VRCConstraintSource(grips[1].Find(Carry), 0));
             follow.IsActive = true; follow.Locked = true; follow.RebakeOffsetsWhenUnfrozen = true;
             var bone = HeldPropRig.Child(handle, "Grab");
             HeldPropRig.Child(bone, "Grip").localPosition = Vector3.up * .02f;
@@ -184,25 +231,29 @@ namespace Orbiters.Toolkit.Editor.VRChat
 
         /// <summary>
         /// Fits a placed hand screen to <paramref name="avatar"/>: it waits in front of the face (following the head while
-        /// it is off) and each handle follows
-        /// either wrist from wherever it was grabbed. Recorded with Undo; binding again (another avatar, a moved armature)
-        /// replaces the earlier fit.
+        /// it is off), its grips sit in the middle of each palm and its head on the head bone. Recorded with Undo; binding
+        /// again (another avatar, a moved armature) replaces the earlier fit.
         /// </summary>
         public static void Bind(Transform screen, Transform avatar)
         {
             if (screen == null) throw new ArgumentNullException(nameof(screen));
             var animator = HeldPropRig.Humanoid(avatar, "hand screen");
             var home = screen.Find(HeldPropRig.Spawn);
+            var head = screen.Find(Head);
+            var grips = new[] { screen.Find(LeftGrip), screen.Find(RightGrip) };
             var handles = new[] { screen.Find(LeftHandle), screen.Find(RightHandle) };
             var follows = handles.Select(h => h != null ? h.GetComponent<VRCParentConstraint>() : null).ToArray();
-            if (home == null || follows.Any(f => f == null || f.Sources.Count < 3)) throw new InvalidOperationException("This hand screen was modified: add it again.");
-            Undo.RecordObjects(new Object[] { home, handles[0], handles[1], follows[0], follows[1] }, "Fit hand screen");
+            if (home == null || head == null || grips.Any(g => g == null || g.Find(Carry) == null) ||
+                follows.Any(f => f == null || f.Sources.Count < HandleSources))
+                throw new InvalidOperationException("This hand screen was modified or made by an older Orbiters Toolkit: add it again.");
+            Undo.RecordObjects(new Object[] { home, head, grips[0], grips[1], handles[0], handles[1] }, "Fit hand screen");
             HeldPropRig.FollowHead(home, animator, avatar, FromHead, "hand screen");
+            HeldPropRig.FollowHead(head, animator, avatar, Vector3.zero, "hand screen");
             for (int i = 0; i < 2; i++)
             {
-                var waits = follows[i].Sources[0].SourceTransform;
+                HeldPropRig.FollowPalm(grips[i], animator, avatar, i == 0, "hand screen");
+                var waits = follows[i].Sources[AtHome].SourceTransform;
                 handles[i].SetPositionAndRotation(waits.position, waits.rotation);
-                HeldPropRig.Wrists(follows[i], animator);
             }
         }
     }

@@ -23,10 +23,12 @@ namespace Orbiters.Toolkit.Editor.Processes
         {
             try
             {
-                if (Application.platform == RuntimePlatform.OSXEditor) return Activate("tell application \\\"" + processName + "\\\" to activate");
                 var processes = Process.GetProcessesByName(processName);
                 try
                 {
+                    // macOS: the running application by its process (asking for it by name would launch it when it isn't).
+                    if (Application.platform == RuntimePlatform.OSXEditor)
+                        return processes.Any(p => BringToFront(p));
                     var shown = processes.FirstOrDefault(p => p.MainWindowHandle != IntPtr.Zero);
                     return shown != null && BringToFront(shown);
                 }
@@ -45,7 +47,7 @@ namespace Orbiters.Toolkit.Editor.Processes
             {
                 if (process == null || process.HasExited) return false;
                 if (Application.platform == RuntimePlatform.OSXEditor)
-                    return Activate("tell application \\\"System Events\\\" to set frontmost of (first process whose unix id is " + process.Id + ") to true");
+                    return Activate("tell application \"System Events\" to set frontmost of (first process whose unix id is " + process.Id + ") to true");
                 if (Application.platform != RuntimePlatform.WindowsEditor) return false;
                 process.Refresh();
                 var window = process.MainWindowHandle;
@@ -88,9 +90,10 @@ namespace Orbiters.Toolkit.Editor.Processes
         public static void BringToFrontOnceShown(Process process, double seconds = 120)
         {
             if (process == null) return;
+            // Elsewhere there is no window handle to wait for: an application started from Unity comes to the front itself.
+            if (Application.platform != RuntimePlatform.WindowsEditor) return;
             // It may take the focus itself too, as long as Unity is in front.
-            if (Application.platform == RuntimePlatform.WindowsEditor)
-                try { AllowSetForegroundWindow(process.Id); } catch (Exception) { }
+            try { AllowSetForegroundWindow(process.Id); } catch (Exception) { }
             Starting.Add((process, EditorApplication.timeSinceStartup + seconds));
             if (Starting.Count == 1) EditorApplication.update += Watch;
         }
@@ -129,9 +132,10 @@ namespace Orbiters.Toolkit.Editor.Processes
             return text.ToString();
         }
 
+        // The script names a process by its number only: nothing in it comes from a name that could hold a quote.
         private static bool Activate(string script)
         {
-            var start = new ProcessStartInfo("osascript", "-e \"" + script + "\"") { UseShellExecute = false, CreateNoWindow = true };
+            var start = new ProcessStartInfo("osascript", "-e \"" + script.Replace("\\", "\\\\").Replace("\"", "\\\"") + "\"") { UseShellExecute = false, CreateNoWindow = true };
             Process.Start(start)?.Dispose();
             return true;
         }

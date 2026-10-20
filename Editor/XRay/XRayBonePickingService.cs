@@ -26,6 +26,7 @@ namespace Orbiters.Toolkit.Editor.XRay
         {
             SceneView.duringSceneGui += OnSceneGUI;
             XRayGizmoService.Changed += RepaintSceneViews;
+            XRayBonePickHandlers.Changed += RepaintSceneViews;
             AssemblyReloadEvents.beforeAssemblyReload += ClearHover;
             EditorApplication.quitting += ClearHover;
         }
@@ -92,7 +93,7 @@ namespace Orbiters.Toolkit.Editor.XRay
             var hovered = GetHover(sceneView);
             if (Enabled && hovered.IsValid && CanPickBone(evt, controlId))
             {
-                SelectBone(hovered.Bone, evt.shift, evt.control || evt.command);
+                Pick(hovered.Bone, evt.shift, evt.control || evt.command);
                 evt.Use();
                 return;
             }
@@ -214,13 +215,20 @@ namespace Orbiters.Toolkit.Editor.XRay
 
         private static void DrawSelectedHighlights()
         {
+            var selected = new HashSet<Transform>();
             var selectedTransforms = Selection.transforms;
-            if (selectedTransforms == null || selectedTransforms.Length == 0)
+            if (selectedTransforms != null)
+            {
+                selected.UnionWith(selectedTransforms);
+            }
+
+            // A tool's own pick (Mixer's sub-selected bone) shows as a selected bone does.
+            XRayBonePickHandlers.CollectPicked(selected);
+            if (selected.Count == 0)
             {
                 return;
             }
 
-            var selected = new HashSet<Transform>(selectedTransforms);
             foreach (var segment in XRayGizmoService.ActiveBoneSegments)
             {
                 if (!segment.IsValid ||
@@ -261,6 +269,26 @@ namespace Orbiters.Toolkit.Editor.XRay
             {
                 Handles.zTest = previousZTest;
             }
+        }
+
+        /// <summary>
+        /// A click on a bone: a plain click goes to a tool's handler first (Mixer's Weight Paint sub-selects the bone);
+        /// Shift and Ctrl clicks, and clicks no tool takes, select it in Unity.
+        /// </summary>
+        internal static void Pick(Transform bone, bool additive, bool toggle)
+        {
+            if (bone == null)
+            {
+                return;
+            }
+
+            if (!additive && !toggle && XRayBonePickHandlers.TryPick(bone))
+            {
+                SceneView.RepaintAll();
+                return;
+            }
+
+            SelectBone(bone, additive, toggle);
         }
 
         private static void SelectBone(Transform bone, bool additive, bool toggle)

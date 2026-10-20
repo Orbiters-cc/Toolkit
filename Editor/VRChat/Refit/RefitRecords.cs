@@ -140,6 +140,14 @@ namespace Orbiters.Toolkit.Editor.VRChat.Refit
                 transform.localRotation = transformState.localRotation;
                 transform.localScale = transformState.localScale;
                 EditorUtility.SetDirty(transform);
+                // An object the refit hid (an armature of a prefab it could not remove) is shown again: its PhysBones and
+                // contacts work again.
+                if (transformState.activeCaptured && transform.gameObject.activeSelf != transformState.active)
+                {
+                    Undo.RecordObject(transform.gameObject, undoName);
+                    transform.gameObject.SetActive(transformState.active);
+                    PrefabUtility.RecordPrefabInstancePropertyModifications(transform.gameObject);
+                }
                 restored = true;
             }
 
@@ -279,6 +287,64 @@ namespace Orbiters.Toolkit.Editor.VRChat.Refit
             record.bodyShrinkMesh = null;
         }
 
+        // ---- The fit shape --------------------------------------------------------------------------------------------
+
+        /// <summary>The name the refit engines give the blendshape carrying a fit, when nothing else tells it apart.</summary>
+        public const string DefaultFitShape = "refit";
+
+        /// <summary>
+        /// The blendshape carrying the fit on a refitted mesh (the refit engines keep the original as the mesh and put the fit
+        /// in a blendshape at 100): the first shape <paramref name="mesh"/> has that <paramref name="original"/> had not and
+        /// that is not one of the body's shapes it was given (<paramref name="shapes"/>); without another original, the one
+        /// named <see cref="DefaultFitShape"/>. Null when it has none: a refit that only added the body's shapes.
+        /// </summary>
+        public static string FitShape(Mesh mesh, Mesh original, IEnumerable<RefitShape> shapes)
+        {
+            if (mesh == null) return null;
+            var generated = new HashSet<string>((shapes ?? Enumerable.Empty<RefitShape>()).Select(s => s.generated).Where(s => !string.IsNullOrEmpty(s)),
+                StringComparer.Ordinal);
+            bool compare = original != null && original != mesh;
+            for (int i = 0; i < mesh.blendShapeCount; i++)
+            {
+                string name = mesh.GetBlendShapeName(i);
+                if (generated.Contains(name)) continue;
+                if (compare ? original.GetBlendShapeIndex(name) < 0 : name == DefaultFitShape) return name;
+            }
+            return null;
+        }
+
+        /// <summary>The fit shape of the record's mesh (see <see cref="FitShape(Mesh, Mesh, IEnumerable{RefitShape})"/>); null for a refit of shapes only.</summary>
+        public static string FitShape(OrbitersRefit record) =>
+            record == null || record.kind != OrbitersRefit.FitKind.Fitted ? null
+                : FitShape(record.mesh, record.original != null ? record.original.mesh : null, record.shapes);
+
+        /// <summary>
+        /// The renderer of an applied refit now wears <paramref name="mesh"/>, its own copy of the refit's mesh (a tool's edit
+        /// of a mesh other avatars may share): the record and the kept fit it wears follow, with Undo. False when the record
+        /// is not applied.
+        /// </summary>
+        public static bool ReplaceMesh(OrbitersRefit record, Mesh mesh, string meshPath, string undoName)
+        {
+            var renderer = record != null ? record.GetComponent<SkinnedMeshRenderer>() : null;
+            if (renderer == null || mesh == null || !record.Applied) return false;
+            var current = CurrentFit(record);
+            Undo.RecordObject(renderer, undoName);
+            renderer.sharedMesh = mesh;
+            EditorUtility.SetDirty(renderer);
+            PrefabUtility.RecordPrefabInstancePropertyModifications(renderer);
+            Undo.RecordObject(record, undoName);
+            record.mesh = mesh;
+            record.meshPath = meshPath;
+            if (current != null)
+            {
+                current.state.mesh = mesh;
+                current.meshPath = meshPath;
+            }
+            Dirty(record);
+            Changed?.Invoke(renderer);
+            return true;
+        }
+
         // ---- Kept fits --------------------------------------------------------------------------------------------------
 
         /// <summary>The kept fit the renderer wears now, or null.</summary>
@@ -320,6 +386,8 @@ namespace Orbiters.Toolkit.Editor.VRChat.Refit
             if (record.Applied && CurrentFit(record) == null) KeepFit(record, null);
             if (!Restore(root, renderer, fit.state, "Use a kept fit")) return false;
             Undo.RecordObject(record, "Use a kept fit");
+            // The body shrink was planned under the fit worn until now: under another one it is checked again.
+            if (record.mesh != fit.Mesh) ClearBodyShrink(record);
             record.mesh = fit.Mesh;
             record.meshPath = fit.meshPath;
             record.shapes = fit.shapes.ToList();

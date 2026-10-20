@@ -294,7 +294,7 @@ namespace Orbiters.Toolkit.Editor.XRay
             if (backgroundStyle == null)
             {
                 backgroundStyle = new GUIStyle();
-                backgroundStyle.normal.background = CreateRoundedRectTexture(18, 6f, BackgroundColor);
+                backgroundStyle.normal.background = ReloadScopedObjects.Keep(CreateRoundedRectTexture(18, 6f, BackgroundColor));
                 backgroundStyle.border = new RectOffset(6, 6, 6, 6);
             }
         }
@@ -304,7 +304,7 @@ namespace Orbiters.Toolkit.Editor.XRay
             var texture = new Texture2D(size, size, TextureFormat.RGBA32, false)
             {
                 hideFlags = HideFlags.HideAndDontSave,
-                name = "XRay Scene Label Background",
+                name = "Avatar gizmos label background",
                 wrapMode = TextureWrapMode.Clamp,
                 filterMode = FilterMode.Bilinear
             };

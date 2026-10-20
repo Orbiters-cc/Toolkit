@@ -55,7 +55,9 @@ namespace Orbiters.Toolkit.Editor.Meshes
             }
             catch
             {
+                // Meshes made before the failure, given to a renderer yet or not.
                 Release(root);
+                foreach (var mesh in scene.Made) if (mesh != null) Object.DestroyImmediate(mesh);
                 throw;
             }
         }
@@ -78,7 +80,10 @@ namespace Orbiters.Toolkit.Editor.Meshes
             private readonly Dictionary<long, Transform> transforms = new Dictionary<long, Transform>();
             private readonly Dictionary<long, Matrix4x4> globals = new Dictionary<long, Matrix4x4>();
             private readonly Dictionary<long, long> parents = new Dictionary<long, long>();
+            private readonly Dictionary<long, long> modelParent = new Dictionary<long, long>();
             private readonly Options options;
+            /// <summary>Every mesh built so far (destroyed by Load when building fails).</summary>
+            public readonly List<Mesh> Made = new List<Mesh>();
 
             public Scene(FbxDocument document, Options options)
             {
@@ -88,6 +93,10 @@ namespace Orbiters.Toolkit.Editor.Meshes
                 {
                     if (!children.TryGetValue(parent, out var list)) children[parent] = list = new List<long>();
                     list.Add(child);
+                    // A model's parent is the first model (or the root) the file connects it to.
+                    if (!modelParent.ContainsKey(child) && objects.TryGetValue(child, out var node) && node.Name == "Model" &&
+                        (parent == 0 || objects.TryGetValue(parent, out var above) && above.Name == "Model"))
+                        modelParent[child] = parent;
                 }
                 toUnity = document.ToUnity();
                 toFbx = toUnity.inverse;
@@ -111,11 +120,23 @@ namespace Orbiters.Toolkit.Editor.Meshes
                 }
             }
 
-            // The models below a parent, by name as the importer sorts them, each placed in its parent's space.
-            private void AddModels(long parentId, Transform parent, Matrix4x4 parentGlobal)
+            // The models below a parent, by name as the importer sorts them, each placed in its parent's space, depth first
+            // as the importer builds them, without recursion (no depth overflows the stack). Each model once, under the first
+            // parent the file connects it to: a second parent does not build it twice, and connections that loop back end.
+            private void AddModels(long rootId, Transform root, Matrix4x4 rootGlobal)
             {
-                foreach (var model in Of(parentId, "Model").OrderBy(m => m.ObjectName, StringComparer.Ordinal))
+                var pending = new Stack<(FbxNode Model, long ParentId, Transform Parent, Matrix4x4 ParentGlobal)>();
+                void PushChildren(long parentId, Transform parent, Matrix4x4 parentGlobal)
                 {
+                    var sorted = Of(parentId, "Model").Where(m => modelParent.TryGetValue(m.Id, out long first) && first == parentId)
+                        .OrderBy(m => m.ObjectName, StringComparer.Ordinal).ToList();
+                    for (int i = sorted.Count - 1; i >= 0; i--) pending.Push((sorted[i], parentId, parent, parentGlobal));
+                }
+                PushChildren(rootId, root, rootGlobal);
+                while (pending.Count > 0)
+                {
+                    var (model, parentId, parent, parentGlobal) = pending.Pop();
+                    if (model.Id == rootId || transforms.ContainsKey(model.Id)) continue;
                     var local = FbxTransform.Local(model);
                     var go = EditorUtility.CreateGameObjectWithHideFlags(model.ObjectName, HideFlags.HideAndDontSave);
                     go.transform.SetParent(parent, false);
@@ -123,7 +144,7 @@ namespace Orbiters.Toolkit.Editor.Meshes
                     transforms[model.Id] = go.transform;
                     globals[model.Id] = parentGlobal * local;
                     parents[model.Id] = parentId;
-                    AddModels(model.Id, go.transform, globals[model.Id]);
+                    PushChildren(model.Id, go.transform, globals[model.Id]);
                 }
             }
 
@@ -216,6 +237,7 @@ namespace Orbiters.Toolkit.Editor.Meshes
                 if (cornerStart != polygonVertices.Length) throw new InvalidDataException($"{model.ObjectName} ends in an unfinished polygon.");
 
                 var mesh = new Mesh { name = model.ObjectName };
+                Made.Add(mesh);
                 int vertexCount = vertexPoint.Count;
                 if (vertexCount > 65535) mesh.indexFormat = IndexFormat.UInt32;
                 var positions = new Vector3[vertexCount];
@@ -287,6 +309,8 @@ namespace Orbiters.Toolkit.Editor.Meshes
                     }
                 }
 
+                // A skin none of whose clusters has a bone in the file skins nothing: the mesh stays unskinned.
+                if (bones.Count == 0) return null;
                 var boneWeights = new BoneWeight[vertexPoint.Count];
                 var perPoint = new BoneWeight[pointCount];
                 for (int p = 0; p < pointCount; p++)
@@ -361,6 +385,7 @@ namespace Orbiters.Toolkit.Editor.Meshes
             // The bone every other one is below (or the deepest model above them all).
             private Transform RootBone(Transform[] bones)
             {
+                if (bones.Length == 0) return null;
                 var chains = bones.Select(b => Ancestors(b).Reverse().ToList()).ToList();
                 Transform common = null;
                 for (int depth = 0; ; depth++)

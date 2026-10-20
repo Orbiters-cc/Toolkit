@@ -38,6 +38,12 @@ namespace Orbiters.Toolkit.Meshes
         private int[] triangles;
         private int nodeCount;
 
+        /// <summary>
+        /// The vertices went through a mirroring transform (a negative scale: its determinant is negative), so the mesh's
+        /// front faces wind the other way round in them: raycasts without back faces and <see cref="FaceNormal"/> follow.
+        /// </summary>
+        public bool Mirrored { get; set; }
+
         public int TriangleCount => triangles.Length / 3;
         public Vector3[] Vertices => vertices;
         public int[] Triangles => triangles;
@@ -279,7 +285,8 @@ namespace Orbiters.Toolkit.Meshes
         {
             int t = triangle * 3;
             Vector3 a = vertices[triangles[t]], b = vertices[triangles[t + 1]], c = vertices[triangles[t + 2]];
-            return Vector3.Cross(b - a, c - a).normalized;
+            var normal = Vector3.Cross(b - a, c - a).normalized;
+            return Mirrored ? -normal : normal;
         }
 
         private static float BoxDistance2(Vector3 p, Vector3 min, Vector3 max)
@@ -309,7 +316,7 @@ namespace Orbiters.Toolkit.Meshes
             Vector3 p = Vector3.Cross(dir, e2);
             float det = Vector3.Dot(e1, p);
             distance = 0f; bary = Vector3.zero;
-            if (backfaces ? Math.Abs(det) < 1e-12f : det < 1e-12f) return false;
+            if (backfaces ? Math.Abs(det) < 1e-12f : (Mirrored ? -det : det) < 1e-12f) return false;
             float invDet = 1f / det;
             Vector3 s = origin - a;
             float u = Vector3.Dot(s, p) * invDet;

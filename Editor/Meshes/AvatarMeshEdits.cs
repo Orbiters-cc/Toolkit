@@ -4,10 +4,11 @@ using UnityEngine;
 namespace Orbiters.Toolkit.Editor.Meshes
 {
     /// <summary>
-    /// An avatar's meshes were changed by another tool: for good (<see cref="Applied"/>: MCB applying an export from
-    /// Blender), or for a while (<see cref="Previewed"/>: MCB showing Blender's edits live on temporary meshes, or putting
-    /// the avatar's own back). What was made from them elsewhere (My Avatar's Substance 3D Painter project) can follow.
-    /// Tools raise them once the change is done, with the avatar's root.
+    /// An avatar's meshes were changed by another tool: for good (<see cref="Applied"/>: a Mixer commit, MCB applying an
+    /// export from Blender), or for a while (<see cref="Previewed"/>: a tool showing edits live on temporary meshes, as
+    /// Mixer's working copies, or putting the avatar's own back). What was made from them elsewhere (My Avatar's Substance
+    /// 3D Painter project) can follow. Tools raise them once the change is done, with the avatar's root; a live preview
+    /// raises <see cref="NotifyPreviewed"/> at each change (listeners wait for the edits to pause).
     /// </summary>
     public static class AvatarMeshEdits
     {

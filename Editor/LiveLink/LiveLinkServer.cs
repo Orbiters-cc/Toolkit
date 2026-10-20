@@ -5,6 +5,7 @@ using System.IO;
 using System.Linq;
 using System.Net;
 using System.Net.Sockets;
+using System.Security.Cryptography;
 using System.Text;
 using System.Threading;
 using UnityEditor;
@@ -18,12 +19,24 @@ namespace Orbiters.Toolkit.Editor.LiveLink
     ///   u32 magic, u8 version, u8 type, u16 token length, u32 payload length, then the token (UTF-8) and the payload
     /// </code>
     /// Each link has its own magic, version and frame types. Every frame carries the session's token: a frame with another
-    /// token (or that doesn't hold together) closes the connection, and nothing it sent is used.
+    /// token (or that doesn't hold together) closes the connection, and nothing it sent is used. Unity sends frames only on
+    /// connections that sent it a frame with the token, so a stranger that connects learns nothing.
+    /// <para>
+    /// Type 0 is the same for every link: a client that wants Unity to prove it holds the session's token before sending
+    /// it (a stranger could listen on Unity's port while Unity reloads its scripts) sends first a type 0 frame without a
+    /// token whose payload is a random nonce of 16 to 64 bytes. Unity answers with a type 0 frame without a token whose
+    /// payload is <see cref="Proof"/>: HMAC-SHA256, keyed with the token's UTF-8 bytes, of the ASCII text
+    /// "Orbiters live link proof", the magic (u32), the port the client connected to (u16) and the nonce.
+    /// </para>
     /// </summary>
     public sealed class LiveLinkFormat
     {
         public const int HeaderBytes = 12;
         public const int MaxTokenBytes = 256;
+        /// <summary>The frame type of a proof request and of its answer, the same on every link.</summary>
+        public const byte ProofType = 0;
+        public const int MinNonceBytes = 16;
+        public const int MaxNonceBytes = 64;
 
         public uint Magic { get; }
         public byte Version { get; }
@@ -54,7 +67,11 @@ namespace Orbiters.Toolkit.Editor.LiveLink
         }
 
         /// <summary>Reads the 12-byte header: false when it is not a frame of this format (or announces too much).</summary>
-        public bool TryReadHeader(byte[] header, out byte type, out int tokenLength, out int payloadLength)
+        public bool TryReadHeader(byte[] header, out byte type, out int tokenLength, out int payloadLength) =>
+            TryReadAnyHeader(header, out type, out tokenLength, out payloadLength) && type != ProofType && knownType(type);
+
+        // A header of this format, whatever its type (the proof type included).
+        internal bool TryReadAnyHeader(byte[] header, out byte type, out int tokenLength, out int payloadLength)
         {
             type = 0;
             tokenLength = payloadLength = 0;
@@ -63,7 +80,20 @@ namespace Orbiters.Toolkit.Editor.LiveLink
             type = header[5];
             tokenLength = BitConverter.ToUInt16(header, 6);
             payloadLength = BitConverter.ToInt32(header, 8);
-            return knownType(type) && tokenLength <= MaxTokenBytes && payloadLength >= 0 && payloadLength <= MaxPayloadBytes;
+            return tokenLength <= MaxTokenBytes && payloadLength >= 0 && payloadLength <= MaxPayloadBytes;
+        }
+
+        /// <summary>What Unity answers to a proof request with this nonce, on this port (see the class remarks).</summary>
+        public byte[] Proof(string token, int port, byte[] nonce)
+        {
+            if (nonce == null) throw new ArgumentNullException(nameof(nonce));
+            var label = Encoding.ASCII.GetBytes("Orbiters live link proof");
+            var message = new byte[label.Length + 4 + 2 + nonce.Length];
+            label.CopyTo(message, 0);
+            BitConverter.GetBytes(Magic).CopyTo(message, label.Length);
+            BitConverter.GetBytes((ushort)port).CopyTo(message, label.Length + 4);
+            nonce.CopyTo(message, label.Length + 6);
+            using (var hmac = new HMACSHA256(Encoding.UTF8.GetBytes(token ?? string.Empty))) return hmac.ComputeHash(message);
         }
 
         /// <summary>Compares tokens in constant time (a wrong token never tells how much of it was right).</summary>
@@ -92,10 +122,12 @@ namespace Orbiters.Toolkit.Editor.LiveLink
     /// <summary>
     /// Unity's end of a live link: a listener on 127.0.0.1 whose connections are read on background threads, their frames
     /// handed to the editor's main thread through <see cref="EditorApplication.update"/>, in the order they came (with
-    /// connections and disconnections). Frames waiting with the same collapse key (the positions of one mesh, the newest
-    /// image of one texture) collapse to the newest, in the place of the first of them: a frame that came after them
-    /// (a whole mesh, a goodbye) is still handled after them. Sends are queued and written by a thread per connection, so
-    /// the editor never waits on a peer that is busy. Closed before script reloads.
+    /// connections and disconnections). A connection counts (it is announced, and frames are sent to it) only once it sent
+    /// a frame with the session's token; one that does not within a few seconds is closed. Frames waiting with the same
+    /// collapse key (the positions of one mesh, the newest image of one texture) collapse to the newest, in the place of
+    /// the first of them: a frame that came after them (a whole mesh, a goodbye) is still handled after them. A connection
+    /// whose frames wait unhandled past a cap is read no further until the editor caught up. Sends are queued and written
+    /// by a thread per connection, so the editor never waits on a peer that is busy. Closed before script reloads.
     /// </summary>
     public sealed class LiveLinkServer : IDisposable
     {
@@ -107,26 +139,37 @@ namespace Orbiters.Toolkit.Editor.LiveLink
             // What waits to be written, in order, and its size (a peer that stops reading is cut off past a cap).
             public readonly BlockingCollection<byte[]> Outgoing = new BlockingCollection<byte[]>(new ConcurrentQueue<byte[]>());
             public long QueuedBytes;
+            // Payload bytes read but not handled on the main thread yet: past a cap, the reader waits.
+            public long InboundBytes;
+            public readonly ManualResetEventSlim Drained = new ManualResetEventSlim(true);
             public Thread Writer;
+            // Closes a connection that did not prove it belongs to the session in time; Proved once it sent the token.
+            public Timer Deadline;
+            public volatile bool Proved;
             // Replaced by a newer connection (single-client links): its departure was announced already.
             public volatile bool Superseded;
-            // Single-client links announce a connection (and replace the previous one) only once it sent a frame with
-            // the session's token, so a stranger connecting cannot push the real client off.
+            // A connection is announced (and replaces the previous one on single-client links) only once it sent a frame
+            // with the session's token: a stranger that connects is told nothing and cannot push the real client off.
             public volatile bool Announced;
+            public bool ProofSent;
         }
 
         // A connection or a disconnection (Frame and Collapsed null), a frame, or the place of collapsed frames.
         private readonly struct Item
         {
-            public readonly int Connection;
+            public readonly Connection Owner;
             public readonly bool Up;
             public readonly LiveLinkFrame Frame;
             public readonly (int, string, int)? Collapsed;
-            public Item(int connection, bool up, LiveLinkFrame frame, (int, string, int)? collapsed = null) { Connection = connection; Up = up; Frame = frame; Collapsed = collapsed; }
+            public Item(Connection owner, bool up, LiveLinkFrame frame, (int, string, int)? collapsed = null) { Owner = owner; Up = up; Frame = frame; Collapsed = collapsed; }
         }
 
         /// <summary>Bytes a connection may have waiting to be written before it is closed as not reading.</summary>
         public const long MaxQueuedBytes = 512L * 1024 * 1024;
+        /// <summary>Connections that have not proved they belong to the session yet, at most; more are closed at once.</summary>
+        public const int MaxPendingConnections = 16;
+        /// <summary>How long a new connection has to send a frame with the session's token.</summary>
+        internal static int HandshakeMilliseconds = 10000;
 
         private readonly LiveLinkFormat format;
         private readonly string token;
@@ -136,17 +179,21 @@ namespace Orbiters.Toolkit.Editor.LiveLink
         private readonly Func<LiveLinkFrame, string> collapseKey;
         private readonly TcpListener listener;
         private readonly Thread acceptThread;
+        private readonly string threadName;
+        private readonly long maxInboundBytes;
         private readonly Dictionary<int, Connection> connections = new Dictionary<int, Connection>();
         private readonly ConcurrentQueue<Item> items = new ConcurrentQueue<Item>();
         // Newest waiting frame per (connection, collapse key, run): a run ends when a frame that does not collapse comes.
-        private readonly ConcurrentDictionary<(int, string, int), LiveLinkFrame> latest = new ConcurrentDictionary<(int, string, int), LiveLinkFrame>();
+        private readonly Dictionary<(int, string, int), LiveLinkFrame> latest = new Dictionary<(int, string, int), LiveLinkFrame>();
         private readonly HashSet<Connection> unannounced = new HashSet<Connection>();
+        // Main thread: the connections announced and not gone yet (frames of any other are dropped).
+        private readonly HashSet<int> live = new HashSet<int>();
         private int nextId;
         private volatile bool disposed;
 
         /// <summary>A frame reached the main thread (already checked: this session's token, a payload that holds together).</summary>
         public event Action<LiveLinkFrame> Received;
-        /// <summary>A connection opened (true) or closed (false), on the main thread.</summary>
+        /// <summary>A connection opened (true: it sent a frame with the session's token) or closed (false), on the main thread.</summary>
         public event Action<int, bool> ConnectionChanged;
 
         public int Port { get; }
@@ -156,7 +203,7 @@ namespace Orbiters.Toolkit.Editor.LiveLink
         /// <param name="port">0 for any free port; a port to listen on again after a script reload (any other when taken).</param>
         /// <param name="singleClient">One connection at a time: a new one replaces the previous (an app reconnecting after a crash).</param>
         /// <param name="accept">Checks (and decodes into <see cref="LiveLinkFrame.Decoded"/>) a frame on its connection's thread;
-        /// false closes the connection.</param>
+        /// false (or an exception) closes the connection.</param>
         /// <param name="collapseKey">Frames waiting with the same key (per connection) collapse to the newest; null: none do.</param>
         /// <param name="closingType">The frame type that says goodbye: the connection closes after it, and it is sent on dispose.</param>
         public LiveLinkServer(LiveLinkFormat format, string token, int port = 0, bool singleClient = false, Func<LiveLinkFrame, bool> accept = null,
@@ -168,6 +215,8 @@ namespace Orbiters.Toolkit.Editor.LiveLink
             this.accept = accept;
             this.collapseKey = collapseKey;
             this.closingType = closingType;
+            this.threadName = threadName;
+            maxInboundBytes = Math.Max(4L * format.MaxPayloadBytes, 64L * 1024 * 1024);
             try
             {
                 listener = new TcpListener(IPAddress.Loopback, port);
@@ -209,7 +258,12 @@ namespace Orbiters.Toolkit.Editor.LiveLink
         {
             Connection target;
             lock (connections) connections.TryGetValue(connection, out target);
-            try { target?.Client.Close(); }
+            Close(target);
+        }
+
+        private static void Close(Connection connection)
+        {
+            try { connection?.Client.Close(); }
             catch (Exception) { }
         }
 
@@ -219,8 +273,7 @@ namespace Orbiters.Toolkit.Editor.LiveLink
             if (Interlocked.Add(ref connection.QueuedBytes, data.Length) > MaxQueuedBytes)
             {
                 // The peer stopped reading long ago: better a reconnect than the editor's memory filling up.
-                try { connection.Client.Close(); }
-                catch (Exception) { }
+                Close(connection);
                 return false;
             }
             try
@@ -244,22 +297,50 @@ namespace Orbiters.Toolkit.Editor.LiveLink
                     Interlocked.Add(ref connection.QueuedBytes, -data.Length);
                 }
             }
-            catch (Exception ex) when (ex is IOException || ex is ObjectDisposedException || ex is SocketException || ex is InvalidOperationException)
+            catch (Exception)
             {
-                // The peer went away: the reader sees it too and announces it.
-                try { connection.Client.Close(); }
-                catch (Exception) { }
+                // The peer went away (or the stream was closed under the writer): the reader sees it too and announces it.
+                Close(connection);
             }
         }
 
-        /// <summary>Writes a small file whole or not at all (an endpoint the other application reads while it may change).</summary>
+        /// <summary>
+        /// Writes a small file whole or not at all (an endpoint the other application reads while it may change). The file
+        /// is written beside it under a name of its own, then put in its place; while a reader holds it open (Windows refuses
+        /// the replacement then), it is tried again a few times, and finally overwritten in place.
+        /// </summary>
         public static void WriteAtomically(string path, string text)
         {
             Directory.CreateDirectory(Path.GetDirectoryName(path));
-            string temp = path + ".tmp";
-            File.WriteAllText(temp, text);
-            if (File.Exists(path)) File.Replace(temp, path, null);
-            else File.Move(temp, path);
+            string temp = path + "." + Guid.NewGuid().ToString("N").Substring(0, 8) + ".tmp";
+            try
+            {
+                File.WriteAllText(temp, text);
+                for (int attempt = 0; ; attempt++)
+                {
+                    try
+                    {
+                        if (File.Exists(path)) File.Replace(temp, path, null);
+                        else File.Move(temp, path);
+                        return;
+                    }
+                    catch (IOException) when (attempt < 4)
+                    {
+                        Thread.Sleep(15);
+                    }
+                    catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException)
+                    {
+                        // Still held: a reader that sees a half file reads it again later; a stale one would mislead it.
+                        File.Copy(temp, path, true);
+                        return;
+                    }
+                }
+            }
+            finally
+            {
+                try { if (File.Exists(temp)) File.Delete(temp); }
+                catch (Exception) { }
+            }
         }
 
         private void AcceptLoop()
@@ -269,22 +350,42 @@ namespace Orbiters.Toolkit.Editor.LiveLink
                 TcpClient accepted;
                 try { accepted = listener.AcceptTcpClient(); }
                 catch (Exception) when (disposed) { return; }
-                catch (SocketException) { continue; }
                 catch (ObjectDisposedException) { return; }
-
-                accepted.NoDelay = true;
-                var connection = new Connection { Id = Interlocked.Increment(ref nextId), Client = accepted, Stream = accepted.GetStream() };
-                lock (connections)
+                catch (Exception)
                 {
-                    if (singleClient) unannounced.Add(connection);
-                    else { connections[connection.Id] = connection; connection.Announced = true; }
+                    // Not one connection's fault (the listener itself): not again at once.
+                    Thread.Sleep(100);
+                    continue;
                 }
-                if (connection.Announced) items.Enqueue(new Item(connection.Id, true, null));
-                connection.Writer = new Thread(() => WriteLoop(connection)) { IsBackground = true, Name = acceptThread.Name + " writer" };
-                connection.Writer.Start();
-                var reader = new Thread(() => ReadLoop(connection)) { IsBackground = true, Name = acceptThread.Name + " reader" };
-                reader.Start();
+
+                try { Start(accepted); }
+                catch (Exception)
+                {
+                    // That connection went away while it was set up.
+                    try { accepted.Close(); }
+                    catch (Exception) { }
+                }
             }
+        }
+
+        private void Start(TcpClient accepted)
+        {
+            accepted.NoDelay = true;
+            var connection = new Connection { Id = Interlocked.Increment(ref nextId), Client = accepted, Stream = accepted.GetStream() };
+            lock (connections)
+            {
+                if (disposed || unannounced.Count >= MaxPendingConnections)
+                {
+                    accepted.Close();
+                    return;
+                }
+                unannounced.Add(connection);
+            }
+            connection.Deadline = new Timer(_ => { if (!connection.Proved) Close(connection); }, null, HandshakeMilliseconds, Timeout.Infinite);
+            connection.Writer = new Thread(() => WriteLoop(connection)) { IsBackground = true, Name = threadName + " writer" };
+            connection.Writer.Start();
+            var reader = new Thread(() => ReadLoop(connection)) { IsBackground = true, Name = threadName + " reader" };
+            reader.Start();
         }
 
         private void ReadLoop(Connection connection)
@@ -293,72 +394,115 @@ namespace Orbiters.Toolkit.Editor.LiveLink
             int run = 0;
             try
             {
-                while (!disposed && connection.Client.Connected)
+                while (!disposed && !connection.Superseded && connection.Client.Connected)
                 {
+                    // The editor has not caught up with this connection's frames: wait (the peer's writes wait in turn).
+                    while (Interlocked.Read(ref connection.InboundBytes) > maxInboundBytes)
+                    {
+                        if (disposed || connection.Superseded) return;
+                        connection.Drained.Reset();
+                        if (Interlocked.Read(ref connection.InboundBytes) > maxInboundBytes) connection.Drained.Wait(100);
+                    }
                     if (!ReadExactly(connection.Stream, header)) return;
-                    if (!format.TryReadHeader(header, out byte type, out int tokenLength, out int payloadLength)) return;
+                    if (!format.TryReadAnyHeader(header, out byte type, out int tokenLength, out int payloadLength)) return;
+                    if (type == LiveLinkFormat.ProofType)
+                    {
+                        if (!AnswerProof(connection, tokenLength, payloadLength)) return;
+                        continue;
+                    }
+                    if (!format.TryReadHeader(header, out _, out _, out _)) return;
                     var tokenBytes = new byte[tokenLength];
                     if (!ReadExactly(connection.Stream, tokenBytes)) return;
                     string frameToken = Encoding.UTF8.GetString(tokenBytes);
                     // Anything not of this session ends the connection: nothing it sent is used, nor its payload read.
                     if (!LiveLinkFormat.SameToken(frameToken, token)) return;
+                    // It holds the token: no deadline to read the rest of its first frame in.
+                    connection.Proved = true;
+                    connection.Deadline?.Dispose();
                     var payload = new byte[payloadLength];
                     if (!ReadExactly(connection.Stream, payload)) return;
                     var frame = new LiveLinkFrame { Connection = connection.Id, Type = type, Token = frameToken, Payload = payload };
                     if (accept != null && !accept(frame)) return;
+                    if (connection.Superseded) return;
                     if (!connection.Announced) Announce(connection);
                     string key = collapseKey?.Invoke(frame);
                     if (key == null)
                     {
                         run++;
-                        items.Enqueue(new Item(connection.Id, true, frame));
+                        Interlocked.Add(ref connection.InboundBytes, payload.Length);
+                        items.Enqueue(new Item(connection, true, frame));
                     }
                     else
                     {
                         // The first frame of a run takes a place in the order; later ones only replace what it delivers.
                         var slot = (connection.Id, key, run);
-                        bool added = false;
-                        latest.AddOrUpdate(slot, _ => { added = true; return frame; }, (_, __) => frame);
-                        if (added) items.Enqueue(new Item(connection.Id, true, null, slot));
+                        bool added;
+                        lock (latest)
+                        {
+                            added = !latest.TryGetValue(slot, out var older);
+                            Interlocked.Add(ref connection.InboundBytes, payload.Length - (older?.Payload.Length ?? 0));
+                            latest[slot] = frame;
+                        }
+                        if (added) items.Enqueue(new Item(connection, true, null, slot));
                     }
                     if (closingType.HasValue && type == closingType.Value) return;
                 }
             }
             catch (Exception ex) when (ex is IOException || ex is ObjectDisposedException || ex is SocketException)
             {
-                // The other application went away.
+                // The other application went away (or did not prove it belongs to the session in time).
+            }
+            catch (Exception ex)
+            {
+                // The link's own check of a frame failed: that connection ends, the editor goes on.
+                UnityEngine.Debug.LogWarning("[" + threadName + "] A frame could not be read, so its connection was closed: " + ex);
             }
             finally
             {
                 lock (connections) { connections.Remove(connection.Id); unannounced.Remove(connection); }
+                connection.Deadline?.Dispose();
                 connection.Outgoing.CompleteAdding();
-                try { connection.Client.Close(); }
-                catch (Exception) { }
-                if (connection.Announced && !connection.Superseded) items.Enqueue(new Item(connection.Id, false, null));
+                Close(connection);
+                if (connection.Announced && !connection.Superseded) items.Enqueue(new Item(connection, false, null));
             }
         }
 
-        // A single-client connection proved it belongs to the session: it replaces the previous one, whose departure is
-        // announced first, so the app can let go of what that one held.
+        // A proof request (before the connection sent the token, once): the nonce is read and the proof queued.
+        private bool AnswerProof(Connection connection, int tokenLength, int nonceLength)
+        {
+            if (connection.Announced || connection.ProofSent || tokenLength != 0) return false;
+            if (nonceLength < LiveLinkFormat.MinNonceBytes || nonceLength > LiveLinkFormat.MaxNonceBytes) return false;
+            var nonce = new byte[nonceLength];
+            if (!ReadExactly(connection.Stream, nonce)) return false;
+            connection.ProofSent = true;
+            return Write(connection, format.Encode(LiveLinkFormat.ProofType, null, format.Proof(token, Port, nonce)));
+        }
+
+        // A connection proved it belongs to the session: it is announced. On single-client links it replaces the previous
+        // one, whose departure is announced first, so the app can let go of what that one held.
         private void Announce(Connection connection)
         {
-            Connection[] replaced;
+            Connection[] replaced = Array.Empty<Connection>();
             lock (connections)
             {
                 unannounced.Remove(connection);
-                replaced = connections.Values.ToArray();
-                foreach (var old in replaced) { old.Superseded = true; connections.Remove(old.Id); }
+                if (singleClient)
+                {
+                    replaced = connections.Values.ToArray();
+                    foreach (var old in replaced) { old.Superseded = true; connections.Remove(old.Id); }
+                }
                 connections[connection.Id] = connection;
                 connection.Announced = true;
             }
+            connection.Deadline?.Dispose();
             foreach (var old in replaced)
             {
-                items.Enqueue(new Item(old.Id, false, null));
+                items.Enqueue(new Item(old, false, null));
                 old.Outgoing.CompleteAdding();
-                try { old.Client.Close(); }
-                catch (Exception) { }
+                old.Drained.Set();
+                Close(old);
             }
-            items.Enqueue(new Item(connection.Id, true, null));
+            items.Enqueue(new Item(connection, true, null));
         }
 
         private static bool ReadExactly(NetworkStream input, byte[] buffer)
@@ -374,22 +518,30 @@ namespace Orbiters.Toolkit.Editor.LiveLink
         }
 
         // Main thread: connections, disconnections and frames in arrival order; collapsed frames in the place of the
-        // first of their run, as the newest of it.
+        // first of their run, as the newest of it. Frames of a connection that is gone (replaced, closed) are dropped.
         private void Pump()
         {
-            while (items.TryDequeue(out var item))
+            while (!disposed && items.TryDequeue(out var item))
             {
+                var owner = item.Owner;
+                LiveLinkFrame frame = item.Frame;
                 if (item.Collapsed.HasValue)
                 {
-                    if (latest.TryRemove(item.Collapsed.Value, out var newest)) Received?.Invoke(newest);
-                    continue;
+                    lock (latest)
+                    {
+                        if (latest.TryGetValue(item.Collapsed.Value, out frame)) latest.Remove(item.Collapsed.Value);
+                    }
+                    if (frame == null) continue;
                 }
-                if (item.Frame == null)
+                else if (frame == null)
                 {
-                    ConnectionChanged?.Invoke(item.Connection, item.Up);
+                    if (item.Up) live.Add(owner.Id);
+                    else live.Remove(owner.Id);
+                    ConnectionChanged?.Invoke(owner.Id, item.Up);
                     continue;
                 }
-                Received?.Invoke(item.Frame);
+                if (Interlocked.Add(ref owner.InboundBytes, -frame.Payload.Length) <= maxInboundBytes) owner.Drained.Set();
+                if (live.Contains(owner.Id)) Received?.Invoke(frame);
             }
         }
 
@@ -399,15 +551,19 @@ namespace Orbiters.Toolkit.Editor.LiveLink
             disposed = true;
             EditorApplication.update -= Pump;
             AssemblyReloadEvents.beforeAssemblyReload -= Dispose;
+            // Only to connections of the session: a stranger never hears from Unity.
             if (closingType.HasValue) Broadcast(closingType.Value);
             Connection[] all;
             lock (connections) { all = connections.Values.Concat(unannounced).ToArray(); connections.Clear(); unannounced.Clear(); }
             // The goodbye gets a moment to leave; a peer that is not reading does not hold the reload up.
-            foreach (var connection in all) connection.Outgoing.CompleteAdding();
-            foreach (var connection in all) connection.Writer?.Join(200);
+            foreach (var connection in all) { connection.Outgoing.CompleteAdding(); connection.Drained.Set(); connection.Deadline?.Dispose(); }
+            var until = DateTime.UtcNow.AddMilliseconds(250);
             foreach (var connection in all)
-                try { connection.Client.Close(); }
-                catch (Exception) { }
+            {
+                int left = (int)Math.Max(0, (until - DateTime.UtcNow).TotalMilliseconds);
+                connection.Writer?.Join(left);
+            }
+            foreach (var connection in all) Close(connection);
             try { listener.Stop(); }
             catch (Exception) { }
         }

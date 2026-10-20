@@ -25,8 +25,10 @@ namespace Orbiters.Toolkit.Meshes
         public int WeldedCount => Members.Length;
 
         /// <param name="normals">With <paramref name="minNormalDot"/>: vertices at one place weld only when their normals
-        /// agree that much (two sheets that touch, as the front and back of double-sided cloth or closed lips, face apart
-        /// and stay apart; UV seams and hard edges still weld). Null welds by position alone.</param>
+        /// agree that much with every vertex already welded there (two sheets that touch, as the front and back of
+        /// double-sided cloth or closed lips, face apart and stay apart; UV seams and hard edges still weld), into the group
+        /// whose normals they agree with best. Normals alone cannot tell two sheets apart where both have a hard edge at
+        /// the same place: <paramref name="weldKeys"/> can. Null welds by position alone.</param>
         /// <param name="weldKeys">Per vertex: vertices at one place weld only when their keys are equal (a caller's
         /// signature of what else must agree, as skin and blendshape motion). Null: no such condition.</param>
         public static MeshNeighbors Build(Vector3[] vertices, int[] triangles, float weldTolerance = 1e-5f, Vector3[] normals = null, float minNormalDot = -1f, long[] weldKeys = null)
@@ -46,22 +48,35 @@ namespace Orbiters.Toolkit.Meshes
                 var p = vertices[v];
                 int cx = (int)Math.Floor(p.x / cell), cy = (int)Math.Floor(p.y / cell), cz = (int)Math.Floor(p.z / cell);
                 int found = -1;
-                for (int dx = -1; dx <= 1 && found < 0; dx++)
-                    for (int dy = -1; dy <= 1 && found < 0; dy++)
-                        for (int dz = -1; dz <= 1 && found < 0; dz++)
+                float bestAgreement = float.NegativeInfinity;
+                // By position alone the first group found is the one; with normals every group in reach is weighed.
+                for (int dx = -1; dx <= 1 && (found < 0 || byNormal); dx++)
+                    for (int dy = -1; dy <= 1 && (found < 0 || byNormal); dy++)
+                        for (int dz = -1; dz <= 1 && (found < 0 || byNormal); dz++)
                         {
                             if (!grid.TryGetValue(Key(cx + dx, cy + dy, cz + dz), out var bucket)) continue;
                             for (int i = 0; i < bucket.Count; i++)
                             {
                                 int w = bucket[i];
-                                int first = membersList[w][0];
+                                var group = membersList[w];
+                                int first = group[0];
                                 var q = vertices[first];
                                 float ddx = q.x - p.x, ddy = q.y - p.y, ddz = q.z - p.z;
                                 if (ddx * ddx + ddy * ddy + ddz * ddz > tol2) continue;
-                                if (byNormal && !NormalsAgree(normals[first], normals[v], minNormalDot)) continue;
                                 if (byKey && weldKeys[first] != weldKeys[v]) continue;
-                                found = w;
-                                break;
+                                if (!byNormal)
+                                {
+                                    found = w;
+                                    break;
+                                }
+                                // Every member, not only the first: otherwise two members up to twice the limit apart
+                                // weld through a third, and which ones depends on the vertex order.
+                                float agreement = Agreement(normals, group, normals[v], minNormalDot);
+                                if (agreement > bestAgreement)
+                                {
+                                    bestAgreement = agreement;
+                                    found = w;
+                                }
                             }
                         }
                 if (found < 0)
@@ -101,12 +116,23 @@ namespace Orbiters.Toolkit.Meshes
             return new MeshNeighbors { Weld = weld, Members = members, Adjacent = adjacent, TrianglesOf = trianglesOf, Representative = representative };
         }
 
-        // A missing (zero) normal agrees with any.
-        private static bool NormalsAgree(Vector3 a, Vector3 b, float minDot)
+        // How well a normal agrees with a group's: the least cosine to any member, or -infinity when one disagrees past the
+        // limit. A missing (zero) normal agrees with any.
+        private static float Agreement(Vector3[] normals, List<int> group, Vector3 normal, float minDot)
         {
-            float la = a.sqrMagnitude, lb = b.sqrMagnitude;
-            if (la < 1e-12f || lb < 1e-12f) return true;
-            return Vector3.Dot(a, b) >= minDot * Mathf.Sqrt(la * lb);
+            float least = 1f;
+            float ln = normal.sqrMagnitude;
+            if (ln < 1e-12f) return 1f;
+            foreach (int member in group)
+            {
+                var other = normals[member];
+                float lo = other.sqrMagnitude;
+                if (lo < 1e-12f) continue;
+                float cosine = Vector3.Dot(other, normal) / Mathf.Sqrt(lo * ln);
+                if (cosine < minDot) return float.NegativeInfinity;
+                least = Math.Min(least, cosine);
+            }
+            return least;
         }
 
         private static long Key(int x, int y, int z) => ((long)(x & 0x1FFFFF) << 42) | ((long)(y & 0x1FFFFF) << 21) | (long)(z & 0x1FFFFF);

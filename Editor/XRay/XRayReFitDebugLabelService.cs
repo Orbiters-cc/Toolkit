@@ -12,6 +12,9 @@ namespace Orbiters.Toolkit.Editor.XRay
         private const string SessionRootPrefix = "__ReFit_Debug_Session_";
 
         private static readonly List<XRaySceneLabel> Labels = new List<XRaySceneLabel>();
+        // The debug session roots, found again only after the hierarchy changed (not at every repaint).
+        private static readonly List<GameObject> SessionRoots = new List<GameObject>();
+        private static bool rootsStale = true;
         private static bool lastDebugMode;
 
         static XRayReFitDebugLabelService()
@@ -19,7 +22,7 @@ namespace Orbiters.Toolkit.Editor.XRay
             lastDebugMode = IsReFitDebugModeEnabled();
             SceneView.duringSceneGui += OnSceneGUI;
             EditorApplication.update += WatchDebugMode;
-            EditorApplication.hierarchyChanged += RepaintSceneViews;
+            EditorApplication.hierarchyChanged += OnHierarchyChanged;
             AssemblyReloadEvents.beforeAssemblyReload += RepaintSceneViews;
             EditorApplication.quitting += RepaintSceneViews;
         }
@@ -46,6 +49,12 @@ namespace Orbiters.Toolkit.Editor.XRay
             XRaySceneLabelRenderer.Draw(sceneView, Labels);
         }
 
+        private static void OnHierarchyChanged()
+        {
+            rootsStale = true;
+            RepaintSceneViews();
+        }
+
         private static void WatchDebugMode()
         {
             bool debugMode = IsReFitDebugModeEnabled();
@@ -61,7 +70,17 @@ namespace Orbiters.Toolkit.Editor.XRay
         private static void CollectLabels()
         {
             Labels.Clear();
-            foreach (var root in Resources.FindObjectsOfTypeAll<GameObject>())
+            if (rootsStale)
+            {
+                rootsStale = false;
+                SessionRoots.Clear();
+                foreach (var candidate in Resources.FindObjectsOfTypeAll<GameObject>())
+                {
+                    if (IsReFitDebugSessionRoot(candidate)) SessionRoots.Add(candidate);
+                }
+            }
+
+            foreach (var root in SessionRoots)
             {
                 if (!IsReFitDebugSessionRoot(root))
                 {

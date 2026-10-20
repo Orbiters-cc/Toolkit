@@ -11,7 +11,7 @@ namespace Orbiters.Toolkit.Editor.VRChat
 {
     public static partial class HandScreenInstaller
     {
-        // Who carries each handle: 0 its home, 1 the left wrist, 2 the right wrist (its constraint's sources).
+        // Who carries each handle: one of its constraint's sources (AtHome, InLeftHand… CarriedRight).
         private sealed class Hold
         {
             public string Name; public int Left, Right; public bool Grabbable;
@@ -20,11 +20,13 @@ namespace Orbiters.Toolkit.Editor.VRChat
 
         private static readonly Hold[] Holds =
         {
-            // One hand carries the whole screen and leaves the other free to take the second handle.
-            new Hold { Name = "Left hand", Left = 1, Right = 1, Grabbable = true, When = Held(true, false) },
-            new Hold { Name = "Right hand", Left = 2, Right = 2, Grabbable = true, When = Held(false, true) },
-            new Hold { Name = "Both hands", Left = 1, Right = 2, When = Held(true, true).Append((Crossed, AnimatorConditionMode.IfNot, 0f)).ToArray() },
-            new Hold { Name = "Both hands crossed", Left = 2, Right = 1, When = Held(true, true).Append((Crossed, AnimatorConditionMode.If, 0f)).ToArray() },
+            // One hand carries the whole screen from where it took it (facing the owner) and leaves the other free to take
+            // the second handle.
+            new Hold { Name = "Left hand", Left = CarriedLeft, Right = CarriedLeft, Grabbable = true, When = Held(true, false) },
+            new Hold { Name = "Right hand", Left = CarriedRight, Right = CarriedRight, Grabbable = true, When = Held(false, true) },
+            // Both hands: each handle on a palm, so everyone sees the screen exactly between the owner's hands.
+            new Hold { Name = "Both hands", Left = InLeftHand, Right = InRightHand, When = Held(true, true).Append((Crossed, AnimatorConditionMode.IfNot, 0f)).ToArray() },
+            new Hold { Name = "Both hands crossed", Left = InRightHand, Right = InLeftHand, When = Held(true, true).Append((Crossed, AnimatorConditionMode.If, 0f)).ToArray() },
         };
 
         private static (string, AnimatorConditionMode, float)[] Held(bool left, bool right) => new[]
@@ -59,8 +61,8 @@ namespace Orbiters.Toolkit.Editor.VRChat
             var spawn = State(controller, machine, "Spawn", Pose(true, false, 0, 0, true, toHome: true));
             var dropped = State(controller, machine, "Dropped", Pose(true, true, 0, 0, true));
             var held = Holds.Select(h => State(controller, machine, h.Name, Pose(true, false, h.Left, h.Right, h.Grabbable))).ToArray();
-            // One update world-frozen before following other wrists: unfreezing measures each handle's offset where it is,
-            // so nothing jumps (also between one hand and both).
+            // One update world-frozen before another hold: unfreezing measures where each handle is from its new source, so
+            // a screen carried in one hand keeps its place (handles on a palm go onto it the next update).
             var caught = Holds.Select(h => State(controller, machine, h.Name + " catch", Pose(true, true, h.Left, h.Right, false))).ToArray();
             machine.defaultState = off;
             Transition(off, spawn, (Enabled, AnimatorConditionMode.If, 0));
@@ -84,15 +86,18 @@ namespace Orbiters.Toolkit.Editor.VRChat
         private static AnimationClip Pose(bool visible, bool frozen, int left, int right, bool grabbable, bool toHome = false)
         {
             var clip = new AnimationClip();
+            // Unfreezing measures every source's offset where the handle is. On a palm, a handle sits on it whatever was
+            // measured; back home, on its home again. The carried sources are never animated: they keep the offsets measured
+            // where the screen was taken.
+            var onSource = toHome ? new[] { AtHome, InLeftHand, InRightHand } : new[] { InLeftHand, InRightHand };
             foreach (var (handle, holder) in new[] { (LeftHandle, left), (RightHandle, right) })
             {
-                // A hold leaves the offsets measured where it was grabbed; back home, each handle sits on its home again.
-                if (toHome)
-                    foreach (string offset in new[] { "ParentPositionOffset", "ParentRotationOffset" })
-                    foreach (string axis in new[] { "x", "y", "z" })
-                        Curve(clip, handle, typeof(VRCParentConstraint), "Sources.source0." + offset + "." + axis, 0);
+                foreach (int source in onSource)
+                foreach (string offset in new[] { "ParentPositionOffset", "ParentRotationOffset" })
+                foreach (string axis in new[] { "x", "y", "z" })
+                    Curve(clip, handle, typeof(VRCParentConstraint), "Sources.source" + source + "." + offset + "." + axis, 0);
                 Curve(clip, handle, typeof(VRCParentConstraint), "FreezeToWorld", frozen ? 1 : 0);
-                for (int source = 0; source < 3; source++)
+                for (int source = 0; source < HandleSources; source++)
                     Curve(clip, handle, typeof(VRCParentConstraint), "Sources.source" + source + ".Weight", source == holder ? 1 : 0);
                 Curve(clip, handle + "/Grab", typeof(VRCPhysBone), "m_Enabled", grabbable ? 1 : 0);
             }
@@ -104,7 +109,7 @@ namespace Orbiters.Toolkit.Editor.VRChat
 
         /// <summary>
         /// A PhysBone grab on a handle starts the owner's hold, which is latched (and synced, so everyone follows the
-        /// owner's wrists) rather than left to the grab: Touch's grab and pose inputs can release a PhysBone mid-squeeze.
+        /// owner's hands) rather than left to the grab: Touch's grab and pose inputs can release a PhysBone mid-squeeze.
         /// The contacts tell which hand took which handle. While one hand holds the screen, the other takes the other
         /// handle to stretch it; relaxing a hand lets go.
         /// </summary>

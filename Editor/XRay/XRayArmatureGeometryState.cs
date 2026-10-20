@@ -3,7 +3,8 @@ using UnityEngine;
 
 namespace Orbiters.Toolkit.Editor.XRay
 {
-    // Bone poses are handled by skinning. Only topology and helper offsets invalidate the mesh.
+    // Bone rotations are handled by skinning (each segment is skinned to its head bone). Topology, helper offsets and a
+    // child bone moved from its parent (a segment that stretches) invalidate the mesh.
     internal sealed class XRayArmatureGeometryState
     {
         private readonly Transform rootBone;
@@ -59,8 +60,8 @@ namespace Orbiters.Toolkit.Editor.XRay
                 {
                     if (childIndex >= children.Count) return false;
                     var previous = children[childIndex++];
-                    if (child != previous.Child || (previous.IsHelper &&
-                        (child.localPosition - previous.LocalPosition).sqrMagnitude > 0.0000000001f)) return false;
+                    if (child != previous.Child ||
+                        (child.localPosition - previous.LocalPosition).sqrMagnitude > 0.0000000001f) return false;
                 }
             }
             return childIndex == children.Count;

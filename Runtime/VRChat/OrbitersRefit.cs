@@ -20,6 +20,12 @@ namespace Orbiters.Toolkit.VRChat
         public Vector3 localPosition;
         public Quaternion localRotation = Quaternion.identity;
         public Vector3 localScale = Vector3.one;
+        /// <summary>
+        /// Whether restoring sets the object's active state to <see cref="active"/> too: an object the refit hid (an armature
+        /// of a prefab it could not remove) comes back.
+        /// </summary>
+        public bool activeCaptured;
+        public bool active = true;
     }
 
     /// <summary>The sibling ordinals of one saved path (see <see cref="RefitTransformState.siblingOrdinals"/>).</summary>

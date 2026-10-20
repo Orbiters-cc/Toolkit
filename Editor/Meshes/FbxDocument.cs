@@ -77,34 +77,36 @@ namespace Orbiters.Toolkit.Editor.Meshes
 
         // ---- Reading ---------------------------------------------------------------------------------------------------------
 
+        /// <summary>
+        /// Reads a binary FBX file. A damaged one (records that end before they start or past their parent, nesting deeper
+        /// than files are made, lengths past the end, arrays bigger than they announce) is refused with an
+        /// <see cref="InvalidDataException"/>.
+        /// </summary>
         public static FbxDocument Read(byte[] bytes)
         {
             if (!FbxReader.IsBinary(bytes)) throw new NotSupportedException("Only binary FBX files can be read (this one is text FBX).");
             var document = new FbxDocument { Version = BitConverter.ToUInt32(bytes, 23) };
             bool wide = document.Version >= 7500;
+            var budget = new FbxBinary.Budget(bytes.Length);
             int position = 27;
             while (position < bytes.Length)
             {
-                var node = ReadNode(bytes, ref position, wide);
+                var node = ReadNode(bytes, ref position, wide, bytes.Length, 0, budget);
                 if (node == null) break;
                 document.Nodes.Add(node);
             }
             return document;
         }
 
-        private static FbxNode ReadNode(byte[] bytes, ref int position, bool wide)
+        private static FbxNode ReadNode(byte[] bytes, ref int position, bool wide, long limit, int depth, FbxBinary.Budget budget)
         {
-            long end = wide ? (long)BitConverter.ToUInt64(bytes, position) : BitConverter.ToUInt32(bytes, position);
-            long count = wide ? (long)BitConverter.ToUInt64(bytes, position + 8) : BitConverter.ToUInt32(bytes, position + 4);
-            position += wide ? 24 : 12;
-            int nameLength = bytes[position++];
-            if (end == 0) return null;
-            var node = new FbxNode(Encoding.ASCII.GetString(bytes, position, nameLength));
-            position += nameLength;
-            for (long i = 0; i < count; i++) node.Properties.Add(ReadProperty(bytes, ref position));
+            if (depth > FbxBinary.MaxDepth) throw FbxBinary.Damaged("its records nest too deep");
+            if (!FbxBinary.ReadHeader(bytes, ref position, wide, limit, out long end, out long count, out string name)) return null;
+            var node = new FbxNode(name);
+            for (long i = 0; i < count; i++) node.Properties.Add(ReadProperty(bytes, ref position, end, budget));
             while (position < end)
             {
-                var child = ReadNode(bytes, ref position, wide);
+                var child = ReadNode(bytes, ref position, wide, end, depth + 1, budget);
                 if (child == null) break;
                 node.Children.Add(child);
             }
@@ -112,42 +114,42 @@ namespace Orbiters.Toolkit.Editor.Meshes
             return node;
         }
 
-        private static object ReadProperty(byte[] bytes, ref int position)
+        private static object ReadProperty(byte[] bytes, ref int position, long limit, FbxBinary.Budget budget)
         {
+            FbxBinary.Need(position, 1, limit);
             char type = (char)bytes[position++];
             switch (type)
             {
-                case 'Y': position += 2; return BitConverter.ToInt16(bytes, position - 2);
-                case 'C': position += 1; return bytes[position - 1];
-                case 'I': position += 4; return BitConverter.ToInt32(bytes, position - 4);
-                case 'F': position += 4; return BitConverter.ToSingle(bytes, position - 4);
-                case 'D': position += 8; return BitConverter.ToDouble(bytes, position - 8);
-                case 'L': position += 8; return BitConverter.ToInt64(bytes, position - 8);
+                case 'Y': FbxBinary.Need(position, 2, limit); position += 2; return BitConverter.ToInt16(bytes, position - 2);
+                case 'C': FbxBinary.Need(position, 1, limit); position += 1; return bytes[position - 1];
+                case 'I': FbxBinary.Need(position, 4, limit); position += 4; return BitConverter.ToInt32(bytes, position - 4);
+                case 'F': FbxBinary.Need(position, 4, limit); position += 4; return BitConverter.ToSingle(bytes, position - 4);
+                case 'D': FbxBinary.Need(position, 8, limit); position += 8; return BitConverter.ToDouble(bytes, position - 8);
+                case 'L': FbxBinary.Need(position, 8, limit); position += 8; return BitConverter.ToInt64(bytes, position - 8);
                 case 'S':
                 case 'R':
                 {
-                    int length = BitConverter.ToInt32(bytes, position);
-                    position += 4;
+                    int length = FbxBinary.ReadLength(bytes, ref position, limit);
                     object value = type == 'S' ? Encoding.UTF8.GetString(bytes, position, length) : (object)Slice(bytes, position, length);
                     position += length;
                     return value;
                 }
                 case 'f': case 'd': case 'l': case 'i': case 'b':
                 {
-                    int length = BitConverter.ToInt32(bytes, position);
-                    int encoding = BitConverter.ToInt32(bytes, position + 4);
-                    int stored = BitConverter.ToInt32(bytes, position + 8);
-                    position += 12;
-                    var data = encoding == 1 ? Inflate(bytes, position, stored) : Slice(bytes, position, stored);
-                    position += stored;
+                    FbxBinary.ReadArrayHeader(bytes, ref position, limit, type, budget, out int length, out bool compressed, out int stored);
+                    int size = length * FbxBinary.ElementSize(type);
+                    Array values;
                     switch (type)
                     {
-                        case 'f': { var a = new float[length]; Buffer.BlockCopy(data, 0, a, 0, length * 4); return a; }
-                        case 'd': { var a = new double[length]; Buffer.BlockCopy(data, 0, a, 0, length * 8); return a; }
-                        case 'l': { var a = new long[length]; Buffer.BlockCopy(data, 0, a, 0, length * 8); return a; }
-                        case 'i': { var a = new int[length]; Buffer.BlockCopy(data, 0, a, 0, length * 4); return a; }
-                        default: return data.Take(length).Select(b => b != 0).ToArray();
+                        case 'f': values = new float[length]; break;
+                        case 'd': values = new double[length]; break;
+                        case 'l': values = new long[length]; break;
+                        case 'i': values = new int[length]; break;
+                        default: values = new byte[length]; break;
                     }
+                    FbxBinary.Decode(bytes, position, stored, compressed, values, size);
+                    position += stored;
+                    return values is byte[] flags ? flags.Select(b => b != 0).ToArray() : (object)values;
                 }
                 default:
                     throw new InvalidDataException("Unknown FBX property type '" + type + "'.");
@@ -159,18 +161,6 @@ namespace Orbiters.Toolkit.Editor.Meshes
             var slice = new byte[length];
             Buffer.BlockCopy(bytes, start, slice, 0, length);
             return slice;
-        }
-
-        // zlib: a 2-byte header, then deflate (the Adler-32 checksum at the end is left unread).
-        private static byte[] Inflate(byte[] bytes, int start, int length)
-        {
-            using (var input = new MemoryStream(bytes, start + 2, length - 2))
-            using (var inflate = new DeflateStream(input, CompressionMode.Decompress))
-            using (var output = new MemoryStream())
-            {
-                inflate.CopyTo(output);
-                return output.ToArray();
-            }
         }
 
         // ---- Writing ---------------------------------------------------------------------------------------------------------
@@ -212,7 +202,9 @@ namespace Orbiters.Toolkit.Editor.Meshes
             // End offset, property count and property bytes, filled in once known.
             if (wide) { writer.Write(0L); writer.Write((long)node.Properties.Count); writer.Write(0L); }
             else { writer.Write(0); writer.Write(node.Properties.Count); writer.Write(0); }
-            var name = Encoding.ASCII.GetBytes(node.Name);
+            var name = Encoding.ASCII.GetBytes(node.Name ?? string.Empty);
+            // The name's length is one byte: a longer name would make the rest of the file unreadable.
+            if (name.Length > 255) throw new InvalidDataException("An FBX record name is longer than 255 characters: " + node.Name.Substring(0, 40) + "...");
             writer.Write((byte)name.Length);
             writer.Write(name);
             long propertiesStart = stream.Position;

@@ -71,8 +71,8 @@ namespace Orbiters.Toolkit.Editor.XRay
             {
                 if (icon != null) return icon;
                 const int resolution = 64;
-                icon = new Texture2D(resolution, resolution, TextureFormat.RGBA32, false)
-                { name = "Mirror pose butterfly", hideFlags = HideFlags.HideAndDontSave, filterMode = FilterMode.Bilinear };
+                icon = ReloadScopedObjects.Keep(new Texture2D(resolution, resolution, TextureFormat.RGBA32, false)
+                { name = "Mirror pose butterfly", hideFlags = HideFlags.HideAndDontSave, filterMode = FilterMode.Bilinear });
                 Color ink = EditorGUIUtility.isProSkin ? new Color(.85f, .85f, .85f) : new Color(.2f, .2f, .2f);
                 var outline = new List<Vector2>();
                 AddCurve(outline, new Vector2(8, 10), new Vector2(8, 7), new Vector2(2, 1), new Vector2(2, 5));

@@ -16,7 +16,10 @@ namespace Orbiters.Toolkit.Editor.Textures
             public int Slot;
             /// <summary>Painter's channel: basecolor, normal (OpenGL), roughness, metallic, emissive, ambientocclusion.</summary>
             public string Channel;
-            /// <summary>The image's absolute path.</summary>
+            /// <summary>
+            /// The image's absolute path: one the tool that notifies checked is its own (My Avatar's Painter link folder, a
+            /// project texture), never a path taken as it came from another application.
+            /// </summary>
             public string Path;
             public bool Final;
         }

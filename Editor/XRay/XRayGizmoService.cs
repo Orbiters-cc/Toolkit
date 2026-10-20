@@ -15,12 +15,15 @@ namespace Orbiters.Toolkit.Editor.XRay
         private const string MeshTypeKey = "Orbiters.XRayGizmos.MeshType";
         private const string ThicknessKey = "Orbiters.XRayGizmos.Thickness";
         private const string ColorKey = "Orbiters.XRayGizmos.Color";
+        // The pinned object for this editor session (by instance ID: a script reload keeps it).
+        private const string PinnedKey = "Orbiters.XRayGizmos.PinnedObject";
 
         private static readonly Dictionary<int, Instance> Instances = new Dictionary<int, Instance>();
         private static bool isRefreshing;
         private static Material material;
         private static int settingsRevision;
         private static double nextGeometryCheck;
+        private static GameObject pinnedObject;
 
         public static event Action Changed;
 
@@ -68,7 +71,23 @@ namespace Orbiters.Toolkit.Editor.XRay
             private set => EditorPrefs.SetString(ColorKey, ColorUtility.ToHtmlStringRGBA(value));
         }
 
-        public static GameObject PinnedObject { get; private set; }
+        public static GameObject PinnedObject
+        {
+            get
+            {
+                if (pinnedObject == null)
+                {
+                    int id = SessionState.GetInt(PinnedKey, 0);
+                    if (id != 0) pinnedObject = EditorUtility.InstanceIDToObject(id) as GameObject;
+                }
+                return pinnedObject;
+            }
+            private set
+            {
+                pinnedObject = value;
+                SessionState.SetInt(PinnedKey, value != null ? value.GetInstanceID() : 0);
+            }
+        }
         public static string LastStatus { get; private set; }
 
         public static IReadOnlyList<GameObject> ActiveTargets
@@ -82,6 +101,10 @@ namespace Orbiters.Toolkit.Editor.XRay
             }
         }
 
+        /// <summary>
+        /// The bone segments shown, where the bones are now. Read on every Scene view event (hover, picking): made from what
+        /// each armature's gizmo was built with, without copying its renderer's bones again.
+        /// </summary>
         public static IReadOnlyList<XRayBoneSegment> ActiveBoneSegments
         {
             get
@@ -89,7 +112,14 @@ namespace Orbiters.Toolkit.Editor.XRay
                 var segments = new List<XRayBoneSegment>();
                 foreach (var instance in Instances.Values)
                 {
-                    AppendSegments(instance.Target, segments);
+                    var owner = instance.Target.Owner;
+                    if (owner == null || instance.Segments == null) continue;
+                    foreach (var cached in instance.Segments)
+                    {
+                        if (cached.Bone == null) continue;
+                        if (cached.Child != null) segments.Add(new XRayBoneSegment(owner, cached.Bone, cached.Child));
+                        else if (cached.Leaf) segments.Add(new XRayBoneSegment(owner, cached.Bone, cached.Bone.TransformPoint(cached.LocalTail)));
+                    }
                 }
 
                 return segments;
@@ -108,6 +138,7 @@ namespace Orbiters.Toolkit.Editor.XRay
             {
                 LastStatus = "Bones hidden.";
                 ClearAll();
+                ClearOrphanedGizmos();
             }
             else
             {
@@ -194,11 +225,19 @@ namespace Orbiters.Toolkit.Editor.XRay
             settingsRevision++;
             ClearAll();
             Refresh();
+            // Hidden, Refresh has nothing to tell: a setting changed all the same.
+            if (!Enabled) NotifyChanged();
         }
 
         public static void Refresh()
         {
             if (isRefreshing)
+            {
+                return;
+            }
+
+            // Off with nothing shown (most selection and hierarchy changes in most projects): nothing to do or tell.
+            if (!Enabled && Instances.Count == 0)
             {
                 return;
             }
@@ -317,7 +356,9 @@ namespace Orbiters.Toolkit.Editor.XRay
                     out var meshObject,
                     out string message))
             {
-                Instances[target.ArmatureKey] = new Instance(target, meshObject, settingsRevision);
+                var gizmoRenderer = meshObject.GetComponent<SkinnedMeshRenderer>();
+                var mesh = gizmoRenderer != null ? gizmoRenderer.sharedMesh : null;
+                Instances[target.ArmatureKey] = new Instance(target, meshObject, mesh, settingsRevision, BuildSegments(target));
                 LastStatus = message;
             }
             else
@@ -344,7 +385,7 @@ namespace Orbiters.Toolkit.Editor.XRay
                 shader = Shader.Find("Unlit/Color");
             }
 
-            material = new Material(shader) { hideFlags = HideFlags.HideAndDontSave };
+            material = ReloadScopedObjects.Keep(new Material(shader) { hideFlags = HideFlags.HideAndDontSave });
             ApplyMaterialSettings();
             return material;
         }
@@ -366,15 +407,21 @@ namespace Orbiters.Toolkit.Editor.XRay
 
         private static void ClearAll()
         {
+            if (Instances.Count == 0)
+            {
+                return;
+            }
+
             foreach (int id in Instances.Keys.ToList())
             {
                 DestroyInstance(id);
             }
 
-            ClearOrphanedGizmos();
             SceneView.RepaintAll();
         }
 
+        // The object and its mesh: the mesh too when the object already went with its parent (the avatar deleted, its
+        // scene closed, Play mode left), which destroys only the object.
         private static void DestroyInstance(int id)
         {
             if (!Instances.TryGetValue(id, out var instance))
@@ -382,23 +429,25 @@ namespace Orbiters.Toolkit.Editor.XRay
                 return;
             }
 
-            if (instance.MeshObject != null)
-            {
-                UnityEngine.Object.DestroyImmediate(instance.MeshObject);
-            }
-
+            XRayArmatureMeshGenerator.DestroyGizmoObject(instance.MeshObject);
+            XRayArmatureMeshGenerator.DestroyHiddenMesh(instance.Mesh);
             Instances.Remove(id);
         }
 
+        // Gizmos and meshes no instance holds (left by the scripts before a reload): at load, and when bones are hidden.
         private static void ClearOrphanedGizmos()
         {
+            var kept = new HashSet<GameObject>(Instances.Values.Select(i => i.MeshObject).Where(o => o != null));
             foreach (var go in Resources.FindObjectsOfTypeAll<GameObject>())
             {
-                if (XRayArmatureMeshGenerator.IsArmatureGizmoObject(go))
+                if (XRayArmatureMeshGenerator.IsArmatureGizmoObject(go) && !kept.Contains(go))
                 {
-                    UnityEngine.Object.DestroyImmediate(go);
+                    XRayArmatureMeshGenerator.DestroyGizmoObject(go);
                 }
             }
+
+            XRayArmatureMeshGenerator.DestroyOrphanedMeshes(XRayArmatureMeshGenerator.MeshName, false,
+                new HashSet<Mesh>(Instances.Values.Select(i => i.Mesh).Where(m => m != null)));
         }
 
         private static void OnPlayModeStateChanged(PlayModeStateChange state)
@@ -436,15 +485,19 @@ namespace Orbiters.Toolkit.Editor.XRay
             Changed?.Invoke();
         }
 
-        private static void AppendSegments(XRayArmatureTarget target, List<XRayBoneSegment> segments)
+        // The segments of an armature as its gizmo is built: a bone to each displayed child, or a leaf's tail in the bone's
+        // own space (it follows the bone as the gizmo's mesh does).
+        private static List<CachedSegment> BuildSegments(XRayArmatureTarget target)
         {
-            if (!target.IsValid || target.Renderer.bones == null)
+            var segments = new List<CachedSegment>();
+            var bones = target.IsValid ? target.Renderer.bones : null;
+            if (bones == null)
             {
-                return;
+                return segments;
             }
 
             var boneSet = new HashSet<Transform>();
-            foreach (var bone in target.Renderer.bones)
+            foreach (var bone in bones)
             {
                 if (bone != null)
                 {
@@ -452,7 +505,7 @@ namespace Orbiters.Toolkit.Editor.XRay
                 }
             }
 
-            foreach (var bone in target.Renderer.bones)
+            foreach (var bone in bones)
             {
                 if (bone == null)
                 {
@@ -465,14 +518,32 @@ namespace Orbiters.Toolkit.Editor.XRay
                     if (child != null && boneSet.Contains(child))
                     {
                         hasDisplayedChild = true;
-                        segments.Add(new XRayBoneSegment(target.Owner, bone, child));
+                        segments.Add(new CachedSegment(bone, child, default, false));
                     }
                 }
 
                 if (!hasDisplayedChild && TryGetLeafTailPosition(bone, boneSet, out var leafTail))
                 {
-                    segments.Add(new XRayBoneSegment(target.Owner, bone, leafTail));
+                    segments.Add(new CachedSegment(bone, null, bone.InverseTransformPoint(leafTail), true));
                 }
+            }
+
+            return segments;
+        }
+
+        private readonly struct CachedSegment
+        {
+            public readonly Transform Bone;
+            public readonly Transform Child;
+            public readonly Vector3 LocalTail;
+            public readonly bool Leaf;
+
+            public CachedSegment(Transform bone, Transform child, Vector3 localTail, bool leaf)
+            {
+                Bone = bone;
+                Child = child;
+                LocalTail = localTail;
+                Leaf = leaf;
             }
         }
 
@@ -528,15 +599,19 @@ namespace Orbiters.Toolkit.Editor.XRay
         {
             public readonly XRayArmatureTarget Target;
             public readonly GameObject MeshObject;
+            public readonly Mesh Mesh;
             public readonly int Revision;
             public readonly XRayArmatureGeometryState Geometry;
+            public readonly List<CachedSegment> Segments;
 
-            public Instance(XRayArmatureTarget target, GameObject meshObject, int revision)
+            public Instance(XRayArmatureTarget target, GameObject meshObject, Mesh mesh, int revision, List<CachedSegment> segments)
             {
                 Target = target;
                 MeshObject = meshObject;
+                Mesh = mesh;
                 Revision = revision;
                 Geometry = new XRayArmatureGeometryState(target.Renderer);
+                Segments = segments;
             }
         }
     }

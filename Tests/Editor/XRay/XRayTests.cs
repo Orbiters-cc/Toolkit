@@ -12,7 +12,8 @@ namespace Orbiters.Toolkit.Editor.Tests.XRay
         [Test] public void Picking() => XRayPickingTests.RunOrThrow();
         [Test] public void TargetFinder() => XRayTargetFinderTests.RunOrThrow();
         [Test] public void BlendShapes() => XRayBlendShapeTests.RunOrThrow();
-        [Test] public void EdgeSkinning() => XRayEdgeSkinningTests.RunOrThrow();
-        [Test] public void EdgeSkinningAllInfluences() => XRayEdgeSkinningTests.AllInfluencesOrThrow();
+        [Test] public void MeshEdgesDrawTheRendererWithoutCopies() => XRayMeshEdgeTests.DrawsTheRendererWithoutCopiesOrThrow();
+        [Test] public void MeshEdgesFollowEditsWithoutRecording() => XRayMeshEdgeTests.FollowsEditsWithoutRecordingOrThrow();
+        [Test] public void BonePicksGoToATool() => XRayBonePickTests.RunOrThrow();
     }
 }

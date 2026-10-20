@@ -202,8 +202,8 @@ namespace Orbiters.Toolkit.Editor.VRChat.Refit
                 }
 
                 RefitOutcome outcome = null;
-                string key = batch.UseCache ? RefitCache.Key(job, root, engineName) : null;
-                var cached = RefitCache.Find(key);
+                string key = batch.UseCache ? CacheKey(job, root, engine, engineName) : null;
+                var cached = RefitCache.Find(key, engineName);
                 if (cached != null)
                 {
                     outcome = RefitCache.Apply(cached, renderer);
@@ -259,6 +259,20 @@ namespace Orbiters.Toolkit.Editor.VRChat.Refit
             }
             progress?.Invoke(1f, result.Cancelled ? "Cancelled" : "Done");
             done?.Invoke(result);
+        }
+
+        // The job's cache key with what the engine reads beyond it; null (no reuse) when the engine cannot say.
+        private static string CacheKey(RefitJob job, Transform root, IRefitEngine engine, string engineName)
+        {
+            string inputs = null;
+            if (engine is IRefitInputs reads)
+                try { inputs = reads.Inputs(job) ?? ""; }
+                catch (Exception ex)
+                {
+                    Debug.LogWarning("[Orbiters] " + engineName + " could not say what it reads for " + job.Renderer.name + ": not reused. " + ex.Message);
+                    return null;
+                }
+            return RefitCache.Key(job, root, engineName, inputs);
         }
 
         /// <summary>The requested body shapes the mesh does not have yet (same or normalized name): its own shapes stay.</summary>

@@ -115,29 +115,75 @@ namespace Orbiters.Toolkit.Editor.Processes
             }, cancellation);
         }
 
-        /// <summary>Runs the job and calls <paramref name="done"/> on the main thread.</summary>
+        /// <summary>
+        /// Runs the job and calls <paramref name="done"/> on the main thread, once, whatever happens: a job cancelled before
+        /// it started, and one a script reload stops (Unity stops the processes it started with its scripts), report so
+        /// (<see cref="Result.Cancelled"/>), the latter before the reload, while the caller can still keep its state.
+        /// </summary>
         public static void Run(Job job, Action<Result> done, CancellationToken cancellation = default)
         {
             var task = Run(job, cancellation);
-            void Poll()
+            bool finished = false;
+            void Finish(Result result)
             {
-                if (!task.IsCompleted) return;
+                if (finished) return;
+                finished = true;
                 EditorApplication.update -= Poll;
-                var result = task.IsFaulted ? new Result { Success = false, ExitCode = -1, Summary = task.Exception?.GetBaseException().Message } : task.Result;
+                AssemblyReloadEvents.beforeAssemblyReload -= Reloading;
                 done?.Invoke(result);
             }
+            void Poll()
+            {
+                if (task.IsCompleted) Finish(ResultOf(task, job));
+            }
+            void Reloading()
+            {
+                if (task.IsCompleted) { Finish(ResultOf(task, job)); return; }
+                UnityEngine.Debug.LogWarning("[Orbiters Toolkit] A Blender job was stopped because Unity reloaded its scripts" +
+                                             (string.IsNullOrEmpty(job.LogPath) ? "." : " (its log: " + job.LogPath + ")."));
+                Finish(new Result { Success = false, ExitCode = -1, Cancelled = true, LogPath = job.LogPath, Summary = "Blender was stopped: Unity reloaded its scripts." });
+            }
             EditorApplication.update += Poll;
+            AssemblyReloadEvents.beforeAssemblyReload += Reloading;
+        }
+
+        private static Result ResultOf(Task<Result> task, Job job)
+        {
+            if (task.IsCanceled) return new Result { Success = false, ExitCode = -1, Cancelled = true, LogPath = job.LogPath, Summary = "Cancelled before Blender started." };
+            if (task.IsFaulted) return new Result { Success = false, ExitCode = -1, LogPath = job.LogPath, Summary = task.Exception?.GetBaseException().Message };
+            return task.Result;
         }
 
         private static bool LooksLikeError(string line) =>
             line.IndexOf("Error", StringComparison.OrdinalIgnoreCase) >= 0 || line.IndexOf("Traceback", StringComparison.Ordinal) >= 0 ||
             line.IndexOf("Exception", StringComparison.Ordinal) >= 0;
 
+        /// <summary>
+        /// One argument as the command line gives it to the program (Windows' rules, which Mono follows elsewhere too):
+        /// quoted when it holds a space, tab or quote; backslashes doubled only before a quote and before the closing
+        /// quote, so a path keeps its single ones ("C:\My Files\a.blend" stays so).
+        /// </summary>
         public static string Quote(string argument)
         {
             if (string.IsNullOrEmpty(argument)) return "\"\"";
-            if (argument.IndexOfAny(new[] { ' ', '"', '\t' }) < 0) return argument;
-            return "\"" + argument.Replace("\\", "\\\\").Replace("\"", "\\\"") + "\"";
+            if (argument.IndexOfAny(new[] { ' ', '"', '\t', '\n', '\v' }) < 0) return argument;
+            var quoted = new StringBuilder("\"");
+            int backslashes = 0;
+            foreach (char c in argument)
+            {
+                if (c == '\\')
+                {
+                    backslashes++;
+                    continue;
+                }
+                if (c == '"') quoted.Append('\\', backslashes * 2 + 1);
+                else quoted.Append('\\', backslashes);
+                quoted.Append(c);
+                backslashes = 0;
+            }
+            quoted.Append('\\', backslashes * 2);
+            quoted.Append('"');
+            return quoted.ToString();
         }
     }
 }

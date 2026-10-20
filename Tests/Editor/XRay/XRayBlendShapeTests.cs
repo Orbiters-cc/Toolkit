@@ -1,8 +1,6 @@
-using Orbiters.Toolkit.Editor.XRay;
-using Orbiters.Toolkit.XRay;
+using Orbiters.Toolkit.Meshes;
 using System;
 using System.Linq;
-using System.Reflection;
 using UnityEditor;
 using UnityEditor.SceneManagement;
 using UnityEngine;
@@ -31,7 +29,6 @@ namespace Orbiters.Toolkit.Editor.Tests.XRay
                 renderer.bones = new[] { bone };
                 renderer.rootBone = bone;
                 renderer.sharedMesh = mesh;
-                var evaluate = typeof(XRayMeshEdgeService).GetMethod("ApplyActiveBlendShapes", BindingFlags.Static | BindingFlags.NonPublic);
                 var configurations = new[] { new[] { 50f, 100f }, new[] { -100f, 100f }, new[] { -100f, -50f },
                     new[] { 25f, 50f, 100f }, new[] { 50f }, new[] { -50f }, new[] { 0f } };
                 foreach (var frames in configurations)
@@ -44,11 +41,11 @@ namespace Orbiters.Toolkit.Editor.Tests.XRay
                         renderer.SetBlendShapeWeight(0, weight);
                         renderer.BakeMesh(baked);
                         var actual = mesh.vertices;
-                        evaluate.Invoke(null, new object[] { renderer, mesh, actual, null });
+                        ApplyActiveBlendShapes(renderer, mesh, actual);
                         var expected = baked.vertices;
                         for (int vertex = 0; vertex < actual.Length; vertex++)
                             if ((actual[vertex] - expected[vertex]).sqrMagnitude > 0.00000001f)
-                                throw new InvalidOperationException($"Clamp={PlayerSettings.legacyClampBlendShapeWeights}, frames {string.Join(",", frames)}, weight {weight}: XRay {actual[vertex]} != Unity {expected[vertex]}");
+                                throw new InvalidOperationException($"Clamp={PlayerSettings.legacyClampBlendShapeWeights}, frames {string.Join(",", frames)}, weight {weight}: Toolkit {actual[vertex]} != Unity {expected[vertex]}");
                     }
                 }
             }
@@ -58,6 +55,20 @@ namespace Orbiters.Toolkit.Editor.Tests.XRay
                 Object.DestroyImmediate(mesh);
                 Object.DestroyImmediate(baked);
                 EditorSceneManager.ClosePreviewScene(scene);
+            }
+        }
+
+        // The renderer's blendshapes at their weights, as the Toolkit's tools add them (BlendShapeEvaluation).
+        private static void ApplyActiveBlendShapes(SkinnedMeshRenderer renderer, Mesh mesh, Vector3[] vertices)
+        {
+            BlendShapeEvaluation.Scratch scratch = null;
+            bool clamp = BlendShapeEvaluation.ClampWeights;
+            for (int shape = 0; shape < mesh.blendShapeCount; shape++)
+            {
+                float weight = renderer.GetBlendShapeWeight(shape);
+                if (weight == 0f && mesh.GetBlendShapeFrameCount(shape) <= 1) continue;
+                scratch ??= new BlendShapeEvaluation.Scratch(mesh.vertexCount);
+                BlendShapeEvaluation.Add(mesh, shape, weight, clamp, vertices, null, scratch);
             }
         }
     }

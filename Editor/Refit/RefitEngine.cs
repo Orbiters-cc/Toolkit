@@ -103,6 +103,16 @@ namespace Orbiters.Toolkit.Editor.Refit
         void OpenCommission(RefitJob job, RefitOutcome outcome);
     }
 
+    /// <summary>
+    /// An engine that reads more of the scene than its job says (the outfit's toggles: the body shapes it wears while the
+    /// clothing shows): what it read, so a result kept for reuse is reused only for the same.
+    /// </summary>
+    public interface IRefitInputs
+    {
+        /// <summary>Main thread and cheap. Text that changes whenever what the engine reads beyond the job does; empty for none.</summary>
+        string Inputs(RefitJob job);
+    }
+
     public static class RefitEngine
     {
         public const string PackageId = "orbiters.refit";

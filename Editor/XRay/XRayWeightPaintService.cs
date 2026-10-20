@@ -29,6 +29,9 @@ namespace Orbiters.Toolkit.Editor.XRay
         // Per renderer, the bone it showed last: what it shows again when the mesh is selected without any of its bones.
         private static readonly Dictionary<int, int> lastBoneOf = new Dictionary<int, int>();
         private static string fallbackNote;
+        // When the shown renderers' meshes were last compared with those the overlays were made from.
+        private static double nextSourceCheck;
+        private const string MeshSuffix = "_XRayWeightPaint";
 
         public static event Action Changed;
 
@@ -36,6 +39,7 @@ namespace Orbiters.Toolkit.Editor.XRay
         {
             EditorApplication.hierarchyChanged += Refresh;
             Selection.selectionChanged += Refresh;
+            SceneView.duringSceneGui += WatchSourceMeshes;
             EditorApplication.playModeStateChanged += OnPlayModeStateChanged;
             AssemblyReloadEvents.beforeAssemblyReload += ClearAll;
             EditorApplication.quitting += ClearAll;
@@ -73,6 +77,7 @@ namespace Orbiters.Toolkit.Editor.XRay
             {
                 LastStatus = "Weight paint disabled.";
                 ClearAll();
+                ClearOrphanedOverlays();
             }
             else
             {
@@ -116,7 +121,9 @@ namespace Orbiters.Toolkit.Editor.XRay
         {
             if (renderer == null) return;
             var list = bones != null ? new List<Transform>(bones) : new List<Transform>();
-            bool sameTarget = pinned && pinnedRenderer == renderer && SameBones(pinnedBones, list) && (pinnedWeights == null) == (customWeights == null);
+            bool sameRenderer = pinned && pinnedRenderer == renderer;
+            bool sameTarget = sameRenderer && SameBones(pinnedBones, list) && (pinnedWeights == null) == (customWeights == null);
+            bool wasBones = pinnedWeights == null;
             pinned = true;
             pinnedRenderer = renderer;
             pinnedBones = list;
@@ -126,8 +133,63 @@ namespace Orbiters.Toolkit.Editor.XRay
                 Repaint(renderer, customWeights);
                 return;
             }
+            // Another bone of the same renderer (a bone clicked while painting): recoloured in place at once, without
+            // copying the mesh again.
+            if (sameRenderer && wasBones && customWeights == null && TryShowOtherBones(renderer, list))
+            {
+                return;
+            }
             settingsRevision++;
             Refresh();
+        }
+
+        private static bool TryShowOtherBones(SkinnedMeshRenderer renderer, List<Transform> bones)
+        {
+            int id = renderer.GetInstanceID();
+            if (!Instances.TryGetValue(id, out var instance) || instance.MeshObject == null || instance.Revision != settingsRevision)
+            {
+                return false;
+            }
+
+            var overlayMesh = instance.Mesh;
+            var source = renderer.sharedMesh;
+            if (overlayMesh == null || source == null || source != instance.Source || source.vertexCount != overlayMesh.vertexCount)
+            {
+                return false;
+            }
+
+            var wanted = new HashSet<Transform>(bones.Where(b => b != null));
+            var rendererBones = renderer.bones;
+            var indices = new HashSet<int>();
+            var shown = new List<Transform>();
+            for (int i = 0; i < rendererBones.Length; i++)
+            {
+                if (rendererBones[i] != null && wanted.Contains(rendererBones[i]) && indices.Add(i))
+                {
+                    shown.Add(rendererBones[i]);
+                }
+            }
+
+            if (indices.Count == 0)
+            {
+                return false;
+            }
+
+            overlayMesh.colors32 = BuildWeightColors(source, indices);
+            Instances[id] = new Instance(renderer, instance.MeshObject, overlayMesh, source, indices, settingsRevision);
+            lastBoneOf[id] = Array.IndexOf(rendererBones, shown[0]);
+            activeBones.Clear();
+            activeBones.AddRange(shown);
+            if (!activeRenderers.Contains(renderer))
+            {
+                activeRenderers.Add(renderer);
+            }
+
+            fallbackNote = null;
+            LastStatus = BuildStatus(1, false);
+            SceneView.RepaintAll();
+            NotifyChanged();
+            return true;
         }
 
         /// <summary>Ends the pin of <paramref name="renderer"/> (or any pin when null); the overlay follows the selection again.</summary>
@@ -146,20 +208,36 @@ namespace Orbiters.Toolkit.Editor.XRay
         public static void Repaint(SkinnedMeshRenderer renderer, float[] customWeights = null)
         {
             if (renderer == null) return;
-            if (!Instances.TryGetValue(renderer.GetInstanceID(), out var instance) || instance.MeshObject == null) { Refresh(); return; }
-            var overlayRenderer = instance.MeshObject.GetComponent<SkinnedMeshRenderer>();
-            var overlayMesh = overlayRenderer != null ? overlayRenderer.sharedMesh : null;
-            if (overlayMesh == null) { Refresh(); return; }
-            Color32[] colors;
-            if (customWeights != null && customWeights.Length == overlayMesh.vertexCount) colors = BuildCustomColors(customWeights);
-            else
-            {
-                var weights = renderer.sharedMesh != null ? renderer.sharedMesh.boneWeights : null;
-                if (weights == null || weights.Length != overlayMesh.vertexCount) { Refresh(); return; }
-                colors = BuildWeightColors(weights, instance.BoneIndices);
-            }
-            overlayMesh.colors32 = colors;
+            int id = renderer.GetInstanceID();
+            if (!Instances.TryGetValue(id, out var instance) || instance.MeshObject == null || instance.Mesh == null) { Rebuild(id); return; }
+            var overlayMesh = instance.Mesh;
+            var source = renderer.sharedMesh;
+            // Another mesh (Mixer's working copy, MCB applying an import), or one with other vertices: made again from it.
+            if (source == null || source != instance.Source || source.vertexCount != overlayMesh.vertexCount) { Rebuild(id); return; }
+            overlayMesh.colors32 = customWeights != null && customWeights.Length == overlayMesh.vertexCount
+                ? BuildCustomColors(customWeights)
+                : BuildWeightColors(source, instance.BoneIndices);
             SceneView.RepaintAll();
+        }
+
+        private static void Rebuild(int rendererKey)
+        {
+            DestroyInstance(rendererKey);
+            Refresh();
+        }
+
+        // A mesh swapped under a shown renderer raises no hierarchy change: compared a few times a second while shown.
+        private static void WatchSourceMeshes(SceneView _)
+        {
+            if (Instances.Count == 0 || isRefreshing || EditorApplication.timeSinceStartup < nextSourceCheck) return;
+            nextSourceCheck = EditorApplication.timeSinceStartup + 0.25;
+            foreach (var pair in Instances)
+            {
+                var renderer = pair.Value.Renderer;
+                if (renderer != null && pair.Value.Mesh != null && renderer.sharedMesh == pair.Value.Source) continue;
+                Rebuild(pair.Key);
+                return;
+            }
         }
 
         private static bool SameBones(List<Transform> a, List<Transform> b)
@@ -177,7 +255,8 @@ namespace Orbiters.Toolkit.Editor.XRay
         {
             var mesh = renderer != null ? renderer.sharedMesh : null;
             var bones = renderer != null ? renderer.bones : null;
-            if (mesh == null || bones == null || bones.Length == 0 || !mesh.HasVertexAttribute(UnityEngine.Rendering.VertexAttribute.BlendWeight)) return -1;
+            // Rigid meshes (one bone per vertex) store bone indices without weights: each counts as 1.
+            if (mesh == null || bones == null || bones.Length == 0 || !mesh.HasVertexAttribute(UnityEngine.Rendering.VertexAttribute.BlendIndices)) return -1;
             var totals = new float[bones.Length];
             foreach (var weight in mesh.GetAllBoneWeights())
                 if (weight.boneIndex >= 0 && weight.boneIndex < totals.Length) totals[weight.boneIndex] += weight.weight;
@@ -196,6 +275,8 @@ namespace Orbiters.Toolkit.Editor.XRay
             if (!lastBoneOf.TryGetValue(renderer.GetInstanceID(), out int bone) || bone < 0 || bone >= bones.Length || bones[bone] == null)
                 bone = MostWeightedBone(renderer);
             if (bone < 0) return false;
+            // Kept, so the next refresh does not weigh the whole mesh again.
+            lastBoneOf[renderer.GetInstanceID()] = bone;
             boneIndices.Add(bone);
             selectedBones.Add(bones[bone]);
             return true;
@@ -211,6 +292,20 @@ namespace Orbiters.Toolkit.Editor.XRay
         public static void Refresh()
         {
             if (isRefreshing)
+            {
+                return;
+            }
+
+            // A pin whose renderer went away (its tool's object deleted, its scene closed) ends with it.
+            if (pinned && pinnedRenderer == null)
+            {
+                pinned = false;
+                pinnedBones = new List<Transform>();
+                pinnedWeights = null;
+            }
+
+            // Off with nothing shown (most selection and hierarchy changes in most projects): nothing to do or tell.
+            if (!Enabled && !pinned && Instances.Count == 0 && activeRenderers.Count == 0)
             {
                 return;
             }
@@ -255,10 +350,15 @@ namespace Orbiters.Toolkit.Editor.XRay
                 {
                     HashSet<int> boneIndices;
                     List<Transform> selectedBones;
-                    if (pinned && pinnedWeights != null && renderer == pinnedRenderer)
+                    if (pinned && renderer == pinnedRenderer)
                     {
-                        boneIndices = new HashSet<int>();
-                        selectedBones = new List<Transform>();
+                        // A tool's pin shows its own weights, or its bones' (none: no weight anywhere), never a bone of
+                        // the overlay's choosing.
+                        if (pinnedWeights != null || !TryResolveSelectedBoneIndices(renderer, selection, out boneIndices, out selectedBones))
+                        {
+                            boneIndices = new HashSet<int>();
+                            selectedBones = new List<Transform>();
+                        }
                     }
                     else if (TryResolveSelectedBoneIndices(renderer, selection, out boneIndices, out selectedBones))
                     {
@@ -300,6 +400,8 @@ namespace Orbiters.Toolkit.Editor.XRay
                     int id = target.RendererKey;
                     if (!Instances.TryGetValue(id, out var instance) ||
                         instance.MeshObject == null ||
+                        instance.Mesh == null ||
+                        instance.Source != target.Renderer.sharedMesh ||
                         instance.Revision != settingsRevision ||
                         !SameBoneSelection(instance.BoneIndices, target.BoneIndices))
                     {
@@ -397,25 +499,38 @@ namespace Orbiters.Toolkit.Editor.XRay
             boneIndices = new HashSet<int>();
             selectedBones = new List<Transform>();
 
-            if (renderer == null || renderer.bones == null || selectedTransforms == null || selectedTransforms.Count == 0)
+            // Read once: renderer.bones copies the whole array at every call.
+            var bones = renderer != null ? renderer.bones : null;
+            if (bones == null || selectedTransforms == null || selectedTransforms.Count == 0)
             {
                 return false;
             }
 
-            for (int i = 0; i < renderer.bones.Length; i++)
+            // The armature's own object (not a bone of the mesh) stands for all of its bones; a bone, even the root one
+            // (Hips), stands for itself only, as in Blender.
+            List<Transform> containers = null;
+            foreach (var selectedTransform in selectedTransforms)
             {
-                var bone = renderer.bones[i];
+                if (IsArmatureRootSelection(selectedTransform, renderer) && Array.IndexOf(bones, selectedTransform) < 0)
+                {
+                    (containers ?? (containers = new List<Transform>())).Add(selectedTransform);
+                }
+            }
+
+            for (int i = 0; i < bones.Length; i++)
+            {
+                var bone = bones[i];
                 if (bone == null)
                 {
                     continue;
                 }
 
                 bool selected = selectedTransforms.Contains(bone);
-                if (!selected)
+                if (!selected && containers != null)
                 {
-                    foreach (var selectedTransform in selectedTransforms)
+                    foreach (var container in containers)
                     {
-                        if (IsArmatureRootSelection(selectedTransform, renderer) && IsChildOf(bone, selectedTransform))
+                        if (IsChildOf(bone, container))
                         {
                             selected = true;
                             break;
@@ -434,20 +549,16 @@ namespace Orbiters.Toolkit.Editor.XRay
 
         private static bool HasAnySelectedWeight(SkinnedMeshRenderer renderer, HashSet<int> selectedBoneIndices)
         {
-            if (renderer == null || renderer.sharedMesh == null || selectedBoneIndices == null || selectedBoneIndices.Count == 0)
+            var mesh = renderer != null ? renderer.sharedMesh : null;
+            if (mesh == null || selectedBoneIndices == null || selectedBoneIndices.Count == 0)
             {
                 return false;
             }
 
-            var weights = renderer.sharedMesh.boneWeights;
-            if (weights == null || weights.Length == 0)
+            // The mesh's own weight data: no copy of every vertex's weights for each renderer of the scene.
+            foreach (var weight in mesh.GetAllBoneWeights())
             {
-                return false;
-            }
-
-            foreach (var weight in weights)
-            {
-                if (GetSelectedWeight(weight, selectedBoneIndices) > 0.0001f)
+                if (weight.weight > 0.0001f && selectedBoneIndices.Contains(weight.boneIndex))
                 {
                     return true;
                 }
@@ -497,7 +608,8 @@ namespace Orbiters.Toolkit.Editor.XRay
                 return;
             }
 
-            Instances[target.RendererKey] = new Instance(target.Renderer, overlay, target.BoneIndices, settingsRevision);
+            Instances[target.RendererKey] = new Instance(target.Renderer, overlay, overlay.GetComponent<SkinnedMeshRenderer>().sharedMesh,
+                target.Renderer.sharedMesh, target.BoneIndices, settingsRevision);
             LastStatus = message;
         }
 
@@ -518,19 +630,18 @@ namespace Orbiters.Toolkit.Editor.XRay
                 return false;
             }
 
-            var weights = sourceMesh.boneWeights;
-            if (weights == null || weights.Length != sourceMesh.vertexCount)
+            if (sourceMesh.GetBonesPerVertex().Length != sourceMesh.vertexCount)
             {
                 message = $"Renderer '{renderer.name}' mesh has no compatible bone weights.";
                 return false;
             }
 
             var mesh = UnityEngine.Object.Instantiate(sourceMesh);
-            mesh.name = sourceMesh.name + "_XRayWeightPaint";
+            mesh.name = sourceMesh.name + MeshSuffix;
             mesh.hideFlags = HideFlags.HideAndDontSave;
-            mesh.colors32 = pinned && pinnedWeights != null && renderer == pinnedRenderer && pinnedWeights.Length == weights.Length
+            mesh.colors32 = pinned && pinnedWeights != null && renderer == pinnedRenderer && pinnedWeights.Length == sourceMesh.vertexCount
                 ? BuildCustomColors(pinnedWeights)
-                : BuildWeightColors(weights, target.BoneIndices);
+                : BuildWeightColors(sourceMesh, target.BoneIndices);
 
             overlay = new GameObject(GetOverlayObjectName(target.RendererKey));
             overlay.hideFlags = HideFlags.HideAndDontSave;
@@ -555,25 +666,29 @@ namespace Orbiters.Toolkit.Editor.XRay
             return true;
         }
 
-        private static Color32[] BuildWeightColors(BoneWeight[] weights, HashSet<int> selectedBoneIndices)
+        // Every influence of each vertex (not only the four strongest the legacy weights keep), summed over the bones shown.
+        private static Color32[] BuildWeightColors(Mesh mesh, HashSet<int> selectedBoneIndices)
         {
-            var colors = new Color32[weights.Length];
-            for (int i = 0; i < weights.Length; i++)
+            int count = mesh.vertexCount;
+            var colors = new Color32[count];
+            var perVertex = mesh.GetBonesPerVertex();
+            var weights = mesh.GetAllBoneWeights();
+            int at = 0;
+            for (int v = 0; v < count; v++)
             {
-                colors[i] = EvaluateBlenderWeightColor(GetSelectedWeight(weights[i], selectedBoneIndices));
+                float value = 0f;
+                int influences = v < perVertex.Length ? perVertex[v] : 0;
+                for (int k = 0; k < influences && at + k < weights.Length; k++)
+                {
+                    var weight = weights[at + k];
+                    if (selectedBoneIndices.Contains(weight.boneIndex)) value += weight.weight;
+                }
+
+                at += influences;
+                colors[v] = EvaluateBlenderWeightColor(Mathf.Clamp01(value));
             }
 
             return colors;
-        }
-
-        private static float GetSelectedWeight(BoneWeight weight, HashSet<int> selectedBoneIndices)
-        {
-            float value = 0f;
-            if (selectedBoneIndices.Contains(weight.boneIndex0)) value += weight.weight0;
-            if (selectedBoneIndices.Contains(weight.boneIndex1)) value += weight.weight1;
-            if (selectedBoneIndices.Contains(weight.boneIndex2)) value += weight.weight2;
-            if (selectedBoneIndices.Contains(weight.boneIndex3)) value += weight.weight3;
-            return Mathf.Clamp01(value);
         }
 
         private static Color32 EvaluateBlenderWeightColor(float weight)
@@ -646,7 +761,7 @@ namespace Orbiters.Toolkit.Editor.XRay
                 shader = Shader.Find("Unlit/Color");
             }
 
-            material = new Material(shader) { hideFlags = HideFlags.HideAndDontSave };
+            material = ReloadScopedObjects.Keep(new Material(shader) { hideFlags = HideFlags.HideAndDontSave });
             ApplyMaterialSettings();
             return material;
         }
@@ -671,6 +786,7 @@ namespace Orbiters.Toolkit.Editor.XRay
 
         private static void ClearAll()
         {
+            bool shown = Instances.Count > 0 || activeRenderers.Count > 0;
             foreach (int id in Instances.Keys.ToList())
             {
                 DestroyInstance(id);
@@ -678,10 +794,11 @@ namespace Orbiters.Toolkit.Editor.XRay
 
             activeRenderers.Clear();
             activeBones.Clear();
-            ClearOrphanedOverlays();
-            SceneView.RepaintAll();
+            if (shown) SceneView.RepaintAll();
         }
 
+        // The overlay object and its mesh: the mesh too when the object already went with its parent (the renderer
+        // deleted, its scene closed, a prefab stage or Play mode left), which destroys only the object.
         private static void DestroyInstance(int id)
         {
             if (!Instances.TryGetValue(id, out var instance))
@@ -689,37 +806,25 @@ namespace Orbiters.Toolkit.Editor.XRay
                 return;
             }
 
-            DestroyOverlay(instance.MeshObject);
+            XRayArmatureMeshGenerator.DestroyGizmoObject(instance.MeshObject);
+            XRayArmatureMeshGenerator.DestroyHiddenMesh(instance.Mesh);
             Instances.Remove(id);
         }
 
+        // Overlays and meshes no instance holds (left by the scripts before a reload): at load, and when switched off.
         private static void ClearOrphanedOverlays()
         {
+            var kept = new HashSet<GameObject>(Instances.Values.Select(i => i.MeshObject).Where(o => o != null));
             foreach (var go in Resources.FindObjectsOfTypeAll<GameObject>())
             {
-                if (IsWeightPaintOverlay(go))
+                if (IsWeightPaintOverlay(go) && !kept.Contains(go))
                 {
-                    DestroyOverlay(go);
+                    XRayArmatureMeshGenerator.DestroyGizmoObject(go);
                 }
             }
-        }
 
-        // The overlay object and its mesh: a hidden copy of the source mesh, which nothing unloads (it never leaves memory
-        // on its own, every rebuild of the overlay would leave one behind).
-        private static void DestroyOverlay(GameObject overlay)
-        {
-            if (overlay == null)
-            {
-                return;
-            }
-
-            var overlayRenderer = overlay.GetComponent<SkinnedMeshRenderer>();
-            var mesh = overlayRenderer != null ? overlayRenderer.sharedMesh : null;
-            UnityEngine.Object.DestroyImmediate(overlay);
-            if (mesh != null && !EditorUtility.IsPersistent(mesh) && (mesh.hideFlags & HideFlags.DontSave) != 0)
-            {
-                UnityEngine.Object.DestroyImmediate(mesh);
-            }
+            XRayArmatureMeshGenerator.DestroyOrphanedMeshes(MeshSuffix, true,
+                new HashSet<Mesh>(Instances.Values.Select(i => i.Mesh).Where(m => m != null)));
         }
 
         private static bool IsWeightPaintOverlay(GameObject go)
@@ -808,17 +913,25 @@ namespace Orbiters.Toolkit.Editor.XRay
         {
             public readonly SkinnedMeshRenderer Renderer;
             public readonly GameObject MeshObject;
+            /// <summary>The overlay's own mesh (a hidden copy of <see cref="Source"/>).</summary>
+            public readonly Mesh Mesh;
+            /// <summary>The renderer's mesh the overlay was made from.</summary>
+            public readonly Mesh Source;
             public readonly HashSet<int> BoneIndices;
             public readonly int Revision;
 
             public Instance(
                 SkinnedMeshRenderer renderer,
                 GameObject meshObject,
+                Mesh mesh,
+                Mesh source,
                 HashSet<int> boneIndices,
                 int revision)
             {
                 Renderer = renderer;
                 MeshObject = meshObject;
+                Mesh = mesh;
+                Source = source;
                 BoneIndices = new HashSet<int>(boneIndices);
                 Revision = revision;
             }

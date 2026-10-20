@@ -13,13 +13,15 @@ using Object = UnityEngine.Object;
 
 /// <summary>
 /// Fits kept for a refitted renderer (kept, used again, forgotten; the build's pick-one menu) and the body shrink a refit
-/// records (the build's blendshape on the body that follows the clothing's toggle). Builds run on clones only.
+/// records (the build's blendshape on the body that follows the clothing's toggle). Builds run on clones only. Fits are made
+/// as the refit engines make them: the original mesh with the fit in its "refit" blendshape, worn at 100.
 /// </summary>
 public sealed class RefitKeptFitsAndShrinkTests
 {
     private Scene scene;
     private GameObject root;
     private SkinnedMeshRenderer body, jacket;
+    private Mesh jacketOriginal;
     private readonly List<Object> created = new List<Object>();
     private string folder;
     private int undoGroup;
@@ -33,7 +35,8 @@ public sealed class RefitKeptFitsAndShrinkTests
         root = new GameObject("Kept fits avatar");
         SceneManager.MoveGameObjectToScene(root, scene);
         body = AddRenderer("Body", Mesh("Body", "Flex"));
-        jacket = AddRenderer("Jacket", Mesh("Jacket"));
+        jacketOriginal = Mesh("Jacket");
+        jacket = AddRenderer("Jacket", jacketOriginal);
         folder = null;
     }
 
@@ -102,6 +105,31 @@ public sealed class RefitKeptFitsAndShrinkTests
     }
 
     [Test]
+    public void UsingAnotherKeptFitDropsTheBodyShrinkPlannedUnderTheWornOne()
+    {
+        var loose = Fit("Loose fit", .01f);
+        var record = Register(loose, "base:1");
+        var kept = RefitRecords.KeepFit(record, "Loose");
+        var tight = Fit("Tight fit", -.01f);
+        record = Register(tight, "base:1");
+        RefitRecords.SetBodyShrink(record, body.sharedMesh, new[] { 1 }, new[] { Vector3.back * .002f });
+        Assert.That(RefitRecords.UseFit(record, kept), Is.True);
+        Assert.That(record.HasBodyShrink, Is.False, "The shrink was planned under the tight fit.");
+    }
+
+    [Test]
+    public void TheFitShapeIsTheOneTheOriginalLacksThatFollowsNoBodyShape()
+    {
+        var fit = Fit("Fit", .01f);
+        var record = Register(fit, "base:1");
+        Assert.That(RefitRecords.FitShape(record), Is.EqualTo("refit"));
+        Assert.That(RefitRecords.FitShape(fit, jacketOriginal, new[] { new RefitShape("Flex", "refit") }), Is.Null,
+            "A shape that follows the body is not the fit.");
+        var shapesOnly = Mesh("Shapes only", "Flex");
+        Assert.That(RefitRecords.FitShape(shapesOnly, jacketOriginal, new[] { new RefitShape("Flex", "Flex") }), Is.Null);
+    }
+
+    [Test]
     public void KeptFitsBecomeShapesAndAPickOneMenuOnTheBuildCopyOnly()
     {
         if (VrcFury.Writer == null) Assert.Ignore("VRCFury is not installed.");
@@ -128,10 +156,104 @@ public sealed class RefitKeptFitsAndShrinkTests
         var deltas = new Vector3[copy.sharedMesh.vertexCount];
         copy.sharedMesh.GetBlendShapeFrameVertices(shape, 0, deltas, null, null);
         Assert.That(deltas[1].x, Is.EqualTo(.02f).Within(1e-6f), "The shape takes the worn fit to the kept one.");
+        Assert.That(deltas[0].magnitude + deltas[2].magnitude, Is.EqualTo(0f).Within(1e-6f), "Where the fits agree, nothing moves.");
         Assert.That(copy.sharedMesh.GetBlendShapeIndex("ReFit fit: Tight"), Is.LessThan(0), "The worn fit is the mesh itself.");
+        // Picked in the menu, the kept shape at 100 over the worn fit (its "refit" shape still at 100) shows the kept fit.
+        var shown = copy.sharedMesh.vertices;
+        int fitShape = copy.sharedMesh.GetBlendShapeIndex("refit");
+        var fitDeltas = new Vector3[shown.Length];
+        copy.sharedMesh.GetBlendShapeFrameVertices(fitShape, 0, fitDeltas, null, null);
+        Assert.That(shown[1].x + fitDeltas[1].x + deltas[1].x, Is.EqualTo(jacketOriginal.vertices[1].x + .01f).Within(1e-6f));
         Assert.That(copy.GetComponents(VrcFury.Component).Length, Is.EqualTo(2), "One toggle per fit.");
-        Assert.That(tight.blendShapeCount, Is.Zero, "The project's mesh is untouched.");
+        Assert.That(tight.blendShapeCount, Is.EqualTo(1), "The project's mesh is untouched: only its fit shape.");
         Assert.That(jacket.GetComponents(VrcFury.Component), Is.Empty, "The scene avatar is untouched.");
+    }
+
+    [Test]
+    public void AKeptFitSkinnedToAnotherArmatureIsLeftOutOfTheMenu()
+    {
+        if (VrcFury.Writer == null) Assert.Ignore("VRCFury is not installed.");
+        var other = Fit("Other armature fit", .01f);
+        other.bindposes = new[] { Matrix4x4.Translate(Vector3.up * .1f) };
+        var record = Register(other, "base:1");
+        RefitRecords.KeepFit(record, "Other");
+        var tight = Fit("Tight fit", -.01f);
+        record = Register(tight, "base:1");
+        RefitRecords.KeepFit(record, "Tight");
+        var clone = Object.Instantiate(root);
+        created.Add(clone);
+        SceneManager.MoveGameObjectToScene(clone, scene);
+        var warnings = new List<string>();
+        Assert.That(RefitKeptFitsBuild.Apply(clone, warnings), Is.Zero);
+        Assert.That(warnings.Any(w => w.Contains("another armature")), Is.True, string.Join("; ", warnings));
+        Assert.That(clone.transform.Find("Jacket").GetComponent<SkinnedMeshRenderer>().sharedMesh, Is.SameAs(tight), "Nothing to add: the mesh stays.");
+    }
+
+    [Test]
+    public void ABodyShrinkIsLeftOutOnABodyMeshItWasNotPlannedOn()
+    {
+        var fit = Fit("Fit", 0f);
+        var record = Register(fit, "base:1");
+        RefitRecords.SetBodyShrink(record, body.sharedMesh, new[] { 1 }, new[] { Vector3.back * .002f });
+        // Another version of the body with as many vertices.
+        body.sharedMesh = Mesh("Body 2", "Flex");
+        var warnings = new List<string>();
+        var clone = Object.Instantiate(root);
+        created.Add(clone);
+        SceneManager.MoveGameObjectToScene(clone, scene);
+        Assert.That(RefitShrinkBuild.Apply(clone, warnings), Is.Zero);
+        Assert.That(warnings.Any(w => w.Contains("another body mesh")), Is.True, string.Join("; ", warnings));
+
+        // Its planned mesh deleted: left out too, never applied to whatever body mesh is there.
+        record.bodyShrinkMesh = null;
+        warnings.Clear();
+        var second = Object.Instantiate(root);
+        created.Add(second);
+        SceneManager.MoveGameObjectToScene(second, scene);
+        Assert.That(RefitShrinkBuild.Apply(second, warnings), Is.Zero);
+        Assert.That(warnings.Any(w => w.Contains("is gone")), Is.True, string.Join("; ", warnings));
+    }
+
+    [Test]
+    public void ABodyShrinkCheckedWhenTheBuildStartsSurvivesAnotherStepCopyingTheBody()
+    {
+        var fit = Fit("Fit", 0f);
+        var record = Register(fit, "base:1");
+        RefitRecords.SetBodyShrink(record, body.sharedMesh, new[] { 1 }, new[] { Vector3.back * .002f });
+        var clone = Object.Instantiate(root);
+        created.Add(clone);
+        SceneManager.MoveGameObjectToScene(clone, scene);
+        RefitShrinkBuild.Capture(clone);
+        // A later build step works on its own copy of the body mesh.
+        var copiedBody = clone.transform.Find("Body").GetComponent<SkinnedMeshRenderer>();
+        copiedBody.sharedMesh = Object.Instantiate(copiedBody.sharedMesh);
+        created.Add(copiedBody.sharedMesh);
+        var warnings = new List<string>();
+        Assert.That(RefitShrinkBuild.Apply(clone, warnings), Is.EqualTo(1), string.Join("; ", warnings));
+        created.Add(copiedBody.sharedMesh);
+    }
+
+    [Test]
+    public void TwoPiecesOfTheSameNameEachKeepTheirShrink()
+    {
+        var fit = Fit("Fit", 0f);
+        var record = Register(fit, "base:1");
+        RefitRecords.SetBodyShrink(record, body.sharedMesh, new[] { 0 }, new[] { Vector3.back * .002f });
+        var twin = AddRenderer("Jacket", Mesh("Jacket twin"));
+        var twinFit = Mesh("Twin fit");
+        twin.sharedMesh = twinFit;
+        var twinRecord = RefitRecords.Register(twin, new RefitRendererState(), twinFit, null, body, new RefitShape[0], OrbitersRefit.FitKind.Fitted, "base:1", "base:1", "Test");
+        RefitRecords.SetBodyShrink(twinRecord, body.sharedMesh, new[] { 2 }, new[] { Vector3.left * .003f });
+        var clone = Object.Instantiate(root);
+        created.Add(clone);
+        SceneManager.MoveGameObjectToScene(clone, scene);
+        var warnings = new List<string>();
+        Assert.That(RefitShrinkBuild.Apply(clone, warnings), Is.EqualTo(2), string.Join("; ", warnings));
+        var copiedBody = clone.transform.Find("Body").GetComponent<SkinnedMeshRenderer>();
+        created.Add(copiedBody.sharedMesh);
+        string name = RefitShrinkBuild.ShapeName(jacket);
+        Assert.That(copiedBody.sharedMesh.GetBlendShapeIndex(name), Is.GreaterThanOrEqualTo(0));
+        Assert.That(copiedBody.sharedMesh.GetBlendShapeIndex(name + " 2"), Is.GreaterThanOrEqualTo(0), "The second piece's shrink is not lost.");
     }
 
     [Test]
@@ -171,16 +293,21 @@ public sealed class RefitKeptFitsAndShrinkTests
     }
 
     private OrbitersRefit Register(Mesh fit, string baseKey) =>
-        RefitRecords.Register(jacket, new RefitRendererState(), fit, null, body, new RefitShape[0], OrbitersRefit.FitKind.Fitted, baseKey, baseKey, "Test");
+        RefitRecords.Register(jacket, new RefitRendererState { mesh = jacketOriginal }, fit, null, body, new RefitShape[0], OrbitersRefit.FitKind.Fitted,
+            baseKey, baseKey, "Test");
 
-    // A fit of the jacket: its middle vertex moved along x.
+    // A fit of the jacket as the refit engines make one: the original mesh, its middle vertex moved along x by the "refit"
+    // blendshape, worn at 100.
     private Mesh Fit(string name, float offset)
     {
-        var mesh = Mesh(name);
-        var vertices = mesh.vertices;
-        vertices[1] += Vector3.right * offset;
-        mesh.vertices = vertices;
+        var mesh = Object.Instantiate(jacketOriginal);
+        mesh.name = name;
+        created.Add(mesh);
+        var deltas = new Vector3[mesh.vertexCount];
+        deltas[1] = Vector3.right * offset;
+        mesh.AddBlendShapeFrame(RefitRecords.DefaultFitShape, 100f, deltas, null, null);
         jacket.sharedMesh = mesh;
+        jacket.SetBlendShapeWeight(mesh.GetBlendShapeIndex(RefitRecords.DefaultFitShape), 100f);
         return mesh;
     }
 

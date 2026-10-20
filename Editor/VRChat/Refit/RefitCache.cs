@@ -5,6 +5,7 @@ using System.Linq;
 using System.Security.Cryptography;
 using System.Text;
 using Orbiters.Toolkit.Editor.Refit;
+using Orbiters.Toolkit.Storage;
 using Orbiters.Toolkit.VRChat;
 using UnityEditor;
 using UnityEngine;
@@ -15,6 +16,8 @@ namespace Orbiters.Toolkit.Editor.VRChat.Refit
     /// <summary>
     /// Refits are slow; the same mesh, placed the same way on the same body with the same shapes and settings, gives the same
     /// result. Putting an outfit on a second avatar with the same custom base reuses the first result instead of computing it.
+    /// Entries are kept per engine version (a folder each): an engine finds only its own, so once a newer version of an
+    /// engine stored a result, or loaded with the editor, the older versions' entries go (the meshes they point to stay).
     /// </summary>
     internal static class RefitCache
     {
@@ -22,8 +25,11 @@ namespace Orbiters.Toolkit.Editor.VRChat.Refit
         // Changes when entries keep something new: older entries are then not found and made again.
         private const string Format = "3";
 
-        /// <summary>What decides the result, hashed; null when an input is not a saved asset (nothing to find it again by).</summary>
-        internal static string Key(RefitJob job, Transform avatarRoot, string engine)
+        /// <summary>
+        /// What decides the result, hashed; null when an input is not a saved asset (nothing to find it again by).
+        /// <paramref name="inputs"/>: what else the engine read from the scene for this job (<see cref="IRefitInputs"/>).
+        /// </summary>
+        internal static string Key(RefitJob job, Transform avatarRoot, string engine, string inputs = null)
         {
             var renderer = job.Renderer;
             if (renderer == null || job.Body == null || avatarRoot == null) return null;
@@ -32,6 +38,7 @@ namespace Orbiters.Toolkit.Editor.VRChat.Refit
             var text = new StringBuilder();
             text.Append(Format).Append('|').Append(engine).Append('|').Append(job.Mode).Append('|').Append(Mathf.RoundToInt(job.Tightness * 100)).Append('|');
             text.Append(job.CoverDifferentBaseBody).Append('|').Append(job.MadeForAnotherBody).Append('|');
+            text.Append(inputs ?? "").Append('|');
             foreach (var layer in job.CoverageLayers)
             {
                 string identity = layer != null ? Identity(layer.sharedMesh) : null;
@@ -70,13 +77,19 @@ namespace Orbiters.Toolkit.Editor.VRChat.Refit
                 return BitConverter.ToString(sha.ComputeHash(Encoding.UTF8.GetBytes(text.ToString()))).Replace("-", "").ToLowerInvariant();
         }
 
-        internal static RefitCacheEntry Find(string key)
+        /// <summary>The folder of one engine version's entries.</summary>
+        internal static string EngineFolder(string engine) => Folder + "/" + SafePaths.FileName(string.IsNullOrEmpty(engine) ? "none" : engine, "none");
+
+        private static string EntryPath(string key, string engine) => EngineFolder(engine) + "/" + key + ".asset";
+
+        internal static RefitCacheEntry Find(string key, string engine)
         {
             if (string.IsNullOrEmpty(key)) return null;
-            var entry = AssetDatabase.LoadAssetAtPath<RefitCacheEntry>(Folder + "/" + key + ".asset");
+            string path = EntryPath(key, engine);
+            var entry = AssetDatabase.LoadAssetAtPath<RefitCacheEntry>(path);
             if (entry == null) return null;
             // The mesh was deleted: forget the entry.
-            if (entry.mesh == null) { AssetDatabase.DeleteAsset(Folder + "/" + key + ".asset"); return null; }
+            if (entry.mesh == null) { AssetDatabase.DeleteAsset(path); return null; }
             return entry;
         }
 
@@ -103,8 +116,8 @@ namespace Orbiters.Toolkit.Editor.VRChat.Refit
             if (string.IsNullOrEmpty(key) || outcome?.Mesh == null || !EditorUtility.IsPersistent(outcome.Mesh)) return null;
             try
             {
-                EnsureFolder();
-                string path = Folder + "/" + key + ".asset";
+                EnsureFolder(EngineFolder(engine));
+                string path = EntryPath(key, engine);
                 var entry = AssetDatabase.LoadAssetAtPath<RefitCacheEntry>(path);
                 bool created = entry == null;
                 if (created) entry = ScriptableObject.CreateInstance<RefitCacheEntry>();
@@ -117,6 +130,7 @@ namespace Orbiters.Toolkit.Editor.VRChat.Refit
                 if (created) AssetDatabase.CreateAsset(entry, path);
                 else EditorUtility.SetDirty(entry);
                 AssetDatabase.SaveAssetIfDirty(entry);
+                Prune(engine);
                 return path;
             }
             catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException || ex is ArgumentException)
@@ -124,6 +138,64 @@ namespace Orbiters.Toolkit.Editor.VRChat.Refit
                 Debug.LogWarning("[Orbiters] Could not keep this refit for reuse: " + ex.Message);
                 return null;
             }
+        }
+
+        /// <summary>
+        /// Removes the entries no engine finds any more: the folders of the other versions of <paramref name="engine"/> (same
+        /// name up to its first space: "ReFit 0.7.1 r10" for "ReFit 0.7.2 r11") and, with <paramref name="legacy"/>, the entries
+        /// of the layout before engine folders (directly in <paramref name="folder"/>). Other engines' entries stay; the meshes
+        /// entries point to are never touched. Returns the paths removed.
+        /// </summary>
+        internal static List<string> Prune(string engine, string folder = Folder, bool legacy = false)
+        {
+            var removed = new List<string>();
+            if (string.IsNullOrEmpty(engine) || !AssetDatabase.IsValidFolder(folder)) return removed;
+            string root = Path.GetDirectoryName(Application.dataPath);
+            string own = SafePaths.FileName(engine, "none"), product = Product(engine);
+            try
+            {
+                if (legacy)
+                    foreach (string file in Directory.GetFiles(Path.Combine(root, folder), "*.asset", SearchOption.TopDirectoryOnly))
+                        removed.Add(folder + "/" + Path.GetFileName(file));
+                foreach (string directory in Directory.GetDirectories(Path.Combine(root, folder)))
+                {
+                    string name = Path.GetFileName(directory);
+                    if (name != own && Product(name) == product) removed.Add(folder + "/" + name);
+                }
+            }
+            catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException) { return new List<string>(); }
+            if (removed.Count == 0) return removed;
+            var failed = new List<string>();
+            AssetDatabase.DeleteAssets(removed.ToArray(), failed);
+            removed.RemoveAll(failed.Contains);
+            if (removed.Count > 0) Debug.Log($"[Orbiters] Removed {removed.Count} refit cache entries (or folders) no engine finds any more.");
+            return removed;
+        }
+
+        // An engine's name up to its version: "ReFit" of "ReFit 0.7.2 r11".
+        private static string Product(string engine)
+        {
+            int space = engine.IndexOf(' ');
+            return space > 0 ? engine.Substring(0, space) : engine;
+        }
+
+        // Once the editor has loaded (the engine registered with it): the entries of the engine's earlier versions go, and
+        // those of the layout before engine folders.
+        [InitializeOnLoadMethod]
+        private static void PruneAfterLoad()
+        {
+            if (Application.isBatchMode) return;
+            EditorApplication.CallbackFunction once = null;
+            once = () =>
+            {
+                if (EditorApplication.isCompiling || EditorApplication.isUpdating) return;
+                EditorApplication.update -= once;
+                if (EditorApplication.isPlayingOrWillChangePlaymode) return;
+                string engine = RefitEngine.Current?.Name;
+                try { if (!string.IsNullOrEmpty(engine)) Prune(engine, legacy: true); }
+                catch (Exception ex) { Debug.LogWarning("[Orbiters] Could not clean the refit cache: " + ex.Message); }
+            };
+            EditorApplication.update += once;
         }
 
         internal static IEnumerable<RefitShape> Pairs(RefitOutcome outcome)
@@ -150,11 +222,11 @@ namespace Orbiters.Toolkit.Editor.VRChat.Refit
             text.Append(';');
         }
 
-        private static void EnsureFolder()
+        private static void EnsureFolder(string folder)
         {
-            if (AssetDatabase.IsValidFolder(Folder)) return;
+            if (AssetDatabase.IsValidFolder(folder)) return;
             string parent = "Assets";
-            foreach (string part in Folder.Substring("Assets/".Length).Split('/'))
+            foreach (string part in folder.Substring("Assets/".Length).Split('/'))
             {
                 string next = parent + "/" + part;
                 if (!AssetDatabase.IsValidFolder(next)) AssetDatabase.CreateFolder(parent, part);

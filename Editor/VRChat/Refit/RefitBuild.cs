@@ -126,6 +126,9 @@ namespace Orbiters.Toolkit.Editor.VRChat.Refit
             // Never stops the upload: without the capture, the links are collected again from the build copy later.
             try { RefitBuild.Capture(avatarRoot); }
             catch (Exception ex) { Debug.LogWarning("[Orbiters] ReFit could not prepare its blendshape links: " + ex.Message); }
+            // Before other steps copy the body's mesh: which body shrinks are on the mesh they were planned on.
+            try { RefitShrinkBuild.Capture(avatarRoot); }
+            catch (Exception ex) { Debug.LogWarning("[Orbiters] ReFit could not check its body shrinks: " + ex.Message); }
             return true;
         }
     }

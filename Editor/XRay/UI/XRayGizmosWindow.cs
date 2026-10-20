@@ -12,6 +12,13 @@ namespace Orbiters.Toolkit.Editor.XRay
     public class XRayGizmosWindow : EditorWindow
     {
         private ScrollView content;
+        // What the window shows, but for values its own fields keep up to date in place: rebuilt only when it changes.
+        private string shownState;
+        private bool renderQueued;
+        // Values changed by the window's own sliders and pickers (or by the Scene toolbar): set in place, never rebuilt
+        // under a drag.
+        private readonly List<Action> liveValues = new List<Action>();
+        private Label hoverLabel;
 
         [MenuItem("Tools/Orbiters/Avatar Gizmos")]
         public static void Open()
@@ -73,17 +80,83 @@ namespace Orbiters.Toolkit.Editor.XRay
             content.AddToClassList("xray-scroll");
             body.Add(content);
 
-            Render();
+            shownState = null;
+            RenderNow();
         }
 
+        // The services' changes: several in one frame (a selection reaches every service) make one update, on the next.
         private void Render()
         {
+            if (content == null || renderQueued)
+            {
+                return;
+            }
+
+            renderQueued = true;
+            rootVisualElement.schedule.Execute(RenderNow);
+        }
+
+        private void RenderNow()
+        {
+            renderQueued = false;
             if (content == null)
             {
                 return;
             }
 
+            foreach (var update in liveValues) update();
+            string state = State();
+            if (state == shownState)
+            {
+                return;
+            }
+
+            // A field being dragged keeps its control: the window catches up once the pointer lets go.
+            if (rootVisualElement.panel != null && rootVisualElement.panel.GetCapturingElement(PointerId.mousePointerId) != null)
+            {
+                renderQueued = true;
+                rootVisualElement.schedule.Execute(RenderNow).StartingIn(100);
+                return;
+            }
+
+            shownState = state;
+            Build();
+        }
+
+        // Everything the window shows but the live values (thickness, alphas, colours, the hovered bone).
+        private string State()
+        {
+            var state = new System.Text.StringBuilder();
+            void Add(object value) => state.Append(value).Append('\u001f');
+            Add(MirrorPoseService.Enabled); Add(XRayMirrorControls.Status);
+            Add(EditorApplication.isPlayingOrWillChangePlaymode); Add(EditorApplication.isPlaying);
+            Add(XRayGizmoService.Enabled); Add(XRayGizmoService.TargetMode); Add(DescribeSelectedTarget());
+            var pinnedObject = XRayGizmoService.PinnedObject;
+            Add(pinnedObject != null ? pinnedObject.GetInstanceID() + pinnedObject.name : "-");
+            Add(XRayGizmoService.MeshType); Add(XRayBonePickingService.Enabled);
+            Add(XRayWeightPaintService.Enabled);
+            if (XRayWeightPaintService.Enabled)
+            {
+                Add(FormatRenderers(XRayWeightPaintService.ActiveRenderers)); Add(FormatTransforms(XRayWeightPaintService.ActiveBones));
+                Add(XRayWeightPaintService.LastStatus);
+            }
+            Add(XRayMeshEdgeService.Enabled);
+            if (XRayMeshEdgeService.Enabled)
+            {
+                Add(FormatRenderers(XRayMeshEdgeService.ActiveRenderers)); Add(XRayMeshEdgeService.LastStatus);
+            }
+            var targets = XRayGizmoService.ActiveTargets;
+            Add(targets.Count);
+            foreach (var target in targets) Add(target != null ? target.GetInstanceID() + target.name : "-");
+            if (targets.Count == 0) Add(XRayGizmoService.LastStatus);
+            return state.ToString();
+        }
+
+        private void Build()
+        {
             content.Clear();
+            liveValues.Clear();
+            hoverLabel = null;
 
             Question("Mirror posing");
             var mirror = new Toggle("Mirror") { value = MirrorPoseService.Enabled };
@@ -144,11 +217,13 @@ namespace Orbiters.Toolkit.Editor.XRay
             thickness.AddToClassList("xray-field");
             thickness.RegisterValueChangedCallback(evt => XRayGizmoService.SetThickness(evt.newValue));
             content.Add(thickness);
+            liveValues.Add(() => thickness.SetValueWithoutNotify(XRayGizmoService.Thickness));
 
             var color = new ColorField("Color") { value = XRayGizmoService.GizmoColor };
             color.AddToClassList("xray-field");
             color.RegisterValueChangedCallback(evt => XRayGizmoService.SetColor(evt.newValue));
             content.Add(color);
+            liveValues.Add(() => color.SetValueWithoutNotify(XRayGizmoService.GizmoColor));
 
             var clickableBones = new Toggle("Clickable scene bones") { value = XRayBonePickingService.Enabled };
             clickableBones.AddToClassList("xray-field");
@@ -157,8 +232,9 @@ namespace Orbiters.Toolkit.Editor.XRay
 
             if (XRayBonePickingService.Enabled)
             {
-                var hovered = XRayBonePickingService.HoveredBone;
-                SummaryRow("Hover", hovered != null ? hovered.name : "-");
+                // Follows the pointer in place: hovering never rebuilds the window.
+                hoverLabel = SummaryRow("Hover", HoveredText());
+                liveValues.Add(() => { if (hoverLabel != null) hoverLabel.text = HoveredText(); });
                 Help("Hover bones in the Scene view for a white highlight; click to select the matching bone transform.");
             }
 
@@ -177,6 +253,7 @@ namespace Orbiters.Toolkit.Editor.XRay
             weightAlpha.AddToClassList("xray-field");
             weightAlpha.RegisterValueChangedCallback(evt => XRayWeightPaintService.SetOverlayAlpha(evt.newValue));
             content.Add(weightAlpha);
+            liveValues.Add(() => weightAlpha.SetValueWithoutNotify(XRayWeightPaintService.OverlayAlpha));
 
             if (XRayWeightPaintService.Enabled)
             {
@@ -200,11 +277,23 @@ namespace Orbiters.Toolkit.Editor.XRay
             edgeAlpha.AddToClassList("xray-field");
             edgeAlpha.RegisterValueChangedCallback(evt => XRayMeshEdgeService.SetEdgeAlpha(evt.newValue));
             content.Add(edgeAlpha);
+            liveValues.Add(() => edgeAlpha.SetValueWithoutNotify(XRayMeshEdgeService.EdgeAlpha));
 
             var edgeColor = new ColorField("Edge color") { value = XRayMeshEdgeService.EdgeColor };
             edgeColor.AddToClassList("xray-field");
             edgeColor.RegisterValueChangedCallback(evt => XRayMeshEdgeService.SetEdgeColor(evt.newValue));
             content.Add(edgeColor);
+            liveValues.Add(() => edgeColor.SetValueWithoutNotify(XRayMeshEdgeService.EdgeColor));
+
+            var seeThrough = new Toggle("See through the mesh")
+            {
+                value = XRayMeshEdgeService.SeeThrough,
+                tooltip = "Show the edges of the whole mesh, back and hidden parts included"
+            };
+            seeThrough.AddToClassList("xray-field");
+            seeThrough.RegisterValueChangedCallback(evt => XRayMeshEdgeService.SetSeeThrough(evt.newValue));
+            content.Add(seeThrough);
+            liveValues.Add(() => seeThrough.SetValueWithoutNotify(XRayMeshEdgeService.SeeThrough));
 
             if (XRayMeshEdgeService.Enabled)
             {
@@ -276,7 +365,7 @@ namespace Orbiters.Toolkit.Editor.XRay
             content.Add(row);
         }
 
-        private void SummaryRow(string key, string value)
+        private Label SummaryRow(string key, string value)
         {
             var row = new VisualElement();
             row.AddToClassList("xray-summary-row");
@@ -290,6 +379,13 @@ namespace Orbiters.Toolkit.Editor.XRay
             row.Add(v);
 
             content.Add(row);
+            return v;
+        }
+
+        private static string HoveredText()
+        {
+            var hovered = XRayBonePickingService.HoveredBone;
+            return hovered != null ? hovered.name : "-";
         }
 
         private string DescribeSelectedTarget()

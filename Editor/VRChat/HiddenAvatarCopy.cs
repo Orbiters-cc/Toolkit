@@ -1,4 +1,6 @@
 using System;
+using System.Linq;
+using Orbiters.Toolkit.Editor.XRay;
 using UnityEditor;
 using UnityEditor.SceneManagement;
 using UnityEngine;
@@ -9,7 +11,8 @@ namespace Orbiters.Toolkit.Editor.VRChat
 {
     /// <summary>
     /// A copy of an avatar as it is in the scene, in a preview scene of its own: out of the hierarchy, never saved, the open
-    /// scene left unchanged, and never listed by the SDK's upload panel. Disposing closes it.
+    /// scene left unchanged, and never listed by the SDK's upload panel. The avatar gizmos' helpers (bones, weight paint) are
+    /// not part of it: never baked, exported or built. Disposing closes it.
     /// </summary>
     public sealed class HiddenAvatarCopy : IDisposable
     {
@@ -31,6 +34,9 @@ namespace Orbiters.Toolkit.Editor.VRChat
                 // A copy of an object never saved (a tool's own hidden copy) lands in the open scene when unparented.
                 if (copy.scene != Scene) SceneManager.MoveGameObjectToScene(copy, Scene);
                 Object.DestroyImmediate(holder);
+                // Their meshes stay the source's gizmos': only the copied objects go.
+                foreach (var helper in copy.GetComponentsInChildren<Transform>(true).Where(t => t != copy.transform && XRayArmatureMeshGenerator.IsPackageGizmoObject(t.gameObject)).ToList())
+                    if (helper != null) Object.DestroyImmediate(helper.gameObject);
                 // The SDK panel lists every avatar whose object isn't flagged so: an upload must never pick the copy.
                 copy.hideFlags = HideFlags.NotEditable;
                 copy.SetActive(true);

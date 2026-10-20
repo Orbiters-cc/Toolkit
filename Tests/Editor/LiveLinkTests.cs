@@ -47,8 +47,8 @@ namespace Orbiters.Toolkit.Editor.Tests
             Assert.That(LiveLinkFormat.SameToken("abc", "abd"), Is.False);
         }
 
-        // Several applications at once, each frame on the main thread with its connection; one with another token is cut off
-        // without anything it sent being used.
+        // Several applications at once, each frame on the main thread with its connection, each announced once it sent a
+        // frame of the session; one with another token is cut off without anything it sent being used.
         [UnityTest]
         public IEnumerator ConnectionsAreKeptApartAndStrangersAreCutOff()
         {
@@ -61,10 +61,11 @@ namespace Orbiters.Toolkit.Editor.Tests
                 using (var first = Connect(server))
                 using (var second = Connect(server))
                 {
-                    yield return Until(() => changes.Count >= 2);
+                    yield return Until(() => false, .2);
+                    Assert.That(changes, Is.Empty, "a connection is announced once it sent a frame of the session");
                     Send(first, 1, "secret", "one");
                     Send(second, 1, "secret", "two");
-                    yield return Until(() => frames.Count >= 2);
+                    yield return Until(() => frames.Count >= 2 && changes.Count >= 2);
                     Assert.That(frames.Select(f => Encoding.UTF8.GetString(f.Payload)), Is.EquivalentTo(new[] { "one", "two" }));
                     Assert.That(frames.Select(f => f.Connection).Distinct().Count(), Is.EqualTo(2));
                     Assert.That(server.Connections.Length, Is.EqualTo(2));
@@ -77,6 +78,115 @@ namespace Orbiters.Toolkit.Editor.Tests
                     int reached = server.Broadcast(3, Encoding.UTF8.GetBytes("hello"));
                     Assert.That(reached, Is.EqualTo(1));
                 }
+            }
+        }
+
+        // A process that connects and waits (another user's, on the same machine) is never sent anything: no frame, no
+        // goodbye, so never the session's token. It is closed once the handshake time is over.
+        [UnityTest]
+        public IEnumerator SilentStrangersHearNothingAndAreClosed()
+        {
+            int handshake = LiveLinkServer.HandshakeMilliseconds;
+            LiveLinkServer.HandshakeMilliseconds = 400;
+            var changes = new List<(int, bool)>();
+            var server = new LiveLinkServer(Format, "secret", closingType: 4);
+            var stranger = Connect(server);
+            var client = Connect(server);
+            try
+            {
+                server.ConnectionChanged += (id, up) => changes.Add((id, up));
+                Send(client, 1, "secret", "hello");
+                yield return Until(() => changes.Count >= 1);
+                Assert.That(server.Broadcast(3, Encoding.UTF8.GetBytes("news")), Is.EqualTo(1), "only the client counts");
+                yield return Until(() => client.Available > 0);
+                Assert.That(client.Available, Is.GreaterThan(0), "the client hears the broadcast");
+                Assert.That(stranger.Available, Is.EqualTo(0), "the stranger does not");
+
+                // Past the handshake time the stranger is closed: its read ends without a byte.
+                stranger.ReceiveTimeout = 3000;
+                var buffer = new byte[64];
+                int read;
+                try { read = stranger.GetStream().Read(buffer, 0, buffer.Length); }
+                catch (IOException) { read = -1; }
+                Assert.That(read, Is.EqualTo(0), "the stranger was closed without being told anything");
+
+                server.Dispose();
+                Assert.That(changes.Count(c => c.Item2), Is.EqualTo(1), "the stranger was never announced");
+            }
+            finally
+            {
+                server.Dispose();
+                stranger.Close();
+                client.Close();
+                LiveLinkServer.HandshakeMilliseconds = handshake;
+            }
+        }
+
+        // A client can make Unity prove it holds the token before sending it: the answer is the HMAC of its nonce and the
+        // port, so a process listening on Unity's port while Unity reloads could not give it.
+        [UnityTest]
+        public IEnumerator UnityProvesItHoldsTheTokenBeforeTheClientSendsIt()
+        {
+            var changes = new List<(int, bool)>();
+            using (var server = new LiveLinkServer(Format, "secret"))
+            {
+                server.ConnectionChanged += (id, up) => changes.Add((id, up));
+                using (var client = Connect(server))
+                {
+                    var nonce = new byte[24];
+                    new System.Random(7).NextBytes(nonce);
+                    var request = Format.Encode(LiveLinkFormat.ProofType, null, nonce);
+                    client.GetStream().Write(request, 0, request.Length);
+                    client.ReceiveTimeout = 3000;
+                    var header = ReadExactly(client, LiveLinkFormat.HeaderBytes);
+                    Assert.That(header[5], Is.EqualTo(LiveLinkFormat.ProofType));
+                    Assert.That(BitConverter.ToUInt16(header, 6), Is.EqualTo(0), "the answer carries no token");
+                    var proof = ReadExactly(client, BitConverter.ToInt32(header, 8));
+                    Assert.That(proof, Is.EqualTo(Format.Proof("secret", server.Port, nonce)));
+                    Assert.That(proof, Is.Not.EqualTo(Format.Proof("other", server.Port, nonce)));
+                    Assert.That(proof, Is.Not.EqualTo(Format.Proof("secret", server.Port + 1, nonce)), "a proof given on another port does not hold");
+                    yield return Until(() => false, .2);
+                    Assert.That(changes, Is.Empty, "asking for the proof does not count as belonging to the session");
+
+                    Send(client, 1, "secret", "hello");
+                    yield return Until(() => changes.Count >= 1);
+                    Assert.That(changes.Count, Is.EqualTo(1));
+                }
+            }
+        }
+
+        private static byte[] ReadExactly(TcpClient client, int count)
+        {
+            var buffer = new byte[count];
+            int read = 0;
+            while (read < count)
+            {
+                int n = client.GetStream().Read(buffer, read, count - read);
+                if (n <= 0) throw new IOException("closed after " + read + " bytes");
+                read += n;
+            }
+            return buffer;
+        }
+
+        // An endpoint file a reader holds open (as Python's open() does: sharing read and write) is still brought up to date.
+        [Test]
+        public void EndpointFilesAreWrittenWhileAReaderHoldsThem()
+        {
+            string folder = Path.Combine(Path.GetTempPath(), "OrbitersLiveLinkTest-" + Guid.NewGuid().ToString("N"));
+            try
+            {
+                string path = Path.Combine(folder, "endpoint.json");
+                LiveLinkServer.WriteAtomically(path, "{\"port\":1}");
+                using (new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+                    LiveLinkServer.WriteAtomically(path, "{\"port\":2}");
+                Assert.That(File.ReadAllText(path), Is.EqualTo("{\"port\":2}"));
+                LiveLinkServer.WriteAtomically(path, "{\"port\":3}");
+                Assert.That(File.ReadAllText(path), Is.EqualTo("{\"port\":3}"));
+                Assert.That(Directory.GetFiles(folder), Is.EqualTo(new[] { path }), "no temporary file is left");
+            }
+            finally
+            {
+                if (Directory.Exists(folder)) Directory.Delete(folder, true);
             }
         }
 

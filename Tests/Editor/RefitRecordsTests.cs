@@ -14,8 +14,12 @@ using UnityEngine.SceneManagement;
 using Object = UnityEngine.Object;
 
 /// <summary>Stands in for ReFit: gives the mesh a copy with the requested shapes, or fails when told to.</summary>
-internal sealed class FakeRefitEngine : IRefitEngine
+internal sealed class FakeRefitEngine : IRefitEngine, IRefitInputs
 {
+    /// <summary>What the engine says it read beyond the job (the outfit's toggles, for ReFit).</summary>
+    public string Reads = "";
+    string IRefitInputs.Inputs(RefitJob job) => Reads;
+
     public readonly List<RefitJob> Jobs = new List<RefitJob>();
     /// <summary>The mesh each job started from.</summary>
     public readonly List<Mesh> Inputs = new List<Mesh>();
@@ -411,8 +415,11 @@ public sealed class RefitRecordsTests
         Assert.That(layered, Is.Not.EqualTo(bodyOnly), "Inner garments participate in cache identity.");
         inner.transform.localPosition = Vector3.forward * .01f;
         Assert.That(RefitCache.Key(coverageJob, root.transform, "test-engine"), Is.Not.EqualTo(layered), "Moving an inner garment invalidates the outer fit.");
+        Assert.That(RefitCache.Key(coverageJob, root.transform, "test-engine", "Fluff 100"), Is.Not.EqualTo(RefitCache.Key(coverageJob, root.transform, "test-engine", "")),
+            "What the engine reads beyond the job (the body shapes the outfit's toggles set) decides too.");
         engine.SaveMeshesIn = folder;
-        var createdFolders = new[] { "Assets/Orbiters", "Assets/Orbiters/ReFit", RefitCache.Folder }.Where(f => !AssetDatabase.IsValidFolder(f)).ToList();
+        var createdFolders = new[] { "Assets/Orbiters", "Assets/Orbiters/ReFit", RefitCache.Folder, RefitCache.EngineFolder(engine.Name) }
+            .Where(f => !AssetDatabase.IsValidFolder(f)).ToList();
         var before = new HashSet<string>(createdFolders.Count == 0 ? AssetDatabase.FindAssets("t:RefitCacheEntry", new[] { RefitCache.Folder }) : new string[0]);
         GameObject second = null;
         try
@@ -461,7 +468,8 @@ public sealed class RefitRecordsTests
         AssetDatabase.CreateAsset(bodyMesh, folder + "/body.asset");
         AssetDatabase.CreateAsset(jacketMesh, folder + "/jacket.asset");
         engine.SaveMeshesIn = folder;
-        var createdFolders = new[] { "Assets/Orbiters", "Assets/Orbiters/ReFit", RefitCache.Folder }.Where(f => !AssetDatabase.IsValidFolder(f)).ToList();
+        var createdFolders = new[] { "Assets/Orbiters", "Assets/Orbiters/ReFit", RefitCache.Folder, RefitCache.EngineFolder(engine.Name) }
+            .Where(f => !AssetDatabase.IsValidFolder(f)).ToList();
         var before = new HashSet<string>(createdFolders.Count == 0 ? AssetDatabase.FindAssets("t:RefitCacheEntry", new[] { RefitCache.Folder }) : new string[0]);
         var original = originalBase.GetComponent<SkinnedMeshRenderer>();
         var hips = new GameObject("Hips").transform;
@@ -487,6 +495,11 @@ public sealed class RefitRecordsTests
             original.SetBlendShapeWeight(1, 0);
             Assert.That(Run(Batch(RefitMode.Fit, "Flex arms")).Items[0].Reused, Is.True);
             Assert.That(engine.Jobs.Count, Is.EqualTo(3));
+
+            // The engine read something else beyond the job (a toggle of the outfit edited): computed, not reused.
+            engine.Reads = "Fluff 100";
+            Assert.That(Run(Batch(RefitMode.Fit, "Flex arms")).Items[0].Reused, Is.False);
+            Assert.That(engine.Jobs.Count, Is.EqualTo(4));
         }
         finally
         {
@@ -495,6 +508,63 @@ public sealed class RefitRecordsTests
                     if (!before.Contains(guid)) AssetDatabase.DeleteAsset(AssetDatabase.GUIDToAssetPath(guid));
             for (int i = createdFolders.Count - 1; i >= 0; i--) AssetDatabase.DeleteAsset(createdFolders[i]);
         }
+    }
+
+    [Test]
+    public void RestoreShowsAgainWhatTheRefitHid()
+    {
+        var old = new GameObject("Old armature");
+        old.transform.SetParent(root.transform, false);
+        old.SetActive(false);
+        var state = RefitRecords.Capture(root.transform, jacket);
+        state.transforms.Add(new RefitTransformState { transform = old.transform, path = "Old armature", activeCaptured = true, active = true });
+        Assert.That(RefitRecords.Restore(root.transform, jacket, state, "Test"), Is.True);
+        Assert.That(old.activeSelf, Is.True, "The object the refit hid (a prefab's old armature) is shown again.");
+
+        // Kept by path only (a fit saved outside the scene): found again by its path, shown too.
+        old.SetActive(false);
+        var saved = RefitRecords.Persistent(state);
+        Assert.That(saved.transforms.Last().activeCaptured, Is.True);
+        Assert.That(RefitRecords.Restore(root.transform, jacket, saved, "Test"), Is.True);
+        Assert.That(old.activeSelf, Is.True);
+
+        // A state captured as usual never changes what is shown.
+        old.SetActive(false);
+        var plain = RefitRecords.Capture(root.transform, jacket);
+        plain.transforms.Add(new RefitTransformState { transform = old.transform, path = "Old armature" });
+        RefitRecords.Restore(root.transform, jacket, plain, "Test");
+        Assert.That(old.activeSelf, Is.False);
+    }
+
+    [Test]
+    public void TheCacheForgetsOnlyTheEntriesNoEngineFindsAnyMore()
+    {
+        folder = "Assets/RefitTest-" + Guid.NewGuid().ToString("N");
+        AssetDatabase.CreateFolder("Assets", folder.Substring("Assets/".Length));
+        string Entry(string under)
+        {
+            string path = under + "/" + Guid.NewGuid().ToString("N") + ".asset";
+            AssetDatabase.CreateAsset(ScriptableObject.CreateInstance<RefitCacheEntry>(), path);
+            return path;
+        }
+        string Version(string name)
+        {
+            AssetDatabase.CreateFolder(folder, name);
+            return folder + "/" + name;
+        }
+        string legacy = Entry(folder);
+        string older = Entry(Version("Pruned 0.1.0 r1")), current = Entry(Version("Pruned 0.2.0 r2")), other = Entry(Version("Other 0.1.0 r1"));
+
+        var removed = RefitCache.Prune("Pruned 0.2.0 r2", folder);
+        Assert.That(removed, Is.EqualTo(new[] { folder + "/Pruned 0.1.0 r1" }), "Only the engine's other versions go.");
+        Assert.That(AssetDatabase.LoadAssetAtPath<RefitCacheEntry>(older), Is.Null);
+        Assert.That(AssetDatabase.LoadAssetAtPath<RefitCacheEntry>(current), Is.Not.Null, "The engine's own entries stay.");
+        Assert.That(AssetDatabase.LoadAssetAtPath<RefitCacheEntry>(other), Is.Not.Null, "Another engine's entries stay.");
+        Assert.That(AssetDatabase.LoadAssetAtPath<RefitCacheEntry>(legacy), Is.Not.Null, "Entries of the earlier layout go only when asked.");
+
+        Assert.That(RefitCache.Prune("Pruned 0.2.0 r2", folder, legacy: true), Is.EqualTo(new[] { legacy }));
+        Assert.That(AssetDatabase.LoadAssetAtPath<RefitCacheEntry>(current), Is.Not.Null);
+        Assert.That(RefitCache.EngineFolder("ReFit 0.7.2 r11"), Is.EqualTo(RefitCache.Folder + "/ReFit 0.7.2 r11"));
     }
 
     [Test] public void MixedOutfitFitsInnerLayersFirstAndKeepsPropsOutOfCoverage()

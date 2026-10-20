@@ -33,6 +33,12 @@ namespace Orbiters.Toolkit.Editor.Textures
             int bytes = depth / 8;
             int offset = 18 + idLength + (colorMapType != 0 ? colorMapLength * ((colorMapDepth + 7) / 8) : 0);
             int count = width * height;
+            // Checked before the pixels are allocated (up to 1 GiB): the file must be able to hold them. Run-length packets
+            // give at most 128 pixels for a header byte and one pixel's bytes.
+            long available = data.Length - (long)offset;
+            if (available < 0 || (rle ? available / (1 + bytes) * 128L : available / bytes) < count) throw new InvalidDataException("Truncated TGA image.");
+            // 32-bit pixels whose header declares no alpha bits carry no alpha: they are opaque.
+            bool alpha = bytes == 4 && (descriptor & 0x0F) != 0;
             var pixels = new byte[count * 4];
             // Each source pixel (BGR(A) or gray) into RGBA.
             void Put(int index, int at)
@@ -40,7 +46,7 @@ namespace Orbiters.Toolkit.Editor.Textures
                 int o = index * 4;
                 if (gray) { byte v = data[at]; pixels[o] = v; pixels[o + 1] = v; pixels[o + 2] = v; pixels[o + 3] = 255; return; }
                 pixels[o] = data[at + 2]; pixels[o + 1] = data[at + 1]; pixels[o + 2] = data[at];
-                pixels[o + 3] = bytes == 4 ? data[at + 3] : (byte)255;
+                pixels[o + 3] = alpha ? data[at + 3] : (byte)255;
             }
             if (!rle)
             {

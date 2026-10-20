@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using Orbiters.Toolkit.XRay;
+using UnityEditor;
 using UnityEngine;
 
 namespace Orbiters.Toolkit.Editor.XRay
@@ -8,6 +9,8 @@ namespace Orbiters.Toolkit.Editor.XRay
     {
         public const string GizmoObjectNamePrefix = "__XRayGizmos_";
         public const string MeshObjectNamePrefix = GizmoObjectNamePrefix + "Armature";
+        /// <summary>The name of the bone gizmo's mesh (hidden, never saved: destroyed with its object).</summary>
+        public const string MeshName = "XRayArmatureMesh";
 
         public static bool TryCreate(
             GameObject targetRoot,
@@ -137,7 +140,7 @@ namespace Orbiters.Toolkit.Editor.XRay
                 return false;
             }
 
-            var mesh = new Mesh { name = "XRayArmatureMesh" };
+            var mesh = new Mesh { name = MeshName };
             mesh.hideFlags = HideFlags.HideAndDontSave;
 
             var localVertices = new Vector3[vertices.Count];
@@ -269,7 +272,47 @@ namespace Orbiters.Toolkit.Editor.XRay
             var existing = targetRoot.Find(GetMeshObjectName(armatureKey));
             if (existing != null)
             {
-                Object.DestroyImmediate(existing.gameObject);
+                DestroyGizmoObject(existing.gameObject);
+            }
+        }
+
+        /// <summary>
+        /// Destroys a gizmo object and its mesh: a hidden mesh nothing unloads, which destroying the object alone would leave
+        /// in memory (one per rebuild).
+        /// </summary>
+        internal static void DestroyGizmoObject(GameObject gizmo)
+        {
+            if (gizmo == null)
+            {
+                return;
+            }
+
+            var renderer = gizmo.GetComponent<SkinnedMeshRenderer>();
+            var mesh = renderer != null ? renderer.sharedMesh : null;
+            Object.DestroyImmediate(gizmo);
+            DestroyHiddenMesh(mesh);
+        }
+
+        /// <summary>Destroys <paramref name="mesh"/> when it is a hidden one a gizmo made (never an asset or a scene's mesh).</summary>
+        internal static void DestroyHiddenMesh(Mesh mesh)
+        {
+            if (mesh != null && !EditorUtility.IsPersistent(mesh) && (mesh.hideFlags & HideFlags.DontSave) == HideFlags.DontSave)
+            {
+                Object.DestroyImmediate(mesh);
+            }
+        }
+
+        /// <summary>
+        /// Destroys the hidden meshes named <paramref name="name"/> (or ending with it) that <paramref name="keep"/> does not
+        /// hold: those left by gizmos that went with their parent, or by the scripts before a reload.
+        /// </summary>
+        internal static void DestroyOrphanedMeshes(string name, bool suffix, ICollection<Mesh> keep)
+        {
+            foreach (var mesh in Resources.FindObjectsOfTypeAll<Mesh>())
+            {
+                if (mesh == null || (keep != null && keep.Contains(mesh))) continue;
+                bool named = suffix ? mesh.name.EndsWith(name, System.StringComparison.Ordinal) : mesh.name == name;
+                if (named) DestroyHiddenMesh(mesh);
             }
         }
 

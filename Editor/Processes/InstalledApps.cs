@@ -18,7 +18,10 @@ namespace Orbiters.Toolkit.Editor.Processes
             }
             .Where(value => !string.IsNullOrWhiteSpace(value)).Distinct(StringComparer.OrdinalIgnoreCase);
 
-        /// <summary>Steam's library folders (its own and those listed in libraryfolders.vdf), each holding steamapps/common.</summary>
+        /// <summary>
+        /// Steam's library folders (its own, in the program folders or where the registry says Steam is, and those listed in
+        /// libraryfolders.vdf), each holding steamapps/common.
+        /// </summary>
         public static IEnumerable<string> SteamLibraries()
         {
             var roots = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -32,6 +35,8 @@ namespace Orbiters.Toolkit.Editor.Processes
                 string steamRoot = Path.Combine(baseRoot, "Steam");
                 if (Directory.Exists(steamRoot)) roots.Add(steamRoot);
             }
+            foreach (string registered in SteamFromRegistry())
+                if (Directory.Exists(registered)) roots.Add(registered);
 
             foreach (string root in roots.ToList())
             {
@@ -56,6 +61,27 @@ namespace Orbiters.Toolkit.Editor.Processes
             }
 
             return roots;
+        }
+
+        // Steam installed elsewhere than the program folders (another drive): the folder it records for itself.
+        private static IEnumerable<string> SteamFromRegistry()
+        {
+            var found = new List<string>();
+            if (Path.DirectorySeparatorChar != '\\') return found;
+            void Read(Microsoft.Win32.RegistryKey hive, string key, string value)
+            {
+                try
+                {
+                    using (var opened = hive.OpenSubKey(key))
+                        if (opened?.GetValue(value) is string path && !string.IsNullOrWhiteSpace(path))
+                            found.Add(Path.GetFullPath(path.Replace('/', Path.DirectorySeparatorChar)));
+                }
+                catch (Exception) { }
+            }
+            Read(Microsoft.Win32.Registry.CurrentUser, @"Software\Valve\Steam", "SteamPath");
+            Read(Microsoft.Win32.Registry.LocalMachine, @"SOFTWARE\WOW6432Node\Valve\Steam", "InstallPath");
+            Read(Microsoft.Win32.Registry.LocalMachine, @"SOFTWARE\Valve\Steam", "InstallPath");
+            return found;
         }
 
         /// <summary>The folders in <c>steamapps/common</c> of every Steam library whose name contains <paramref name="nameFragment"/>.</summary>

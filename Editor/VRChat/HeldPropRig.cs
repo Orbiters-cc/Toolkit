@@ -187,6 +187,41 @@ namespace Orbiters.Toolkit.Editor.VRChat
         }
 
         /// <summary>
+        /// Ties <paramref name="grip"/> (its parent constraint's first source) to the middle of the left or right palm,
+        /// turned like the avatar as it stands now. The caller records Undo.
+        /// </summary>
+        internal static void FollowPalm(Transform grip, Animator animator, Transform avatar, bool left, string prop)
+        {
+            var follow = grip != null ? grip.GetComponent<VRCParentConstraint>() : null;
+            if (follow == null || follow.Sources.Count < 1) throw new InvalidOperationException("This " + prop + " was modified: add it again.");
+            var (hand, palm) = Palm(animator, left, prop);
+            Undo.RecordObject(follow, "Fit " + prop);
+            grip.SetPositionAndRotation(palm, avatar.rotation);
+            // Offsets are in the hand's axes, unscaled, as for the head.
+            var turn = Quaternion.Inverse(hand.rotation);
+            follow.Sources[0] = new VRCConstraintSource(hand, 1, turn * (palm - hand.position), (turn * avatar.rotation).eulerAngles);
+            EditorUtility.SetDirty(follow);
+        }
+
+        /// <summary>
+        /// The hand bone and the middle of its palm: halfway to the knuckle of the middle finger (or of the index or ring
+        /// finger). Avatars without finger bones use a sixth of a forearm past the wrist.
+        /// </summary>
+        internal static (Transform hand, Vector3 palm) Palm(Animator animator, bool left, string prop)
+        {
+            var hand = animator.GetBoneTransform(left ? HumanBodyBones.LeftHand : HumanBodyBones.RightHand);
+            if (hand == null) throw new InvalidOperationException("The " + prop + " needs an avatar with hands.");
+            var knuckle = (left
+                    ? new[] { HumanBodyBones.LeftMiddleProximal, HumanBodyBones.LeftIndexProximal, HumanBodyBones.LeftRingProximal }
+                    : new[] { HumanBodyBones.RightMiddleProximal, HumanBodyBones.RightIndexProximal, HumanBodyBones.RightRingProximal })
+                .Select(animator.GetBoneTransform).FirstOrDefault(b => b != null && Vector3.Distance(b.position, hand.position) > .001f);
+            if (knuckle != null) return (hand, Vector3.Lerp(hand.position, knuckle.position, .5f));
+            var forearm = animator.GetBoneTransform(left ? HumanBodyBones.LeftLowerArm : HumanBodyBones.RightLowerArm);
+            // A hand is about a third of a forearm long.
+            return (hand, forearm == null ? hand.position : hand.position + (hand.position - forearm.position) * (.35f / 2));
+        }
+
+        /// <summary>
         /// Ties <paramref name="anchor"/> (its parent constraint's first source) to the tip of the right index finger, turned
         /// like the avatar as it stands now. Recorded with Undo; binding again replaces the earlier fit.
         /// </summary>

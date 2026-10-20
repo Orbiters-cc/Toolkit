@@ -31,6 +31,7 @@ public static class OrbitersAccountService
 
     private static Dictionary<string, Answer> answers;
     private static readonly Dictionary<string, Texture2D> Pictures = new Dictionary<string, Texture2D>(StringComparer.Ordinal);
+    private static bool releasesPictures;
 
     /// <summary>The last state the tool's connection check answered for this account, or null; fresh while a few minutes old.</summary>
     public static Connection CachedConnection(string endpoint, string token, out bool fresh)
@@ -63,7 +64,14 @@ public static class OrbitersAccountService
         if (string.IsNullOrEmpty(url)) return null;
         if (Pictures.TryGetValue(url, out var picture) && picture) return picture;
         string file = PicturePath(url);
-        try { return File.Exists(file) ? Pictures[url] = Load(File.ReadAllBytes(file)) : null; }
+        try
+        {
+            if (!File.Exists(file)) return null;
+            picture = Load(File.ReadAllBytes(file));
+            // A damaged file is dropped: the picture is downloaded again instead of decoded again at every refresh.
+            if (!picture) { File.Delete(file); return null; }
+            return Keep(url, picture);
+        }
         catch (Exception) { return null; }
     }
 
@@ -72,8 +80,14 @@ public static class OrbitersAccountService
     {
         var picture = Load(bytes);
         if (!picture) return null;
-        if (Pictures.TryGetValue(url, out var old) && old && old != picture) UnityEngine.Object.DestroyImmediate(old);
-        Pictures[url] = picture;
+        // The texture other rows show takes the new picture: none of them is left with a destroyed one.
+        if (Pictures.TryGetValue(url, out var shown) && shown && shown != picture)
+        {
+            shown.LoadImage(bytes);
+            UnityEngine.Object.DestroyImmediate(picture);
+            picture = shown;
+        }
+        else Keep(url, picture);
         try
         {
             string file = PicturePath(url);
@@ -82,6 +96,25 @@ public static class OrbitersAccountService
         }
         catch (Exception) { }
         return picture;
+    }
+
+    // Hidden textures are never unloaded and the cache is lost at each script reload: they go just before it.
+    private static Texture2D Keep(string url, Texture2D picture)
+    {
+        if (!releasesPictures)
+        {
+            AssemblyReloadEvents.beforeAssemblyReload += ReleasePictures;
+            releasesPictures = true;
+        }
+        Pictures[url] = picture;
+        return picture;
+    }
+
+    private static void ReleasePictures()
+    {
+        foreach (var picture in Pictures.Values)
+            if (picture) UnityEngine.Object.DestroyImmediate(picture);
+        Pictures.Clear();
     }
 
     private static Texture2D Load(byte[] bytes)

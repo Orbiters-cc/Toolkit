@@ -1,6 +1,6 @@
 {
   "name": "orbiters.toolkit",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "displayName": "Orbiters Toolkit",
   "description": "Shared Orbiters account, editor UI, feature flags, VPM dependency prompts, bone matching, accessory attachment and posing preview, blendshape links, custom base refits (records, build-time blendshape links, fit checks), avatar photoshoot, mirror posing, Scene view gizmos (bones, weight paint, mesh edges, avatar budget), mesh editing primitives (BVH, neighbors, FBX writer) and background window capture.",
   "unity": "2022.3",
@@ -15,5 +15,8 @@
     "com.unity.collections": "2.1.4",
     "com.unity.mathematics": "1.3.2"
   },
+  "legacyPackages": [
+    "orbiters.xraygizmos"
+  ],
   "url": "https://github.com/Orbiters-cc/Toolkit/releases/download/0.3.10/Toolkit-0.3.10.zip"
 }

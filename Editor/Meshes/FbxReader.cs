@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
-using System.IO.Compression;
 using System.Linq;
 using System.Text;
 using UnityEngine;
@@ -77,33 +76,30 @@ namespace Orbiters.Toolkit.Editor.Meshes
             public bool Compressed;
             public byte[] Data;
 
-            private byte[] Bytes()
-            {
-                if (!Compressed) return Data;
-                using (var input = new MemoryStream(Data, 2, Data.Length - 2))
-                using (var inflate = new DeflateStream(input, CompressionMode.Decompress))
-                using (var output = new MemoryStream())
-                {
-                    inflate.CopyTo(output);
-                    return output.ToArray();
-                }
-            }
+            // Exactly Length elements (checked when read): a compressed array decodes to no more than that.
+            private byte[] Bytes() => Compressed ? FbxBinary.Inflate(Data, 0, Data.Length, Length * FbxBinary.ElementSize(Type)) : Data;
 
             public double[] Doubles()
             {
-                var bytes = Bytes();
                 var result = new double[Length];
-                if (Type == 'd') Buffer.BlockCopy(bytes, 0, result, 0, Length * 8);
-                else if (Type == 'f') for (int i = 0; i < Length; i++) result[i] = BitConverter.ToSingle(bytes, i * 4);
+                if (Type == 'd') FbxBinary.Decode(Data, 0, Data.Length, Compressed, result, Length * 8);
+                else if (Type == 'f')
+                {
+                    var bytes = Bytes();
+                    for (int i = 0; i < Length; i++) result[i] = BitConverter.ToSingle(bytes, i * 4);
+                }
                 return result;
             }
 
             public int[] Ints()
             {
-                var bytes = Bytes();
                 var result = new int[Length];
-                if (Type == 'i') Buffer.BlockCopy(bytes, 0, result, 0, Length * 4);
-                else if (Type == 'l') for (int i = 0; i < Length; i++) result[i] = (int)BitConverter.ToInt64(bytes, i * 8);
+                if (Type == 'i') FbxBinary.Decode(Data, 0, Data.Length, Compressed, result, Length * 4);
+                else if (Type == 'l')
+                {
+                    var bytes = Bytes();
+                    for (int i = 0; i < Length; i++) result[i] = (int)BitConverter.ToInt64(bytes, i * 8);
+                }
                 return result;
             }
 
@@ -129,30 +125,28 @@ namespace Orbiters.Toolkit.Editor.Meshes
             if (!IsBinary(bytes)) throw new NotSupportedException("Only binary FBX files can be shown in 3D (this one is text FBX).");
             uint version = BitConverter.ToUInt32(bytes, 23);
             bool wide = version >= 7500;
+            var budget = new FbxBinary.Budget(bytes.Length);
             int position = 27;
             var root = new Node();
             while (position < bytes.Length)
             {
-                var node = ReadNode(bytes, ref position, wide);
+                var node = ReadNode(bytes, ref position, wide, bytes.Length, 0, budget);
                 if (node == null) break;
                 root.Children.Add(node);
             }
             return Build(root, options);
         }
 
-        private static Node ReadNode(byte[] bytes, ref int position, bool wide)
+        // The bounds are FbxBinary's, as for FbxDocument: a damaged file is refused, never looped over.
+        private static Node ReadNode(byte[] bytes, ref int position, bool wide, long limit, int depth, FbxBinary.Budget budget)
         {
-            long end = wide ? (long)BitConverter.ToUInt64(bytes, position) : BitConverter.ToUInt32(bytes, position);
-            long count = wide ? (long)BitConverter.ToUInt64(bytes, position + 8) : BitConverter.ToUInt32(bytes, position + 4);
-            position += wide ? 24 : 12;
-            int nameLength = bytes[position++];
-            if (end == 0) return null;
-            var node = new Node { Name = Encoding.ASCII.GetString(bytes, position, nameLength) };
-            position += nameLength;
-            for (long i = 0; i < count; i++) node.Properties.Add(ReadProperty(bytes, ref position));
+            if (depth > FbxBinary.MaxDepth) throw FbxBinary.Damaged("its records nest too deep");
+            if (!FbxBinary.ReadHeader(bytes, ref position, wide, limit, out long end, out long count, out string name)) return null;
+            var node = new Node { Name = name };
+            for (long i = 0; i < count; i++) node.Properties.Add(ReadProperty(bytes, ref position, end, budget));
             while (position < end)
             {
-                var child = ReadNode(bytes, ref position, wide);
+                var child = ReadNode(bytes, ref position, wide, end, depth + 1, budget);
                 if (child == null) break;
                 node.Children.Add(child);
             }
@@ -160,36 +154,33 @@ namespace Orbiters.Toolkit.Editor.Meshes
             return node;
         }
 
-        private static object ReadProperty(byte[] bytes, ref int position)
+        private static object ReadProperty(byte[] bytes, ref int position, long limit, FbxBinary.Budget budget)
         {
+            FbxBinary.Need(position, 1, limit);
             char type = (char)bytes[position++];
             switch (type)
             {
-                case 'Y': position += 2; return (long)BitConverter.ToInt16(bytes, position - 2);
-                case 'C': position += 1; return (long)bytes[position - 1];
-                case 'I': position += 4; return (long)BitConverter.ToInt32(bytes, position - 4);
-                case 'F': position += 4; return (double)BitConverter.ToSingle(bytes, position - 4);
-                case 'D': position += 8; return BitConverter.ToDouble(bytes, position - 8);
-                case 'L': position += 8; return BitConverter.ToInt64(bytes, position - 8);
+                case 'Y': FbxBinary.Need(position, 2, limit); position += 2; return (long)BitConverter.ToInt16(bytes, position - 2);
+                case 'C': FbxBinary.Need(position, 1, limit); position += 1; return (long)bytes[position - 1];
+                case 'I': FbxBinary.Need(position, 4, limit); position += 4; return (long)BitConverter.ToInt32(bytes, position - 4);
+                case 'F': FbxBinary.Need(position, 4, limit); position += 4; return (double)BitConverter.ToSingle(bytes, position - 4);
+                case 'D': FbxBinary.Need(position, 8, limit); position += 8; return BitConverter.ToDouble(bytes, position - 8);
+                case 'L': FbxBinary.Need(position, 8, limit); position += 8; return BitConverter.ToInt64(bytes, position - 8);
                 case 'S':
                 case 'R':
                 {
-                    int length = BitConverter.ToInt32(bytes, position);
-                    position += 4;
+                    int length = FbxBinary.ReadLength(bytes, ref position, limit);
                     object value = type == 'S' ? (object)Encoding.UTF8.GetString(bytes, position, length) : null;
                     position += length;
                     return value;
                 }
                 case 'f': case 'd': case 'l': case 'i': case 'b':
                 {
-                    int length = BitConverter.ToInt32(bytes, position);
-                    int encoding = BitConverter.ToInt32(bytes, position + 4);
-                    int stored = BitConverter.ToInt32(bytes, position + 8);
-                    position += 12;
+                    FbxBinary.ReadArrayHeader(bytes, ref position, limit, type, budget, out int length, out bool compressed, out int stored);
                     var data = new byte[stored];
                     Buffer.BlockCopy(bytes, position, data, 0, stored);
                     position += stored;
-                    return new ArrayProperty { Type = type, Length = length, Compressed = encoding == 1, Data = data };
+                    return new ArrayProperty { Type = type, Length = length, Compressed = compressed, Data = data };
                 }
                 default:
                     throw new InvalidDataException("Unknown FBX property type '" + type + "'.");

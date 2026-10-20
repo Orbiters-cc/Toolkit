@@ -360,7 +360,7 @@ namespace Orbiters.Toolkit.Editor.XRay
     {
         public override Vector2 GetWindowSize()
         {
-            return new Vector2(250f, 118f);
+            return new Vector2(250f, 138f);
         }
 
         public override void OnGUI(Rect rect)
@@ -386,6 +386,15 @@ namespace Orbiters.Toolkit.Editor.XRay
             if (EditorGUI.EndChangeCheck())
             {
                 XRayMeshEdgeService.SetEdgeColor(color);
+            }
+
+            EditorGUI.BeginChangeCheck();
+            bool seeThrough = EditorGUILayout.Toggle(
+                new GUIContent("See through", "Show the edges of the whole mesh, back and hidden parts included"),
+                XRayMeshEdgeService.SeeThrough);
+            if (EditorGUI.EndChangeCheck())
+            {
+                XRayMeshEdgeService.SetSeeThrough(seeThrough);
             }
 
             EditorGUILayout.Space(4f);
@@ -447,10 +456,10 @@ namespace Orbiters.Toolkit.Editor.XRay
                 return extraIcon;
             }
 
-            extraIcon = new Texture2D(16, 16, TextureFormat.RGBA32, false)
+            extraIcon = ReloadScopedObjects.Keep(new Texture2D(16, 16, TextureFormat.RGBA32, false)
             {
                 hideFlags = HideFlags.HideAndDontSave
-            };
+            });
             var clear = new Color(0f, 0f, 0f, 0f);
             var color = EditorGUIUtility.isProSkin ? new Color(0.82f, 0.82f, 0.82f, 1f) : new Color(0.18f, 0.18f, 0.18f, 1f);
             for (int y = 0; y < 16; y++)
