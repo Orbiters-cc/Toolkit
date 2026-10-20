@@ -307,6 +307,9 @@ namespace Orbiters.Toolkit.Editor.Meshes
             var source = new List<int>();
             var lookup = new Dictionary<long, int>();
             var submeshes = new List<List<int>>();
+            // A slot past both the model's materials and its polygon count comes from a damaged file, not an exporter:
+            // such polygons go to the first slot instead of making billions of empty ones.
+            int slots = Math.Max(mesh.Materials.Length, polygons.Count(p => p < 0));
             int corner = 0, polygon = 0;
             var ring = new List<int>();
             for (int i = 0; i < polygons.Length; i++)
@@ -331,7 +334,7 @@ namespace Orbiters.Toolkit.Editor.Meshes
                 corner++;
                 if (polygons[i] >= 0) continue;
                 int slot = materials == null || materials.Length == 0 ? 0 : allSame ? materials[0] : polygon < materials.Length ? materials[polygon] : 0;
-                slot = Mathf.Max(0, slot);
+                if (slot < 0 || slot >= slots) slot = 0;
                 while (submeshes.Count <= slot) submeshes.Add(new List<int>());
                 // Unity's axes mirror X, so the winding flips, as for the comparison triangles.
                 for (int k = 1; k + 1 < ring.Count; k++)

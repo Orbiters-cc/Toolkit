@@ -139,6 +139,30 @@ namespace Orbiters.Toolkit.Editor.Tests
             }
         }
 
+        // A part drawn through a base vertex keeps it, its indices as stored (a 16-bit mesh reaches vertices past 65535 so).
+        [Test]
+        public void ReplacingKeepsBaseVertices()
+        {
+            string folder = "Assets/Orbiters/ToolkitTests-" + Guid.NewGuid().ToString("N").Substring(0, 8) + "/Meshes";
+            var vertices = new[] { Vector3.zero, Vector3.right, Vector3.up, Vector3.forward };
+            var shifted = new Mesh { vertices = vertices };
+            shifted.subMeshCount = 2;
+            shifted.SetIndices(new[] { 0, 1, 2 }, MeshTopology.Triangles, 0);
+            shifted.SetIndices(new[] { 0, 1, 2 }, MeshTopology.Triangles, 1, true, 1);
+            try
+            {
+                var asset = MeshAssets.Save(new Mesh { vertices = vertices, triangles = new[] { 0, 1, 2 } }, folder, "Body");
+                MeshAssets.Replace(shifted, asset);
+                Assert.That(asset.GetBaseVertex(1), Is.EqualTo(1u));
+                Assert.That(asset.GetIndices(1, false), Is.EqualTo(new[] { 0, 1, 2 }));
+                Assert.That(asset.GetIndices(1), Is.EqualTo(new[] { 1, 2, 3 }));
+            }
+            finally
+            {
+                AssetDatabase.DeleteAsset(folder.Substring(0, folder.LastIndexOf('/')));
+            }
+        }
+
         // Saving a mesh that is an asset already gives a new asset (a copy) and leaves the first one where it is.
         [Test]
         public void SavingAnAssetMeshMakesACopy()

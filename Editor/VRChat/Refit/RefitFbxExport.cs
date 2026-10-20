@@ -32,7 +32,10 @@ namespace Orbiters.Toolkit.Editor.VRChat.Refit
         public static FbxExportMesh Item(SkinnedMeshRenderer renderer, string fitShape = null)
         {
             var item = FbxExportMesh.From(renderer);
-            string shape = !string.IsNullOrEmpty(fitShape) ? fitShape : FitShape(RefitRecords.Find(renderer));
+            var record = RefitRecords.Find(renderer);
+            // The clothing's own model: an export over it would make the record's original the fitted mesh.
+            if (record != null && record.original != null && record.original.mesh != null) item.Sources.Add(record.original.mesh);
+            string shape = !string.IsNullOrEmpty(fitShape) ? fitShape : FitShape(record);
             if (!string.IsNullOrEmpty(shape) && item.Mesh != null && item.Mesh.GetBlendShapeIndex(shape) >= 0) item.Baked.Add(shape);
             return item;
         }

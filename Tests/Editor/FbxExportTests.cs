@@ -196,6 +196,73 @@ public sealed class FbxExportTests
         }
     }
 
+    // An export never writes over the file its mesh comes from, nor over that of another mesh of the same avatar.
+    [Test]
+    public void AnExportNeverWritesOverAFileItsAvatarIsMadeOf()
+    {
+        string folder = "Assets/__OrbitersFbxExportTest-" + Guid.NewGuid().ToString("N").Substring(0, 8);
+        AssetDatabase.CreateFolder("Assets", folder.Substring("Assets/".Length));
+        using (var rig = MakeRig())
+        {
+            try
+            {
+                var own = Object.Instantiate(rig.Renderer.sharedMesh);
+                AssetDatabase.CreateAsset(own, folder + "/Cloth.asset");
+                rig.Renderer.sharedMesh = own;
+                var other = EditorUtility.CreateGameObjectWithHideFlags("Hat", HideFlags.HideAndDontSave);
+                other.transform.SetParent(rig.Root.transform, false);
+                var hat = new Mesh { name = "Hat", vertices = new[] { Vector3.zero, Vector3.right, Vector3.up }, triangles = new[] { 0, 1, 2 } };
+                AssetDatabase.CreateAsset(hat, folder + "/Hat.asset");
+                other.AddComponent<MeshFilter>().sharedMesh = hat;
+                other.AddComponent<MeshRenderer>();
+
+                foreach (string asset in new[] { folder + "/Cloth.asset", folder + "/Hat.asset" })
+                {
+                    string full = Path.GetFullPath(asset);
+                    var before = File.ReadAllBytes(full);
+                    var result = FbxExport.Write(full, new[] { FbxExportMesh.From(rig.Renderer) });
+                    Assert.That(result.Success, Is.False, asset + " is refused.");
+                    StringAssert.Contains("Save under another name", result.Error);
+                    Assert.That(File.ReadAllBytes(full), Is.EqualTo(before), asset + " is left as it was.");
+                }
+            }
+            finally
+            {
+                AssetDatabase.DeleteAsset(folder);
+            }
+        }
+    }
+
+    // What FBX can't hold is said: a UV set's z and w, a submesh without faces (the material slots after it move up).
+    [Test]
+    public void WhatTheFileCannotHoldIsSaid()
+    {
+        string path = TempFile();
+        var plate = EditorUtility.CreateGameObjectWithHideFlags("Plate", HideFlags.HideAndDontSave);
+        var mesh = new Mesh { name = "Plate" };
+        try
+        {
+            mesh.SetVertices(new List<Vector3> { Vector3.zero, Vector3.right, Vector3.up, Vector3.one });
+            mesh.SetUVs(0, new List<Vector3> { new Vector3(0f, 0f, 1f), Vector3.zero, Vector3.zero, Vector3.zero });
+            mesh.subMeshCount = 3;
+            mesh.SetTriangles(new[] { 0, 1, 2 }, 0);
+            mesh.SetTriangles(new int[0], 1);
+            mesh.SetTriangles(new[] { 1, 3, 2 }, 2);
+            plate.AddComponent<MeshFilter>().sharedMesh = mesh;
+            var result = FbxExport.Write(path, new[] { FbxExportMesh.From(plate.AddComponent<MeshRenderer>()) });
+            Assert.That(result.Error, Is.Null, "Written.");
+            string said = string.Join(" / ", result.Warnings);
+            Assert.That(result.Warnings.Any(w => w.Contains("UV set 0")), Is.True, said);
+            Assert.That(result.Warnings.Any(w => w.Contains("submesh 1")), Is.True, said);
+        }
+        finally
+        {
+            Object.DestroyImmediate(plate);
+            Object.DestroyImmediate(mesh);
+            if (File.Exists(path)) File.Delete(path);
+        }
+    }
+
     // ---- The rig ------------------------------------------------------------------------------------------------------------
 
     private static Rig MakeRig()

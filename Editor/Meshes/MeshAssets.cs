@@ -50,7 +50,23 @@ namespace Orbiters.Toolkit.Editor.Meshes
             if (!IsNativeAsset(existing)) throw new System.ArgumentException("Not a mesh asset of the project's own (a model's meshes are made again at each import).", nameof(existing));
             if (mesh == existing) return existing;
             string name = existing.name;
-            CopyInto(mesh, existing);
+            // Every renderer and prefab points at this asset: a copy that fails half way puts the old mesh back instead of
+            // leaving it cleared for the next save to write out.
+            var backup = Object.Instantiate(existing);
+            try
+            {
+                CopyInto(mesh, existing);
+            }
+            catch
+            {
+                CopyInto(backup, existing);
+                existing.name = name;
+                throw;
+            }
+            finally
+            {
+                Object.DestroyImmediate(backup);
+            }
             existing.name = name;
             EditorUtility.SetDirty(existing);
             AssetDatabase.SaveAssetIfDirty(existing);
@@ -87,7 +103,9 @@ namespace Orbiters.Toolkit.Editor.Meshes
                     to.SetBoneWeights(perVertex, weights);
             to.bindposes = from.bindposes;
             to.subMeshCount = from.subMeshCount;
-            for (int s = 0; s < from.subMeshCount; s++) to.SetIndices(from.GetIndices(s), from.GetTopology(s), s, false);
+            // Indices as stored, with their base vertex: a 16-bit mesh reaches vertices past 65535 only through it.
+            for (int s = 0; s < from.subMeshCount; s++)
+                to.SetIndices(from.GetIndices(s, false), from.GetTopology(s), s, false, (int)from.GetBaseVertex(s));
             int n = from.vertexCount;
             var dv = new Vector3[n]; var dn = new Vector3[n]; var dt = new Vector3[n];
             for (int shape = 0; shape < from.blendShapeCount; shape++)

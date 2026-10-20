@@ -10,7 +10,7 @@ using UnityEngine;
 // memory, a stack overflow or a giant allocation. Models whose connections loop or that have two parents are built once.
 public sealed class FbxMalformedTests
 {
-    private static byte[] Sample(uint version = 7400)
+    private static byte[] Sample(uint version = 7400, Action<FbxNode> geometryExtra = null)
     {
         var document = new FbxDocument { Version = version };
         document.Nodes.Add(new FbxNode("FBXHeaderExtension"));
@@ -20,6 +20,7 @@ public sealed class FbxMalformedTests
         var geometry = objects.Add("Geometry", 42L, "Body\0\u0001Geometry", "Mesh");
         geometry.Add("Vertices", Enumerable.Range(0, 300).Select(i => i * 0.5).ToArray());
         geometry.Add("PolygonVertexIndex", new[] { 0, 1, ~2 });
+        geometryExtra?.Invoke(geometry);
         document.Nodes.Add(new FbxNode("Connections"));
         document.Nodes[2].Add("C", "OO", 42L, 0L);
         return document.Write();
@@ -168,6 +169,21 @@ public sealed class FbxMalformedTests
         {
             FbxModel.Release(root);
         }
+    }
+
+    // A material index of two billion puts the polygon in the first slot instead of making two billion slots.
+    [Test]
+    public void AHugeMaterialIndexIsNotASlotCount()
+    {
+        var bytes = Sample(geometryExtra: geometry =>
+        {
+            var layer = geometry.Add("LayerElementMaterial", 0);
+            layer.Add("MappingInformationType", "ByPolygon");
+            layer.Add("Materials", new[] { 2000000000 });
+        });
+        var mesh = FbxReader.Read(bytes, FbxReadOptions.Render).Single();
+        Assert.That(mesh.SubMeshes.Count, Is.EqualTo(1));
+        Assert.That(mesh.SubMeshes[0].Length, Is.EqualTo(3));
     }
 
     [Test]

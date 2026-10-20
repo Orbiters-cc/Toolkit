@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using Orbiters.Toolkit.Meshes;
 using Unity.Collections;
 using UnityEditor;
 using UnityEngine;
@@ -28,6 +29,11 @@ namespace Orbiters.Toolkit.Editor.Meshes
         public float[] BlendShapeWeights = Array.Empty<float>();
         /// <summary>Blendshapes applied to the mesh at their weight and left out of the file (a fit to keep, say).</summary>
         public readonly HashSet<string> Baked = new HashSet<string>(StringComparer.Ordinal);
+        /// <summary>
+        /// Assets the mesh comes from besides its own and its objects' (the original a refit was made from): the file is never
+        /// written over them.
+        /// </summary>
+        public readonly List<UnityEngine.Object> Sources = new List<UnityEngine.Object>();
 
         public string DisplayName => Name ?? (Transform != null ? Transform.name : Mesh != null ? Mesh.name : "Mesh");
 
@@ -163,7 +169,40 @@ namespace Orbiters.Toolkit.Editor.Meshes
                 foreach (var t in new[] { item.Transform }.Concat(item.Bones ?? Array.Empty<Transform>()))
                     if (t != null && (t == root || !t.IsChildOf(root))) return t.name + " is not under " + root.name + ".";
             }
+            string full = Path.GetFullPath(path);
+            if (SourceFiles(items).TryGetValue(full, out string from))
+                return Path.GetFileName(full) + " is the file " + from + " comes from: writing over it would change it for everything " +
+                       "that uses that file. Save under another name.";
             return null;
+        }
+
+        // The files the exported meshes and objects come from, and those of every other mesh of their avatars (an export
+        // over one of them would replace a model the avatar is made of), by full path, with what comes from each.
+        private static Dictionary<string, string> SourceFiles(List<FbxExportMesh> items)
+        {
+            var files = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            void Add(UnityEngine.Object asset, string what)
+            {
+                string assetPath = asset != null ? AssetDatabase.GetAssetPath(asset) : null;
+                if (string.IsNullOrEmpty(assetPath)) return;
+                string full = Path.GetFullPath(FileUtil.GetPhysicalPath(assetPath));
+                if (!files.ContainsKey(full)) files[full] = what;
+            }
+            foreach (var item in items)
+            {
+                Add(item.Mesh, item.DisplayName);
+                foreach (var source in item.Sources) Add(source, item.DisplayName);
+                foreach (var t in new[] { item.Transform }.Concat(item.Bones ?? Array.Empty<Transform>()).Where(t => t != null))
+                {
+                    // Up the prefab chain to the model: an outfit's prefab and its FBX.
+                    UnityEngine.Object o = t;
+                    for (int depth = 0; o != null && depth < 32; depth++, o = PrefabUtility.GetCorrespondingObjectFromSource(o)) Add(o, t.name);
+                }
+            }
+            foreach (var top in items.Select(i => i.Transform.root).Distinct())
+                foreach (var renderer in top.GetComponentsInChildren<Renderer>(true))
+                    Add(renderer is SkinnedMeshRenderer skinned ? skinned.sharedMesh : renderer.TryGetComponent<MeshFilter>(out var filter) ? filter.sharedMesh : null, renderer.name);
+            return files;
         }
 
         // Next to the file under a name Unity's asset database skips, then over it.
@@ -185,32 +224,14 @@ namespace Orbiters.Toolkit.Editor.Meshes
         }
 
         /// <summary>
-        /// A blendshape's offsets at a weight, as Unity blends its frames: from nothing to the first frame below it, then
-        /// between the two frames around it, past the last one along it.
+        /// A blendshape's offsets at a weight, as Unity's skinning blends its frames (<see cref="BlendShapeEvaluation"/>), the
+        /// weight clamped when the project clamps blendshape weights.
         /// </summary>
         public static void ShapeAt(Mesh mesh, int shape, float weight, Vector3[] deltas, Vector3[] normals)
         {
-            int frames = mesh.GetBlendShapeFrameCount(shape), n = mesh.vertexCount;
-            int upper = 0;
-            while (upper < frames - 1 && mesh.GetBlendShapeFrameWeight(shape, upper) < weight) upper++;
-            float upperWeight = mesh.GetBlendShapeFrameWeight(shape, upper);
-            float lowerWeight = upper == 0 ? 0f : mesh.GetBlendShapeFrameWeight(shape, upper - 1);
-            float t = upperWeight == lowerWeight ? 1f : (weight - lowerWeight) / (upperWeight - lowerWeight);
-            mesh.GetBlendShapeFrameVertices(shape, upper, deltas, normals, null);
-            for (int v = 0; v < n; v++)
-            {
-                deltas[v] *= t;
-                if (normals != null) normals[v] *= t;
-            }
-            if (upper == 0 || t == 1f) return;
-            var lowerDeltas = new Vector3[n];
-            var lowerNormals = normals != null ? new Vector3[n] : null;
-            mesh.GetBlendShapeFrameVertices(shape, upper - 1, lowerDeltas, lowerNormals, null);
-            for (int v = 0; v < n; v++)
-            {
-                deltas[v] += lowerDeltas[v] * (1f - t);
-                if (normals != null) normals[v] += lowerNormals[v] * (1f - t);
-            }
+            Array.Clear(deltas, 0, deltas.Length);
+            if (normals != null) Array.Clear(normals, 0, normals.Length);
+            BlendShapeEvaluation.Add(mesh, shape, weight, BlendShapeEvaluation.ClampWeights, deltas, normals, new BlendShapeEvaluation.Scratch(mesh.vertexCount));
         }
 
         private sealed class Writer
@@ -377,25 +398,22 @@ namespace Orbiters.Toolkit.Editor.Meshes
                 bool hasNormals = normals.Length == n;
                 var colors = mesh.HasVertexAttribute(VertexAttribute.Color) ? mesh.colors : null;
                 if (colors != null && colors.Length != n) colors = null;
-                var uvs = Uvs(mesh);
+                var uvs = Uvs(mesh, name);
 
                 // Blendshapes kept on the mesh at their weight.
                 var baked = new bool[mesh.blendShapeCount];
                 var dv = new Vector3[n];
                 var dn = new Vector3[n];
+                BlendShapeEvaluation.Scratch scratch = null;
+                bool clamp = BlendShapeEvaluation.ClampWeights;
                 foreach (string shapeName in item.Baked)
                 {
                     int shape = mesh.GetBlendShapeIndex(shapeName);
                     if (shape < 0) { result.Warnings.Add(name + " has no blendshape " + shapeName + " to apply."); continue; }
                     baked[shape] = true;
-                    float weight = item.Weight(shape);
-                    if (weight == 0f || mesh.GetBlendShapeFrameCount(shape) == 0) continue;
-                    ShapeAt(mesh, shape, weight, dv, hasNormals ? dn : null);
-                    for (int v = 0; v < n; v++)
-                    {
-                        positions[v] += dv[v];
-                        if (hasNormals) normals[v] += dn[v];
-                    }
+                    // As the renderer shows it: Unity's skinning, with its weight clamping.
+                    BlendShapeEvaluation.Add(mesh, shape, item.Weight(shape), clamp, positions, hasNormals ? normals : null,
+                        scratch ?? (scratch = new BlendShapeEvaluation.Scratch(n)));
                 }
                 if (hasNormals && baked.Any(b => b))
                     for (int v = 0; v < n; v++)
@@ -415,7 +433,7 @@ namespace Orbiters.Toolkit.Editor.Meshes
                     int size = topology == MeshTopology.Triangles ? 3 : topology == MeshTopology.Quads ? 4 : 0;
                     if (size == 0) { result.Warnings.Add(name + ": submesh " + s + " is made of " + topology.ToString().ToLowerInvariant() + ", left out."); continue; }
                     var indices = mesh.GetIndices(s);
-                    if (indices.Length < size) continue;
+                    if (indices.Length < size) { result.Warnings.Add(name + ": submesh " + s + " has no faces, left out (the material slots after it move up one)."); continue; }
                     long material = MaterialId(item, s, name);
                     int slot = slotMaterials.IndexOf(material);
                     if (slot < 0)
@@ -591,8 +609,9 @@ namespace Orbiters.Toolkit.Editor.Meshes
 
             private static ulong Hash(Vector3 v) => Mix(Mix(Mix((uint)v.x.GetHashCode()) ^ (uint)v.y.GetHashCode()) ^ (uint)v.z.GetHashCode());
 
-            // Every UV set up to the last one the mesh has (a gap filled with zeros keeps the later sets in their channels).
-            private static List<Vector2[]> Uvs(Mesh mesh)
+            // Every UV set up to the last one the mesh has (a gap filled with zeros keeps the later sets in their channels). FBX
+            // UVs have two values: a set that holds more says so.
+            private List<Vector2[]> Uvs(Mesh mesh, string name)
             {
                 int last = -1;
                 for (int channel = 0; channel < 8; channel++)
@@ -605,7 +624,13 @@ namespace Orbiters.Toolkit.Editor.Meshes
                     if (mesh.HasVertexAttribute(VertexAttribute.TexCoord0 + channel))
                     {
                         mesh.GetUVs(channel, values);
-                        for (int v = 0; v < set.Length && v < values.Count; v++) set[v] = new Vector2(values[v].x, values[v].y);
+                        bool dropped = false;
+                        for (int v = 0; v < set.Length && v < values.Count; v++)
+                        {
+                            set[v] = new Vector2(values[v].x, values[v].y);
+                            dropped |= values[v].z != 0f || values[v].w != 0f;
+                        }
+                        if (dropped) result.Warnings.Add(name + ": UV set " + channel + " holds more than two values a vertex, only the first two are written.");
                     }
                     sets.Add(set);
                 }
