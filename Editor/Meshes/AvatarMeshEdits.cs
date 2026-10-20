@@ -24,6 +24,25 @@ namespace Orbiters.Toolkit.Editor.Meshes
         /// <summary>The avatar shows other meshes for a while (a live preview), or its own again.</summary>
         public static void NotifyPreviewed(Transform avatarRoot) => Notify(Previewed, avatarRoot);
 
+        /// <summary>
+        /// Asked by work that reads an avatar's meshes and can wait (My Avatar's optimization estimate): true while a tool
+        /// edits them live (Mixer's sculpt or paint modes), when every frame matters to the user and the meshes shown are
+        /// temporary. Tools add a test answering for an avatar root.
+        /// </summary>
+        public static event Func<Transform, bool> LiveEditing;
+
+        /// <summary>Whether a tool edits <paramref name="avatarRoot"/>'s meshes live (see <see cref="LiveEditing"/>).</summary>
+        public static bool IsLiveEditing(Transform avatarRoot)
+        {
+            if (avatarRoot == null || LiveEditing == null) return false;
+            foreach (Func<Transform, bool> test in LiveEditing.GetInvocationList())
+            {
+                try { if (test(avatarRoot)) return true; }
+                catch (Exception ex) { Debug.LogException(ex); }
+            }
+            return false;
+        }
+
         private static void Notify(Action<Transform> listeners, Transform avatarRoot)
         {
             if (avatarRoot == null || listeners == null) return;

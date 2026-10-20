@@ -10,6 +10,8 @@
   where vectors or a shrunk image were jagged), to mark VRChat avatars.
 - `ModelThumbnails.Get(root, key, transparent: true)`: pictures without a background, the model's alpha worked out from
   a render over black and one over white (avatar shaders' own alpha is never read).
+- `AvatarMeshEdits.LiveEditing` / `IsLiveEditing(root)`: tools say when they edit an avatar's meshes live (Mixer's
+  sculpt and paint modes), and work that reads those meshes and can wait (My Avatar's optimization estimate) waits.
 - `MeshBvh` queries (rays, spheres, closest points) walk the tree with a stack on the call's frame: no garbage per
   pointer move.
 - Polygon edges show on the surface that is seen only (depth-tested): the back of the mesh and hidden parts no longer
