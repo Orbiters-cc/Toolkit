@@ -8,7 +8,9 @@ namespace Orbiters.Toolkit.Editor
     {
         Bones, Mirror, Clothes, Refresh, Person, PersonOff, People, Robot, RobotOff, Lock, Unlock, Branch, Close, Chevron, Gauge, Sliders, Sound, Check, Sparkle, Male, Female, Key, External, Grid, Download, Broom, Plus, Camera, RefSheet,
         // Mixer and the Hierarchy.
-        Sculpt, Weights, Armature, Join, Render, Blender, Hierarchy, Eye, EyeOff, Link, Undo, Redo, Layers, Search, Trash, Settings, Minus
+        Sculpt, Weights, Armature, Join, Render, Blender, Hierarchy, Eye, EyeOff, Link, Undo, Redo, Layers, Search, Trash, Settings, Minus,
+        // The Mixer Project window.
+        Target, Clock, Sort, UnfoldAll, FoldAll
     }
 
     /// <summary>
@@ -319,6 +321,42 @@ namespace Orbiters.Toolkit.Editor
                     painter.BeginPath(); painter.MoveTo(P(12f, 3.5f)); painter.LineTo(P(21f, 8f)); painter.LineTo(P(12f, 12.5f)); painter.LineTo(P(3f, 8f)); painter.ClosePath(); painter.Fill();
                     painter.BeginPath(); painter.MoveTo(P(4.5f, 12.2f)); painter.LineTo(P(12f, 16f)); painter.LineTo(P(19.5f, 12.2f)); painter.Stroke();
                     painter.BeginPath(); painter.MoveTo(P(4.5f, 16.2f)); painter.LineTo(P(12f, 20f)); painter.LineTo(P(19.5f, 16.2f)); painter.Stroke();
+                    break;
+                case IconGlyph.Target:
+                    // A crosshair: where something is used.
+                    painter.lineWidth = 1.8f * scale;
+                    painter.BeginPath(); painter.Arc(P(12f, 12f), 6.5f * scale, 0f, 360f); painter.Stroke();
+                    painter.BeginPath(); painter.MoveTo(P(12f, 2.5f)); painter.LineTo(P(12f, 7f)); painter.Stroke();
+                    painter.BeginPath(); painter.MoveTo(P(12f, 17f)); painter.LineTo(P(12f, 21.5f)); painter.Stroke();
+                    painter.BeginPath(); painter.MoveTo(P(2.5f, 12f)); painter.LineTo(P(7f, 12f)); painter.Stroke();
+                    painter.BeginPath(); painter.MoveTo(P(17f, 12f)); painter.LineTo(P(21.5f, 12f)); painter.Stroke();
+                    painter.BeginPath(); painter.Arc(P(12f, 12f), 1.6f * scale, 0f, 360f); painter.Fill();
+                    break;
+                case IconGlyph.Clock:
+                    painter.lineWidth = 1.9f * scale;
+                    painter.BeginPath(); painter.Arc(P(12f, 12f), 8f * scale, 0f, 360f); painter.Stroke();
+                    painter.BeginPath(); painter.MoveTo(P(12f, 7f)); painter.LineTo(P(12f, 12f)); painter.LineTo(P(15.5f, 14f)); painter.Stroke();
+                    break;
+                case IconGlyph.Sort:
+                    // Three bars, shortest last, and an arrow down.
+                    painter.lineWidth = 1.9f * scale;
+                    painter.BeginPath(); painter.MoveTo(P(4f, 7f)); painter.LineTo(P(13f, 7f)); painter.Stroke();
+                    painter.BeginPath(); painter.MoveTo(P(4f, 12f)); painter.LineTo(P(11f, 12f)); painter.Stroke();
+                    painter.BeginPath(); painter.MoveTo(P(4f, 17f)); painter.LineTo(P(9f, 17f)); painter.Stroke();
+                    painter.BeginPath(); painter.MoveTo(P(17.5f, 5f)); painter.LineTo(P(17.5f, 19f)); painter.Stroke();
+                    painter.BeginPath(); painter.MoveTo(P(14.5f, 16f)); painter.LineTo(P(17.5f, 19.2f)); painter.LineTo(P(20.5f, 16f)); painter.Stroke();
+                    break;
+                case IconGlyph.UnfoldAll:
+                    // Two chevrons pointing apart.
+                    painter.lineWidth = 2f * scale;
+                    painter.BeginPath(); painter.MoveTo(P(7f, 9f)); painter.LineTo(P(12f, 4.5f)); painter.LineTo(P(17f, 9f)); painter.Stroke();
+                    painter.BeginPath(); painter.MoveTo(P(7f, 15f)); painter.LineTo(P(12f, 19.5f)); painter.LineTo(P(17f, 15f)); painter.Stroke();
+                    break;
+                case IconGlyph.FoldAll:
+                    // Two chevrons pointing together.
+                    painter.lineWidth = 2f * scale;
+                    painter.BeginPath(); painter.MoveTo(P(7f, 4.5f)); painter.LineTo(P(12f, 9f)); painter.LineTo(P(17f, 4.5f)); painter.Stroke();
+                    painter.BeginPath(); painter.MoveTo(P(7f, 19.5f)); painter.LineTo(P(12f, 15f)); painter.LineTo(P(17f, 19.5f)); painter.Stroke();
                     break;
                 case IconGlyph.Search:
                     painter.lineWidth = 2.1f * scale;
