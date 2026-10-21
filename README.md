@@ -1,6 +1,6 @@
 # Orbiters Toolkit
 
-## 0.4.1 — 2026-10-20
+## 0.4.1 — 2026-10-21
 
 - `VirtualList.SpanOf`: an item may take several rows' height (positions, scrolling and `Reveal` count rows; `TopOf`
   and `HeightOf` say where an item is). Without it the list behaves as before.
