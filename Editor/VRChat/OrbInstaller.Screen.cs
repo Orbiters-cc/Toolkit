@@ -16,9 +16,11 @@ using Object = UnityEngine.Object;
 namespace Orbiters.Toolkit.Editor.VRChat
 {
     /// <summary>
-    /// Orb's projected screen (Orbiters contracts, Docs/orb.md, Screen; the orb card's "Replace Orbiters overlay" option):
-    /// Orb's menu shown in front of its owner instead of in Orbiters desktop's SteamVR overlay, where everyone around sees
-    /// it. When it opens it stays where it appeared (frozen in the world) so a hand reaching for it never pushes it away.
+    /// Orb's projected screen (Orbiters contracts, Docs/orb.md, Screen), on every orb: Orb's menu shown in front of its
+    /// owner, where everyone around sees it. Its owner's opens only in VRChat's desktop mode or with the orb card's
+    /// "Replace Orbiters overlay" option (<see cref="ScreenReplace"/>); in VR without it, Orbiters desktop's SteamVR overlay
+    /// shows the menu instead. When it opens it stays where it appeared (frozen in the world) so a hand reaching for it
+    /// never pushes it away.
     /// <para>
     /// The desktop writes the screen's memory, 744 bytes kept two to an animated animator parameter (each word
     /// b0 + 256 × b1, so a cleared word is two zero bytes): for its owner through local parameters (<see cref="ScreenPointer"/>
@@ -32,6 +34,13 @@ namespace Orbiters.Toolkit.Editor.VRChat
     {
         public const string ScreenOpen = "Orb/Screen/Open", ScreenPointer = "Orb/Screen/Pointer";
         public const string ScreenValuePrefix = "Orb/Screen/Value", ScreenTouchPrefix = "Orb/Screen/Touch/";
+        /// <summary>
+        /// Local, never changed by a menu: on when the orb card's "Replace Orbiters overlay" option is (its default value),
+        /// so the screen shows Orb's menu in VR too. Orbiters desktop reads it to choose between its overlay and the screen.
+        /// </summary>
+        public const string ScreenReplace = "Orb/Screen/Replace";
+        /// <summary>VRChat's: 1 in VR, 0 in desktop mode.</summary>
+        internal const string VRMode = "VRMode";
         /// <summary>The screen protocol's version (the avatar manifest's <c>orb.screen</c>).</summary>
         public const int ScreenVersion = 1;
         public const int ScreenBytes = 744, ScreenWords = ScreenBytes / 2, ScreenLocalValues = 16;
@@ -79,7 +88,8 @@ namespace Orbiters.Toolkit.Editor.VRChat
 
         /// <summary>
         /// The screen's shader (word properties written out), pages, layout, glyphs, mesh and material, made once in
-        /// <paramref name="folder"/> (the shared <see cref="ScreenFolder"/>; tests use their own).
+        /// <paramref name="folder"/> (a new orb's own; the shared <see cref="ScreenFolder"/> for an orb made without a
+        /// screen; tests use their own).
         /// </summary>
         internal static (Mesh mesh, Material material) ScreenAssets(string folder = ScreenFolder)
         {
@@ -219,12 +229,6 @@ namespace Orbiters.Toolkit.Editor.VRChat
             return screen.transform;
         }
 
-        internal static void RemoveScreen(Transform orb)
-        {
-            var screen = orb != null ? orb.Find(ScreenObject) : null;
-            if (screen != null) Undo.DestroyObjectImmediate(screen.gameObject);
-        }
-
         // The screen before the eyes, which the panel's place tells (the panel sits at eyes + PanelFromEyes).
         private static void PlaceScreen(Transform orb)
         {
@@ -248,10 +252,15 @@ namespace Orbiters.Toolkit.Editor.VRChat
 
         // ---- The animator ----
 
-        /// <summary>The screen's parameters, layers and expression parameters (all local), added to an orb's controller.</summary>
-        private static void ScreenController(AnimatorController controller, int textSync, List<VRCExpressionParameters.Parameter> parameters)
+        /// <summary>
+        /// The screen's parameters, layers and expression parameters (all local), added to an orb's controller;
+        /// <paramref name="replace"/> is <see cref="ScreenReplace"/>'s default.
+        /// </summary>
+        private static void ScreenController(AnimatorController controller, int textSync, List<VRCExpressionParameters.Parameter> parameters, bool replace)
         {
             controller.AddParameter(ScreenOpen, AnimatorControllerParameterType.Bool);
+            controller.AddParameter(new AnimatorControllerParameter { name = ScreenReplace, type = AnimatorControllerParameterType.Bool, defaultBool = replace });
+            controller.AddParameter(VRMode, AnimatorControllerParameterType.Int);
             controller.AddParameter(ScreenPointer, AnimatorControllerParameterType.Int);
             for (int i = 0; i < ScreenLocalValues; i++) controller.AddParameter(ScreenValue(i), AnimatorControllerParameterType.Float);
             for (int hand = 0; hand < 2; hand++)
@@ -269,6 +278,8 @@ namespace Orbiters.Toolkit.Editor.VRChat
             ScreenLayer(controller, textSync);
 
             parameters.Add(Parameter(ScreenOpen, synced: false));
+            // Not saved: a new upload's option always holds.
+            parameters.Add(Parameter(ScreenReplace, synced: false, defaultValue: replace ? 1 : 0));
             parameters.Add(Parameter(ScreenPointer, synced: false, type: VRCExpressionParameters.ValueType.Int));
             for (int i = 0; i < ScreenLocalValues; i++) parameters.Add(Parameter(ScreenValue(i), synced: false, type: VRCExpressionParameters.ValueType.Float));
             for (int hand = 0; hand < 2; hand++)
@@ -390,9 +401,13 @@ namespace Orbiters.Toolkit.Editor.VRChat
             machine.defaultState = closed;
             var (first, blocks) = ScreenPointers(textSync);
             // The owner's opens when the desktop opens it or at once when the menu's Menu toggle is on (a blank screen
-            // then says the desktop does not answer); it closes when both are off.
-            Transition(closed, open, ("IsLocal", AnimatorConditionMode.If, 0), (ScreenOpen, AnimatorConditionMode.If, 0));
-            Transition(closed, open, ("IsLocal", AnimatorConditionMode.If, 0), (Menu, AnimatorConditionMode.If, 0));
+            // then says the desktop does not answer), in desktop mode or with Replace (in VR without it the overlay shows
+            // the menu); it closes when both are off.
+            foreach (var trigger in new[] { ScreenOpen, Menu })
+            {
+                Transition(closed, open, ("IsLocal", AnimatorConditionMode.If, 0), (trigger, AnimatorConditionMode.If, 0), (VRMode, AnimatorConditionMode.Less, 1));
+                Transition(closed, open, ("IsLocal", AnimatorConditionMode.If, 0), (trigger, AnimatorConditionMode.If, 0), (ScreenReplace, AnimatorConditionMode.If, 0));
+            }
             Transition(open, closed, ("IsLocal", AnimatorConditionMode.If, 0), (ScreenOpen, AnimatorConditionMode.IfNot, 0), (Menu, AnimatorConditionMode.IfNot, 0));
             Transition(closed, open, ("IsLocal", AnimatorConditionMode.IfNot, 0), (TextPointer, AnimatorConditionMode.Greater, first - 1), (TextPointer, AnimatorConditionMode.Less, first + blocks));
             Transition(open, closed, ("IsLocal", AnimatorConditionMode.IfNot, 0), (TextPointer, AnimatorConditionMode.Equals, PointerScreenClose));

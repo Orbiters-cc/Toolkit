@@ -160,6 +160,8 @@ namespace Orbiters.Toolkit.Editor.VRChat
             Quiet(screen);
 
             BuildController(root, folder, textSync);
+            // Its files in the orb's folder, which a gallery package carries.
+            AddScreen(root.transform, folder);
             panel.gameObject.SetActive(false);
         }
 

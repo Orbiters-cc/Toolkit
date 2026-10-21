@@ -45,6 +45,22 @@ namespace Orbiters.Toolkit.Editor.VRChat.Attachments
         /// <summary>The settings the props below <paramref name="placed"/> offer (Orb's text slots), for the tools' cards.</summary>
         public static List<AttachmentOption> Options(GameObject placed) =>
             placed == null ? new List<AttachmentOption>() : OptionSources.SelectMany(source => source(placed) ?? Enumerable.Empty<AttachmentOption>()).ToList();
+
+        /// <summary>
+        /// Sets <paramref name="to"/>'s options as <paramref name="from"/>'s are, matched by label and choice (an update
+        /// placed in place of an older copy keeps its settings).
+        /// </summary>
+        public static void CarryOptions(GameObject from, GameObject to)
+        {
+            var before = Options(from);
+            foreach (var option in Options(to))
+            {
+                var was = before.FirstOrDefault(o => o.Label == option.Label);
+                if (was == null || was.Current < 0 || was.Current >= was.Choices.Count) continue;
+                int index = option.Choices.ToList().IndexOf(was.Choices[was.Current]);
+                if (index >= 0 && index != option.Current) option.Choose(index);
+            }
+        }
     }
 
     /// <summary>A setting of a prop on an avatar: one of a few choices, switched in place (with Undo).</summary>

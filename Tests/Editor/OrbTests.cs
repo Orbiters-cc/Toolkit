@@ -74,7 +74,9 @@ public class OrbTests
         };
         for (int i = 0; i < 8; i++) expected.Add(("Orb/Text/Sync" + i, VRCExpressionParameters.ValueType.Float, true, false, 0));
         var parameters = AssetDatabase.LoadAssetAtPath<VRCExpressionParameters>(folder + "/Parameters.asset");
-        CollectionAssert.AreEqual(expected, parameters.parameters.Select(p => (p.name, p.valueType, p.networkSynced, p.saved, p.defaultValue)).ToList());
+        // The screen's parameters follow (TheScreensTouchPointsAndParametersAreLocal).
+        CollectionAssert.AreEqual(expected, parameters.parameters.Take(expected.Count).Select(p => (p.name, p.valueType, p.networkSynced, p.saved, p.defaultValue)).ToList());
+        Assert.IsTrue(parameters.parameters.Skip(expected.Count).All(p => p.name.StartsWith("Orb/Screen/", StringComparison.Ordinal)));
         Assert.AreEqual(1 + 8 + 1 + 8 + 8 * 8, parameters.CalcTotalCost(), "Synced bits: 1 + 8 + 1 + 8 + 8·N");
 
         // Global in the Full Controller, so VRCFury keeps the names OSC looks for; its own parameters are renamed as usual.
@@ -326,23 +328,11 @@ public class OrbTests
 
     // ---- The projected screen (Docs/orb.md, Screen) ----
 
-    // An orb whose controller has the screen (built into its own folder) and its screen object, playing.
+    // An orb (every orb has its screen), playing.
     private (GameObject root, MeshRenderer screen) PlayWithScreen(int textSync = 8)
     {
-        var prefab = AssetDatabase.LoadAssetAtPath<GameObject>(OrbInstaller.CreatePrefab(folder, textSync));
-        string screenFolder = folder + "/With screen";
-        AssetDatabase.CreateFolder(folder, "With screen");
-        var builder = new GameObject("Orb builder");
-        try { OrbInstaller.BuildController(builder, screenFolder, textSync, false, true); }
-        finally { Object.DestroyImmediate(builder); }
-        var root = Object.Instantiate(prefab);
-        SceneManager.MoveGameObjectToScene(root, scene);
-        var screen = OrbInstaller.AddScreen(root.transform, folder + "/Screen assets").GetComponent<MeshRenderer>();
-        graph = PlayableGraph.Create("Orb screen test");
-        playable = AnimatorControllerPlayable.Create(graph, AssetDatabase.LoadAssetAtPath<AnimatorController>(screenFolder + "/Orb.controller"));
-        AnimationPlayableOutput.Create(graph, "Orb", root.AddComponent<Animator>()).SetSourcePlayable(playable);
-        graph.SetTimeUpdateMode(DirectorUpdateMode.Manual); graph.Play();
-        return (root, screen);
+        var root = Play(AssetDatabase.LoadAssetAtPath<GameObject>(OrbInstaller.CreatePrefab(folder, textSync)));
+        return (root, root.transform.Find(OrbInstaller.ScreenObject).GetComponent<MeshRenderer>());
     }
 
     // The screen's memory as its shader reads it (word k: b0 + 256 b1).
@@ -370,11 +360,12 @@ public class OrbTests
     }
 
     [Test]
-    public void TheScreenOptionAddsItsTouchPointsAndParameters()
+    public void TheScreensTouchPointsAndParametersAreLocal()
     {
         if (VrcFury.Writer == null) Assert.Ignore("Requires the VRCFury integration.");
         var (root, screen) = PlayWithScreen();
         Assert.IsTrue(OrbInstaller.HasScreen(root.transform));
+        Assert.AreEqual(folder + "/Orb screen.mat", AssetDatabase.GetAssetPath(screen.sharedMaterial), "Its files in the orb's folder, which a package carries");
         Assert.IsFalse(screen.gameObject.activeSelf, "Hidden until it opens");
         var receivers = screen.GetComponentsInChildren<VRCContactReceiver>(true);
         Assert.AreEqual(8, receivers.Length, "Four touch points per index finger");
@@ -385,10 +376,12 @@ public class OrbTests
             StringAssert.StartsWith(OrbInstaller.ScreenTouchPrefix, r.parameter);
             Assert.AreEqual(r.parameter.Contains("/R") ? "FingerIndexR" : "FingerIndexL", r.collisionTags.Single());
         }
-        var parameters = AssetDatabase.LoadAssetAtPath<VRCExpressionParameters>(folder + "/With screen/Parameters.asset");
+        var parameters = AssetDatabase.LoadAssetAtPath<VRCExpressionParameters>(folder + "/Parameters.asset");
         var screenParameters = parameters.parameters.Where(p => p.name.StartsWith("Orb/Screen/", StringComparison.Ordinal)).ToList();
-        Assert.AreEqual(1 + 1 + OrbInstaller.ScreenLocalValues + 8, screenParameters.Count, "Open, the pointer, 16 values, 8 touch points");
+        Assert.AreEqual(1 + 1 + 1 + OrbInstaller.ScreenLocalValues + 8, screenParameters.Count, "Open, Replace, the pointer, 16 values, 8 touch points");
         Assert.IsTrue(screenParameters.All(p => !p.networkSynced), "No synced bits");
+        var replace = screenParameters.Single(p => p.name == OrbInstaller.ScreenReplace);
+        Assert.AreEqual((0f, false), (replace.defaultValue, replace.saved), "Off unless the card's option is on, and never saved: each upload's option holds");
         var hold = screen.GetComponent<VRCParentConstraint>();
         Assert.IsFalse(hold.RebakeOffsetsWhenUnfrozen, "Opened again, it appears before the eyes, not where it was");
     }
@@ -399,9 +392,10 @@ public class OrbTests
         if (VrcFury.Writer == null) Assert.Ignore("Requires the VRCFury integration.");
         var (_, screen) = PlayWithScreen();
         playable.SetBool("IsLocal", true);
+        playable.SetInteger(OrbInstaller.VRMode, 0);
         playable.SetBool(OrbInstaller.ScreenOpen, true);
         Tick(3);
-        Assert.IsTrue(screen.gameObject.activeSelf, "Orb/Screen/Open shows it");
+        Assert.IsTrue(screen.gameObject.activeSelf, "Orb/Screen/Open shows it in desktop mode");
         Assert.IsTrue(screen.GetComponent<VRCParentConstraint>().FreezeToWorld, "Frozen where it appeared");
 
         void Local(int pointer, byte[] bytes, int from)
@@ -453,6 +447,49 @@ public class OrbTests
         playable.SetBool(OrbInstaller.ScreenOpen, false);
         Tick(3);
         Assert.IsFalse(screen.gameObject.activeSelf, "Both off: closed");
+
+        // In VR the overlay shows the menu, unless the screen replaces it.
+        playable.SetInteger(OrbInstaller.VRMode, 1);
+        playable.SetBool(OrbInstaller.Menu, true);
+        playable.SetBool(OrbInstaller.ScreenOpen, true);
+        Tick(3);
+        Assert.IsFalse(screen.gameObject.activeSelf, "In VR without Replace the screen stays closed");
+        playable.SetBool(OrbInstaller.ScreenReplace, true);
+        Tick(3);
+        Assert.IsTrue(screen.gameObject.activeSelf, "Replace: the screen in VR too");
+        playable.SetBool(OrbInstaller.Menu, false);
+        playable.SetBool(OrbInstaller.ScreenOpen, false);
+        Tick(3);
+        Assert.IsFalse(screen.gameObject.activeSelf);
+    }
+
+    // VRCFury reverts every override of its components in a prefab instance when an upload starts (VRCFPrefabFixer): the
+    // options of an orb placed from a prefab survive it.
+    [Test]
+    public void OptionsOfAPlacedOrbSurviveVrcFurysRevertBeforeAnUpload()
+    {
+        if (VrcFury.Writer == null) Assert.Ignore("Requires the VRCFury integration.");
+        var prefab = AssetDatabase.LoadAssetAtPath<GameObject>(OrbInstaller.CreatePrefab(folder));
+        var placed = (GameObject)PrefabUtility.InstantiatePrefab(prefab, scene);
+        Assert.AreEqual((8, false, false), OrbInstaller.OptionsOf(placed.transform));
+        OrbInstaller.SetOptions(placed.transform, 4, true, true);
+        Assert.AreEqual((4, true, true), OrbInstaller.OptionsOf(placed.transform));
+
+        // What VRCFury does to the avatar before the SDK copies it.
+        foreach (var component in placed.GetComponents(VrcFury.Component))
+        {
+            var source = PrefabUtility.GetCorrespondingObjectFromSource(component);
+            var mods = PrefabUtility.GetPropertyModifications(component)?.Where(m => m.target == source).ToList();
+            if (mods != null && mods.Count > 0) PrefabUtility.RevertObjectOverride(component, InteractionMode.AutomatedAction);
+        }
+        Assert.AreEqual((4, true, true), OrbInstaller.OptionsOf(placed.transform), "Kept on the orb's own Full Controller");
+        Assert.AreEqual(1, placed.GetComponents(VrcFury.Component).Length, "The prefab's Full Controller replaced, not doubled");
+        Assert.IsTrue(VrcFury.IsGlobalParameter(VrcFury.Features(placed).Single(f => f.kind == "FullController").feature, OrbInstaller.ScreenReplace));
+
+        // And back: the screen stays, Replace off.
+        OrbInstaller.SetOptions(placed.transform, 8, false, false);
+        Assert.AreEqual((8, false, false), OrbInstaller.OptionsOf(placed.transform));
+        Assert.IsTrue(OrbInstaller.HasScreen(placed.transform));
     }
 
     [TestCase(8)]

@@ -35,17 +35,24 @@
 - **Orb › Call** (`Orb/Call/Menu`, `Pick`, `Go`, `End`, all local): the contacts on the panel, a radial choosing one, call
   or answer, decline or hang up, for Orbiters desktop's calls (contracts `Docs/orb-calls.md`). Orbs switched after this get
   their options' files in `Assets/Orbiters/Orb/Menu 3/` (earlier ones keep theirs).
-- **Orb's projected screen** ("Replace Orbiters overlay" on the orb's card; `OrbInstaller.SetOptions(orb, textSync,
-  walkBoost, screen)`, contracts Docs/orb.md, Screen): Orb's menu (fast walk, YouTube, calls, a 3D picture) opens on a
-  screen in front of its owner instead of in Orbiters desktop's SteamVR overlay. It shows the page pictures Orbiters
+- **Orb's projected screen** (on every orb; contracts Docs/orb.md, Screen): Orb's menu (fast walk, YouTube, calls, a
+  3D picture) opens on a screen in front of its owner in VRChat's desktop mode (`VRMode` 0) and, in VR, with "Replace
+  Orbiters overlay" on the orb's card (`OrbInstaller.SetOptions(orb, textSync, walkBoost, replace)`: the local
+  `Orb/Screen/Replace`'s default, never saved); in VR without it the animator keeps the screen closed and Orbiters
+  desktop's SteamVR overlay shows the menu. It shows the page pictures Orbiters
   desktop draws (`OrbScreenPages.png.bytes`, `OrbScreenLayout.png.bytes`, from `orbiters-desktop --orb-menu`) and draws
   over them what the desktop sends: texts, black and white thumbnails, hovered, pressed, chosen and hidden buttons. Its
   744 bytes of memory sit two to an animated parameter, written for its owner through local parameters (16 a block)
   and for everyone else through the text panel's synced channel (no synced bits of its own). It appears 42 cm before
   the eyes and stays frozen in the world while open; eight local contact receivers (four per index finger, not
-  counted in VRChat's performance rank) tell the desktop where a finger touches it. Turning the option on adds the
-  screen's object to that orb, with files shared by every screen in `Assets/Orbiters/Orb/Screen 2/`; options' files
-  are now in `Assets/Orbiters/Orb/Menu 5/`. Avatar manifests say `orb.screen` when it is there.
+  counted in VRChat's performance rank) tell the desktop where a finger touches it. A new orb's screen files are in
+  its own folder; an orb made without a screen gets one (files shared in `Assets/Orbiters/Orb/Screen 2/`) when its
+  options change; options' files are now in `Assets/Orbiters/Orb/Menu 7/`. Avatar manifests say `orb.screen`.
+- **Orb's options survive an upload**: VRCFury reverts every override of its components in a prefab instance when an
+  upload starts, so the options set on a placed orb (text slots, walk boost, Replace Orbiters overlay) came back off
+  after each upload. `SetOptions` now replaces the prefab's Full Controller by a copy of the orb's own (the prefab's
+  removed, an override VRCFury keeps). `AttachmentHooks.CarryOptions(from, to)` sets a placed prop's options as an
+  older copy's are, by label and choice.
 - **Orb's text no longer comes out scrambled** (`OrbInstaller.ValueLag`): VRChat could apply the sync values a frame
   before the pointer sent with them, so each block of the panel was written with the next one's letters (chunks of
   text in the wrong places). The panel reads the values two updates after the pointer (three against one), and
