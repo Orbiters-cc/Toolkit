@@ -22,6 +22,12 @@
   from Cascadia Mono and Noto Sans JP) and both shaders are copied into the prop's folder; `Bind` fits it to the avatar's
   head bone, its facing and its eye height. The text shader derives from KillFrenzy Avatar Text's (MIT), see
   `Editor/THIRD_PARTY_NOTICES.md`.
+- **Orb's text slots on an avatar** (`OrbInstaller.SetTextSync`, `TextSyncOf`): a placed orb switches between 4 and
+  8 text sync values (50 or 82 synced bits; a full panel in about 10 or 5 s). Its VRCFury Full Controller takes the
+  controller and parameters made once for that number in `Assets/Orbiters/Orb/Text slots N` and its global
+  parameters follow, with Undo; the orb's own files (a gallery's) stay as they are.
+- **Attachment options** (`AttachmentHooks.RegisterOptions`, `Options`, `AttachmentOption`): a prop offers a few
+  settings once it is on an avatar, which tools show on its card (Orb's text slots in My Avatar).
 - **Avatar manifests** for Orbiters desktop (`AvatarManifestExporter`, Docs/avatar-manifest.md): while the VRChat SDK
   builds an avatar for Windows (Build & Test or an upload), after every other build step, the Toolkit writes
   `%LOCALAPPDATA%\Orbiters\Avatars\<blueprint id>.json`: the expression parameters with their final names (VRCFury's

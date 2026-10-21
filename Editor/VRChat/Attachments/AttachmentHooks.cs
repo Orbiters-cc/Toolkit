@@ -33,5 +33,29 @@ namespace Orbiters.Toolkit.Editor.VRChat.Attachments
             if (placed == null || avatar == null) return;
             foreach (var hook in Hooks) hook(placed, avatar);
         }
+
+        private static readonly List<Func<GameObject, IEnumerable<AttachmentOption>>> OptionSources = new List<Func<GameObject, IEnumerable<AttachmentOption>>>();
+
+        /// <param name="options">The settings a prop below an object offers once it is on an avatar (none for others).</param>
+        public static void RegisterOptions(Func<GameObject, IEnumerable<AttachmentOption>> options)
+        {
+            if (options != null && !OptionSources.Contains(options)) OptionSources.Add(options);
+        }
+
+        /// <summary>The settings the props below <paramref name="placed"/> offer (Orb's text slots), for the tools' cards.</summary>
+        public static List<AttachmentOption> Options(GameObject placed) =>
+            placed == null ? new List<AttachmentOption>() : OptionSources.SelectMany(source => source(placed) ?? Enumerable.Empty<AttachmentOption>()).ToList();
+    }
+
+    /// <summary>A setting of a prop on an avatar: one of a few choices, switched in place (with Undo).</summary>
+    public sealed class AttachmentOption
+    {
+        public string Label, Tooltip;
+        public IReadOnlyList<string> Choices;
+        /// <summary>Per choice, what it means (or null).</summary>
+        public IReadOnlyList<string> ChoiceTooltips;
+        /// <summary>The choice that holds now, −1 for none of them.</summary>
+        public int Current;
+        public Action<int> Choose;
     }
 }
