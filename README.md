@@ -48,6 +48,9 @@
   are now in `Assets/Orbiters/Orb/Menu 4/`. Avatar manifests say `orb.screen` when it is there.
 - **Attachment options** (`AttachmentHooks.RegisterOptions`, `Options`, `AttachmentOption`): a prop offers a few
   settings once it is on an avatar, which tools show on its card (Orb's text slots in My Avatar).
+- `AvatarObjectUpdate` / `IAvatarObjectUpdates` (`AvatarObjectTools.RegisterUpdates`, `UpdateOf`): a tool tells views of
+  an avatar's objects (Mixer's Hierarchy) that a newer version waits for one of them (My Avatar's gallery items, MCB's
+  custom base), how its update is going, and starts it as its own Update button does.
 - **Avatar manifests** for Orbiters desktop (`AvatarManifestExporter`, Docs/avatar-manifest.md): while the VRChat SDK
   builds an avatar for Windows (Build & Test or an upload), after every other build step, the Toolkit writes
   `%LOCALAPPDATA%\Orbiters\Avatars\<blueprint id>.json`: the expression parameters with their final names (VRCFury's

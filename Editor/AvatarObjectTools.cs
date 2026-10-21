@@ -23,12 +23,43 @@ namespace Orbiters.Toolkit.Editor
     }
 
     /// <summary>
-    /// The avatar tools registered at load (<see cref="IAvatarObjectTool"/>), for views that show an avatar's objects.
-    /// Views refresh on <see cref="Changed"/>, which tools raise when what they answer changes (a drop, a fit question).
+    /// A newer version waiting for one of an avatar's objects: an item a tool added (My Avatar's gallery assets) or the
+    /// custom base the avatar uses (MCB), as the tool's own Update button offers it.
+    /// </summary>
+    public sealed class AvatarObjectUpdate
+    {
+        /// <summary>What it updates, as people know it ("Orb", "Ultipaw 2").</summary>
+        public string Name;
+        /// <summary>The version on the avatar and the newer one.</summary>
+        public string From, To;
+        /// <summary>The update is under way; <see cref="Status"/> says how far.</summary>
+        public bool Running;
+        /// <summary>The last try failed; <see cref="Status"/> says why, and starting again retries it.</summary>
+        public bool Failed;
+        public string Status;
+        /// <summary>Starts it as the tool's own Update button does, with its questions and progress (or tries again).</summary>
+        public Action Start;
+    }
+
+    /// <summary>A tool that knows when one of an avatar's objects has a newer version.</summary>
+    public interface IAvatarObjectUpdates
+    {
+        /// <summary>
+        /// Main thread and cheap, from what the tool knows now: it may look further in the background, then raises
+        /// <see cref="AvatarObjectTools.NotifyChanged"/>. Null when nothing newer waits for the object.
+        /// </summary>
+        AvatarObjectUpdate UpdateOf(GameObject go);
+    }
+
+    /// <summary>
+    /// The avatar tools registered at load (<see cref="IAvatarObjectTool"/>, <see cref="IAvatarObjectUpdates"/>), for views
+    /// that show an avatar's objects. Views refresh on <see cref="Changed"/>, which tools raise when what they answer
+    /// changes (a drop, a fit question, an update found or under way).
     /// </summary>
     public static class AvatarObjectTools
     {
         private static readonly List<IAvatarObjectTool> Tools = new List<IAvatarObjectTool>();
+        private static readonly List<IAvatarObjectUpdates> UpdateSources = new List<IAvatarObjectUpdates>();
 
         /// <summary>Raised when a tool's answers changed.</summary>
         public static event Action Changed;
@@ -40,7 +71,35 @@ namespace Orbiters.Toolkit.Editor
             NotifyChanged();
         }
 
+        public static void RegisterUpdates(IAvatarObjectUpdates source)
+        {
+            if (source == null || UpdateSources.Contains(source)) return;
+            UpdateSources.Add(source);
+            NotifyChanged();
+        }
+
+        public static void UnregisterUpdates(IAvatarObjectUpdates source)
+        {
+            if (UpdateSources.Remove(source)) NotifyChanged();
+        }
+
         public static void NotifyChanged() => Changed?.Invoke();
+
+        /// <summary>The newer version waiting for <paramref name="go"/> (an item, or an avatar root's custom base), or null.</summary>
+        public static AvatarObjectUpdate UpdateOf(GameObject go)
+        {
+            if (go == null) return null;
+            foreach (var source in UpdateSources)
+            {
+                try
+                {
+                    var update = source.UpdateOf(go);
+                    if (update != null) return update;
+                }
+                catch (Exception e) { Debug.LogException(e); }
+            }
+            return null;
+        }
 
         /// <summary>The tool that takes drops on <paramref name="avatarRoot"/>, or null.</summary>
         public static IAvatarObjectTool DropTarget(GameObject avatarRoot) => First(avatarRoot, (tool, go) => tool.TakesDrops(go));
