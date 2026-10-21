@@ -180,11 +180,14 @@ namespace Orbiters.Toolkit.Editor.LiveLink
         public const int MaxPendingConnections = 16;
         /// <summary>How long a new connection has to send a frame with the session's token.</summary>
         internal static int HandshakeMilliseconds = 10000;
+        /// <summary>How long a replaced connection's goodbye (after what was queued for it) has to leave before it is closed.</summary>
+        internal static int ReplacedDrainMilliseconds = 2000;
 
         private readonly LiveLinkFormat format;
         private readonly string token;
         private readonly bool singleClient;
         private readonly byte? closingType;
+        private readonly byte[] replacedGoodbye;
         private readonly Func<LiveLinkFrame, bool> accept;
         private readonly Func<LiveLinkFrame, string> collapseKey;
         private readonly TcpListener listener;
@@ -217,8 +220,11 @@ namespace Orbiters.Toolkit.Editor.LiveLink
         /// false (or an exception) closes the connection.</param>
         /// <param name="collapseKey">Frames waiting with the same key (per connection) collapse to the newest; null: none do.</param>
         /// <param name="closingType">The frame type that says goodbye: the connection closes after it, and it is sent on dispose.</param>
+        /// <param name="replacedGoodbye">On single-client links with a closing type: the payload of the goodbye a connection gets
+        /// when a newer one replaces it (null: an empty one), so the app can tell another client taking the link from Unity
+        /// going away (where it links again on its own).</param>
         public LiveLinkServer(LiveLinkFormat format, string token, int port = 0, bool singleClient = false, Func<LiveLinkFrame, bool> accept = null,
-            Func<LiveLinkFrame, string> collapseKey = null, byte? closingType = null, string threadName = "Orbiters live link")
+            Func<LiveLinkFrame, string> collapseKey = null, byte? closingType = null, string threadName = "Orbiters live link", byte[] replacedGoodbye = null)
         {
             this.format = format ?? throw new ArgumentNullException(nameof(format));
             this.token = token ?? throw new ArgumentNullException(nameof(token));
@@ -226,6 +232,7 @@ namespace Orbiters.Toolkit.Editor.LiveLink
             this.accept = accept;
             this.collapseKey = collapseKey;
             this.closingType = closingType;
+            this.replacedGoodbye = replacedGoodbye;
             this.threadName = threadName;
             maxInboundBytes = Math.Max(4L * format.MaxPayloadBytes, 64L * 1024 * 1024);
             try
@@ -534,7 +541,8 @@ namespace Orbiters.Toolkit.Editor.LiveLink
         }
 
         // A connection proved it belongs to the session: it is announced. On single-client links it replaces the previous
-        // one, whose departure is announced first, so the app can let go of what that one held.
+        // one, whose departure is announced first, so the app can let go of what that one held. With a closing type, the
+        // replaced one gets its goodbye after what was queued for it, then is closed (at the latest after a short while).
         private void Announce(Connection connection)
         {
             Connection[] replaced = Array.Empty<Connection>();
@@ -553,9 +561,17 @@ namespace Orbiters.Toolkit.Editor.LiveLink
             foreach (var old in replaced)
             {
                 items.Enqueue(new Item(old, false, null));
+                if (closingType.HasValue) Write(old, format.Encode(closingType.Value, token, replacedGoodbye));
                 Complete(old);
                 Wake(old);
-                Close(old);
+                if (!closingType.HasValue) { Close(old); continue; }
+                var writer = old.Writer;
+                ThreadPool.QueueUserWorkItem(_ =>
+                {
+                    try { writer?.Join(ReplacedDrainMilliseconds); }
+                    catch (Exception) { }
+                    Close(old);
+                });
             }
             items.Enqueue(new Item(connection, true, null));
         }

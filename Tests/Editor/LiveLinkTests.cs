@@ -156,6 +156,44 @@ namespace Orbiters.Toolkit.Editor.Tests
             }
         }
 
+        // With a closing type, the connection a newer one replaces gets its goodbye (the payload given, so the app tells
+        // another client taking the link from Unity going away) after what was queued for it, then is closed.
+        [UnityTest]
+        public IEnumerator AReplacedConnectionIsToldWhyAfterWhatWasQueuedForIt()
+        {
+            var changes = new List<(int, bool)>();
+            using (var server = new LiveLinkServer(Format, "secret", singleClient: true, closingType: 4, replacedGoodbye: Encoding.UTF8.GetBytes("replaced")))
+            {
+                server.ConnectionChanged += (id, up) => changes.Add((id, up));
+                using (var first = Connect(server))
+                {
+                    Send(first, 1, "secret", "hello");
+                    yield return Until(() => changes.Count >= 1);
+                    Assert.That(server.Send(changes[0].Item1, 3, Encoding.UTF8.GetBytes("before")), Is.True);
+                    using (var second = Connect(server))
+                    {
+                        Send(second, 1, "secret", "hello");
+                        yield return Until(() => changes.Count >= 3);
+                        var frames = new List<(byte, string)>();
+                        first.ReceiveTimeout = 3000;
+                        try
+                        {
+                            while (true)
+                            {
+                                var head = ReadExactly(first, LiveLinkFormat.HeaderBytes);
+                                Assert.That(Format.TryReadHeader(head, out byte type, out int tokenLength, out int payloadLength), Is.True);
+                                ReadExactly(first, tokenLength);
+                                frames.Add((type, Encoding.UTF8.GetString(ReadExactly(first, payloadLength))));
+                            }
+                        }
+                        catch (IOException) { }
+                        Assert.That(frames, Is.EqualTo(new[] { ((byte)3, "before"), ((byte)4, "replaced") }), "what was queued, then the goodbye, then the connection closes");
+                        Assert.That(server.Connections, Is.EqualTo(new[] { changes[2].Item1 }), "the new connection stays");
+                    }
+                }
+            }
+        }
+
         private static byte[] ReadExactly(TcpClient client, int count)
         {
             var buffer = new byte[count];
