@@ -63,6 +63,8 @@ namespace Orbiters.Toolkit.Editor.VRChat
             controller.AddParameter(State, AnimatorControllerParameterType.Int);
             controller.AddParameter(Talk, AnimatorControllerParameterType.Bool);
             controller.AddParameter(Touch, AnimatorControllerParameterType.Bool);
+            // Read by Orbiters desktop over OSC only, as the walk boost.
+            controller.AddParameter(Photo3D, AnimatorControllerParameterType.Bool);
             controller.AddParameter(TextVisible, AnimatorControllerParameterType.Bool);
             controller.AddParameter(TextPointer, AnimatorControllerParameterType.Int);
             for (int i = 0; i < textSync; i++) controller.AddParameter(TextSync(i), AnimatorControllerParameterType.Float);
@@ -88,6 +90,7 @@ namespace Orbiters.Toolkit.Editor.VRChat
                 // Local, but expression parameters all the same: OSC reads and sets those only.
                 Parameter(Talk, synced: false),
                 Parameter(Touch, synced: false),
+                Parameter(Photo3D, synced: false),
                 Parameter(TextVisible),
                 Parameter(TextPointer, type: VRCExpressionParameters.ValueType.Int),
             };
@@ -96,6 +99,7 @@ namespace Orbiters.Toolkit.Editor.VRChat
             {
                 Control("Show Orb", VRCExpressionsMenu.Control.ControlType.Toggle, Visible),
                 Control("Talk", VRCExpressionsMenu.Control.ControlType.Button, Talk),
+                Control("3D picture", VRCExpressionsMenu.Control.ControlType.Button, Photo3D),
             };
             if (walkBoost)
             {

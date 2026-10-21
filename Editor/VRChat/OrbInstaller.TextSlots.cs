@@ -14,11 +14,14 @@ namespace Orbiters.Toolkit.Editor.VRChat
     {
         /// <summary>The optional Walk boost radial's parameter (local, saved): Orbiters desktop's walk boost, 0 off to 1 strongest.</summary>
         public const string WalkBoost = "Orb/WalkBoost";
+        /// <summary>The menu's 3D picture button (local): Orbiters desktop takes a 3D picture with VRChat's camera.</summary>
+        public const string Photo3D = "Orb/Photo3D";
         /// <summary>The text slots a person picks between on an orb's card: 4 costs 50 synced bits, 8 fills the panel twice as fast for 82.</summary>
         public static readonly IReadOnlyList<int> OfferedTextSync = new[] { 4, 8 };
         // The controller, parameters and menu of each choice of options, shared by every orb switched to it (they name no
         // object of their own: their curves follow paths below the orb).
-        internal const string OptionsFolder = "Assets/Orbiters/Orb/";
+        // A new menu or parameters get a new folder: orbs switched earlier keep the files they use.
+        internal const string OptionsFolder = "Assets/Orbiters/Orb/Menu 2/";
 
         [InitializeOnLoadMethod]
         private static void RegisterOrbOptions() => AttachmentHooks.RegisterOptions(root => FindAll(root).SelectMany(orb =>
