@@ -38,8 +38,9 @@ namespace Orbiters.Toolkit.Editor.VRChat
                 },
                 new AttachmentOption
                 {
-                    Label = "Walk boost",
+                    Label = "Add walk boost in menu",
                     Tooltip = "A Walk boost radial in Orb's menu: how much faster Orbiters desktop makes you walk in VR. No synced bits.",
+                    IsToggle = true,
                     Choices = new[] { "Off", "On" },
                     ChoiceTooltips = new[] { "No radial", "Orb › Walk boost in your menu sets Orbiters desktop's walk boost" },
                     Current = current.walkBoost ? 1 : 0,

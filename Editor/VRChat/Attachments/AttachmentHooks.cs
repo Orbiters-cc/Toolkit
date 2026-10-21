@@ -51,6 +51,8 @@ namespace Orbiters.Toolkit.Editor.VRChat.Attachments
     public sealed class AttachmentOption
     {
         public string Label, Tooltip;
+        /// <summary>An on/off setting (choice 0 off, 1 on), shown as a toggle rather than a choice of labels.</summary>
+        public bool IsToggle;
         public IReadOnlyList<string> Choices;
         /// <summary>Per choice, what it means (or null).</summary>
         public IReadOnlyList<string> ChoiceTooltips;
