@@ -31,8 +31,10 @@
   desktop's walk boost. Each choice of text slots and radial has its shared controller, parameters and menu in
   `Assets/Orbiters/Orb/Text slots N[ + walk boost]`.
 - **Orb's 3D picture button** (`Orb/Photo3D`, local): Orb › 3D picture asks Orbiters desktop to record a second of
-  VRChat's camera swinging around its subject and reconstruct it. Orbs switched after this get their options' files in
-  `Assets/Orbiters/Orb/Menu 2/` (earlier ones keep theirs).
+  VRChat's camera swinging around its subject and reconstruct it.
+- **Orb › Call** (`Orb/Call/Menu`, `Pick`, `Go`, `End`, all local): the contacts on the panel, a radial choosing one, call
+  or answer, decline or hang up, for Orbiters desktop's calls (contracts `Docs/orb-calls.md`). Orbs switched after this get
+  their options' files in `Assets/Orbiters/Orb/Menu 3/` (earlier ones keep theirs).
 - **Attachment options** (`AttachmentHooks.RegisterOptions`, `Options`, `AttachmentOption`): a prop offers a few
   settings once it is on an avatar, which tools show on its card (Orb's text slots in My Avatar).
 - **Avatar manifests** for Orbiters desktop (`AvatarManifestExporter`, Docs/avatar-manifest.md): while the VRChat SDK

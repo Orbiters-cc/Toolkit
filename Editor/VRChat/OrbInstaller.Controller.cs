@@ -65,6 +65,8 @@ namespace Orbiters.Toolkit.Editor.VRChat
             controller.AddParameter(Touch, AnimatorControllerParameterType.Bool);
             // Read by Orbiters desktop over OSC only, as the walk boost.
             controller.AddParameter(Photo3D, AnimatorControllerParameterType.Bool);
+            foreach (var button in new[] { CallMenu, CallGo, CallEnd }) controller.AddParameter(button, AnimatorControllerParameterType.Bool);
+            controller.AddParameter(CallPick, AnimatorControllerParameterType.Float);
             controller.AddParameter(TextVisible, AnimatorControllerParameterType.Bool);
             controller.AddParameter(TextPointer, AnimatorControllerParameterType.Int);
             for (int i = 0; i < textSync; i++) controller.AddParameter(TextSync(i), AnimatorControllerParameterType.Float);
@@ -91,6 +93,10 @@ namespace Orbiters.Toolkit.Editor.VRChat
                 Parameter(Talk, synced: false),
                 Parameter(Touch, synced: false),
                 Parameter(Photo3D, synced: false),
+                Parameter(CallMenu, synced: false),
+                Parameter(CallPick, synced: false, type: VRCExpressionParameters.ValueType.Float),
+                Parameter(CallGo, synced: false),
+                Parameter(CallEnd, synced: false),
                 Parameter(TextVisible),
                 Parameter(TextPointer, type: VRCExpressionParameters.ValueType.Int),
             };
@@ -100,6 +106,7 @@ namespace Orbiters.Toolkit.Editor.VRChat
                 Control("Show Orb", VRCExpressionsMenu.Control.ControlType.Toggle, Visible),
                 Control("Talk", VRCExpressionsMenu.Control.ControlType.Button, Talk),
                 Control("3D picture", VRCExpressionsMenu.Control.ControlType.Button, Photo3D),
+                CallSubmenu(folder),
             };
             if (walkBoost)
             {
@@ -110,6 +117,28 @@ namespace Orbiters.Toolkit.Editor.VRChat
                 controls.Add(radial);
             }
             Install(root, folder, controller, MenuPath, "Orb menu", controls, parameters.ToArray(), parameters.Select(p => p.name));
+        }
+
+        /// <summary>
+        /// Orb › Call (Orbiters contracts' Docs/orb-calls.md): the contacts on the panel, a radial choosing one, call or
+        /// answer, decline or hang up. All read by Orbiters desktop over OSC.
+        /// </summary>
+        private static VRCExpressionsMenu.Control CallSubmenu(string folder)
+        {
+            var menu = ScriptableObject.CreateInstance<VRCExpressionsMenu>();
+            var choose = Control("Choose", VRCExpressionsMenu.Control.ControlType.RadialPuppet, "");
+            choose.subParameters = new[] { new VRCExpressionsMenu.Control.Parameter { name = CallPick } };
+            menu.controls = new List<VRCExpressionsMenu.Control>
+            {
+                Control("Contacts", VRCExpressionsMenu.Control.ControlType.Button, CallMenu),
+                choose,
+                Control("Call / Answer", VRCExpressionsMenu.Control.ControlType.Button, CallGo),
+                Control("Hang up", VRCExpressionsMenu.Control.ControlType.Button, CallEnd),
+            };
+            AssetDatabase.CreateAsset(menu, AssetDatabase.GenerateUniqueAssetPath(folder + "/Orb call menu.asset"));
+            var call = Control("Call", VRCExpressionsMenu.Control.ControlType.SubMenu, "");
+            call.subMenu = menu;
+            return call;
         }
 
         // An object shown while a bool is on: in "Shown" by default (the orb), else "Hidden" (the panel).
