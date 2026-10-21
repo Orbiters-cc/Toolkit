@@ -16,6 +16,11 @@ namespace Orbiters.Toolkit.Editor.VRChat
         public const string WalkBoost = "Orb/WalkBoost";
         /// <summary>The menu's 3D picture button (local): Orbiters desktop takes a 3D picture with VRChat's camera.</summary>
         public const string Photo3D = "Orb/Photo3D";
+        /// <summary>
+        /// The menu's Menu toggle (local): Orb's menu open (the projected screen when the orb has one, else Orbiters
+        /// desktop's SteamVR overlay); the desktop turns it off when the menu closes on its own. The one direct trigger.
+        /// </summary>
+        public const string Menu = "Orb/Menu";
         /// <summary>Orb › Call (local): the contacts on the panel, the chosen one, call or answer, decline or hang up.</summary>
         public const string CallMenu = "Orb/Call/Menu", CallPick = "Orb/Call/Pick", CallGo = "Orb/Call/Go", CallEnd = "Orb/Call/End";
         /// <summary>The text slots a person picks between on an orb's card: 4 costs 50 synced bits, 8 fills the panel twice as fast for 82.</summary>
@@ -23,7 +28,7 @@ namespace Orbiters.Toolkit.Editor.VRChat
         // The controller, parameters and menu of each choice of options, shared by every orb switched to it (they name no
         // object of their own: their curves follow paths below the orb).
         // A new menu or parameters get a new folder: orbs switched earlier keep the files they use.
-        internal const string OptionsFolder = "Assets/Orbiters/Orb/Menu 5/";
+        internal const string OptionsFolder = "Assets/Orbiters/Orb/Menu 6/";
 
         [InitializeOnLoadMethod]
         private static void RegisterOrbOptions() => AttachmentHooks.RegisterOptions(root => FindAll(root).SelectMany(orb =>

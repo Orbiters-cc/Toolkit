@@ -73,6 +73,7 @@ namespace Orbiters.Toolkit.Editor.VRChat
             controller.AddParameter(Touch, AnimatorControllerParameterType.Bool);
             // Read by Orbiters desktop over OSC only, as the walk boost.
             controller.AddParameter(Photo3D, AnimatorControllerParameterType.Bool);
+            controller.AddParameter(Menu, AnimatorControllerParameterType.Bool);
             foreach (var button in new[] { CallMenu, CallGo, CallEnd }) controller.AddParameter(button, AnimatorControllerParameterType.Bool);
             controller.AddParameter(CallPick, AnimatorControllerParameterType.Float);
             controller.AddParameter(TextVisible, AnimatorControllerParameterType.Bool);
@@ -103,6 +104,7 @@ namespace Orbiters.Toolkit.Editor.VRChat
                 Parameter(Talk, synced: false),
                 Parameter(Touch, synced: false),
                 Parameter(Photo3D, synced: false),
+                Parameter(Menu, synced: false),
                 Parameter(CallMenu, synced: false),
                 Parameter(CallPick, synced: false, type: VRCExpressionParameters.ValueType.Float),
                 Parameter(CallGo, synced: false),
@@ -115,6 +117,8 @@ namespace Orbiters.Toolkit.Editor.VRChat
             var controls = new List<VRCExpressionsMenu.Control>
             {
                 Control("Show Orb", VRCExpressionsMenu.Control.ControlType.Toggle, Visible),
+                // Opens Orb's menu directly (the other triggers go through Orbiters desktop: a binding, a word, a touch).
+                Control("Menu", VRCExpressionsMenu.Control.ControlType.Toggle, Menu),
                 Control("Talk", VRCExpressionsMenu.Control.ControlType.Button, Talk),
                 Control("3D picture", VRCExpressionsMenu.Control.ControlType.Button, Photo3D),
                 CallSubmenu(folder),

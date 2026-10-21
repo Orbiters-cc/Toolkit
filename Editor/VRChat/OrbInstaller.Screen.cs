@@ -389,8 +389,11 @@ namespace Orbiters.Toolkit.Editor.VRChat
             closed.writeDefaultValues = true; open.writeDefaultValues = true;
             machine.defaultState = closed;
             var (first, blocks) = ScreenPointers(textSync);
+            // The owner's opens when the desktop opens it or at once when the menu's Menu toggle is on (a blank screen
+            // then says the desktop does not answer); it closes when both are off.
             Transition(closed, open, ("IsLocal", AnimatorConditionMode.If, 0), (ScreenOpen, AnimatorConditionMode.If, 0));
-            Transition(open, closed, ("IsLocal", AnimatorConditionMode.If, 0), (ScreenOpen, AnimatorConditionMode.IfNot, 0));
+            Transition(closed, open, ("IsLocal", AnimatorConditionMode.If, 0), (Menu, AnimatorConditionMode.If, 0));
+            Transition(open, closed, ("IsLocal", AnimatorConditionMode.If, 0), (ScreenOpen, AnimatorConditionMode.IfNot, 0), (Menu, AnimatorConditionMode.IfNot, 0));
             Transition(closed, open, ("IsLocal", AnimatorConditionMode.IfNot, 0), (TextPointer, AnimatorConditionMode.Greater, first - 1), (TextPointer, AnimatorConditionMode.Less, first + blocks));
             Transition(open, closed, ("IsLocal", AnimatorConditionMode.IfNot, 0), (TextPointer, AnimatorConditionMode.Equals, PointerScreenClose));
         }

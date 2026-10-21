@@ -64,6 +64,7 @@ public class OrbTests
             ("Orb/Talk", VRCExpressionParameters.ValueType.Bool, false, false, 0),
             ("Orb/Touch", VRCExpressionParameters.ValueType.Bool, false, false, 0),
             ("Orb/Photo3D", VRCExpressionParameters.ValueType.Bool, false, false, 0),
+            ("Orb/Menu", VRCExpressionParameters.ValueType.Bool, false, false, 0),
             ("Orb/Call/Menu", VRCExpressionParameters.ValueType.Bool, false, false, 0),
             ("Orb/Call/Pick", VRCExpressionParameters.ValueType.Float, false, false, 0),
             ("Orb/Call/Go", VRCExpressionParameters.ValueType.Bool, false, false, 0),
@@ -93,7 +94,8 @@ public class OrbTests
         Assert.AreEqual(("Orb", VRCExpressionsMenu.Control.ControlType.SubMenu), (menu.name, menu.type));
         CollectionAssert.AreEqual(new[]
             {
-                ("Show Orb", VRCExpressionsMenu.Control.ControlType.Toggle, "Orb/Visible"), ("Talk", VRCExpressionsMenu.Control.ControlType.Button, "Orb/Talk"),
+                ("Show Orb", VRCExpressionsMenu.Control.ControlType.Toggle, "Orb/Visible"), ("Menu", VRCExpressionsMenu.Control.ControlType.Toggle, "Orb/Menu"),
+                ("Talk", VRCExpressionsMenu.Control.ControlType.Button, "Orb/Talk"),
                 ("3D picture", VRCExpressionsMenu.Control.ControlType.Button, "Orb/Photo3D"), ("Call", VRCExpressionsMenu.Control.ControlType.SubMenu, ""),
             },
             menu.subMenu.controls.Select(c => (c.name, c.type, c.parameter.name)).ToArray());
@@ -439,6 +441,18 @@ public class OrbTests
         Tick(3);
         Assert.IsFalse(screen.gameObject.activeSelf);
         Assert.IsFalse(screen.GetComponent<VRCParentConstraint>().FreezeToWorld, "Closed, it follows the head again");
+
+        // The menu's Menu toggle opens it at once, whatever the desktop does, and closes it when both are off.
+        playable.SetBool(OrbInstaller.Menu, true);
+        Tick(3);
+        Assert.IsTrue(screen.gameObject.activeSelf, "Orb/Menu shows the owner's screen");
+        playable.SetBool(OrbInstaller.ScreenOpen, true);
+        playable.SetBool(OrbInstaller.Menu, false);
+        Tick(3);
+        Assert.IsTrue(screen.gameObject.activeSelf, "Still open while the desktop has it open");
+        playable.SetBool(OrbInstaller.ScreenOpen, false);
+        Tick(3);
+        Assert.IsFalse(screen.gameObject.activeSelf, "Both off: closed");
     }
 
     [TestCase(8)]
