@@ -55,7 +55,8 @@ namespace Orbiters.Toolkit.Editor.VRChat
             new Look { Glow = 1.3f, Open = 1.1f, Wide = 1.45f, LookY = .03f, Blink = 0, Hops = true },
         };
 
-        internal static void BuildController(GameObject root, string folder, int textSync)
+        /// <param name="walkBoost">Adds the Walk boost radial (<see cref="WalkBoost"/>, local and saved): Orbiters desktop's walk boost.</param>
+        internal static void BuildController(GameObject root, string folder, int textSync, bool walkBoost = false)
         {
             var controller = AnimatorController.CreateAnimatorControllerAtPath(folder + "/Orb.controller");
             controller.AddParameter(new AnimatorControllerParameter { name = Visible, type = AnimatorControllerParameterType.Bool, defaultBool = true });
@@ -71,6 +72,8 @@ namespace Orbiters.Toolkit.Editor.VRChat
             for (int i = 0; i < textSync; i++) controller.AddParameter(Value(i), AnimatorControllerParameterType.Float);
             for (int c = 0; c < Cells; c++) controller.AddParameter(Cell(c), AnimatorControllerParameterType.Float);
             controller.AddParameter(new AnimatorControllerParameter { name = One, type = AnimatorControllerParameterType.Float, defaultFloat = 1 });
+            // Read by Orbiters desktop over OSC only: no layer uses it.
+            if (walkBoost) controller.AddParameter(WalkBoost, AnimatorControllerParameterType.Float);
 
             Toggled(controller, controller.layers[0].stateMachine, Visible, Shown);
             States(controller);
@@ -89,11 +92,20 @@ namespace Orbiters.Toolkit.Editor.VRChat
                 Parameter(TextPointer, type: VRCExpressionParameters.ValueType.Int),
             };
             for (int i = 0; i < textSync; i++) parameters.Add(Parameter(TextSync(i), type: VRCExpressionParameters.ValueType.Float));
-            Install(root, folder, controller, MenuPath, "Orb menu", new List<VRCExpressionsMenu.Control>
+            var controls = new List<VRCExpressionsMenu.Control>
             {
                 Control("Show Orb", VRCExpressionsMenu.Control.ControlType.Toggle, Visible),
                 Control("Talk", VRCExpressionsMenu.Control.ControlType.Button, Talk),
-            }, parameters.ToArray(), parameters.Select(p => p.name));
+            };
+            if (walkBoost)
+            {
+                parameters.Add(Parameter(WalkBoost, synced: false, type: VRCExpressionParameters.ValueType.Float, saved: true));
+                // A radial sets its first sub-parameter; its own parameter (none here) is only on while it is open.
+                var radial = Control("Walk boost", VRCExpressionsMenu.Control.ControlType.RadialPuppet, "");
+                radial.subParameters = new[] { new VRCExpressionsMenu.Control.Parameter { name = WalkBoost } };
+                controls.Add(radial);
+            }
+            Install(root, folder, controller, MenuPath, "Orb menu", controls, parameters.ToArray(), parameters.Select(p => p.name));
         }
 
         // An object shown while a bool is on: in "Shown" by default (the orb), else "Hidden" (the panel).

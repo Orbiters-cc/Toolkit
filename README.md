@@ -26,6 +26,10 @@
   8 text sync values (50 or 82 synced bits; a full panel in about 10 or 5 s). Its VRCFury Full Controller takes the
   controller and parameters made once for that number in `Assets/Orbiters/Orb/Text slots N` and its global
   parameters follow, with Undo; the orb's own files (a gallery's) stay as they are.
+- **Orb's Walk boost radial** (`OrbInstaller.SetOptions(orb, textSync, walkBoost)`, `OptionsOf`): an option on the orb's
+  card adds Orb › Walk boost to its menu (`Orb/WalkBoost`, a local saved float, no synced bits), which sets Orbiters
+  desktop's walk boost. Each choice of text slots and radial has its shared controller, parameters and menu in
+  `Assets/Orbiters/Orb/Text slots N[ + walk boost]`.
 - **Attachment options** (`AttachmentHooks.RegisterOptions`, `Options`, `AttachmentOption`): a prop offers a few
   settings once it is on an avatar, which tools show on its card (Orb's text slots in My Avatar).
 - **Avatar manifests** for Orbiters desktop (`AvatarManifestExporter`, Docs/avatar-manifest.md): while the VRChat SDK
