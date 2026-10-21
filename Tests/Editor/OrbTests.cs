@@ -151,7 +151,7 @@ public class OrbTests
         {
             playable.SetInteger(OrbInstaller.TextPointer, pointer);
             for (int i = 0; i < glyphs.Length; i++) playable.SetFloat(OrbInstaller.TextSync(i), SyncValue(glyphs[i]));
-            Tick(4);
+            Tick(OrbInstaller.ValueLag + 4);
         }
 
         // The contract's encoding, both ends of each half and the glyphs past 128.
@@ -166,6 +166,14 @@ public class OrbTests
         Send(2, second);
         CollectionAssert.AreEqual(first, Page().Take(8), "Block 1 kept");
         CollectionAssert.AreEqual(second, Page().Skip(8).Take(8), "Pointer 2 writes cells 8 to 15");
+
+        // Values VRChat applied before their pointer (up to ValueLag updates): the block pointed at still keeps its cells.
+        var third = new[] { 50, 51, 52, 53, 54, 55, 56, 57 };
+        for (int i = 0; i < 8; i++) playable.SetFloat(OrbInstaller.TextSync(i), SyncValue(third[i]));
+        Tick(OrbInstaller.ValueLag);
+        Send(3, third);
+        CollectionAssert.AreEqual(second, Page().Skip(8).Take(8), "Block 2 kept");
+        CollectionAssert.AreEqual(third, Page().Skip(16).Take(8), "Pointer 3 writes cells 16 to 23");
 
         // While the pointer stays, the values keep writing; pointer 0 writes nothing; any other pointer neither.
         Send(2, 70, 71, 72, 73, 74, 75, 76, 77);
@@ -449,7 +457,7 @@ public class OrbTests
         {
             playable.SetInteger(OrbInstaller.TextPointer, pointer);
             for (int i = 0; i < textSync; i++) playable.SetFloat(OrbInstaller.TextSync(i), SyncValue(from + i < bytes.Length ? bytes[from + i] : 0));
-            Tick(3);
+            Tick(OrbInstaller.ValueLag + 4);
         }
         // The panel's own blocks don't open it.
         Synced(1, Pattern(3), 0);

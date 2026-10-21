@@ -52,7 +52,7 @@ namespace Orbiters.Toolkit.Editor.VRChat
             new Vector3(0, -ScreenHeight / 2 - .05f, 0), new Vector3(0, 0, .15f),
         };
         // The screen's shared files: made once for every orb that has a screen.
-        internal const string ScreenFolder = "Assets/Orbiters/Orb/Screen 1";
+        internal const string ScreenFolder = "Assets/Orbiters/Orb/Screen 2";
         private const string ScreenShaderTemplate = "Packages/orbiters.toolkit/Editor/VRChat/OrbScreen.shader.txt";
         // Drawn by Orbiters desktop (`orbiters-desktop --orb-menu`) from the menu's layout: the page pictures (a slice per
         // page, the first empty) and the layout table.
@@ -64,7 +64,8 @@ namespace Orbiters.Toolkit.Editor.VRChat
         public static string ScreenTouch(bool right, int index) => ScreenTouchPrefix + (right ? "R" : "L") + index;
 
         // The screen's own animator parameters: its words, the bytes the values carry (synced and local), the blocks the two
-        // pointers write (one update late, as the bytes).
+        // pointers write (one update late, as the local bytes; the synced bytes come from the text's late values,
+        // ValueLag updates later still).
         internal const string SyncBlock = "Orb/Screen/SyncBlock", LocalBlock = "Orb/Screen/LocalBlock";
         internal static string Word(int k) => "Orb/Screen/Word" + k;
         internal static string SyncDigit(int i) => "Orb/Screen/SyncDigit" + i;
@@ -312,7 +313,9 @@ namespace Orbiters.Toolkit.Editor.VRChat
         /// through the text channel, until pointer 254) it shows, frozen where it appeared, and one direct blend tree keeps
         /// its words every update: each word keeps itself; while its block is pointed at it takes the block's two bytes
         /// instead; local pointer 255 clears every word. The bytes (from the values through 1D trees: direct weights can't be
-        /// negative) and the blocks are one update late together.
+        /// negative) and the blocks are one update late together, the synced bytes <see cref="ValueLag"/> updates later
+        /// still (read from the text's late values: values VRChat applied before their pointer never reach the block before).
+        /// The owner's local blocks need no lag: Orbiters desktop never changes their pointer and values in one step.
         /// </summary>
         private static void ScreenLayer(AnimatorController controller, int textSync)
         {
@@ -334,7 +337,7 @@ namespace Orbiters.Toolkit.Editor.VRChat
             Curve(shown, ScreenObject, typeof(VRCParentConstraint), "FreezeToWorld", 1);
             Add(children, shown, One);
             // The digits.
-            for (int i = 0; i < textSync; i++) Add(children, Digit(SyncDigit(i), TextSync(i)), One);
+            for (int i = 0; i < textSync; i++) Add(children, Digit(SyncDigit(i), TextLate(i, ValueLag)), One);
             for (int i = 0; i < ScreenLocalValues; i++) Add(children, Digit(LocalDigit(i), ScreenValue(i)), One);
             // Every word keeps itself.
             var keep = Hidden(new BlendTree { name = "Screen keeps", blendType = BlendTreeType.Direct });

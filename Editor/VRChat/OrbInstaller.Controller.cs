@@ -11,10 +11,16 @@ namespace Orbiters.Toolkit.Editor.VRChat
 {
     public static partial class OrbInstaller
     {
-        // The text's own animator parameters (never avatar parameters): the block the sync values write and the values,
-        // both one update late; what each cell holds, as the float its glyph was sent as; a constant 1.
+        // The text's own animator parameters (never avatar parameters): the block the sync values write, one update late,
+        // and the values, ValueLag updates later still; what each cell holds, as the float its glyph was sent as; a
+        // constant 1.
         internal const string Block = "Orb/Text/Block", One = "Orb/One";
         internal static string Value(int index) => "Orb/Text/Value" + index;
+        // How many updates later than the pointer the sync values reach the cells: VRChat may apply the values a frame
+        // or two before the pointer sent with them, which wrote each block with the next one's letters. The values go
+        // through ValueLag copies, an update each, before the value the cells read (TextLate(i, ValueLag)).
+        internal const int ValueLag = 2;
+        internal static string TextLate(int index, int stage) => "Orb/Text/Late" + stage + "/" + index;
         internal static string Cell(int cell) => "Orb/Text/Cell" + cell;
         // The panel's cell properties (the text shader's _Char0 to _Char127).
         internal static string CellProperty(int cell) => "material._Char" + cell;
@@ -76,6 +82,8 @@ namespace Orbiters.Toolkit.Editor.VRChat
             controller.AddParameter("Voice", AnimatorControllerParameterType.Float);
             controller.AddParameter(Block, AnimatorControllerParameterType.Float);
             for (int i = 0; i < textSync; i++) controller.AddParameter(Value(i), AnimatorControllerParameterType.Float);
+            for (int stage = 1; stage <= ValueLag; stage++)
+            for (int i = 0; i < textSync; i++) controller.AddParameter(TextLate(i, stage), AnimatorControllerParameterType.Float);
             for (int c = 0; c < Cells; c++) controller.AddParameter(Cell(c), AnimatorControllerParameterType.Float);
             controller.AddParameter(new AnimatorControllerParameter { name = One, type = AnimatorControllerParameterType.Float, defaultFloat = 1 });
             // Read by Orbiters desktop over OSC only: no layer uses it.
@@ -214,7 +222,7 @@ namespace Orbiters.Toolkit.Editor.VRChat
 
         /// <summary>
         /// Orb/Text/Pointer as a float (<see cref="Block"/>, for the text's blend trees): one state per block, clearing and
-        /// nothing, each setting it. It is one update late, as the values the text layer copies.
+        /// nothing, each setting it. It is one update late (the values the text layer copies are later still).
         /// </summary>
         private static void Blocks(AnimatorController controller, int textSync)
         {
@@ -246,9 +254,10 @@ namespace Orbiters.Toolkit.Editor.VRChat
         /// Defaults on a cell would fall back to a space as soon as its pointer moves on. Here each cell's glyph is kept in an
         /// animator parameter (<see cref="Cell"/>) that one direct blend tree writes back every update, Write Defaults on (as
         /// VRCFury keeps direct blend trees): it holds the cell, takes the sync value while its block is pointed at, or
-        /// clears, and sets the cell's material property from it. The pointer and the values it reads are both one update
-        /// late (<see cref="Block"/>, <see cref="Value"/>), so a new pointer never writes the previous block's cells with the
-        /// new values. Signed values go through 1D trees between −1 and 1 (direct blend weights can't be negative).
+        /// clears, and sets the cell's material property from it. The pointer is one update late (<see cref="Block"/>) and
+        /// the values it reads <see cref="ValueLag"/> updates later still (<see cref="Value"/>), so neither a new pointer
+        /// nor values VRChat applied a little before their pointer write the previous block's cells with the new values.
+        /// Signed values go through 1D trees between −1 and 1 (direct blend weights can't be negative).
         /// </summary>
         private static void Text(AnimatorController controller, int textSync)
         {
@@ -256,7 +265,16 @@ namespace Orbiters.Toolkit.Editor.VRChat
             var tree = Hidden(new BlendTree { name = "Text", blendType = BlendTreeType.Direct });
             var children = new List<ChildMotion>();
             void Add(Motion motion) => children.Add(new ChildMotion { motion = motion, directBlendParameter = One, timeScale = 1 });
-            for (int i = 0; i < textSync; i++) Add(Copy("Value " + i, TextSync(i), Clip(Value(i), -1), Clip(Value(i), 1)));
+            for (int i = 0; i < textSync; i++)
+            {
+                string from = TextSync(i);
+                for (int stage = 1; stage <= ValueLag; stage++)
+                {
+                    Add(Copy("Value " + i + " late " + stage, from, Clip(TextLate(i, stage), -1), Clip(TextLate(i, stage), 1)));
+                    from = TextLate(i, stage);
+                }
+                Add(Copy("Value " + i, from, Clip(Value(i), -1), Clip(Value(i), 1)));
+            }
             int blocks = Cells / textSync;
             for (int c = 0; c < Cells; c++)
             {

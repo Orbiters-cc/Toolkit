@@ -44,8 +44,13 @@
   and for everyone else through the text panel's synced channel (no synced bits of its own). It appears 42 cm before
   the eyes and stays frozen in the world while open; eight local contact receivers (four per index finger, not
   counted in VRChat's performance rank) tell the desktop where a finger touches it. Turning the option on adds the
-  screen's object to that orb, with files shared by every screen in `Assets/Orbiters/Orb/Screen 1/`; options' files
-  are now in `Assets/Orbiters/Orb/Menu 4/`. Avatar manifests say `orb.screen` when it is there.
+  screen's object to that orb, with files shared by every screen in `Assets/Orbiters/Orb/Screen 2/`; options' files
+  are now in `Assets/Orbiters/Orb/Menu 5/`. Avatar manifests say `orb.screen` when it is there.
+- **Orb's text no longer comes out scrambled** (`OrbInstaller.ValueLag`): VRChat could apply the sync values a frame
+  before the pointer sent with them, so each block of the panel was written with the next one's letters (chunks of
+  text in the wrong places). The panel reads the values two updates after the pointer (three against one), and
+  everyone else's screen reads its bytes from those late values too. Orbiters desktop also never changes a pointer and
+  its values in one step any more. The 3D picture page's cube no longer overlaps the 10 s timer button.
 - **Attachment options** (`AttachmentHooks.RegisterOptions`, `Options`, `AttachmentOption`): a prop offers a few
   settings once it is on an avatar, which tools show on its card (Orb's text slots in My Avatar).
 - `AvatarObjectUpdate` / `IAvatarObjectUpdates` (`AvatarObjectTools.RegisterUpdates`, `UpdateOf`): a tool tells views of
