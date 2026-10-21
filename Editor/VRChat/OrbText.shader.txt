@@ -1,0 +1,504 @@
+/*
+Orb's text panel, from KillFrenzy Avatar Text's shader (KF_AvatarTextShader):
+
+Copyright 2023 KillFrenzy / Evan Tran
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the “Software”), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
+WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+*/
+
+// The panel Orb projects (Orbiters contracts, Docs/orb.md): 4 rows of 32 cells, each holding a glyph of the panel's atlas
+// in a material property the animator sets (_Char0 to _Char127, KillFrenzy Avatar Text's way of reaching them as one
+// array). Changed for Orb: a 16 × 16 atlas of tiles twice as tall as wide (tile g at column g mod 16, row g div 16 from the
+// top), glyphs past 127 sent as negative values and wrapped (g − 256), a dark plate behind the text that is only as large
+// as the text, the beam the orb projects it with (the second material, _Part 1), and the panel growing for people further
+// away about its corner nearest its owner's face, so it never grows over that face. The panel and its beam are one skinned
+// mesh: the plate and the beam's far end on the panel, the beam's near end on the orb. Skinning puts the panel's scale in
+// the vertices, so sizes here are in the panel's own metres and positions are only rescaled. Text seen from behind or in a
+// mirror reads the right way round. Viewers who hide custom shaders see nothing of it (VRCFallback).
+// OrbInstaller copies this file into each orb's folder as "Orb text.shader".
+Shader "Orbiters/Orb Text"
+{
+    Properties
+    {
+        _MainTex ("Glyph atlas", 2D) = "black" {}
+        _TextColor ("Text", Color) = (0.96, 1, 0.97, 1)
+        _OutlineColor ("Outline", Color) = (0, 0.02, 0.012, 1)
+        _PlateColor ("Plate", Color) = (0.008, 0.03, 0.02, 0.82)
+        _EdgeColor ("Edge", Color) = (0, 0.855, 0.427, 1)
+        _Cell ("Cell size (m)", Vector) = (0.009, 0.018, 0, 0)
+        _Pad ("Plate margin (m)", Float) = 0.006
+        _Corner ("Plate corner radius (m)", Float) = 0.005
+        _Grow ("Growth for viewers further away", Range(0, 2)) = 0.6
+        _Beam ("Beam", Range(0, 1)) = 0
+        [Enum(Plate, 0, Beam, 1)] _Part ("Part", Float) = 0
+        [Enum(UnityEngine.Rendering.BlendMode)] _SrcBlend ("Source blend", Float) = 5
+        [Enum(UnityEngine.Rendering.BlendMode)] _DstBlend ("Destination blend", Float) = 10
+        [HideInInspector] _Char0 ("Cell 0", Float) = 0
+        [HideInInspector] _Char1 ("Cell 1", Float) = 0
+        [HideInInspector] _Char2 ("Cell 2", Float) = 0
+        [HideInInspector] _Char3 ("Cell 3", Float) = 0
+        [HideInInspector] _Char4 ("Cell 4", Float) = 0
+        [HideInInspector] _Char5 ("Cell 5", Float) = 0
+        [HideInInspector] _Char6 ("Cell 6", Float) = 0
+        [HideInInspector] _Char7 ("Cell 7", Float) = 0
+        [HideInInspector] _Char8 ("Cell 8", Float) = 0
+        [HideInInspector] _Char9 ("Cell 9", Float) = 0
+        [HideInInspector] _Char10 ("Cell 10", Float) = 0
+        [HideInInspector] _Char11 ("Cell 11", Float) = 0
+        [HideInInspector] _Char12 ("Cell 12", Float) = 0
+        [HideInInspector] _Char13 ("Cell 13", Float) = 0
+        [HideInInspector] _Char14 ("Cell 14", Float) = 0
+        [HideInInspector] _Char15 ("Cell 15", Float) = 0
+        [HideInInspector] _Char16 ("Cell 16", Float) = 0
+        [HideInInspector] _Char17 ("Cell 17", Float) = 0
+        [HideInInspector] _Char18 ("Cell 18", Float) = 0
+        [HideInInspector] _Char19 ("Cell 19", Float) = 0
+        [HideInInspector] _Char20 ("Cell 20", Float) = 0
+        [HideInInspector] _Char21 ("Cell 21", Float) = 0
+        [HideInInspector] _Char22 ("Cell 22", Float) = 0
+        [HideInInspector] _Char23 ("Cell 23", Float) = 0
+        [HideInInspector] _Char24 ("Cell 24", Float) = 0
+        [HideInInspector] _Char25 ("Cell 25", Float) = 0
+        [HideInInspector] _Char26 ("Cell 26", Float) = 0
+        [HideInInspector] _Char27 ("Cell 27", Float) = 0
+        [HideInInspector] _Char28 ("Cell 28", Float) = 0
+        [HideInInspector] _Char29 ("Cell 29", Float) = 0
+        [HideInInspector] _Char30 ("Cell 30", Float) = 0
+        [HideInInspector] _Char31 ("Cell 31", Float) = 0
+        [HideInInspector] _Char32 ("Cell 32", Float) = 0
+        [HideInInspector] _Char33 ("Cell 33", Float) = 0
+        [HideInInspector] _Char34 ("Cell 34", Float) = 0
+        [HideInInspector] _Char35 ("Cell 35", Float) = 0
+        [HideInInspector] _Char36 ("Cell 36", Float) = 0
+        [HideInInspector] _Char37 ("Cell 37", Float) = 0
+        [HideInInspector] _Char38 ("Cell 38", Float) = 0
+        [HideInInspector] _Char39 ("Cell 39", Float) = 0
+        [HideInInspector] _Char40 ("Cell 40", Float) = 0
+        [HideInInspector] _Char41 ("Cell 41", Float) = 0
+        [HideInInspector] _Char42 ("Cell 42", Float) = 0
+        [HideInInspector] _Char43 ("Cell 43", Float) = 0
+        [HideInInspector] _Char44 ("Cell 44", Float) = 0
+        [HideInInspector] _Char45 ("Cell 45", Float) = 0
+        [HideInInspector] _Char46 ("Cell 46", Float) = 0
+        [HideInInspector] _Char47 ("Cell 47", Float) = 0
+        [HideInInspector] _Char48 ("Cell 48", Float) = 0
+        [HideInInspector] _Char49 ("Cell 49", Float) = 0
+        [HideInInspector] _Char50 ("Cell 50", Float) = 0
+        [HideInInspector] _Char51 ("Cell 51", Float) = 0
+        [HideInInspector] _Char52 ("Cell 52", Float) = 0
+        [HideInInspector] _Char53 ("Cell 53", Float) = 0
+        [HideInInspector] _Char54 ("Cell 54", Float) = 0
+        [HideInInspector] _Char55 ("Cell 55", Float) = 0
+        [HideInInspector] _Char56 ("Cell 56", Float) = 0
+        [HideInInspector] _Char57 ("Cell 57", Float) = 0
+        [HideInInspector] _Char58 ("Cell 58", Float) = 0
+        [HideInInspector] _Char59 ("Cell 59", Float) = 0
+        [HideInInspector] _Char60 ("Cell 60", Float) = 0
+        [HideInInspector] _Char61 ("Cell 61", Float) = 0
+        [HideInInspector] _Char62 ("Cell 62", Float) = 0
+        [HideInInspector] _Char63 ("Cell 63", Float) = 0
+        [HideInInspector] _Char64 ("Cell 64", Float) = 0
+        [HideInInspector] _Char65 ("Cell 65", Float) = 0
+        [HideInInspector] _Char66 ("Cell 66", Float) = 0
+        [HideInInspector] _Char67 ("Cell 67", Float) = 0
+        [HideInInspector] _Char68 ("Cell 68", Float) = 0
+        [HideInInspector] _Char69 ("Cell 69", Float) = 0
+        [HideInInspector] _Char70 ("Cell 70", Float) = 0
+        [HideInInspector] _Char71 ("Cell 71", Float) = 0
+        [HideInInspector] _Char72 ("Cell 72", Float) = 0
+        [HideInInspector] _Char73 ("Cell 73", Float) = 0
+        [HideInInspector] _Char74 ("Cell 74", Float) = 0
+        [HideInInspector] _Char75 ("Cell 75", Float) = 0
+        [HideInInspector] _Char76 ("Cell 76", Float) = 0
+        [HideInInspector] _Char77 ("Cell 77", Float) = 0
+        [HideInInspector] _Char78 ("Cell 78", Float) = 0
+        [HideInInspector] _Char79 ("Cell 79", Float) = 0
+        [HideInInspector] _Char80 ("Cell 80", Float) = 0
+        [HideInInspector] _Char81 ("Cell 81", Float) = 0
+        [HideInInspector] _Char82 ("Cell 82", Float) = 0
+        [HideInInspector] _Char83 ("Cell 83", Float) = 0
+        [HideInInspector] _Char84 ("Cell 84", Float) = 0
+        [HideInInspector] _Char85 ("Cell 85", Float) = 0
+        [HideInInspector] _Char86 ("Cell 86", Float) = 0
+        [HideInInspector] _Char87 ("Cell 87", Float) = 0
+        [HideInInspector] _Char88 ("Cell 88", Float) = 0
+        [HideInInspector] _Char89 ("Cell 89", Float) = 0
+        [HideInInspector] _Char90 ("Cell 90", Float) = 0
+        [HideInInspector] _Char91 ("Cell 91", Float) = 0
+        [HideInInspector] _Char92 ("Cell 92", Float) = 0
+        [HideInInspector] _Char93 ("Cell 93", Float) = 0
+        [HideInInspector] _Char94 ("Cell 94", Float) = 0
+        [HideInInspector] _Char95 ("Cell 95", Float) = 0
+        [HideInInspector] _Char96 ("Cell 96", Float) = 0
+        [HideInInspector] _Char97 ("Cell 97", Float) = 0
+        [HideInInspector] _Char98 ("Cell 98", Float) = 0
+        [HideInInspector] _Char99 ("Cell 99", Float) = 0
+        [HideInInspector] _Char100 ("Cell 100", Float) = 0
+        [HideInInspector] _Char101 ("Cell 101", Float) = 0
+        [HideInInspector] _Char102 ("Cell 102", Float) = 0
+        [HideInInspector] _Char103 ("Cell 103", Float) = 0
+        [HideInInspector] _Char104 ("Cell 104", Float) = 0
+        [HideInInspector] _Char105 ("Cell 105", Float) = 0
+        [HideInInspector] _Char106 ("Cell 106", Float) = 0
+        [HideInInspector] _Char107 ("Cell 107", Float) = 0
+        [HideInInspector] _Char108 ("Cell 108", Float) = 0
+        [HideInInspector] _Char109 ("Cell 109", Float) = 0
+        [HideInInspector] _Char110 ("Cell 110", Float) = 0
+        [HideInInspector] _Char111 ("Cell 111", Float) = 0
+        [HideInInspector] _Char112 ("Cell 112", Float) = 0
+        [HideInInspector] _Char113 ("Cell 113", Float) = 0
+        [HideInInspector] _Char114 ("Cell 114", Float) = 0
+        [HideInInspector] _Char115 ("Cell 115", Float) = 0
+        [HideInInspector] _Char116 ("Cell 116", Float) = 0
+        [HideInInspector] _Char117 ("Cell 117", Float) = 0
+        [HideInInspector] _Char118 ("Cell 118", Float) = 0
+        [HideInInspector] _Char119 ("Cell 119", Float) = 0
+        [HideInInspector] _Char120 ("Cell 120", Float) = 0
+        [HideInInspector] _Char121 ("Cell 121", Float) = 0
+        [HideInInspector] _Char122 ("Cell 122", Float) = 0
+        [HideInInspector] _Char123 ("Cell 123", Float) = 0
+        [HideInInspector] _Char124 ("Cell 124", Float) = 0
+        [HideInInspector] _Char125 ("Cell 125", Float) = 0
+        [HideInInspector] _Char126 ("Cell 126", Float) = 0
+        [HideInInspector] _Char127 ("Cell 127", Float) = 0
+    }
+    SubShader
+    {
+        Tags { "RenderType" = "Transparent" "Queue" = "Transparent+1" "IgnoreProjector" = "True" "DisableBatching" = "True" "VRCFallback" = "Hidden" }
+        Pass
+        {
+            Blend [_SrcBlend] [_DstBlend]
+            ZWrite Off
+            Cull Off
+            CGPROGRAM
+            #pragma vertex vert
+            #pragma fragment frag
+            #pragma multi_compile_instancing
+            #include "UnityCG.cginc"
+
+            sampler2D _MainTex;
+            fixed4 _TextColor, _OutlineColor, _PlateColor, _EdgeColor;
+            float4 _Cell;
+            float _Pad, _Corner, _Grow, _Beam, _Part;
+
+            // The cells as one array over their 128 properties (each takes a register of its own).
+            CBUFFER_START(CharacterBuffer)
+            float _Chars[128] : packoffset(c0);
+            float _Char0 : packoffset(c0);
+            float _Char1 : packoffset(c1);
+            float _Char2 : packoffset(c2);
+            float _Char3 : packoffset(c3);
+            float _Char4 : packoffset(c4);
+            float _Char5 : packoffset(c5);
+            float _Char6 : packoffset(c6);
+            float _Char7 : packoffset(c7);
+            float _Char8 : packoffset(c8);
+            float _Char9 : packoffset(c9);
+            float _Char10 : packoffset(c10);
+            float _Char11 : packoffset(c11);
+            float _Char12 : packoffset(c12);
+            float _Char13 : packoffset(c13);
+            float _Char14 : packoffset(c14);
+            float _Char15 : packoffset(c15);
+            float _Char16 : packoffset(c16);
+            float _Char17 : packoffset(c17);
+            float _Char18 : packoffset(c18);
+            float _Char19 : packoffset(c19);
+            float _Char20 : packoffset(c20);
+            float _Char21 : packoffset(c21);
+            float _Char22 : packoffset(c22);
+            float _Char23 : packoffset(c23);
+            float _Char24 : packoffset(c24);
+            float _Char25 : packoffset(c25);
+            float _Char26 : packoffset(c26);
+            float _Char27 : packoffset(c27);
+            float _Char28 : packoffset(c28);
+            float _Char29 : packoffset(c29);
+            float _Char30 : packoffset(c30);
+            float _Char31 : packoffset(c31);
+            float _Char32 : packoffset(c32);
+            float _Char33 : packoffset(c33);
+            float _Char34 : packoffset(c34);
+            float _Char35 : packoffset(c35);
+            float _Char36 : packoffset(c36);
+            float _Char37 : packoffset(c37);
+            float _Char38 : packoffset(c38);
+            float _Char39 : packoffset(c39);
+            float _Char40 : packoffset(c40);
+            float _Char41 : packoffset(c41);
+            float _Char42 : packoffset(c42);
+            float _Char43 : packoffset(c43);
+            float _Char44 : packoffset(c44);
+            float _Char45 : packoffset(c45);
+            float _Char46 : packoffset(c46);
+            float _Char47 : packoffset(c47);
+            float _Char48 : packoffset(c48);
+            float _Char49 : packoffset(c49);
+            float _Char50 : packoffset(c50);
+            float _Char51 : packoffset(c51);
+            float _Char52 : packoffset(c52);
+            float _Char53 : packoffset(c53);
+            float _Char54 : packoffset(c54);
+            float _Char55 : packoffset(c55);
+            float _Char56 : packoffset(c56);
+            float _Char57 : packoffset(c57);
+            float _Char58 : packoffset(c58);
+            float _Char59 : packoffset(c59);
+            float _Char60 : packoffset(c60);
+            float _Char61 : packoffset(c61);
+            float _Char62 : packoffset(c62);
+            float _Char63 : packoffset(c63);
+            float _Char64 : packoffset(c64);
+            float _Char65 : packoffset(c65);
+            float _Char66 : packoffset(c66);
+            float _Char67 : packoffset(c67);
+            float _Char68 : packoffset(c68);
+            float _Char69 : packoffset(c69);
+            float _Char70 : packoffset(c70);
+            float _Char71 : packoffset(c71);
+            float _Char72 : packoffset(c72);
+            float _Char73 : packoffset(c73);
+            float _Char74 : packoffset(c74);
+            float _Char75 : packoffset(c75);
+            float _Char76 : packoffset(c76);
+            float _Char77 : packoffset(c77);
+            float _Char78 : packoffset(c78);
+            float _Char79 : packoffset(c79);
+            float _Char80 : packoffset(c80);
+            float _Char81 : packoffset(c81);
+            float _Char82 : packoffset(c82);
+            float _Char83 : packoffset(c83);
+            float _Char84 : packoffset(c84);
+            float _Char85 : packoffset(c85);
+            float _Char86 : packoffset(c86);
+            float _Char87 : packoffset(c87);
+            float _Char88 : packoffset(c88);
+            float _Char89 : packoffset(c89);
+            float _Char90 : packoffset(c90);
+            float _Char91 : packoffset(c91);
+            float _Char92 : packoffset(c92);
+            float _Char93 : packoffset(c93);
+            float _Char94 : packoffset(c94);
+            float _Char95 : packoffset(c95);
+            float _Char96 : packoffset(c96);
+            float _Char97 : packoffset(c97);
+            float _Char98 : packoffset(c98);
+            float _Char99 : packoffset(c99);
+            float _Char100 : packoffset(c100);
+            float _Char101 : packoffset(c101);
+            float _Char102 : packoffset(c102);
+            float _Char103 : packoffset(c103);
+            float _Char104 : packoffset(c104);
+            float _Char105 : packoffset(c105);
+            float _Char106 : packoffset(c106);
+            float _Char107 : packoffset(c107);
+            float _Char108 : packoffset(c108);
+            float _Char109 : packoffset(c109);
+            float _Char110 : packoffset(c110);
+            float _Char111 : packoffset(c111);
+            float _Char112 : packoffset(c112);
+            float _Char113 : packoffset(c113);
+            float _Char114 : packoffset(c114);
+            float _Char115 : packoffset(c115);
+            float _Char116 : packoffset(c116);
+            float _Char117 : packoffset(c117);
+            float _Char118 : packoffset(c118);
+            float _Char119 : packoffset(c119);
+            float _Char120 : packoffset(c120);
+            float _Char121 : packoffset(c121);
+            float _Char122 : packoffset(c122);
+            float _Char123 : packoffset(c123);
+            float _Char124 : packoffset(c124);
+            float _Char125 : packoffset(c125);
+            float _Char126 : packoffset(c126);
+            float _Char127 : packoffset(c127);
+            CBUFFER_END
+
+            // Touches every cell property, so that Unity sends them all (they are only read through _Chars).
+            float SumCharacters()
+            {
+                return
+                _Char0 + _Char1 + _Char2 + _Char3 + _Char4 + _Char5 + _Char6 + _Char7 +
+                _Char8 + _Char9 + _Char10 + _Char11 + _Char12 + _Char13 + _Char14 + _Char15 +
+                _Char16 + _Char17 + _Char18 + _Char19 + _Char20 + _Char21 + _Char22 + _Char23 +
+                _Char24 + _Char25 + _Char26 + _Char27 + _Char28 + _Char29 + _Char30 + _Char31 +
+                _Char32 + _Char33 + _Char34 + _Char35 + _Char36 + _Char37 + _Char38 + _Char39 +
+                _Char40 + _Char41 + _Char42 + _Char43 + _Char44 + _Char45 + _Char46 + _Char47 +
+                _Char48 + _Char49 + _Char50 + _Char51 + _Char52 + _Char53 + _Char54 + _Char55 +
+                _Char56 + _Char57 + _Char58 + _Char59 + _Char60 + _Char61 + _Char62 + _Char63 +
+                _Char64 + _Char65 + _Char66 + _Char67 + _Char68 + _Char69 + _Char70 + _Char71 +
+                _Char72 + _Char73 + _Char74 + _Char75 + _Char76 + _Char77 + _Char78 + _Char79 +
+                _Char80 + _Char81 + _Char82 + _Char83 + _Char84 + _Char85 + _Char86 + _Char87 +
+                _Char88 + _Char89 + _Char90 + _Char91 + _Char92 + _Char93 + _Char94 + _Char95 +
+                _Char96 + _Char97 + _Char98 + _Char99 + _Char100 + _Char101 + _Char102 + _Char103 +
+                _Char104 + _Char105 + _Char106 + _Char107 + _Char108 + _Char109 + _Char110 + _Char111 +
+                _Char112 + _Char113 + _Char114 + _Char115 + _Char116 + _Char117 + _Char118 + _Char119 +
+                _Char120 + _Char121 + _Char122 + _Char123 + _Char124 + _Char125 + _Char126 + _Char127;
+            }
+
+            // The glow around the plate reaches this far past its edge.
+            static const float Margin = .004;
+
+            struct appdata
+            {
+                float4 vertex : POSITION;
+                // The plate: its corner (x 0 left, 1 right; y 0 bottom, 1 top). The beam: the plate corner its far end goes to.
+                float2 corner : TEXCOORD0;
+                // The beam: across a side (0 to 1) and along it (0 at the orb, 1 at the plate).
+                float2 beam : TEXCOORD1;
+                UNITY_VERTEX_INPUT_INSTANCE_ID
+            };
+
+            struct v2f
+            {
+                float4 pos : SV_POSITION;
+                // From the plate's top left corner, right and down, in the panel's metres.
+                float2 plate : TEXCOORD0;
+                float2 beam : TEXCOORD1;
+                // The text's columns and rows, the plate's width and height.
+                nointerpolation float4 size : TEXCOORD2;
+                UNITY_VERTEX_OUTPUT_STEREO
+            };
+
+            float3 ViewerHead()
+            {
+                #if defined(USING_STEREO_MATRICES)
+                return (unity_StereoWorldSpaceCameraPos[0] + unity_StereoWorldSpaceCameraPos[1]) * .5;
+                #else
+                return _WorldSpaceCameraPos;
+                #endif
+            }
+
+            float Glyph(float cell)
+            {
+                float g = round(_Chars[(int)cell]);
+                return g < 0 ? g + 256 : g;
+            }
+
+            // The columns of the longest row and the rows down to the last one holding anything but spaces.
+            float2 TextSize()
+            {
+                float columns = 0, rows = 0;
+                [loop] for (int r = 0; r < 4; r++)
+                {
+                    float used = 0;
+                    [loop] for (int c = 0; c < 32; c++) if (Glyph(r * 32 + c) != 0) used = c + 1;
+                    columns = max(columns, used);
+                    if (used > 0) rows = r + 1;
+                }
+                return float2(columns, rows);
+            }
+
+            v2f vert(appdata v)
+            {
+                v2f o;
+                UNITY_SETUP_INSTANCE_ID(v);
+                UNITY_INITIALIZE_OUTPUT(v2f, o);
+                UNITY_INITIALIZE_VERTEX_OUTPUT_STEREO(o);
+                float2 text = TextSize();
+                float2 page = float2(32, 4) * _Cell.xy + 2 * _Pad;
+                float2 plate = text * _Cell.xy + 2 * _Pad;
+                bool beam = _Part > .5;
+                float3 position = v.vertex.xyz;
+                if (!beam || v.beam.y > .5)
+                {
+                    // The mesh holds a full page: this vertex moves to its corner of a plate as large as the text. Where it
+                    // is in the mesh against where it is on a page gives the panel's scale (skinning puts it in the vertices).
+                    float margin = beam ? 0 : Margin;
+                    float2 onPage = float2(v.corner.x * (page.x + 2 * margin) - margin, (v.corner.y - 1) * (page.y + 2 * margin) + margin);
+                    float scale = dot(onPage, onPage) > 1e-8 ? length(position.xy) / length(onPage) : 1;
+                    float2 onPlate = float2(v.corner.x * (plate.x + 2 * margin) - margin, (v.corner.y - 1) * (plate.y + 2 * margin) + margin);
+                    // People further away see it larger, by up to 1 + _Grow from three metres (in the panel's metres):
+                    // its owner, about half a metre away, and people within arm's length see it as it is.
+                    float away = length(ViewerHead() - unity_ObjectToWorld._m03_m13_m23) / max(scale, 1e-4);
+                    float grow = 1 + _Grow * smoothstep(.8, 3, away);
+                    position.xy = onPlate * scale * grow;
+                    o.plate = float2(onPlate.x, -onPlate.y);
+                }
+                // Nothing to show: no plate, no beam.
+                if (text.x == 0 || (beam && _Beam < .01)) position = 0;
+                o.size = float4(text, plate);
+                o.beam = v.beam;
+                o.pos = UnityObjectToClipPos(float4(position, 1));
+                return o;
+            }
+
+            fixed4 Plate(v2f i, bool flip)
+            {
+                float2 size = i.size.zw;
+                // The plate: a rounded box with a thin bright edge and a soft glow past it.
+                float2 q = abs(i.plate - size * .5) - (size * .5 - _Corner);
+                float edge = length(max(q, 0)) + min(max(q.x, q.y), 0) - _Corner;
+                float aa = max(fwidth(edge), 1e-5);
+                float inside = 1 - smoothstep(-aa, aa, edge);
+                float rule = 1 - smoothstep(.0005 - aa, .0005 + aa, abs(edge + .0011));
+                float glow = (1 - inside) * exp(-max(edge, 0) / .0016) * .35;
+                // Brighter towards its top, and the faint scan lines of a projection.
+                float shade = 1.25 - .4 * saturate(i.plate.y / max(size.y, 1e-4));
+                float scan = .93 + .07 * sin(i.plate.y * 2800 - _Time.y * 5);
+                fixed4 colour = fixed4(_PlateColor.rgb * shade * scan, _PlateColor.a * inside);
+                colour = lerp(colour, fixed4(_EdgeColor.rgb * 1.4, 1), rule * inside * .85);
+                colour = lerp(colour, fixed4(_EdgeColor.rgb, 1), glow);
+                colour.a = max(colour.a, glow);
+
+                // The text: its cell, then the glyph's tile. Read from behind (or in a mirror), the text runs the other way.
+                float2 grid = i.plate - _Pad;
+                if (flip) grid.x = i.size.x * _Cell.x - grid.x;
+                float2 cell = grid / _Cell.xy;
+                float shown = all(cell >= 0) && cell.x < i.size.x && cell.y < i.size.y ? 1 : 0;
+                float2 index = clamp(floor(cell), 0, float2(31, 3));
+                float g = Glyph(index.y * 32 + index.x) * shown;
+                float2 within = frac(cell);
+                float2 uv = float2((fmod(g, 16) + within.x) / 16, 1 - (floor(g / 16) + within.y) / 16);
+                // Gradients of the continuous position: no seams where cells meet.
+                float2 dx = ddx(cell) * float2(1, -1) / 16, dy = ddy(cell) * float2(1, -1) / 16;
+                fixed4 tile = tex2Dgrad(_MainTex, uv, dx, dy);
+                float fill = saturate((tile.r - .5) / max(fwidth(tile.r), 1e-3) + .5);
+                float rim = saturate((tile.a - .5) / max(fwidth(tile.a), 1e-3) + .5) * inside;
+                fixed3 ink = lerp(_OutlineColor.rgb, _TextColor.rgb, fill);
+                colour.rgb = lerp(colour.rgb, ink, rim);
+                colour.a = max(colour.a, rim);
+                return colour;
+            }
+
+            fixed4 Beam(v2f i)
+            {
+                float along = i.beam.y, across = i.beam.x;
+                // A faint veil with fine bright lines along the pyramid's edges, a gentle shimmer running from the orb to the
+                // panel; it leaves the orb from inside and thins out towards the panel.
+                float edges = pow(1 - saturate(min(across, 1 - across) * 2), 28);
+                float run = .8 + .2 * sin(along * 14 - _Time.y * 4);
+                float fade = smoothstep(.02, .15, along) * (1 - .6 * along);
+                return fixed4(_EdgeColor.rgb * (.045 + edges * .5) * run * fade * _Beam, 1);
+            }
+
+            fixed4 frag(v2f i, bool front : SV_IsFrontFace) : SV_Target
+            {
+                if (_Part > .5) return Beam(i);
+                // KillFrenzy Avatar Text's flips: the back of the panel, and mirrors (oblique projections).
+                bool mirror = unity_CameraProjection[2][0] != 0 || unity_CameraProjection[2][1] != 0;
+                fixed4 colour = Plate(i, front == mirror);
+                // Never true: makes Unity send every cell property.
+                [branch] if (colour.a + i.pos.w == 65536) return SumCharacters();
+                return colour;
+            }
+            ENDCG
+        }
+    }
+    Fallback Off
+}

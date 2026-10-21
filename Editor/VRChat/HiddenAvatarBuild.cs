@@ -46,10 +46,12 @@ namespace Orbiters.Toolkit.Editor.VRChat
         }
 
         // By full type name: the build cache makes in-memory objects assets for the SDK's prefab, VRCFury's blueprint hook
-        // clears the callbacks a pending upload runs once it succeeds, and the Logger's probes time real builds.
+        // clears the callbacks a pending upload runs once it succeeds, the Logger's probes time real builds, and the avatar
+        // manifest describes what is uploaded.
         private static readonly string[] Left =
         {
             typeof(BuildCopyAssetsHook).FullName,
+            typeof(Manifest.AvatarManifestExporter).FullName,
             "VF.Hooks.WhenBlueprintIdReadyHook+VrcPreuploadHook",
             "Orbiters.Logger.Editor.VRChat.LoggerBuildStepProbe",
         };

@@ -1,0 +1,210 @@
+// Orb, the Orbiters companion: a glowing orb with simple eyes, and its halo. The eyes are drawn on the side of the orb that
+// faces whoever looks at it (seen from between their eyes, so both eyes of a headset agree), upright with the world:
+// everyone, its owner too, sees Orb look at them. Their shape is a few numbers the animator sets for each state (open,
+// wide, bent into arcs, lidded, tilted), so going from one state to the next morphs them. Blinking, breathing and the slow
+// bob run here. The halo material only adds light: a soft glow and, while Orb thinks, a dashed ring turning around it.
+// Viewers who hide custom shaders see the core as a plain green ball and no halo (VRCFallback).
+// OrbInstaller copies this file into each orb's folder as "Orb.shader".
+Shader "Orbiters/Orb"
+{
+    Properties
+    {
+        _Color ("Colour", Color) = (0, 0.855, 0.427, 1)
+        _EyeColor ("Eyes", Color) = (0.01, 0.07, 0.04, 1)
+        _Glow ("Glow", Range(0, 3)) = 1
+        _Open ("Eyes open", Range(0, 1.5)) = 1
+        _Wide ("Eye width", Range(0.5, 1.6)) = 1
+        _Curve ("Eye arcs (closed +, happy -)", Range(-2, 2)) = 0
+        _Lid ("Lids", Range(0, 1)) = 0
+        _Tilt ("Eye tilt", Range(-1, 1)) = 0
+        _LookX ("Look right", Range(-0.3, 0.3)) = 0
+        _LookY ("Look up", Range(-0.3, 0.3)) = 0
+        _Anger ("Red", Range(0, 1)) = 0
+        _Pulse ("Voice pulse", Range(0, 1)) = 0
+        _Ring ("Thinking ring", Range(0, 1)) = 0
+        _Talk ("Talking", Range(0, 1)) = 0
+        _Blink ("Blinks", Range(0, 1)) = 1
+        _Bob ("Bob", Range(0, 2)) = 1
+        _Sleep ("Asleep", Range(0, 1)) = 0
+        [ToggleUI] _Halo ("Halo", Float) = 0
+        [Enum(UnityEngine.Rendering.BlendMode)] _DstBlend ("Destination blend", Float) = 0
+        [Enum(Off, 0, On, 1)] _ZWrite ("Depth write", Float) = 1
+    }
+    SubShader
+    {
+        Tags { "RenderType" = "Opaque" "Queue" = "Geometry" "VRCFallback" = "Unlit" }
+        Pass
+        {
+            Blend One [_DstBlend]
+            ZWrite [_ZWrite]
+            CGPROGRAM
+            #pragma vertex vert
+            #pragma fragment frag
+            #pragma multi_compile_instancing
+            #include "UnityCG.cginc"
+
+            fixed4 _Color, _EyeColor;
+            float _Glow, _Open, _Wide, _Curve, _Lid, _Tilt, _LookX, _LookY, _Anger, _Pulse, _Ring, _Talk, _Blink, _Bob, _Sleep, _Halo;
+
+            struct appdata { float4 vertex : POSITION; float3 normal : NORMAL; UNITY_VERTEX_INPUT_INSTANCE_ID };
+            struct v2f
+            {
+                float4 pos : SV_POSITION;
+                float3 normal : TEXCOORD0;
+                float3 world : TEXCOORD1;
+                float3 centre : TEXCOORD2;
+                UNITY_VERTEX_OUTPUT_STEREO
+            };
+
+            // Between the viewer's eyes: a headset's two eyes see the face in the same place.
+            float3 ViewerHead()
+            {
+                #if defined(USING_STEREO_MATRICES)
+                return (unity_StereoWorldSpaceCameraPos[0] + unity_StereoWorldSpaceCameraPos[1]) * .5;
+                #else
+                return _WorldSpaceCameraPos;
+                #endif
+            }
+
+            // The orb's radius in metres (the core mesh is a unit sphere).
+            float Radius() { return length(unity_ObjectToWorld._m00_m10_m20); }
+
+            // A slow bob, slower and lower while asleep, and the breath that goes with it (0 to 1).
+            float Bob(out float breath)
+            {
+                float period = lerp(3.2, 5.5, _Sleep);
+                float phase = _Time.y * 6.2831853 / period;
+                breath = sin(phase) * .5 + .5;
+                return sin(phase) * .22 * _Bob * Radius();
+            }
+
+            v2f vert(appdata v)
+            {
+                v2f o;
+                UNITY_SETUP_INSTANCE_ID(v);
+                UNITY_INITIALIZE_VERTEX_OUTPUT_STEREO(o);
+                float breath;
+                float3 bob = float3(0, Bob(breath), 0);
+                o.world = mul(unity_ObjectToWorld, v.vertex).xyz + bob;
+                o.centre = unity_ObjectToWorld._m03_m13_m23 + bob;
+                o.pos = UnityWorldToClipPos(o.world);
+                o.normal = UnityObjectToWorldNormal(v.normal);
+                return o;
+            }
+
+            float2 Rotate(float2 p, float a) { float s = sin(a), c = cos(a); return float2(c * p.x - s * p.y, s * p.x + c * p.y); }
+
+            // A box of half size b with corners rounded by r, as a signed distance.
+            float RoundBox(float2 p, float2 b, float r)
+            {
+                float2 q = abs(p) - b + r;
+                return length(max(q, 0)) + min(max(q.x, q.y), 0) - r;
+            }
+
+            // How closed the eyes are by a blink: every 3.5 to 6 s, closed and open again in about 0.15 s.
+            float Blink()
+            {
+                float slot = floor(_Time.y / 4.6);
+                float jitter = frac(sin(slot * 91.7) * 43758.55) * 1.6;
+                float t = _Time.y - slot * 4.6 - jitter;
+                return saturate(1 - abs(t - .08) / .08) * _Blink;
+            }
+
+            // One eye's signed distance (negative inside) in the face's plane, side -1 left and +1 right as the viewer sees it.
+            float Eye(float2 p, float side, float open, out float2 local)
+            {
+                float w = .115 * _Wide;
+                float2 q = p - float2(side * .33 * lerp(1, _Wide, .5) + _LookX, .1 + _LookY);
+                // Tilted with their inner ends low (annoyed): turning the eye by side * tilt turns its sample point back.
+                q = Rotate(q, -side * _Tilt);
+                local = q;
+                // An open eye: a rounded upright pill, its top cut flat by a lid.
+                float h = .19 * open;
+                float pill = RoundBox(q, float2(w, max(h, .001)), min(w, max(h, .001)));
+                pill = max(pill, q.y - lerp(h, -h * .1, _Lid));
+                // A closed one: a stroke, bent up into a smile below (asleep) or down into an arch (happy).
+                float x = clamp(q.x, -w, w);
+                float arc = _Curve * (.85 * x * x / w - .3 * w);
+                float slope = _Curve * 1.7 * x / w;
+                float stroke = length(float2(max(abs(q.x) - w, 0), (q.y - arc) / sqrt(1 + slope * slope))) - .028;
+                return lerp(stroke, pill, smoothstep(.06, .35, open));
+            }
+
+            fixed4 frag(v2f i) : SV_Target
+            {
+                // Each eye of a headset with its own camera position.
+                UNITY_SETUP_STEREO_EYE_INDEX_POST_VERTEX(i);
+                float3 n = normalize(i.normal);
+                float3 toEye = normalize(_WorldSpaceCameraPos - i.world);
+                float facing = saturate(dot(n, toEye));
+                float breath;
+                Bob(breath);
+                float3 colour = lerp(_Color.rgb, float3(1, .1, .07), _Anger * .9);
+                // Speaking shimmers; a loud voice brightens it.
+                float talk = 1 + _Talk * .14 * sin(_Time.y * 21) * sin(_Time.y * 6.3);
+                float glow = _Glow * talk * (1 + .55 * _Pulse) * (.92 + .08 * breath);
+
+                if (_Halo > .5)
+                {
+                    // A glow around the core, fading out towards the halo sphere's edge: none over the core itself, whose
+                    // face stays dark-eyed.
+                    float radius = Radius();
+                    float3 eye = _WorldSpaceCameraPos, ray = normalize(i.world - eye);
+                    float3 oc = eye - i.centre;
+                    float b = dot(oc, ray), c = dot(oc, oc) - radius * radius;
+                    float d = length(oc - ray * b) / radius;
+                    float3 light = colour * pow(saturate((1.7 - d) / .7), 2.2) * smoothstep(.92, 1.06, d) * .7 * glow;
+                    if (_Ring > .001)
+                    {
+                        // The ring is a band in a tilted plane through the orb's middle, slowly precessing; its dashes chase
+                        // around it. The view ray hits that plane once; the core hides the part behind it.
+                        float precess = _Time.y * .7;
+                        float3 axis = normalize(float3(sin(.42) * cos(precess), cos(.42), sin(.42) * sin(precess)));
+                        float denom = dot(ray, axis);
+                        float t = abs(denom) > 1e-4 ? dot(i.centre - eye, axis) / denom : -1;
+                        float disc = b * b - c;
+                        float hidden = disc > 0 && -b - sqrt(max(disc, 0)) < t ? 1 : 0;
+                        float3 hit = eye + ray * t - i.centre;
+                        float r = length(hit) / radius;
+                        float aa = max(fwidth(r), 1e-4);
+                        float band = 1 - smoothstep(.055 - aa, .055 + aa, abs(r - 1.38));
+                        float3 across = normalize(cross(axis, abs(axis.y) < .9 ? float3(0, 1, 0) : float3(1, 0, 0)));
+                        float angle = atan2(dot(hit, cross(axis, across)), dot(hit, across)) / 6.2831853 + .5;
+                        float spin = frac(angle - _Time.y * .55);
+                        float dashes = smoothstep(.15, .3, frac(angle * 7 + _Time.y * .35)) * (1 - smoothstep(.75, .9, frac(angle * 7 + _Time.y * .35)));
+                        float ring = band * (t > 0) * (1 - hidden) * (.25 + .75 * pow(spin, 2.5)) * (.35 + .65 * dashes);
+                        light += lerp(colour, 1, .55) * ring * 1.6 * _Ring;
+                    }
+                    return fixed4(light, 1);
+                }
+
+                // The core: whiter towards its middle, its colour at the rim.
+                float rim = pow(1 - facing, 2.2);
+                float3 body = lerp(colour, lerp(colour, 1, .5), pow(facing, 3)) * (.8 + .2 * breath) + colour * rim * .9;
+                body *= glow;
+
+                // The face looks at the viewer, upright with the world.
+                float3 forward = normalize(ViewerHead() - i.centre);
+                float3 right = cross(forward, float3(0, 1, 0));
+                right = length(right) > 1e-3 ? normalize(right) : float3(1, 0, 0);
+                float3 up = cross(right, forward);
+                float2 p = float2(dot(n, right), dot(n, up));
+                float front = dot(n, forward);
+                float open = _Open * (1 - Blink());
+                float aa = max(fwidth(p.x) + fwidth(p.y), 1e-4);
+                float2 qa, qb;
+                float eyes = min(Eye(p, -1, open, qa), Eye(p, 1, open, qb));
+                float ink = (1 - smoothstep(-aa, aa, eyes)) * smoothstep(.2, .35, front);
+                // A small glint in each open eye.
+                float2 glint = float2(-.036, .062 * min(open, 1));
+                float spark = min(length(qa - glint), length(qb - glint)) - .03;
+                float shine = (1 - smoothstep(-aa, aa, spark)) * smoothstep(.55, .8, open) * ink;
+                float3 face = lerp(body, _EyeColor.rgb, ink);
+                face = lerp(face, float3(1, 1, 1), shine * .9);
+                return fixed4(face, 1);
+            }
+            ENDCG
+        }
+    }
+    Fallback "Unlit/Color"
+}

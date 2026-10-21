@@ -424,16 +424,18 @@ namespace Orbiters.Toolkit.Editor.VRChat
             return clip;
         }
 
-        internal static VRCExpressionParameters.Parameter Parameter(string name, bool synced = true) => new VRCExpressionParameters.Parameter
-        { name = name, valueType = VRCExpressionParameters.ValueType.Bool, defaultValue = 0, saved = false, networkSynced = synced };
+        // A bool, unsaved and off by default, unless told otherwise.
+        internal static VRCExpressionParameters.Parameter Parameter(string name, bool synced = true,
+            VRCExpressionParameters.ValueType type = VRCExpressionParameters.ValueType.Bool, bool saved = false, float defaultValue = 0) =>
+            new VRCExpressionParameters.Parameter { name = name, valueType = type, defaultValue = defaultValue, saved = saved, networkSynced = synced };
 
         /// <summary>
         /// Saves the prop's parameters and its menu (<paramref name="menuPath"/> opening <paramref name="controls"/>) next to
         /// the controller, and merges all three into the avatar through VRCFury. Another prop's in the same folder stay: a
-        /// taken name gets a number.
+        /// taken name gets a number. <paramref name="globalParameters"/> keep their names in the avatar (OSC apps set them).
         /// </summary>
         internal static void Install(GameObject root, string folder, AnimatorController controller, string menuPath, string subMenuName,
-            List<VRCExpressionsMenu.Control> controls, VRCExpressionParameters.Parameter[] parameters)
+            List<VRCExpressionsMenu.Control> controls, VRCExpressionParameters.Parameter[] parameters, IEnumerable<string> globalParameters = null)
         {
             var asset = ScriptableObject.CreateInstance<VRCExpressionParameters>();
             asset.parameters = parameters;
@@ -445,7 +447,7 @@ namespace Orbiters.Toolkit.Editor.VRChat
             menu.controls = new List<VRCExpressionsMenu.Control>
             { new VRCExpressionsMenu.Control { name = menuPath, type = VRCExpressionsMenu.Control.ControlType.SubMenu, subMenu = sub, icon = OrbitersMenuIcons.Submenu } };
             AssetDatabase.CreateAsset(menu, AssetDatabase.GenerateUniqueAssetPath(folder + "/Menu.asset"));
-            VrcFury.Writer.FullController(root, controller, menu, asset);
+            VrcFury.Writer.FullController(root, controller, menu, asset, globalParameters);
         }
 
         // Orbiters' default icons: a dot for toggles and buttons, a gauge for sliders, a folder for submenus.
@@ -535,6 +537,25 @@ namespace Orbiters.Toolkit.Editor.VRChat
             var shader = AssetDatabase.LoadAssetAtPath<Shader>(path);
             if (shader == null) throw new InvalidOperationException("Unity did not import " + path + ".");
             return shader;
+        }
+
+        /// <summary>
+        /// Writes the Toolkit's binary <paramref name="template"/> (a .bytes file, e.g. a picture) to <paramref name="path"/> in a
+        /// prop's folder, for the same reason as <see cref="CopyShader"/>, and imports it.
+        /// </summary>
+        internal static void CopyFile(string template, string path)
+        {
+            var data = AssetDatabase.LoadAssetAtPath<TextAsset>(template);
+            if (data == null) throw new InvalidOperationException("Missing " + template + ": reinstall Orbiters Toolkit.");
+            System.IO.File.WriteAllBytes(path, data.bytes);
+            AssetDatabase.ImportAsset(path, ImportAssetOptions.ForceSynchronousImport);
+        }
+
+        /// <summary>A renderer that casts and takes no shadows and reads no light or reflection probes (glowing props).</summary>
+        internal static void Quiet(Renderer renderer)
+        {
+            renderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off; renderer.receiveShadows = false;
+            renderer.lightProbeUsage = UnityEngine.Rendering.LightProbeUsage.Off; renderer.reflectionProbeUsage = UnityEngine.Rendering.ReflectionProbeUsage.Off;
         }
 
         /// <summary>An additive particle material (VRChat's mobile shader, so every platform shows it).</summary>

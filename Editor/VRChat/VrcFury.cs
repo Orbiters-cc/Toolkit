@@ -21,8 +21,13 @@ namespace Orbiters.Toolkit.Editor.VRChat
             Component ArmatureLink(GameObject host, GameObject from, HumanBodyBones toBone, GameObject toObject);
             /// <summary>A saved menu toggle turning <paramref name="target"/> on and off.</summary>
             Component Toggle(GameObject host, string menuPath, GameObject target, bool defaultOn);
-            /// <summary>Merges a prop's controller, menu and parameters without changing the avatar's authored assets.</summary>
-            Component FullController(GameObject host, RuntimeAnimatorController controller, ScriptableObject menu, ScriptableObject parameters);
+            /// <summary>
+            /// Merges a prop's controller, menu and parameters without changing the avatar's authored assets. VRCFury gives a
+            /// Full Controller's parameters names of their own in the avatar (VF##_…), except <paramref name="globalParameters"/>
+            /// ("Name", "Prefix*", "!Exception"): those keep their names, so that OSC apps find them.
+            /// </summary>
+            Component FullController(GameObject host, RuntimeAnimatorController controller, ScriptableObject menu, ScriptableObject parameters,
+                IEnumerable<string> globalParameters = null);
             /// <summary>
             /// For a build copy (no Undo): a saved menu toggle, one at a time among those sharing <paramref name="exclusiveTag"/>,
             /// setting <paramref name="shape"/> of <paramref name="renderer"/> to 100; with <paramref name="shape"/> null, the choice

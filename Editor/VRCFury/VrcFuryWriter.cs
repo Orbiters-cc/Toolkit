@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.Linq;
 using com.vrcfury.api;
 using UnityEditor;
@@ -61,7 +62,8 @@ namespace Orbiters.Toolkit.Editor.VRCFury
         }
 
         // The public API adds components without Undo: register the new one so Undo removes it.
-        public Component FullController(GameObject host, RuntimeAnimatorController controller, ScriptableObject menu, ScriptableObject parameters)
+        public Component FullController(GameObject host, RuntimeAnimatorController controller, ScriptableObject menu, ScriptableObject parameters,
+            IEnumerable<string> globalParameters = null)
         {
             return Created(host, () =>
             {
@@ -69,6 +71,7 @@ namespace Orbiters.Toolkit.Editor.VRCFury
                 full.AddController(controller);
                 full.AddMenu((VRC.SDK3.Avatars.ScriptableObjects.VRCExpressionsMenu)menu);
                 full.AddParams((VRC.SDK3.Avatars.ScriptableObjects.VRCExpressionParameters)parameters);
+                foreach (string name in globalParameters ?? Enumerable.Empty<string>()) full.AddGlobalParam(name);
             });
         }
 

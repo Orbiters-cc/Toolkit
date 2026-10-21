@@ -144,12 +144,6 @@ namespace Orbiters.Toolkit.Editor.VRChat
             return material;
         }
 
-        private static void Quiet(Renderer renderer)
-        {
-            renderer.shadowCastingMode = ShadowCastingMode.Off; renderer.receiveShadows = false;
-            renderer.lightProbeUsage = LightProbeUsage.Off; renderer.reflectionProbeUsage = ReflectionProbeUsage.Off;
-        }
-
         internal static void BuildController(GameObject root, string folder)
         {
             var controller = AnimatorController.CreateAnimatorControllerAtPath(folder + "/Orbit orb.controller");

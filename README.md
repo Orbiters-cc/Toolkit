@@ -1,5 +1,43 @@
 # Orbiters Toolkit
 
+## 0.4.2 — 2026-10-21
+
+- **Orb**, the Orbiters companion (`OrbInstaller.CreatePrefab(folder, textSync)`, Orbiters contracts' Docs/orb.md): a
+  small glowing orb in Orbiters green with simple eyes that floats beside its owner's head, lazily and with a spring (a
+  two-link PhysBone tether anyone can grab and let spring back), and the text panel it projects in front of its owner.
+  Orbiters desktop drives it over OSC: `Orb/State` shows what it is doing (idle with a slow bob and blinks, listening
+  brighter with wide eyes glowing up with its owner's voice, thinking with lidded eyes and a dashed ring turning around
+  it, talking with the projector beam to the panel, asleep dim with closed eyes, happy arches, annoyed red slits,
+  surprised round eyes and a hop: one shader, the eyes morph from state to state), and the panel shows 4 rows of 32
+  glyphs sent a block of 4, 8 or 16 cells at a time (`Orb/Text/Pointer`, `Orb/Text/Sync*`, KillFrenzy Avatar Text's
+  protocol: pointer 255 clears, the cells stay). Its owner talks to it by holding the menu's Talk button (`Orb/Talk`) or
+  touching it (`Orb/Touch`, their own hands, on their client only). Every parameter is global in its VRCFury Full
+  Controller, so OSC finds them by the contract's names; synced bits 1 + 8 + 1 + 8 + 8 per sync value (82 with 8).
+  The cells are kept by one direct blend tree (Write Defaults on, as VRCFury keeps it), whatever the avatar's Write
+  Defaults: VRCFury turns a Full Controller's layers to the avatar's setting, which would wipe cells kept with Write
+  Defaults off. The panel is only as large as its text (a dark plate with a green edge, white glyphs with a dark outline),
+  sits low and to the orb's side of its owner's view, out of its middle and below the face as people in front see it,
+  reads the right way round from behind and in mirrors, and grows for viewers further away about its corner nearest the
+  face. Its atlas (255 glyphs: ASCII, Western European accents, Russian Cyrillic, symbols; drawn by the contracts' tool
+  from Cascadia Mono and Noto Sans JP) and both shaders are copied into the prop's folder; `Bind` fits it to the avatar's
+  head bone, its facing and its eye height. The text shader derives from KillFrenzy Avatar Text's (MIT), see
+  `Editor/THIRD_PARTY_NOTICES.md`.
+- **Avatar manifests** for Orbiters desktop (`AvatarManifestExporter`, Docs/avatar-manifest.md): while the VRChat SDK
+  builds an avatar for Windows (Build & Test or an upload), after every other build step, the Toolkit writes
+  `%LOCALAPPDATA%\Orbiters\Avatars\<blueprint id>.json`: the expression parameters with their final names (VRCFury's
+  VF##_ ones), every control of the menu by its labels (each submenu once, rich text removed), what each sets, and tags
+  from the words of labels, folders and parameter names in English, French, Spanish, German and Japanese (clothing,
+  accessory, hair, body, face, nsfw kept to plain words, pose, emote, locomotion, prop, effect, system, orb), and the Orb
+  prop's text sync count. A Build & Test build also writes it as `local_sdk_<avatar name>.json`; an avatar that only gets
+  its id at upload gets its file when the upload succeeds. Never stops or slows a build: problems are said in the
+  Console. Android and iOS builds, Play Mode and hidden builds (`HiddenAvatarBuild` leaves it out) write nothing.
+- `VrcFury.IWriter.FullController` takes global parameters (VRCFury's `AddGlobalParam`): they keep their names in the
+  avatar. `HeldPropRig.Install` passes them on; `HeldPropRig.Parameter` makes ints, floats, saved and defaults too;
+  `CopyFile` copies a binary template (a picture) into a prop's folder; `Quiet` is shared by the glowing props.
+- `VrcParameters.OscDriven` counts `Orb/…`: optimizers leave Orb's parameters alone.
+- `Editor/THIRD_PARTY_NOTICES.md` lists what ships with the Toolkit under its own license: Meshia Mesh Simplification
+  (AlterMesh), KillFrenzy Avatar Text (Orb's text shader) and the fonts drawn into Orb's glyph atlas.
+
 ## 0.4.1 — 2026-10-21
 
 - `VirtualList.SpanOf`: an item may take several rows' height (positions, scrolling and `Reveal` count rows; `TopOf`
@@ -610,6 +648,48 @@ flexing…). The Orbiters tools share one refit layer for it; ReFit (`orbiters.r
 one bone. It is a preview: accessories go back where they were when it is switched off, before their scene is saved, on
 script reload and on entering Play Mode. Bones driven by constraints are left to them; accessories Modular Avatar
 attaches are shown by name match.
+
+## Orb
+
+`OrbInstaller.CreatePrefab(folder, textSync = 8)` builds Orb, the Orbiters companion, into a folder below Assets/ (the
+gallery packages each version in a folder of its own): the prefab, its controller, menu (**Orb** › Show Orb, Talk) and
+parameters, its two shaders and its glyph atlas (copied from the Toolkit's `Orb.shader.txt`, `OrbText.shader.txt` and
+`OrbText.png.bytes`, so the package refers to no Toolkit file), meshes and materials. VRCFury merges it (a Full
+Controller whose parameters are global); `Bind`, run by `AttachmentHooks` when it is attached, ties it to the avatar's
+head bone, turns it with the avatar and sizes it by the avatar's eye height.
+
+What Orbiters desktop sends is the contract in Orbiters contracts' Docs/orb.md: `Orb/Visible` (saved, on by default),
+`Orb/State` (`OrbState`: idle, listening, thinking, talking, sleeping, happy, annoyed, surprised), `Orb/Text/Visible`,
+`Orb/Text/Pointer` and `Orb/Text/Sync0`… (a block of 4, 8 or 16 of the panel's 128 cells per pointer; 255 clears), and
+it reads `Orb/Talk` (the menu's button) and `Orb/Touch` (the owner's hands, local). Synced bits: 1 + 8 + 1 + 8 + 8 per
+sync value.
+
+- `Shown/Head` follows the head bone (position constraint) turned like the avatar (rotation constraint on the avatar
+  root): the orb and its panel stay where its owner can look at them however the head turns or leans.
+- `Shown/Head/Tether`: a two-link PhysBone (pull 0.15, momentum 0.8, no gravity, 20 % immobile) whose tip carries the
+  orb (`…/Orb`, left out of the chain): it lags, overshoots and settles; anyone can grab it and let it spring back. The
+  orb rests beside the head, 26 cm to the right of the eyes and 12 cm before them. `Orb/Hop` jumps when surprised;
+  `Orb/Hop/Body` draws the core and its halo (two materials of `Orbiters/Orb`: face, blinks and bob on the GPU; a ring
+  while thinking); `Orb/Touch` is the contact.
+- `Shown/Head/Panel`: one skinned mesh for the plate and the beam (`Orbiters/Orb Text`), its pivot the plate's corner
+  nearest the face, 6 cm right, 18 cm below and 50 cm before the eyes, facing ahead. The shader shrinks the plate to the
+  text, flips it for readers behind it and in mirrors, and grows it (up to 1.6 times, from 3 m) for viewers further than
+  arm's length, away from the face.
+- Layers: Base (Orb/Visible), State (each state sets everything it shows; any other value is idle), Text visible, Text
+  block (the pointer as a float) and Text: one direct blend tree (Write Defaults on, which VRCFury keeps) holding each
+  cell in an animator parameter, so the cells stay whatever the avatar's Write Defaults.
+
+## Avatar manifests
+
+`AvatarManifestExporter` (a VRChat build step at `int.MaxValue`, after VRCFury's parameter compressor, Modular Avatar /
+NDMF and every Orbiters step) writes `%LOCALAPPDATA%\Orbiters\Avatars\<blueprint id>.json` while the SDK builds an
+avatar for Windows: Orbiters contracts' Docs/avatar-manifest.md, read by Orbiters desktop when VRChat loads that avatar.
+`AvatarManifest.Read(builtAvatar, id)` takes the expression parameters as built (VRCFury's `VF##_` names included) and
+every control of the menu by its labels (rich text removed, each submenu once at its first place), with what it sets and
+its tags (`AvatarManifestTags`: words of the label, its folders and its parameters' names, in English, French, Spanish,
+German and Japanese); `orb.text_sync` when the Orb prop is there. Build & Test also writes `local_sdk_<avatar name>.json`;
+an avatar given its id only at upload gets its file when the upload succeeds. Problems are said in the Console and never
+stop a build; Android and iOS builds, Play Mode and `HiddenAvatarBuild` write nothing.
 
 ## Install AI integration
 
