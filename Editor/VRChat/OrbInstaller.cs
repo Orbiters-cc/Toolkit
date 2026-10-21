@@ -201,6 +201,7 @@ namespace Orbiters.Toolkit.Editor.VRChat
             follow.Sources[0] = new VRCConstraintSource(bone, 1, Vector3.zero, Vector3.zero);
             level.Sources[0] = new VRCConstraintSource(avatar, 1, Vector3.zero, Vector3.zero);
             Layout(tether, panel, head.InverseTransformPoint(eyes));
+            PlaceScreen(orb);
             EditorUtility.SetDirty(follow); EditorUtility.SetDirty(level);
         }
 

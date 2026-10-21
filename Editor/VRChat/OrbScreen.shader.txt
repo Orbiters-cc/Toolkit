@@ -1,0 +1,224 @@
+// Orb's projected screen (Orbiters contracts, Docs/orb.md, Screen): Orb's menu in front of its owner, the same pages
+// Orbiters desktop's SteamVR overlay shows. A page's unchanging part is a picture (_Pages, one slice per page, drawn by
+// the desktop from the menu's layout); what changes is drawn over it from the screen's memory: 744 bytes the animator
+// keeps two to a material property (_W0 to _W371, each b0 + 256 × b1), read here as one array. _Layout says, row by row for each page, where its text slots, thumbnails and buttons are (4-pixel units).
+// Pages are 1024 × 576 pixels. Seen from behind it reads the right way round. Viewers who hide custom shaders see
+// nothing of it (VRCFallback). OrbInstaller writes this file, the word properties filled in, as "Orb screen.shader".
+Shader "Orbiters/Orb Screen"
+{
+    Properties
+    {
+        _Pages ("Pages", 2DArray) = "" {}
+        _Layout ("Layout", 2D) = "black" {}
+        _MainTex ("Glyph atlas", 2D) = "black" {}
+        _Card ("Card", Color) = (0.063, 0.063, 0.071, 1)
+        _Text ("Text", Color) = (0.925, 0.929, 0.933, 1)
+        _Text2 ("Secondary text", Color) = (0.545, 0.545, 0.58, 1)
+        _Accent ("Accent", Color) = (0, 0.855, 0.427, 1)
+        _Dark ("Picture black", Color) = (0.035, 0.035, 0.043, 1)
+        _Light ("Picture white", Color) = (0.86, 0.86, 0.9, 1)
+        _Placeholder ("Picture loading", Color) = (0.153, 0.153, 0.165, 1)
+//@PROPERTIES
+    }
+    SubShader
+    {
+        Tags { "Queue" = "Transparent" "RenderType" = "Transparent" "IgnoreProjector" = "True" "VRCFallback" = "Hidden" }
+        Cull Off
+        ZWrite Off
+        Blend SrcAlpha OneMinusSrcAlpha
+
+        Pass
+        {
+            CGPROGRAM
+            #pragma vertex vert
+            #pragma fragment frag
+            #pragma target 4.5
+            #pragma multi_compile_instancing
+            #include "UnityCG.cginc"
+
+            UNITY_DECLARE_TEX2DARRAY(_Pages);
+            Texture2D _Layout;
+            sampler2D _MainTex;
+            float4 _MainTex_TexelSize;
+            fixed4 _Card, _Text, _Text2, _Accent, _Dark, _Light, _Placeholder;
+
+            // The screen's memory as one array over its 372 properties (each takes a register of its own).
+            CBUFFER_START(WordBuffer)
+            float _Words[372] : packoffset(c0);
+//@BUFFER
+            CBUFFER_END
+
+            // Every word property used, so none is stripped (never added: _Card's alpha is never negative).
+            float SumWords()
+            {
+                return 0
+//@SUM
+                ;
+            }
+
+            static const float2 Page = float2(1024, 576);
+            static const int Pages = 9;
+            // The screen's memory (Docs/orb.md, Screen).
+            static const int Hover = 2, Pressed = 3, On = 4, Hidden = 8, Passes = 16, TextStart = 24, PicturesStart = 384, PictureBytes = 72;
+            // The layout table's columns.
+            static const int TableSlots = 1, TablePictures = 33, TableElements = 40, LayoutRows = 10;
+            // Where each display row of a thumbnail is kept (rows are kept pass by pass: every eighth, fourth, second, the rest).
+            static const int KeptOf[18] = { 0, 9, 5, 10, 3, 11, 6, 12, 1, 13, 7, 14, 4, 15, 8, 16, 2, 17 };
+
+            struct appdata
+            {
+                float4 vertex : POSITION;
+                float2 uv : TEXCOORD0;
+                UNITY_VERTEX_INPUT_INSTANCE_ID
+            };
+
+            struct v2f
+            {
+                float4 pos : SV_POSITION;
+                float2 uv : TEXCOORD0;
+                UNITY_VERTEX_OUTPUT_STEREO
+            };
+
+            v2f vert(appdata v)
+            {
+                v2f o;
+                UNITY_SETUP_INSTANCE_ID(v);
+                UNITY_INITIALIZE_OUTPUT(v2f, o);
+                UNITY_INITIALIZE_VERTEX_OUTPUT_STEREO(o);
+                o.pos = UnityObjectToClipPos(v.vertex);
+                o.uv = v.uv;
+                return o;
+            }
+
+            // Byte i of the memory: word i / 2 holds bytes 2k (low) and 2k + 1 (high) as b0 + 256 b1.
+            int Byte(int i)
+            {
+                float w = _Words[clamp(i >> 1, 0, 371)];
+                float high = floor((w + .5) / 256);
+                return (int)((i & 1) ? high : round(w - high * 256));
+            }
+
+            bool Bit(int at, int index) { return ((Byte(at + index / 7) >> (index % 7)) & 1) == 1; }
+
+            // A texel of the layout table, its bytes (the table's rows run from page 0 at the top of its picture).
+            int4 Texel(int column, int page) { return (int4)round(_Layout.Load(int3(column, LayoutRows - 1 - page, 0)) * 255); }
+
+            // Coverage of a rounded rectangle (x, y, width, height) at p, a pixel's width antialiased.
+            float Rounded(float2 p, float4 r, float radius)
+            {
+                float2 half = r.zw * .5;
+                float2 d = abs(p - (r.xy + half)) - (half - radius);
+                float distance = length(max(d, 0)) + min(max(d.x, d.y), 0) - radius;
+                float pixel = max(fwidth(p.x), 1e-4);
+                return saturate(.5 - distance / pixel);
+            }
+
+            fixed4 frag(v2f i, fixed facing : VFACE) : SV_Target
+            {
+                float2 uv = i.uv;
+                // From behind (and in mirrors) the page reads the right way round.
+                if (facing < 0) uv.x = 1 - uv.x;
+                float2 p = float2(uv.x, 1 - uv.y) * Page;
+                float alpha = Rounded(p, float4(0, 0, Page), 28);
+                if (alpha <= 0) discard;
+                int page = Byte(0);
+                bool known = page >= 1 && page <= Pages;
+                fixed3 colour = known ? UNITY_SAMPLE_TEX2DARRAY(_Pages, float3(uv.x, uv.y, page)).rgb : _Card.rgb;
+                if (_Card.a < 0) colour.r += SumWords();
+                if (!known) return fixed4(colour, alpha);
+                int4 head = Texel(0, page);
+                int hover = Byte(Hover) - 1, pressed = Byte(Pressed) - 1;
+
+                // Buttons: hidden ones go, then what is hovered, pressed and switched on.
+                [loop] for (int e = 0; e < head.w; e++)
+                {
+                    bool hidden = Bit(Hidden, e), on = e < 28 && Bit(On, e);
+                    if (!hidden && !on && e != hover && e != pressed) continue;
+                    int4 at = Texel(TableElements + 2 * e, page);
+                    int4 look = Texel(TableElements + 2 * e + 1, page);
+                    float4 r = float4(at) * 4;
+                    // A hidden button goes, its soft edge too.
+                    if (hidden)
+                    {
+                        colour = lerp(colour, _Card.rgb, Rounded(p, r + float4(-2, -2, 4, 4), look.x + 2));
+                        continue;
+                    }
+                    float inside = Rounded(p, r, look.x);
+                    if (inside <= 0) continue;
+                    // Looks 3 and 9: green and red buttons, darkened when pressed. White over the page in sRGB, as the
+                    // overlay paints it.
+                    bool solid = look.y == 3 || look.y == 9;
+                    #ifdef UNITY_COLORSPACE_GAMMA
+                    float3 g = colour;
+                    #else
+                    float3 g = LinearToGammaSpace(colour);
+                    #endif
+                    if (e == pressed) g = solid ? lerp(g, 0, .16 * inside) : lerp(g, 1, .12 * inside);
+                    else if (e == hover) g = solid ? lerp(g, 1, .14 * inside) : lerp(g, 1, .06 * inside);
+                    #ifdef UNITY_COLORSPACE_GAMMA
+                    colour = g;
+                    #else
+                    colour = GammaToLinearSpace(g);
+                    #endif
+                    if (on)
+                    {
+                        float ring = inside * (1 - Rounded(p, r + float4(3, 3, -6, -6), max(look.x - 3, 0)));
+                        colour = lerp(colour, _Accent.rgb, ring);
+                    }
+                }
+
+                // Text: each slot's cells, a glyph of the atlas each (tiles twice as tall as wide, glyph g at column g mod 16,
+                // row g div 16 from the top).
+                [loop] for (int s = 0; s < head.y; s++)
+                {
+                    int4 slot = Texel(TableSlots + 2 * s, page);
+                    float2 origin = float2(slot.xy) * 4;
+                    float cell = slot.w;
+                    float2 local = p - origin;
+                    if (local.x < 0 || local.y < 0 || local.x >= slot.z * cell || local.y >= 2 * cell) continue;
+                    int4 more = Texel(TableSlots + 2 * s + 1, page);
+                    int column = (int)(local.x / cell);
+                    int glyph = Byte(TextStart + more.x + 256 * more.y + column);
+                    if (glyph == 0) continue;
+                    float2 inCell = float2(local.x / cell - column, local.y / (2 * cell));
+                    float2 atlas = float2((glyph % 16 + inCell.x) / 16, 1 - (glyph / 16 + inCell.y) / 16);
+                    // Gradients from the screen position, smooth across tiles (a tile's edge is no jump in the mip level).
+                    float2 dx = ddx(p) / float2(16 * cell, -32 * cell), dy = ddy(p) / float2(16 * cell, -32 * cell);
+                    float coverage = tex2Dgrad(_MainTex, atlas, dx, dy).r;
+                    int style = more.z & 15;
+                    fixed3 ink = style == 2 ? _Accent.rgb : style == 1 ? _Text2.rgb : _Text.rgb;
+                    colour = lerp(colour, ink, coverage);
+                }
+
+                // Thumbnails (results): 32 × 18 black and white pixels, the passes received so far shown whole.
+                [loop] for (int t = 0; t < head.z; t++)
+                {
+                    float4 r = float4(Texel(TablePictures + t, page)) * 4;
+                    float inside = Rounded(p, r, 10);
+                    if (inside <= 0) continue;
+                    int passes = Byte(Passes + t);
+                    fixed3 shade = _Placeholder.rgb;
+                    if (passes > 0)
+                    {
+                        int2 pixel = clamp(int2((p - r.xy) / r.zw * float2(32, 18)), int2(0, 0), int2(31, 17));
+                        int step = passes >= 4 ? 1 : passes == 3 ? 2 : passes == 2 ? 4 : 8;
+                        int row = pixel.y / step * step;
+                        int b = Byte(PicturesStart + t * PictureBytes + KeptOf[row] * 4 + pixel.x / 8);
+                        shade = ((b >> (7 - pixel.x % 8)) & 1) ? _Light.rgb : _Dark.rgb;
+                    }
+                    colour = lerp(colour, shade, inside);
+                }
+
+                // Orb listening (Home): its microphone breathes.
+                if (page == 1 && (Byte(1) & 1))
+                {
+                    float pulse = .5 + .5 * sin(_Time.y * 4);
+                    float d = abs(length(p - float2(60, 52)) - (31 + 4 * pulse));
+                    colour = lerp(colour, _Accent.rgb, saturate(1.5 - d) * (.7 - .5 * pulse));
+                }
+                return fixed4(colour, alpha);
+            }
+            ENDCG
+        }
+    }
+}

@@ -23,7 +23,7 @@ namespace Orbiters.Toolkit.Editor.VRChat
         // The controller, parameters and menu of each choice of options, shared by every orb switched to it (they name no
         // object of their own: their curves follow paths below the orb).
         // A new menu or parameters get a new folder: orbs switched earlier keep the files they use.
-        internal const string OptionsFolder = "Assets/Orbiters/Orb/Menu 3/";
+        internal const string OptionsFolder = "Assets/Orbiters/Orb/Menu 4/";
 
         [InitializeOnLoadMethod]
         private static void RegisterOrbOptions() => AttachmentHooks.RegisterOptions(root => FindAll(root).SelectMany(orb =>
@@ -39,7 +39,7 @@ namespace Orbiters.Toolkit.Editor.VRChat
                     Choices = OfferedTextSync.Select(n => n.ToString()).ToList(),
                     ChoiceTooltips = OfferedTextSync.Select(n => $"{n} slots: {Bits(n)} synced bits, a full panel in about {SecondsPerPanel(n)} s").ToList(),
                     Current = OfferedTextSync.ToList().IndexOf(current.textSync),
-                    Choose = index => SetOptions(target, OfferedTextSync[index], OptionsOf(target).walkBoost),
+                    Choose = index => { var now = OptionsOf(target); SetOptions(target, OfferedTextSync[index], now.walkBoost, now.screen); },
                 },
                 new AttachmentOption
                 {
@@ -49,7 +49,18 @@ namespace Orbiters.Toolkit.Editor.VRChat
                     Choices = new[] { "Off", "On" },
                     ChoiceTooltips = new[] { "No radial", "Orb › Walk boost in your menu sets Orbiters desktop's walk boost" },
                     Current = current.walkBoost ? 1 : 0,
-                    Choose = index => SetOptions(target, OptionsOf(target).textSync, index == 1),
+                    Choose = index => { var now = OptionsOf(target); SetOptions(target, now.textSync, index == 1, now.screen); },
+                },
+                new AttachmentOption
+                {
+                    Label = "Replace Orbiters overlay",
+                    Tooltip = "Orb's menu (fast walk, YouTube, calls, a 3D picture) opens on a screen in front of you in VRChat, touched with your index finger, " +
+                              "instead of in Orbiters desktop's SteamVR overlay. People around see it too. No synced bits; its touch contacts are local and don't count in VRChat's performance rank.",
+                    IsToggle = true,
+                    Choices = new[] { "Off", "On" },
+                    ChoiceTooltips = new[] { "Orb's menu opens in Orbiters desktop's SteamVR overlay", "Orb's menu opens on a screen in front of you in VRChat" },
+                    Current = current.screen ? 1 : 0,
+                    Choose = index => { var now = OptionsOf(target); SetOptions(target, now.textSync, now.walkBoost, index == 1); },
                 },
             };
         }).ToList());
@@ -63,29 +74,40 @@ namespace Orbiters.Toolkit.Editor.VRChat
         /// <summary>The number of text slots of a placed orb, 0 when its VRCFury Full Controller can't be read.</summary>
         public static int TextSyncOf(Transform orb) => OptionsOf(orb).textSync;
 
-        /// <summary>A placed orb's text slots (0 when its VRCFury Full Controller can't be read) and whether it has the Walk boost radial.</summary>
-        public static (int textSync, bool walkBoost) OptionsOf(Transform orb)
+        /// <summary>
+        /// A placed orb's text slots (0 when its VRCFury Full Controller can't be read), whether it has the Walk boost radial
+        /// and whether its menu opens on its projected screen.
+        /// </summary>
+        public static (int textSync, bool walkBoost, bool screen) OptionsOf(Transform orb)
         {
             var parameters = FullController(orb, out _)?.parameters;
-            if (parameters == null) return (0, false);
-            return (parameters.parameters.Count(p => p.name != null && p.name.StartsWith(TextSyncPrefix, StringComparison.Ordinal)), parameters.parameters.Any(p => p.name == WalkBoost));
+            if (parameters == null) return (0, false, false);
+            return (parameters.parameters.Count(p => p.name != null && p.name.StartsWith(TextSyncPrefix, StringComparison.Ordinal)), parameters.parameters.Any(p => p.name == WalkBoost),
+                parameters.parameters.Any(p => p.name == ScreenPointer) && HasScreen(orb));
         }
 
-        /// <summary>Switches a placed orb to <paramref name="textSync"/> text slots, its Walk boost radial kept.</summary>
-        public static void SetTextSync(Transform orb, int textSync) => SetOptions(orb, textSync, OptionsOf(orb).walkBoost);
+        /// <summary>Switches a placed orb to <paramref name="textSync"/> text slots, its other options kept.</summary>
+        public static void SetTextSync(Transform orb, int textSync)
+        {
+            var now = OptionsOf(orb);
+            SetOptions(orb, textSync, now.walkBoost, now.screen);
+        }
 
         /// <summary>
         /// Switches a placed orb to <paramref name="textSync"/> text slots (4, 8 or 16), with or without the Walk boost
-        /// radial: its VRCFury Full Controller takes the controller, parameters and menu made for that choice, its global
-        /// parameters follow. Recorded with Undo; the orb's own files (a gallery's among them) are left as they are.
+        /// radial and the projected screen: its VRCFury Full Controller takes the controller, parameters and menu made for
+        /// that choice, its global parameters follow, and the screen's object is added or removed. Recorded with Undo; the
+        /// orb's own files (a gallery's among them) are left as they are.
         /// </summary>
-        public static void SetOptions(Transform orb, int textSync, bool walkBoost)
+        public static void SetOptions(Transform orb, int textSync, bool walkBoost, bool screen = false)
         {
             if (!TextSyncCounts.Contains(textSync)) throw new ArgumentOutOfRangeException(nameof(textSync), "An orb has 4, 8 or 16 text sync values.");
             var found = FullController(orb, out var component) ?? throw new InvalidOperationException("This orb has no VRCFury Full Controller: add it again.");
-            if (OptionsOf(orb) == (textSync, walkBoost)) return;
+            if (OptionsOf(orb) == (textSync, walkBoost, screen)) return;
             if (found.menuIndex < 0) throw new InvalidOperationException("This orb's menu was changed: add it again.");
-            var (controller, parameters, menu) = Shared(textSync, walkBoost);
+            if (screen) AddScreen(orb);
+            else RemoveScreen(orb);
+            var (controller, parameters, menu) = Shared(textSync, walkBoost, screen);
             var serialized = new SerializedObject(component);
             Reference(serialized.FindProperty("content.controllers").GetArrayElementAtIndex(found.controllerIndex).FindPropertyRelative("controller"), controller);
             Reference(serialized.FindProperty("content.prms").GetArrayElementAtIndex(found.parametersIndex).FindPropertyRelative("parameters"), parameters);
@@ -149,9 +171,9 @@ namespace Orbiters.Toolkit.Editor.VRChat
         }
 
         // The controller, parameters and menu for a choice of options, made once in their shared folder.
-        private static (AnimatorController controller, VRCExpressionParameters parameters, VRCExpressionsMenu menu) Shared(int textSync, bool walkBoost)
+        private static (AnimatorController controller, VRCExpressionParameters parameters, VRCExpressionsMenu menu) Shared(int textSync, bool walkBoost, bool screen)
         {
-            string folder = OptionsFolder + "Text slots " + textSync + (walkBoost ? " + walk boost" : "");
+            string folder = OptionsFolder + "Text slots " + textSync + (walkBoost ? " + walk boost" : "") + (screen ? " + screen" : "");
             var controller = AssetDatabase.LoadAssetAtPath<AnimatorController>(folder + "/Orb.controller");
             var parameters = AssetDatabase.LoadAssetAtPath<VRCExpressionParameters>(folder + "/Parameters.asset");
             var menu = AssetDatabase.LoadAssetAtPath<VRCExpressionsMenu>(folder + "/Menu.asset");
@@ -160,7 +182,7 @@ namespace Orbiters.Toolkit.Editor.VRChat
             if (AssetDatabase.IsValidFolder(folder)) AssetDatabase.DeleteAsset(folder);
             System.IO.Directory.CreateDirectory(folder); AssetDatabase.ImportAsset(folder);
             var root = new GameObject("Orb options");
-            try { BuildController(root, folder, textSync, walkBoost); }
+            try { BuildController(root, folder, textSync, walkBoost, screen); }
             finally { Object.DestroyImmediate(root); }
             AssetDatabase.SaveAssets();
             return (AssetDatabase.LoadAssetAtPath<AnimatorController>(folder + "/Orb.controller"), AssetDatabase.LoadAssetAtPath<VRCExpressionParameters>(folder + "/Parameters.asset"),

@@ -35,6 +35,17 @@
 - **Orb › Call** (`Orb/Call/Menu`, `Pick`, `Go`, `End`, all local): the contacts on the panel, a radial choosing one, call
   or answer, decline or hang up, for Orbiters desktop's calls (contracts `Docs/orb-calls.md`). Orbs switched after this get
   their options' files in `Assets/Orbiters/Orb/Menu 3/` (earlier ones keep theirs).
+- **Orb's projected screen** ("Replace Orbiters overlay" on the orb's card; `OrbInstaller.SetOptions(orb, textSync,
+  walkBoost, screen)`, contracts Docs/orb.md, Screen): Orb's menu (fast walk, YouTube, calls, a 3D picture) opens on a
+  screen in front of its owner instead of in Orbiters desktop's SteamVR overlay. It shows the page pictures Orbiters
+  desktop draws (`OrbScreenPages.png.bytes`, `OrbScreenLayout.png.bytes`, from `orbiters-desktop --orb-menu`) and draws
+  over them what the desktop sends: texts, black and white thumbnails, hovered, pressed, chosen and hidden buttons. Its
+  744 bytes of memory sit two to an animated parameter, written for its owner through local parameters (16 a block)
+  and for everyone else through the text panel's synced channel (no synced bits of its own). It appears 42 cm before
+  the eyes and stays frozen in the world while open; eight local contact receivers (four per index finger, not
+  counted in VRChat's performance rank) tell the desktop where a finger touches it. Turning the option on adds the
+  screen's object to that orb, with files shared by every screen in `Assets/Orbiters/Orb/Screen 1/`; options' files
+  are now in `Assets/Orbiters/Orb/Menu 4/`. Avatar manifests say `orb.screen` when it is there.
 - **Attachment options** (`AttachmentHooks.RegisterOptions`, `Options`, `AttachmentOption`): a prop offers a few
   settings once it is on an avatar, which tools show on its card (Orb's text slots in My Avatar).
 - **Avatar manifests** for Orbiters desktop (`AvatarManifestExporter`, Docs/avatar-manifest.md): while the VRChat SDK

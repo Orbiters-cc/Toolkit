@@ -63,6 +63,11 @@ public class OrbTests
             ("Orb/State", VRCExpressionParameters.ValueType.Int, true, false, 0),
             ("Orb/Talk", VRCExpressionParameters.ValueType.Bool, false, false, 0),
             ("Orb/Touch", VRCExpressionParameters.ValueType.Bool, false, false, 0),
+            ("Orb/Photo3D", VRCExpressionParameters.ValueType.Bool, false, false, 0),
+            ("Orb/Call/Menu", VRCExpressionParameters.ValueType.Bool, false, false, 0),
+            ("Orb/Call/Pick", VRCExpressionParameters.ValueType.Float, false, false, 0),
+            ("Orb/Call/Go", VRCExpressionParameters.ValueType.Bool, false, false, 0),
+            ("Orb/Call/End", VRCExpressionParameters.ValueType.Bool, false, false, 0),
             ("Orb/Text/Visible", VRCExpressionParameters.ValueType.Bool, true, false, 0),
             ("Orb/Text/Pointer", VRCExpressionParameters.ValueType.Int, true, false, 0),
         };
@@ -86,7 +91,11 @@ public class OrbTests
 
         var menu = AssetDatabase.LoadAssetAtPath<VRCExpressionsMenu>(folder + "/Menu.asset").controls.Single();
         Assert.AreEqual(("Orb", VRCExpressionsMenu.Control.ControlType.SubMenu), (menu.name, menu.type));
-        CollectionAssert.AreEqual(new[] { ("Show Orb", VRCExpressionsMenu.Control.ControlType.Toggle, "Orb/Visible"), ("Talk", VRCExpressionsMenu.Control.ControlType.Button, "Orb/Talk") },
+        CollectionAssert.AreEqual(new[]
+            {
+                ("Show Orb", VRCExpressionsMenu.Control.ControlType.Toggle, "Orb/Visible"), ("Talk", VRCExpressionsMenu.Control.ControlType.Button, "Orb/Talk"),
+                ("3D picture", VRCExpressionsMenu.Control.ControlType.Button, "Orb/Photo3D"), ("Call", VRCExpressionsMenu.Control.ControlType.SubMenu, ""),
+            },
             menu.subMenu.controls.Select(c => (c.name, c.type, c.parameter.name)).ToArray());
 
         // The rig: the tether's tip carries the orb, the owner's hands touch it, the panel waits off.
@@ -303,6 +312,158 @@ public class OrbTests
             Assert.Less(Quaternion.Angle(avatar.rotation * rest.turn, panel.rotation), .01f);
         }
         finally { solver.Release(); }
+    }
+
+    // ---- The projected screen (Docs/orb.md, Screen) ----
+
+    // An orb whose controller has the screen (built into its own folder) and its screen object, playing.
+    private (GameObject root, MeshRenderer screen) PlayWithScreen(int textSync = 8)
+    {
+        var prefab = AssetDatabase.LoadAssetAtPath<GameObject>(OrbInstaller.CreatePrefab(folder, textSync));
+        string screenFolder = folder + "/With screen";
+        AssetDatabase.CreateFolder(folder, "With screen");
+        var builder = new GameObject("Orb builder");
+        try { OrbInstaller.BuildController(builder, screenFolder, textSync, false, true); }
+        finally { Object.DestroyImmediate(builder); }
+        var root = Object.Instantiate(prefab);
+        SceneManager.MoveGameObjectToScene(root, scene);
+        var screen = OrbInstaller.AddScreen(root.transform, folder + "/Screen assets").GetComponent<MeshRenderer>();
+        graph = PlayableGraph.Create("Orb screen test");
+        playable = AnimatorControllerPlayable.Create(graph, AssetDatabase.LoadAssetAtPath<AnimatorController>(screenFolder + "/Orb.controller"));
+        AnimationPlayableOutput.Create(graph, "Orb", root.AddComponent<Animator>()).SetSourcePlayable(playable);
+        graph.SetTimeUpdateMode(DirectorUpdateMode.Manual); graph.Play();
+        return (root, screen);
+    }
+
+    // The screen's memory as its shader reads it (word k: b0 + 256 b1).
+    private static byte[] Memory(MeshRenderer screen)
+    {
+        var block = new MaterialPropertyBlock();
+        screen.GetPropertyBlock(block);
+        var bytes = new byte[OrbInstaller.ScreenBytes];
+        for (int k = 0; k < OrbInstaller.ScreenWords; k++)
+        {
+            float w = block.GetFloat("_W" + k);
+            float high = Mathf.Floor((w + .5f) / 256);
+            bytes[2 * k] = (byte)Mathf.RoundToInt(w - high * 256);
+            bytes[2 * k + 1] = (byte)high;
+        }
+        return bytes;
+    }
+
+    // Bytes for every place of the memory, each value but 128 (it has no float).
+    private static byte[] Pattern(int seed)
+    {
+        var bytes = new byte[OrbInstaller.ScreenBytes];
+        for (int i = 0; i < bytes.Length; i++) { int b = (i * 37 + seed * 11 + 5) % 256; bytes[i] = (byte)(b == 128 ? 129 : b); }
+        return bytes;
+    }
+
+    [Test]
+    public void TheScreenOptionAddsItsTouchPointsAndParameters()
+    {
+        if (VrcFury.Writer == null) Assert.Ignore("Requires the VRCFury integration.");
+        var (root, screen) = PlayWithScreen();
+        Assert.IsTrue(OrbInstaller.HasScreen(root.transform));
+        Assert.IsFalse(screen.gameObject.activeSelf, "Hidden until it opens");
+        var receivers = screen.GetComponentsInChildren<VRCContactReceiver>(true);
+        Assert.AreEqual(8, receivers.Length, "Four touch points per index finger");
+        foreach (var r in receivers)
+        {
+            Assert.IsTrue(r.localOnly && r.allowSelf && !r.allowOthers, "Local: the owner's own fingers only, nothing in the performance rank");
+            Assert.AreEqual(VRC.Dynamics.ContactReceiver.ReceiverType.Proximity, r.receiverType);
+            StringAssert.StartsWith(OrbInstaller.ScreenTouchPrefix, r.parameter);
+            Assert.AreEqual(r.parameter.Contains("/R") ? "FingerIndexR" : "FingerIndexL", r.collisionTags.Single());
+        }
+        var parameters = AssetDatabase.LoadAssetAtPath<VRCExpressionParameters>(folder + "/With screen/Parameters.asset");
+        var screenParameters = parameters.parameters.Where(p => p.name.StartsWith("Orb/Screen/", StringComparison.Ordinal)).ToList();
+        Assert.AreEqual(1 + 1 + OrbInstaller.ScreenLocalValues + 8, screenParameters.Count, "Open, the pointer, 16 values, 8 touch points");
+        Assert.IsTrue(screenParameters.All(p => !p.networkSynced), "No synced bits");
+        var hold = screen.GetComponent<VRCParentConstraint>();
+        Assert.IsFalse(hold.RebakeOffsetsWhenUnfrozen, "Opened again, it appears before the eyes, not where it was");
+    }
+
+    [Test]
+    public void TheOwnersScreenKeepsItsLocalBlocksAndIgnoresTheSyncedOnes()
+    {
+        if (VrcFury.Writer == null) Assert.Ignore("Requires the VRCFury integration.");
+        var (_, screen) = PlayWithScreen();
+        playable.SetBool("IsLocal", true);
+        playable.SetBool(OrbInstaller.ScreenOpen, true);
+        Tick(3);
+        Assert.IsTrue(screen.gameObject.activeSelf, "Orb/Screen/Open shows it");
+        Assert.IsTrue(screen.GetComponent<VRCParentConstraint>().FreezeToWorld, "Frozen where it appeared");
+
+        void Local(int pointer, byte[] bytes, int from)
+        {
+            playable.SetInteger(OrbInstaller.ScreenPointer, pointer);
+            for (int i = 0; i < OrbInstaller.ScreenLocalValues; i++)
+                playable.SetFloat(OrbInstaller.ScreenValue(i), SyncValue(from + i < bytes.Length ? bytes[from + i] : 0));
+            // The desktop holds each block for two frames or more.
+            Tick(2);
+        }
+        var data = Pattern(1);
+        int blocks = (OrbInstaller.ScreenBytes + 15) / 16;
+        for (int b = 0; b < blocks; b++) Local(b + 1, data, b * 16);
+        Local(0, data, 0);
+        CollectionAssert.AreEqual(data, Memory(screen), "Every block written");
+
+        // A minute later nothing drifted.
+        Tick(3000);
+        CollectionAssert.AreEqual(data, Memory(screen));
+
+        // The text channel's screen blocks are for everyone else.
+        playable.SetInteger(OrbInstaller.TextPointer, OrbInstaller.ScreenPointers(8).first);
+        for (int i = 0; i < 8; i++) playable.SetFloat(OrbInstaller.TextSync(i), SyncValue(7));
+        Tick(4);
+        CollectionAssert.AreEqual(data, Memory(screen), "The owner ignores the synced screen blocks");
+
+        // Rewritten block by block, then cleared.
+        var again = Pattern(2);
+        for (int b = 0; b < blocks; b++) Local(b + 1, again, b * 16);
+        Local(0, again, 0);
+        CollectionAssert.AreEqual(again, Memory(screen));
+        Local(OrbInstaller.ScreenLocalClear, again, 0);
+        Local(0, again, 0);
+        Assert.IsTrue(Memory(screen).All(v => v == 0), "Pointer 255 clears the owner's screen");
+
+        playable.SetBool(OrbInstaller.ScreenOpen, false);
+        Tick(3);
+        Assert.IsFalse(screen.gameObject.activeSelf);
+        Assert.IsFalse(screen.GetComponent<VRCParentConstraint>().FreezeToWorld, "Closed, it follows the head again");
+    }
+
+    [TestCase(8)]
+    [TestCase(4)]
+    public void EveryoneElsesScreenOpensWithItsBlocksAndClosesAt254(int textSync)
+    {
+        if (VrcFury.Writer == null) Assert.Ignore("Requires the VRCFury integration.");
+        var (_, screen) = PlayWithScreen(textSync);
+        playable.SetBool("IsLocal", false);
+        Tick(3);
+        var (first, blocks) = OrbInstaller.ScreenPointers(textSync);
+        Assert.AreEqual(OrbInstaller.Cells / textSync + 1, first);
+        Assert.Less(first + blocks - 1, OrbInstaller.PointerScreenClose, "Every block has a pointer");
+
+        void Synced(int pointer, byte[] bytes, int from)
+        {
+            playable.SetInteger(OrbInstaller.TextPointer, pointer);
+            for (int i = 0; i < textSync; i++) playable.SetFloat(OrbInstaller.TextSync(i), SyncValue(from + i < bytes.Length ? bytes[from + i] : 0));
+            Tick(3);
+        }
+        // The panel's own blocks don't open it.
+        Synced(1, Pattern(3), 0);
+        Assert.IsFalse(screen.gameObject.activeSelf, "Panel pointers leave the screen closed");
+        var data = Pattern(4);
+        for (int b = 0; b < blocks; b++) Synced(first + b, data, b * textSync);
+        Assert.IsTrue(screen.gameObject.activeSelf, "Its first block opens it");
+        Synced(0, data, 0);
+        CollectionAssert.AreEqual(data, Memory(screen), "Every block written");
+        // Panel text meanwhile changes nothing on the screen.
+        Synced(2, Pattern(5), 0);
+        CollectionAssert.AreEqual(data, Memory(screen));
+        Synced(OrbInstaller.PointerScreenClose, data, 0);
+        Assert.IsFalse(screen.gameObject.activeSelf, "Pointer 254 closes it");
     }
 
     // ---- Helpers ----

@@ -29,6 +29,8 @@ namespace Orbiters.Toolkit.Editor.VRChat.Manifest
         public readonly List<Control> Controls = new List<Control>();
         /// <summary>The Orb prop's number of text sync values (4, 8 or 16), when the avatar carries it.</summary>
         public int? OrbTextSync;
+        /// <summary>The Orb prop's projected screen: its protocol's version (<see cref="OrbInstaller.ScreenVersion"/>), 0 without one.</summary>
+        public int OrbScreen;
 
         /// <summary>An expression parameter as uploaded. <see cref="Type"/>: "bool", "int" or "float".</summary>
         public sealed class Parameter
@@ -99,6 +101,7 @@ namespace Orbiters.Toolkit.Editor.VRChat.Manifest
                 var sync = new Regex("^" + Regex.Escape(OrbInstaller.TextSyncPrefix) + "[0-9]+$");
                 int count = manifest.Parameters.Count(p => sync.IsMatch(p.Name));
                 if (OrbInstaller.TextSyncCounts.Contains(count)) manifest.OrbTextSync = count;
+                if (manifest.Parameters.Any(p => p.Name == OrbInstaller.ScreenPointer)) manifest.OrbScreen = OrbInstaller.ScreenVersion;
             }
             return manifest;
         }
@@ -212,6 +215,7 @@ namespace Orbiters.Toolkit.Editor.VRChat.Manifest
                     json.WritePropertyName("orb");
                     json.WriteStartObject();
                     json.WritePropertyName("text_sync"); json.WriteValue(OrbTextSync.Value);
+                    if (OrbScreen > 0) { json.WritePropertyName("screen"); json.WriteValue(OrbScreen); }
                     json.WriteEndObject();
                 }
                 json.WriteEndObject();
