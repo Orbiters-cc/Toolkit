@@ -63,12 +63,36 @@ namespace Orbiters.Toolkit.Editor.VRChat.Manifest
         }
         private static string folder;
 
-        /// <summary>The file of <paramref name="avatarId"/>: every character but A–Z, a–z, 0–9, _ and - becomes _ ("local:x" → "local_x.json").</summary>
+        /// <summary>
+        /// The file of <paramref name="avatarId"/> (contracts' Docs/avatar-manifest.md, Rust <c>avatar::file_name</c>): every
+        /// character but A–Z, a–z, 0–9, _ and - becomes _ ("local:x" → "local_x.json"); when one did, - and the FNV-1a
+        /// 32-bit hash of the id's UTF-8 bytes (8 lowercase hex digits) follow, so test avatars named "ネコ" and "イヌ"
+        /// get files of their own.
+        /// </summary>
         public static string FileName(string avatarId)
         {
-            var name = new StringBuilder(avatarId?.Length ?? 0);
-            foreach (char c in avatarId ?? "")
-                name.Append(c >= 'A' && c <= 'Z' || c >= 'a' && c <= 'z' || c >= '0' && c <= '9' || c == '_' || c == '-' ? c : '_');
+            string id = avatarId ?? "";
+            var name = new StringBuilder(id.Length + 14);
+            bool replaced = false;
+            for (int i = 0; i < id.Length; i++)
+            {
+                char c = id[i];
+                if (c >= 'A' && c <= 'Z' || c >= 'a' && c <= 'z' || c >= '0' && c <= '9' || c == '_' || c == '-')
+                {
+                    name.Append(c);
+                    continue;
+                }
+                // One _ per character, as Rust counts them: a surrogate pair is one character.
+                if (char.IsHighSurrogate(c) && i + 1 < id.Length && char.IsLowSurrogate(id[i + 1])) i++;
+                name.Append('_');
+                replaced = true;
+            }
+            if (replaced)
+            {
+                uint hash = 0x811C9DC5;
+                foreach (byte b in Encoding.UTF8.GetBytes(id)) hash = unchecked((hash ^ b) * 0x01000193);
+                name.Append('-').Append(hash.ToString("x8", CultureInfo.InvariantCulture));
+            }
             return name + ".json";
         }
 

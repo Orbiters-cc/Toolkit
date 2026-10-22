@@ -78,9 +78,12 @@
   VF##_ ones), every control of the menu by its labels (each submenu once, rich text removed), what each sets, and tags
   from the words of labels, folders and parameter names in English, French, Spanish, German and Japanese (clothing,
   accessory, hair, body, face, nsfw kept to plain words, pose, emote, locomotion, prop, effect, system, orb), and the Orb
-  prop's text sync count. A Build & Test build also writes it as `local_sdk_<avatar name>.json`; an avatar that only gets
-  its id at upload gets its file when the upload succeeds. Never stops or slows a build: problems are said in the
-  Console. Android and iOS builds, Play Mode and hidden builds (`HiddenAvatarBuild` leaves it out) write nothing.
+  prop's text sync count. A Build & Test build also writes it as `local_sdk_<avatar name>-<hash>.json`: as in contracts
+  0.4.0, a name whose id had characters other than letters, digits, _ and - replaced ends with the FNV-1a hash of the
+  id, so avatars named "ネコ" and "イヌ" get files of their own and Orbiters desktop finds the one VRChat loaded. An avatar
+  that only gets its id at upload gets its file when the upload succeeds. Never stops or slows a build: problems are
+  said in the Console. Android and iOS builds, Play Mode and hidden builds (`HiddenAvatarBuild` leaves it out) write
+  nothing.
 - `VrcFury.IWriter.FullController` takes global parameters (VRCFury's `AddGlobalParam`): they keep their names in the
   avatar. `HeldPropRig.Install` passes them on; `HeldPropRig.Parameter` makes ints, floats, saved and defaults too;
   `CopyFile` copies a binary template (a picture) into a prop's folder; `Quiet` is shared by the glowing props.
@@ -737,8 +740,10 @@ avatar for Windows: Orbiters contracts' Docs/avatar-manifest.md, read by Orbiter
 `AvatarManifest.Read(builtAvatar, id)` takes the expression parameters as built (VRCFury's `VF##_` names included) and
 every control of the menu by its labels (rich text removed, each submenu once at its first place), with what it sets and
 its tags (`AvatarManifestTags`: words of the label, its folders and its parameters' names, in English, French, Spanish,
-German and Japanese); `orb.text_sync` when the Orb prop is there. Build & Test also writes `local_sdk_<avatar name>.json`;
-an avatar given its id only at upload gets its file when the upload succeeds. Problems are said in the Console and never
+German and Japanese); `orb.text_sync` when the Orb prop is there. Build & Test also writes
+`local_sdk_<avatar name>-<hash>.json` (`AvatarManifest.FileName`: characters other than letters, digits, _ and - become
+_, and then the FNV-1a hash of the id follows, as Orbiters desktop names it); an avatar given its id only at upload gets
+its file when the upload succeeds. Problems are said in the Console and never
 stop a build; Android and iOS builds, Play Mode and `HiddenAvatarBuild` write nothing.
 
 ## Install AI integration

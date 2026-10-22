@@ -40,8 +40,13 @@ public class AvatarManifestTests
     public void FileNamesKeepOnlyLettersDigitsUnderscoresAndHyphens()
     {
         Assert.AreEqual("avtr_2bd4-a.json", AvatarManifest.FileName("avtr_2bd4-a"));
-        Assert.AreEqual("local_12____x.json", AvatarManifest.FileName("local:12/..\\x"));
-        Assert.AreEqual("local_sdk_Rexouium_1_6__.json", AvatarManifest.FileName("local:sdk_Rexouium 1.6 é"));
+        // A replaced character adds the FNV-1a hash of the id's UTF-8 bytes: the contracts' Rust file_name gives the same.
+        Assert.AreEqual("local_12____x-86d950ee.json", AvatarManifest.FileName("local:12/..\\x"));
+        Assert.AreEqual("local_sdk_Rexouium_1_6__-aa64dd14.json", AvatarManifest.FileName("local:sdk_Rexouium 1.6 é"));
+        // Names that differ only in replaced characters get files of their own; a character beyond the BMP is one _.
+        Assert.AreEqual("local_sdk___-023273ba.json", AvatarManifest.FileName("local:sdk_ネコ"));
+        Assert.AreEqual("local_sdk___-a6a30a18.json", AvatarManifest.FileName("local:sdk_イヌ"));
+        Assert.AreEqual("local_sdk__-b2629522.json", AvatarManifest.FileName("local:sdk_\U0001F98A"));
     }
 
     [Test]
@@ -129,12 +134,13 @@ public class AvatarManifestTests
 
         // Written in one step under its id's file name; a newer build replaces it.
         string path = AvatarManifestExporter.Write(manifest, "local:sdk_Rexouium");
-        Assert.AreEqual(Path.Combine(folder, "local_sdk_Rexouium.json"), path);
+        // The id's ":" is replaced, so the name carries the id's hash (Rust avatar::file_name names it alike).
+        Assert.AreEqual(Path.Combine(folder, "local_sdk_Rexouium-d14e4443.json"), path);
         Assert.AreEqual("local:sdk_Rexouium", (string)JObject.Parse(File.ReadAllText(path))["avatar_id"]);
         manifest.Name = "Rexouium 2";
         AvatarManifestExporter.Write(manifest, "local:sdk_Rexouium");
         Assert.AreEqual("Rexouium 2", (string)JObject.Parse(File.ReadAllText(path))["name"]);
-        CollectionAssert.AreEqual(new[] { "local_sdk_Rexouium.json" }, Directory.GetFiles(folder).Select(Path.GetFileName), "No temporary file left");
+        CollectionAssert.AreEqual(new[] { "local_sdk_Rexouium-d14e4443.json" }, Directory.GetFiles(folder).Select(Path.GetFileName), "No temporary file left");
 
         // An avatar without the prop has no orb; one with VRChat's default menu has no controls.
         descriptor.expressionParameters.parameters = parameters.Take(3).ToArray();
