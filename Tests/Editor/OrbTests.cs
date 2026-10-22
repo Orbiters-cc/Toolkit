@@ -368,17 +368,19 @@ public class OrbTests
         Assert.AreEqual(folder + "/Orb screen.mat", AssetDatabase.GetAssetPath(screen.sharedMaterial), "Its files in the orb's folder, which a package carries");
         Assert.IsFalse(screen.gameObject.activeSelf, "Hidden until it opens");
         var receivers = screen.GetComponentsInChildren<VRCContactReceiver>(true);
-        Assert.AreEqual(8, receivers.Length, "Four touch points per index finger");
+        Assert.AreEqual(8 + 4 + 4, receivers.Length, "Four touch points per index finger, four each for the eyes and the gaze point");
         foreach (var r in receivers)
         {
             Assert.IsTrue(r.localOnly && r.allowSelf && !r.allowOthers, "Local: the owner's own fingers only, nothing in the performance rank");
             Assert.AreEqual(VRC.Dynamics.ContactReceiver.ReceiverType.Proximity, r.receiverType);
+            if (r.parameter.StartsWith(OrbInstaller.ScreenGazePrefix, StringComparison.Ordinal)) { Assert.AreEqual(OrbInstaller.GazeTag, r.collisionTags.Single()); continue; }
+            if (r.parameter.StartsWith(OrbInstaller.ScreenEyePrefix, StringComparison.Ordinal)) { Assert.AreEqual(OrbInstaller.EyeTag, r.collisionTags.Single()); continue; }
             StringAssert.StartsWith(OrbInstaller.ScreenTouchPrefix, r.parameter);
             Assert.AreEqual(r.parameter.Contains("/R") ? "FingerIndexR" : "FingerIndexL", r.collisionTags.Single());
         }
         var parameters = AssetDatabase.LoadAssetAtPath<VRCExpressionParameters>(folder + "/Parameters.asset");
         var screenParameters = parameters.parameters.Where(p => p.name.StartsWith("Orb/Screen/", StringComparison.Ordinal)).ToList();
-        Assert.AreEqual(1 + 1 + 1 + OrbInstaller.ScreenLocalValues + 8, screenParameters.Count, "Open, Replace, the pointer, 16 values, 8 touch points");
+        Assert.AreEqual(1 + 1 + 1 + OrbInstaller.ScreenLocalValues + 8 + 8, screenParameters.Count, "Open, Replace, the pointer, 16 values, 8 touch points, 4 each for the eyes and the gaze");
         Assert.IsTrue(screenParameters.All(p => !p.networkSynced), "No synced bits");
         var replace = screenParameters.Single(p => p.name == OrbInstaller.ScreenReplace);
         Assert.AreEqual((0f, false), (replace.defaultValue, replace.saved), "Off unless the card's option is on, and never saved: each upload's option holds");
@@ -461,6 +463,82 @@ public class OrbTests
         playable.SetBool(OrbInstaller.ScreenOpen, false);
         Tick(3);
         Assert.IsFalse(screen.gameObject.activeSelf);
+    }
+
+    // Desktop mode: the owner points by looking. The eyes and the gaze point stay on the line of sight however the head
+    // turns, and Orbiters desktop's reading (Docs/orb.md, Screen: the line through the two located points, on the
+    // screen's plane) lands where the owner looks.
+    [Test]
+    public void TheGazePointFollowsTheLineOfSightOntoTheScreen()
+    {
+        if (VrcFury.Writer == null) Assert.Ignore("Requires the VRCFury integration.");
+        var prefab = AssetDatabase.LoadAssetAtPath<GameObject>(OrbInstaller.CreatePrefab(folder));
+        var (avatar, head) = Humanoid(eyes: 1.4f);
+        var orb = ((GameObject)PrefabUtility.InstantiatePrefab(prefab, avatar)).transform;
+        AttachmentHooks.Prepare(orb.gameObject, avatar);
+        var eye = orb.Find(OrbInstaller.Gaze);
+        var gaze = orb.Find(OrbInstaller.GazePoint);
+        foreach (var (at, tag) in new[] { (eye, OrbInstaller.EyeTag), (gaze, OrbInstaller.GazeTag) })
+        {
+            var sender = at.GetComponent<VRCContactSender>();
+            Assert.IsTrue(sender.localOnly, "Local: nothing in the performance rank");
+            Assert.AreEqual(tag, sender.collisionTags.Single());
+        }
+        var screen = orb.Find(OrbInstaller.ScreenObject);
+        var solver = new ConstraintSolver();
+        try
+        {
+            solver.Track(orb.gameObject);
+            solver.Solve();
+            var eyes = avatar.TransformPoint(avatar.GetComponent<VRCAvatarDescriptor>().ViewPosition);
+            float size = 1.4f / 1.6f;
+            Assert.Less(Vector3.Distance(eyes + avatar.forward * OrbInstaller.GazeDistance * size, gaze.position), 1e-4f, "Straight ahead of the eyes at rest");
+            var eyesFromHead = Quaternion.Inverse(head.rotation) * (eyes - head.position);
+            foreach (var look in new[] { Quaternion.Euler(25, 0, 0), Quaternion.Euler(38, -18, 0), Quaternion.Euler(14, 22, 0) })
+            {
+                head.rotation = avatar.rotation * look;
+                solver.Solve();
+                var eyesNow = head.position + head.rotation * eyesFromHead;
+                var sight = head.rotation * Quaternion.Inverse(avatar.rotation) * avatar.forward;
+                Assert.Less(Vector3.Distance(eyesNow, eye.position), 1e-4f, "At the eyes");
+                Assert.Less(Vector3.Angle(sight, gaze.position - eyesNow), .01f, "On the line of sight");
+                // Where the line of sight meets the screen's plane, and what the desktop finds, in the screen's own space.
+                var from = screen.InverseTransformPoint(eyesNow);
+                var dir = screen.InverseTransformDirection(sight);
+                var truth = from + dir * (-from.z / dir.z);
+                var g = screen.InverseTransformPoint(gaze.position);
+                var e = screen.InverseTransformPoint(eye.position);
+                var read = e + (g - e) * (-e.z / (g.z - e.z));
+                Assert.Less(Vector2.Distance(truth, read), .001f, look.eulerAngles + ": where the owner looks");
+                Assert.Less(g.z, -.01f, "In front of the screen, so its dot shows");
+            }
+        }
+        finally { solver.Release(); }
+    }
+
+    [Test]
+    public void TheGazeDotShowsForItsOwnerInDesktopModeWhileTheMenuIsOpen()
+    {
+        if (VrcFury.Writer == null) Assert.Ignore("Requires the VRCFury integration.");
+        var (root, _) = PlayWithScreen();
+        var dot = root.transform.Find(OrbInstaller.GazeDot).gameObject;
+        playable.SetBool("IsLocal", true);
+        playable.SetInteger(OrbInstaller.VRMode, 0);
+        Tick(3);
+        Assert.IsFalse(dot.activeSelf, "Menu closed");
+        playable.SetBool(OrbInstaller.Menu, true);
+        Tick(3);
+        Assert.IsTrue(dot.activeSelf, "Desktop mode, menu open");
+        playable.SetInteger(OrbInstaller.VRMode, 1);
+        Tick(3);
+        Assert.IsFalse(dot.activeSelf, "In VR fingers point");
+        playable.SetInteger(OrbInstaller.VRMode, 0);
+        playable.SetBool("IsLocal", false);
+        playable.SetBool(OrbInstaller.Menu, false);
+        Tick(3);
+        playable.SetBool(OrbInstaller.Menu, true);
+        Tick(3);
+        Assert.IsFalse(dot.activeSelf, "Nobody else sees it");
     }
 
     // VRCFury reverts every override of its components in a prefab instance when an upload starts (VRCFPrefabFixer): the

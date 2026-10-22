@@ -48,6 +48,11 @@
   counted in VRChat's performance rank) tell the desktop where a finger touches it. A new orb's screen files are in
   its own folder; an orb made without a screen gets one (files shared in `Assets/Orbiters/Orb/Screen 2/`) when its
   options change; options' files are now in `Assets/Orbiters/Orb/Menu 7/`. Avatar manifests say `orb.screen`.
+- **Orb's menu in desktop mode**: look at a button and left-click, as VRChat's own desktop menus work. Two local
+  contact senders on the head bone (the eyes and a point 38 cm ahead on the line of sight, `OrbEye`/`OrbGaze`) and
+  four receivers each on the screen (`Orb/Screen/Eye*`, `Orb/Screen/Gaze*`) tell Orbiters desktop the line of sight;
+  a small dot shows where it points while the menu is open (its owner only, desktop mode only). Local contacts: nothing
+  in VRChat's performance rank.
 - **Orb's options survive an upload**: VRCFury reverts every override of its components in a prefab instance when an
   upload starts, so the options set on a placed orb (text slots, walk boost, Replace Orbiters overlay) came back off
   after each upload. `SetOptions` now replaces the prefab's Full Controller by a copy of the orb's own (the prefab's

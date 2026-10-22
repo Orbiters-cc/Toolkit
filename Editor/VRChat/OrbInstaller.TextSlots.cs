@@ -60,8 +60,8 @@ namespace Orbiters.Toolkit.Editor.VRChat
                 {
                     Label = "Replace Orbiters overlay",
                     Tooltip = "Orb's menu (fast walk, YouTube, calls, a 3D picture) opens on a screen in front of you in VRChat, touched with your index finger, " +
-                              "where people around see it too. In desktop mode it always does; in VR it opens in Orbiters desktop's SteamVR overlay unless this is on. " +
-                              "No synced bits; its touch contacts are local and don't count in VRChat's performance rank.",
+                              "where people around see it too. In desktop mode it always does: look at a button (a small dot shows where) and left-click. " +
+                              "In VR it opens in Orbiters desktop's SteamVR overlay unless this is on. No synced bits; its contacts are local and don't count in VRChat's performance rank.",
                     IsToggle = true,
                     Choices = new[] { "Off", "On" },
                     ChoiceTooltips = new[] { "In VR, Orb's menu opens in Orbiters desktop's SteamVR overlay", "In VR too, Orb's menu opens on a screen in front of you in VRChat" },

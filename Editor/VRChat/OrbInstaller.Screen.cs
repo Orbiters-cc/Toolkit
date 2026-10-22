@@ -26,8 +26,10 @@ namespace Orbiters.Toolkit.Editor.VRChat
     /// b0 + 256 × b1, so a cleared word is two zero bytes): for its owner through local parameters (<see cref="ScreenPointer"/>
     /// and 16 <see cref="ScreenValue"/>s a block, as fast as VRChat takes them), for everyone else through the text
     /// panel's synced channel (<see cref="TextPointer"/> past the panel's blocks; 254 closes the screen). Eight local
-    /// contact receivers (four per index finger) say where a finger is. No synced bits; the contacts are local and cost
-    /// nothing in VRChat's performance rank.
+    /// contact receivers (four per index finger) say where a finger is. In desktop mode, where fingers can't reach it, its
+    /// owner points by looking: two local contact senders held on the head bone, at the eyes and on the line of sight
+    /// before them (<see cref="Gaze"/>, a small dot while the menu is open), and eight more receivers say where they look
+    /// from, and a left click presses. No synced bits; the contacts are local and cost nothing in VRChat's performance rank.
     /// </para>
     /// </summary>
     public static partial class OrbInstaller
@@ -41,6 +43,17 @@ namespace Orbiters.Toolkit.Editor.VRChat
         public const string ScreenReplace = "Orb/Screen/Replace";
         /// <summary>VRChat's: 1 in VR, 0 in desktop mode.</summary>
         internal const string VRMode = "VRMode";
+        /// <summary>
+        /// How near the owner's eyes and a point on their line of sight (the gaze point) are to each touch point, as
+        /// <see cref="ScreenTouchPrefix"/> for fingers: the hovered point is where the line through both meets the screen.
+        /// </summary>
+        public const string ScreenEyePrefix = "Orb/Screen/Eye", ScreenGazePrefix = "Orb/Screen/Gaze";
+        /// <summary>The two senders' collision tags: only the screen's eye and gaze receivers take them.</summary>
+        public const string EyeTag = "OrbEye", GazeTag = "OrbGaze";
+        // At the eyes, turned with the head bone; the gaze point on the line of sight, this far before them (nearer than
+        // any point of the screen, so its dot shows in front of it); the senders' radius and the dot's.
+        internal const string Gaze = Head + "/Gaze", GazePoint = Gaze + "/Point", GazeDot = GazePoint + "/Dot";
+        internal const float GazeDistance = .38f, GazeRadius = .01f, GazeDotRadius = .004f;
         /// <summary>The screen protocol's version (the avatar manifest's <c>orb.screen</c>).</summary>
         public const int ScreenVersion = 1;
         public const int ScreenBytes = 744, ScreenWords = ScreenBytes / 2, ScreenLocalValues = 16;
@@ -71,6 +84,8 @@ namespace Orbiters.Toolkit.Editor.VRChat
 
         public static string ScreenValue(int index) => ScreenValuePrefix + index;
         public static string ScreenTouch(bool right, int index) => ScreenTouchPrefix + (right ? "R" : "L") + index;
+        public static string ScreenGaze(int index) => ScreenGazePrefix + index;
+        public static string ScreenEye(int index) => ScreenEyePrefix + index;
 
         // The screen's own animator parameters: its words, the bytes the values carry (synced and local), the blocks the two
         // pointers write (one update late, as the local bytes; the synced bytes come from the text's late values,
@@ -225,6 +240,18 @@ namespace Orbiters.Toolkit.Editor.VRChat
                 receiver.receiverType = ContactReceiver.ReceiverType.Proximity; receiver.parameter = ScreenTouch(right, i);
                 receiver.collisionTags.Add(right ? "FingerIndexR" : "FingerIndexL");
             }
+            // The eyes' and the gaze point's, at the same places.
+            foreach (var (name, tag, parameter) in new (string, string, Func<int, string>)[] { ("Eye ", EyeTag, ScreenEye), ("Gaze ", GazeTag, ScreenGaze) })
+            for (int i = 0; i < ScreenTouchPoints.Length; i++)
+            {
+                var point = Child(screen.transform, name + i);
+                point.localPosition = ScreenTouchPoints[i];
+                var receiver = point.gameObject.AddComponent<VRCContactReceiver>();
+                receiver.shapeType = ContactBase.ShapeType.Sphere; receiver.radius = ScreenTouchRadius;
+                receiver.allowSelf = true; receiver.allowOthers = false; receiver.localOnly = true;
+                receiver.receiverType = ContactReceiver.ReceiverType.Proximity; receiver.parameter = parameter(i);
+                receiver.collisionTags.Add(tag);
+            }
             PlaceScreen(orb);
             return screen.transform;
         }
@@ -265,6 +292,8 @@ namespace Orbiters.Toolkit.Editor.VRChat
             for (int i = 0; i < ScreenLocalValues; i++) controller.AddParameter(ScreenValue(i), AnimatorControllerParameterType.Float);
             for (int hand = 0; hand < 2; hand++)
             for (int i = 0; i < ScreenTouchPoints.Length; i++) controller.AddParameter(ScreenTouch(hand == 1, i), AnimatorControllerParameterType.Float);
+            for (int i = 0; i < ScreenTouchPoints.Length; i++) controller.AddParameter(ScreenEye(i), AnimatorControllerParameterType.Float);
+            for (int i = 0; i < ScreenTouchPoints.Length; i++) controller.AddParameter(ScreenGaze(i), AnimatorControllerParameterType.Float);
             // VRChat's: whether this client is the avatar's owner.
             if (!controller.parameters.Any(p => p.name == "IsLocal")) controller.AddParameter("IsLocal", AnimatorControllerParameterType.Bool);
             controller.AddParameter(SyncBlock, AnimatorControllerParameterType.Float);
@@ -276,6 +305,7 @@ namespace Orbiters.Toolkit.Editor.VRChat
             ScreenBlocks(controller, textSync);
             ScreenLocalBlocks(controller);
             ScreenLayer(controller, textSync);
+            GazeDotLayer(controller);
 
             parameters.Add(Parameter(ScreenOpen, synced: false));
             // Not saved: a new upload's option always holds.
@@ -284,6 +314,29 @@ namespace Orbiters.Toolkit.Editor.VRChat
             for (int i = 0; i < ScreenLocalValues; i++) parameters.Add(Parameter(ScreenValue(i), synced: false, type: VRCExpressionParameters.ValueType.Float));
             for (int hand = 0; hand < 2; hand++)
             for (int i = 0; i < ScreenTouchPoints.Length; i++) parameters.Add(Parameter(ScreenTouch(hand == 1, i), synced: false, type: VRCExpressionParameters.ValueType.Float));
+            for (int i = 0; i < ScreenTouchPoints.Length; i++) parameters.Add(Parameter(ScreenEye(i), synced: false, type: VRCExpressionParameters.ValueType.Float));
+            for (int i = 0; i < ScreenTouchPoints.Length; i++) parameters.Add(Parameter(ScreenGaze(i), synced: false, type: VRCExpressionParameters.ValueType.Float));
+        }
+
+        /// <summary>
+        /// The gaze point's dot: shown for its owner in desktop mode while their screen is open (as the screen opens), so
+        /// they see what they point at; nobody else sees it.
+        /// </summary>
+        private static void GazeDotLayer(AnimatorController controller)
+        {
+            var machine = Layer(controller, "Gaze dot");
+            var hidden = new AnimationClip { name = "Gaze dot hidden" };
+            Curve(hidden, GazeDot, typeof(GameObject), "m_IsActive", 0);
+            var shown = new AnimationClip { name = "Gaze dot shown" };
+            Curve(shown, GazeDot, typeof(GameObject), "m_IsActive", 1);
+            var off = HeldPropRig.State(controller, machine, "Off", hidden);
+            var on = HeldPropRig.State(controller, machine, "On", shown);
+            off.writeDefaultValues = true; on.writeDefaultValues = true;
+            machine.defaultState = off;
+            foreach (var trigger in new[] { ScreenOpen, Menu })
+                Transition(off, on, ("IsLocal", AnimatorConditionMode.If, 0), (trigger, AnimatorConditionMode.If, 0), (VRMode, AnimatorConditionMode.Less, 1));
+            Transition(on, off, (ScreenOpen, AnimatorConditionMode.IfNot, 0), (Menu, AnimatorConditionMode.IfNot, 0));
+            Transition(on, off, (VRMode, AnimatorConditionMode.Greater, 0));
         }
 
         /// <summary>The first <see cref="TextPointer"/> of the screen and how many blocks it has, for <paramref name="textSync"/> values.</summary>

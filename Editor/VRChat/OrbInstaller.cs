@@ -148,6 +148,30 @@ namespace Orbiters.Toolkit.Editor.VRChat
             bodyRenderer.sharedMaterials = new[] { OrbMaterial(folder, shader, "Orb core", false), OrbMaterial(folder, shader, "Orb glow", true) };
             Quiet(bodyRenderer);
 
+            // Desktop mode's pointer (the screen's eye and gaze receivers find it): the owner's eyes and a point on their
+            // line of sight, held to the head bone (sources set by Bind), two local contacts that cost nothing in VRChat's
+            // performance rank, and the dot that shows where they look.
+            var gaze = Child(head, "Gaze");
+            gaze.localPosition = DefaultEyes;
+            var sight = gaze.gameObject.AddComponent<VRCParentConstraint>();
+            sight.Sources.Add(new VRCConstraintSource(null, 1));
+            sight.IsActive = true; sight.Locked = true;
+            var point = Child(gaze, "Point");
+            point.localPosition = Vector3.forward * GazeDistance;
+            foreach (var (at, tag) in new[] { (gaze, EyeTag), (point, GazeTag) })
+            {
+                var sender = at.gameObject.AddComponent<VRCContactSender>();
+                sender.shapeType = ContactBase.ShapeType.Sphere; sender.radius = GazeRadius; sender.localOnly = true;
+                sender.collisionTags.Add(tag);
+            }
+            var dot = Child(point, "Dot");
+            dot.localScale = Vector3.one * GazeDotRadius;
+            dot.gameObject.AddComponent<MeshFilter>().sharedMesh = body.GetComponent<MeshFilter>().sharedMesh;
+            var dotRenderer = dot.gameObject.AddComponent<MeshRenderer>();
+            dotRenderer.sharedMaterial = bodyRenderer.sharedMaterials[0];
+            Quiet(dotRenderer);
+            dot.gameObject.SetActive(false);
+
             // The panel and its beam are one skinned mesh: the plate and the beam's far end on the panel, its near end on
             // the orb, wherever the tether takes it.
             var textShader = CopyShader(TextShaderTemplate, folder + "/Orb text.shader");
@@ -189,22 +213,30 @@ namespace Orbiters.Toolkit.Editor.VRChat
             var head = orb.Find(Head);
             var tether = orb.Find(Tether);
             var panel = orb.Find(Panel);
+            var gaze = orb.Find(Gaze);
             var follow = head != null ? head.GetComponent<VRCPositionConstraint>() : null;
             var level = head != null ? head.GetComponent<VRCRotationConstraint>() : null;
-            if (follow == null || level == null || follow.Sources.Count < 1 || level.Sources.Count < 1 || tether == null || panel == null)
+            var sight = gaze != null ? gaze.GetComponent<VRCParentConstraint>() : null;
+            if (follow == null || level == null || follow.Sources.Count < 1 || level.Sources.Count < 1 || tether == null || panel == null ||
+                sight == null || sight.Sources.Count < 1)
                 throw new InvalidOperationException("This orb was modified: add it again.");
             var bone = animator.GetBoneTransform(HumanBodyBones.Head) ?? animator.GetBoneTransform(HumanBodyBones.Neck) ?? animator.GetBoneTransform(HumanBodyBones.Hips);
             var eyes = Eyes(avatar, bone);
             float size = Mathf.Clamp(Vector3.Dot(eyes - avatar.position, avatar.up) / ReferenceEyes, .3f, 3);
-            Undo.RecordObjects(new Object[] { head, follow, level, tether, panel }, "Fit orb");
+            Undo.RecordObjects(new Object[] { head, follow, level, tether, panel, gaze, sight }, "Fit orb");
             head.SetPositionAndRotation(bone.position, avatar.rotation);
             float parent = head.parent != null ? Mathf.Abs(head.parent.lossyScale.x) : 1;
             head.localScale = Vector3.one * (size / Mathf.Max(parent, 1e-4f));
             follow.Sources[0] = new VRCConstraintSource(bone, 1, Vector3.zero, Vector3.zero);
             level.Sources[0] = new VRCConstraintSource(avatar, 1, Vector3.zero, Vector3.zero);
             Layout(tether, panel, head.InverseTransformPoint(eyes));
+            // The eyes and the gaze point before them turn with the head bone (in desktop mode, with where its owner
+            // looks), looking ahead at rest. Offsets are in the head bone's axes, unscaled.
+            gaze.SetPositionAndRotation(eyes, avatar.rotation);
+            var turn = Quaternion.Inverse(bone.rotation);
+            sight.Sources[0] = new VRCConstraintSource(bone, 1, turn * (gaze.position - bone.position), (turn * gaze.rotation).eulerAngles);
             PlaceScreen(orb);
-            EditorUtility.SetDirty(follow); EditorUtility.SetDirty(level);
+            EditorUtility.SetDirty(follow); EditorUtility.SetDirty(level); EditorUtility.SetDirty(sight);
         }
 
         // Where the avatar sees from: its view position, else a little above and before the head bone.
