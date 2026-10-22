@@ -64,7 +64,8 @@ namespace Orbiters.Toolkit.Editor.VRChat
         /// <param name="walkBoost">Adds the Walk boost radial (<see cref="WalkBoost"/>, local and saved): Orbiters desktop's walk boost.</param>
         /// <param name="replace">The projected screen shows Orb's menu in VR too, instead of Orbiters desktop's SteamVR
         /// overlay (<see cref="ScreenReplace"/>'s default). Every orb has the screen (<see cref="ScreenController"/>).</param>
-        internal static void BuildController(GameObject root, string folder, int textSync, bool walkBoost = false, bool replace = false)
+        /// <param name="thumbnailBytes">The bytes of each thumbnail the screen keeps, 72 or 128 (<see cref="ScreenThumbnailBytes"/>'s default).</param>
+        internal static void BuildController(GameObject root, string folder, int textSync, bool walkBoost = false, bool replace = false, int thumbnailBytes = DefaultThumbnailBytes)
         {
             var controller = AnimatorController.CreateAnimatorControllerAtPath(folder + "/Orb.controller");
             controller.AddParameter(new AnimatorControllerParameter { name = Visible, type = AnimatorControllerParameterType.Bool, defaultBool = true });
@@ -113,7 +114,7 @@ namespace Orbiters.Toolkit.Editor.VRChat
                 Parameter(TextPointer, type: VRCExpressionParameters.ValueType.Int),
             };
             for (int i = 0; i < textSync; i++) parameters.Add(Parameter(TextSync(i), type: VRCExpressionParameters.ValueType.Float));
-            ScreenController(controller, textSync, parameters, replace);
+            ScreenController(controller, textSync, parameters, replace, thumbnailBytes);
             var controls = new List<VRCExpressionsMenu.Control>
             {
                 Control("Show Orb", VRCExpressionsMenu.Control.ControlType.Toggle, Visible),

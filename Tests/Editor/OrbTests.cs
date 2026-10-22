@@ -329,19 +329,19 @@ public class OrbTests
     // ---- The projected screen (Docs/orb.md, Screen) ----
 
     // An orb (every orb has its screen), playing.
-    private (GameObject root, MeshRenderer screen) PlayWithScreen(int textSync = 8)
+    private (GameObject root, MeshRenderer screen) PlayWithScreen(int textSync = 8, int thumbnailBytes = 72)
     {
-        var root = Play(AssetDatabase.LoadAssetAtPath<GameObject>(OrbInstaller.CreatePrefab(folder, textSync)));
+        var root = Play(AssetDatabase.LoadAssetAtPath<GameObject>(OrbInstaller.CreatePrefab(folder, textSync, thumbnailBytes)));
         return (root, root.transform.Find(OrbInstaller.ScreenObject).GetComponent<MeshRenderer>());
     }
 
     // The screen's memory as its shader reads it (word k: b0 + 256 b1).
-    private static byte[] Memory(MeshRenderer screen)
+    private static byte[] Memory(MeshRenderer screen, int thumbnailBytes = 72)
     {
         var block = new MaterialPropertyBlock();
         screen.GetPropertyBlock(block);
-        var bytes = new byte[OrbInstaller.ScreenBytes];
-        for (int k = 0; k < OrbInstaller.ScreenWords; k++)
+        var bytes = new byte[OrbInstaller.ScreenBytes(thumbnailBytes)];
+        for (int k = 0; k < OrbInstaller.ScreenWords(thumbnailBytes); k++)
         {
             float w = block.GetFloat("_W" + k);
             float high = Mathf.Floor((w + .5f) / 256);
@@ -352,9 +352,9 @@ public class OrbTests
     }
 
     // Bytes for every place of the memory, each value but 128 (it has no float).
-    private static byte[] Pattern(int seed)
+    private static byte[] Pattern(int seed, int thumbnailBytes = 72)
     {
-        var bytes = new byte[OrbInstaller.ScreenBytes];
+        var bytes = new byte[OrbInstaller.ScreenBytes(thumbnailBytes)];
         for (int i = 0; i < bytes.Length; i++) { int b = (i * 37 + seed * 11 + 5) % 256; bytes[i] = (byte)(b == 128 ? 129 : b); }
         return bytes;
     }
@@ -380,10 +380,13 @@ public class OrbTests
         }
         var parameters = AssetDatabase.LoadAssetAtPath<VRCExpressionParameters>(folder + "/Parameters.asset");
         var screenParameters = parameters.parameters.Where(p => p.name.StartsWith("Orb/Screen/", StringComparison.Ordinal)).ToList();
-        Assert.AreEqual(1 + 1 + 1 + OrbInstaller.ScreenLocalValues + 8 + 8, screenParameters.Count, "Open, Replace, the pointer, 16 values, 8 touch points, 4 each for the eyes and the gaze");
+        Assert.AreEqual(1 + 1 + 1 + 1 + OrbInstaller.ScreenLocalValues + 8 + 8, screenParameters.Count, "Open, Replace, ThumbnailBytes, the pointer, 16 values, 8 touch points, 4 each for the eyes and the gaze");
         Assert.IsTrue(screenParameters.All(p => !p.networkSynced), "No synced bits");
         var replace = screenParameters.Single(p => p.name == OrbInstaller.ScreenReplace);
         Assert.AreEqual((0f, false), (replace.defaultValue, replace.saved), "Off unless the card's option is on, and never saved: each upload's option holds");
+        var thumbnails = screenParameters.Single(p => p.name == OrbInstaller.ScreenThumbnailBytes);
+        Assert.AreEqual((72f, false, VRCExpressionParameters.ValueType.Int), (thumbnails.defaultValue, thumbnails.saved, thumbnails.valueType), "72 bytes unless the card says 128, never saved");
+        Assert.AreEqual(OrbInstaller.ScreenShaderName(72), screen.sharedMaterial.shader.name);
         var hold = screen.GetComponent<VRCParentConstraint>();
         Assert.IsFalse(hold.RebakeOffsetsWhenUnfrozen, "Opened again, it appears before the eyes, not where it was");
     }
@@ -409,7 +412,7 @@ public class OrbTests
             Tick(2);
         }
         var data = Pattern(1);
-        int blocks = (OrbInstaller.ScreenBytes + 15) / 16;
+        int blocks = (OrbInstaller.ScreenBytes(72) + 15) / 16;
         for (int b = 0; b < blocks; b++) Local(b + 1, data, b * 16);
         Local(0, data, 0);
         CollectionAssert.AreEqual(data, Memory(screen), "Every block written");
@@ -419,7 +422,7 @@ public class OrbTests
         CollectionAssert.AreEqual(data, Memory(screen));
 
         // The text channel's screen blocks are for everyone else.
-        playable.SetInteger(OrbInstaller.TextPointer, OrbInstaller.ScreenPointers(8).first);
+        playable.SetInteger(OrbInstaller.TextPointer, OrbInstaller.ScreenPointers(8, 72).first);
         for (int i = 0; i < 8; i++) playable.SetFloat(OrbInstaller.TextSync(i), SyncValue(7));
         Tick(4);
         CollectionAssert.AreEqual(data, Memory(screen), "The owner ignores the synced screen blocks");
@@ -549,9 +552,10 @@ public class OrbTests
         if (VrcFury.Writer == null) Assert.Ignore("Requires the VRCFury integration.");
         var prefab = AssetDatabase.LoadAssetAtPath<GameObject>(OrbInstaller.CreatePrefab(folder));
         var placed = (GameObject)PrefabUtility.InstantiatePrefab(prefab, scene);
-        Assert.AreEqual((8, false, false), OrbInstaller.OptionsOf(placed.transform));
+        Assert.AreEqual((8, false, false, 72), OrbInstaller.OptionsOf(placed.transform));
         OrbInstaller.SetOptions(placed.transform, 4, true, true);
-        Assert.AreEqual((4, true, true), OrbInstaller.OptionsOf(placed.transform));
+        Assert.AreEqual((4, true, true, 72), OrbInstaller.OptionsOf(placed.transform));
+        Assert.Throws<ArgumentException>(() => OrbInstaller.SetOptions(placed.transform, 4, true, true, 128), "128-byte thumbnails need 8 text slots");
 
         // What VRCFury does to the avatar before the SDK copies it.
         foreach (var component in placed.GetComponents(VrcFury.Component))
@@ -560,25 +564,35 @@ public class OrbTests
             var mods = PrefabUtility.GetPropertyModifications(component)?.Where(m => m.target == source).ToList();
             if (mods != null && mods.Count > 0) PrefabUtility.RevertObjectOverride(component, InteractionMode.AutomatedAction);
         }
-        Assert.AreEqual((4, true, true), OrbInstaller.OptionsOf(placed.transform), "Kept on the orb's own Full Controller");
+        Assert.AreEqual((4, true, true, 72), OrbInstaller.OptionsOf(placed.transform), "Kept on the orb's own Full Controller");
         Assert.AreEqual(1, placed.GetComponents(VrcFury.Component).Length, "The prefab's Full Controller replaced, not doubled");
         Assert.IsTrue(VrcFury.IsGlobalParameter(VrcFury.Features(placed).Single(f => f.kind == "FullController").feature, OrbInstaller.ScreenReplace));
 
-        // And back: the screen stays, Replace off.
+        // 128-byte thumbnails: the parameter's default, the screen's material and memory follow.
+        OrbInstaller.SetOptions(placed.transform, 8, false, true, 128);
+        Assert.AreEqual((8, false, true, 128), OrbInstaller.OptionsOf(placed.transform));
+        var renderer = placed.transform.Find(OrbInstaller.ScreenObject).GetComponent<MeshRenderer>();
+        Assert.AreEqual(OrbInstaller.ScreenShaderName(128), renderer.sharedMaterial.shader.name);
+        Assert.IsTrue(renderer.sharedMaterial.HasProperty("_W511") && !renderer.sharedMaterial.HasProperty("_W512"), "1024 bytes: 512 words");
+        Assert.IsTrue(VrcFury.IsGlobalParameter(VrcFury.Features(placed).Single(f => f.kind == "FullController").feature, OrbInstaller.ScreenThumbnailBytes));
+
+        // And back: the screen stays, Replace off, 72-byte thumbnails.
         OrbInstaller.SetOptions(placed.transform, 8, false, false);
-        Assert.AreEqual((8, false, false), OrbInstaller.OptionsOf(placed.transform));
+        Assert.AreEqual((8, false, false, 72), OrbInstaller.OptionsOf(placed.transform));
         Assert.IsTrue(OrbInstaller.HasScreen(placed.transform));
+        Assert.AreEqual(OrbInstaller.ScreenShaderName(72), renderer.sharedMaterial.shader.name);
     }
 
-    [TestCase(8)]
-    [TestCase(4)]
-    public void EveryoneElsesScreenOpensWithItsBlocksAndClosesAt254(int textSync)
+    [TestCase(8, 72)]
+    [TestCase(4, 72)]
+    [TestCase(8, 128)]
+    public void EveryoneElsesScreenOpensWithItsBlocksAndClosesAt254(int textSync, int thumbnailBytes)
     {
         if (VrcFury.Writer == null) Assert.Ignore("Requires the VRCFury integration.");
-        var (_, screen) = PlayWithScreen(textSync);
+        var (_, screen) = PlayWithScreen(textSync, thumbnailBytes);
         playable.SetBool("IsLocal", false);
         Tick(3);
-        var (first, blocks) = OrbInstaller.ScreenPointers(textSync);
+        var (first, blocks) = OrbInstaller.ScreenPointers(textSync, thumbnailBytes);
         Assert.AreEqual(OrbInstaller.Cells / textSync + 1, first);
         Assert.Less(first + blocks - 1, OrbInstaller.PointerScreenClose, "Every block has a pointer");
 
@@ -591,14 +605,14 @@ public class OrbTests
         // The panel's own blocks don't open it.
         Synced(1, Pattern(3), 0);
         Assert.IsFalse(screen.gameObject.activeSelf, "Panel pointers leave the screen closed");
-        var data = Pattern(4);
+        var data = Pattern(4, thumbnailBytes);
         for (int b = 0; b < blocks; b++) Synced(first + b, data, b * textSync);
         Assert.IsTrue(screen.gameObject.activeSelf, "Its first block opens it");
         Synced(0, data, 0);
-        CollectionAssert.AreEqual(data, Memory(screen), "Every block written");
+        CollectionAssert.AreEqual(data, Memory(screen, thumbnailBytes), "Every block written");
         // Panel text meanwhile changes nothing on the screen.
         Synced(2, Pattern(5), 0);
-        CollectionAssert.AreEqual(data, Memory(screen));
+        CollectionAssert.AreEqual(data, Memory(screen, thumbnailBytes));
         Synced(OrbInstaller.PointerScreenClose, data, 0);
         Assert.IsFalse(screen.gameObject.activeSelf, "Pointer 254 closes it");
     }

@@ -22,8 +22,8 @@ namespace Orbiters.Toolkit.Editor.VRChat
     /// shows the menu instead. When it opens it stays where it appeared (frozen in the world) so a hand reaching for it
     /// never pushes it away.
     /// <para>
-    /// The desktop writes the screen's memory, 744 bytes kept two to an animated animator parameter (each word
-    /// b0 + 256 × b1, so a cleared word is two zero bytes): for its owner through local parameters (<see cref="ScreenPointer"/>
+    /// The desktop writes the screen's memory, 744 bytes (1024 with 128-byte thumbnails, <see cref="ScreenThumbnailBytes"/>)
+    /// kept two to an animated animator parameter (each word b0 + 256 × b1, so a cleared word is two zero bytes): for its owner through local parameters (<see cref="ScreenPointer"/>
     /// and 16 <see cref="ScreenValue"/>s a block, as fast as VRChat takes them), for everyone else through the text
     /// panel's synced channel (<see cref="TextPointer"/> past the panel's blocks; 254 closes the screen). Eight local
     /// contact receivers (four per index finger) say where a finger is. In desktop mode, where fingers can't reach it, its
@@ -54,9 +54,9 @@ namespace Orbiters.Toolkit.Editor.VRChat
         // any point of the screen, so its dot shows in front of it); the senders' radius and the dot's.
         internal const string Gaze = Head + "/Gaze", GazePoint = Gaze + "/Point", GazeDot = GazePoint + "/Dot";
         internal const float GazeDistance = .38f, GazeRadius = .01f, GazeDotRadius = .004f;
-        /// <summary>The screen protocol's version (the avatar manifest's <c>orb.screen</c>).</summary>
-        public const int ScreenVersion = 1;
-        public const int ScreenBytes = 744, ScreenWords = ScreenBytes / 2, ScreenLocalValues = 16;
+        /// <summary>The screen protocol's version (the avatar manifest's <c>orb.screen</c>): 2, colour thumbnails.</summary>
+        public const int ScreenVersion = 2;
+        public const int ScreenLocalValues = 16;
         /// <summary><see cref="TextPointer"/>: everyone else's screen closes (and clears).</summary>
         public const int PointerScreenClose = 254;
         /// <summary><see cref="ScreenPointer"/>: the owner's screen memory clears.</summary>
@@ -73,8 +73,9 @@ namespace Orbiters.Toolkit.Editor.VRChat
             new Vector3(-ScreenWidth / 2 - .05f, ScreenHeight / 2 + .05f, 0), new Vector3(ScreenWidth / 2 + .05f, ScreenHeight / 2 + .05f, 0),
             new Vector3(0, -ScreenHeight / 2 - .05f, 0), new Vector3(0, 0, .15f),
         };
-        // The screen's shared files: made once for every orb that has a screen.
-        internal const string ScreenFolder = "Assets/Orbiters/Orb/Screen 2";
+        // The screen's shared files: made once for every orb that has a screen, and for every orb switched to a thumbnail
+        // size its own files lack.
+        internal const string ScreenFolder = "Assets/Orbiters/Orb/Screen 3";
         private const string ScreenShaderTemplate = "Packages/orbiters.toolkit/Editor/VRChat/OrbScreen.shader.txt";
         // Drawn by Orbiters desktop (`orbiters-desktop --orb-menu`) from the menu's layout: the page pictures (a slice per
         // page, the first empty) and the layout table.
@@ -102,13 +103,15 @@ namespace Orbiters.Toolkit.Editor.VRChat
         // ---- The shared files ----
 
         /// <summary>
-        /// The screen's shader (word properties written out), pages, layout, glyphs, mesh and material, made once in
-        /// <paramref name="folder"/> (a new orb's own; the shared <see cref="ScreenFolder"/> for an orb made without a
-        /// screen; tests use their own).
+        /// The screen's shader (word properties and thumbnail decoder written out), pages, layout, glyphs, mesh and
+        /// material for thumbnails of <paramref name="thumbnailBytes"/>, made once in <paramref name="folder"/> (a new orb's
+        /// own; the shared <see cref="ScreenFolder"/> for an orb made without a screen or switched to another thumbnail size;
+        /// tests use their own). Each size has its own shader and material; the mesh is shared.
         /// </summary>
-        internal static (Mesh mesh, Material material) ScreenAssets(string folder = ScreenFolder)
+        internal static (Mesh mesh, Material material) ScreenAssets(string folder = ScreenFolder, int thumbnailBytes = DefaultThumbnailBytes)
         {
-            string materialPath = folder + "/Orb screen.mat", meshPath = folder + "/Orb screen mesh.asset";
+            string name = ScreenFileName(thumbnailBytes);
+            string materialPath = folder + "/" + name + ".mat", meshPath = folder + "/Orb screen mesh.asset";
             var material = AssetDatabase.LoadAssetAtPath<Material>(materialPath);
             var mesh = AssetDatabase.LoadAssetAtPath<Mesh>(meshPath);
             if (material != null && mesh != null && material.shader != null && material.shader.isSupported) return (mesh, material);
@@ -117,39 +120,54 @@ namespace Orbiters.Toolkit.Editor.VRChat
                 System.IO.Directory.CreateDirectory(folder);
                 AssetDatabase.ImportAsset(folder);
             }
-            var shader = ScreenShader(folder + "/Orb screen.shader");
-            var pages = ScreenPages(folder + "/Orb screen pages.png");
-            var layout = ScreenLayout(folder + "/Orb screen layout.png");
-            var glyphs = Atlas(folder);
-            material = new Material(shader) { name = "Orb screen" };
-            material.SetTexture("_Pages", pages);
-            material.SetTexture("_Layout", layout);
-            material.SetTexture("_MainTex", glyphs);
-            material.renderQueue = (int)RenderQueue.Transparent;
-            AssetDatabase.DeleteAsset(materialPath);
-            AssetDatabase.CreateAsset(material, materialPath);
-            mesh = ScreenMesh();
-            AssetDatabase.DeleteAsset(meshPath);
-            AssetDatabase.CreateAsset(mesh, meshPath);
+            if (material == null || material.shader == null || !material.shader.isSupported)
+            {
+                var shader = ScreenShader(folder + "/" + name + ".shader", thumbnailBytes);
+                var pages = AssetDatabase.LoadAssetAtPath<Texture2DArray>(folder + "/Orb screen pages.png") ?? ScreenPages(folder + "/Orb screen pages.png");
+                var layout = AssetDatabase.LoadAssetAtPath<Texture2D>(folder + "/Orb screen layout.png") ?? ScreenLayout(folder + "/Orb screen layout.png");
+                var glyphs = Atlas(folder);
+                material = new Material(shader) { name = name };
+                material.SetTexture("_Pages", pages);
+                material.SetTexture("_Layout", layout);
+                material.SetTexture("_MainTex", glyphs);
+                material.renderQueue = (int)RenderQueue.Transparent;
+                AssetDatabase.DeleteAsset(materialPath);
+                AssetDatabase.CreateAsset(material, materialPath);
+            }
+            // Made once: every screen of this folder, whatever its thumbnails, draws it.
+            if (mesh == null)
+            {
+                mesh = ScreenMesh();
+                AssetDatabase.CreateAsset(mesh, meshPath);
+            }
             AssetDatabase.SaveAssets();
             return (mesh, material);
         }
 
-        // The template with its 372 word properties, their registers and their sum written out.
-        private static Shader ScreenShader(string path)
+        // The screen's files for a thumbnail size: "Orb screen" for 72 bytes, "Orb screen 128 B" for 128.
+        private static string ScreenFileName(int thumbnailBytes) => thumbnailBytes == DefaultThumbnailBytes ? "Orb screen" : "Orb screen " + thumbnailBytes + " B";
+
+        /// <summary>The name of the screen's shader for thumbnails of <paramref name="thumbnailBytes"/>.</summary>
+        internal static string ScreenShaderName(int thumbnailBytes) => "Orbiters/Orb Screen (" + thumbnailBytes + " B thumbnails)";
+
+        // The template with its word properties, their registers and their sum written out, and the thumbnail decoder.
+        private static Shader ScreenShader(string path, int thumbnailBytes)
         {
             var template = AssetDatabase.LoadAssetAtPath<TextAsset>(ScreenShaderTemplate);
             if (template == null) throw new InvalidOperationException("Missing " + ScreenShaderTemplate + ": reinstall Orbiters Toolkit.");
             var properties = new StringBuilder();
             var buffer = new StringBuilder();
             var sum = new StringBuilder();
-            for (int k = 0; k < ScreenWords; k++)
+            for (int k = 0; k < ScreenWords(thumbnailBytes); k++)
             {
                 properties.AppendLine($"        [HideInInspector] _W{k} (\"Word {k}\", Float) = 0");
                 buffer.AppendLine($"            float _W{k} : packoffset(c{k});");
                 sum.Append(k % 12 == 0 ? "\n                " : " ").Append($"+ _W{k}");
             }
-            string text = template.text.Replace("//@PROPERTIES", properties.ToString().TrimEnd()).Replace("//@BUFFER", buffer.ToString().TrimEnd()).Replace("//@SUM", sum.ToString());
+            string defines = $"            #define SCREEN_WORDS {ScreenWords(thumbnailBytes)}\n            #define THUMBNAIL_BYTES {thumbnailBytes}";
+            string text = template.text.Replace("Shader \"Orbiters/Orb Screen\"", "Shader \"" + ScreenShaderName(thumbnailBytes) + "\"")
+                .Replace("//@PROPERTIES", properties.ToString().TrimEnd()).Replace("//@BUFFER", buffer.ToString().TrimEnd()).Replace("//@SUM", sum.ToString())
+                .Replace("//@DEFINES", defines).Replace("//@THUMBNAIL", ThumbnailDecoder(thumbnailBytes));
             System.IO.File.WriteAllText(path, text);
             AssetDatabase.ImportAsset(path, ImportAssetOptions.ForceSynchronousImport);
             var shader = AssetDatabase.LoadAssetAtPath<Shader>(path);
@@ -206,16 +224,17 @@ namespace Orbiters.Toolkit.Editor.VRChat
 
         /// <summary>
         /// Adds the screen to a placed orb (with Undo): in front of its owner's eyes, hidden until the animator shows it,
-        /// with its touch points. Its place follows the panel's (both are fitted from the eyes).
+        /// with its touch points, for thumbnails of <paramref name="thumbnailBytes"/>. Its place follows the panel's (both
+        /// are fitted from the eyes).
         /// </summary>
-        internal static Transform AddScreen(Transform orb, string folder = ScreenFolder)
+        internal static Transform AddScreen(Transform orb, string folder = ScreenFolder, int thumbnailBytes = DefaultThumbnailBytes)
         {
             var existing = orb.Find(ScreenObject);
             if (existing != null) return existing;
             var head = orb.Find(Head);
             var panel = orb.Find(Panel);
             if (head == null || panel == null) throw new InvalidOperationException("This orb was modified: add it again.");
-            var (mesh, material) = ScreenAssets(folder);
+            var (mesh, material) = ScreenAssets(folder, thumbnailBytes);
             var screen = new GameObject("Screen");
             Undo.RegisterCreatedObjectUndo(screen, "Orb screen");
             screen.transform.SetParent(head, false);
@@ -256,6 +275,23 @@ namespace Orbiters.Toolkit.Editor.VRChat
             return screen.transform;
         }
 
+        /// <summary>
+        /// The screen of a placed orb draws thumbnails of <paramref name="thumbnailBytes"/> (with Undo): a screen whose
+        /// shader is for another size (or from before colour thumbnails) takes the shared material for this one.
+        /// </summary>
+        internal static void SetScreenThumbnails(Transform orb, int thumbnailBytes)
+        {
+            var screen = orb.Find(ScreenObject);
+            var renderer = screen != null ? screen.GetComponent<MeshRenderer>() : null;
+            if (renderer == null) return;
+            var current = renderer.sharedMaterial;
+            if (current != null && current.shader != null && current.shader.name == ScreenShaderName(thumbnailBytes)) return;
+            var (_, material) = ScreenAssets(ScreenFolder, thumbnailBytes);
+            Undo.RecordObject(renderer, "Orb thumbnail size");
+            renderer.sharedMaterial = material;
+            PrefabUtility.RecordPrefabInstancePropertyModifications(renderer);
+        }
+
         // The screen before the eyes, which the panel's place tells (the panel sits at eyes + PanelFromEyes).
         private static void PlaceScreen(Transform orb)
         {
@@ -281,12 +317,14 @@ namespace Orbiters.Toolkit.Editor.VRChat
 
         /// <summary>
         /// The screen's parameters, layers and expression parameters (all local), added to an orb's controller;
-        /// <paramref name="replace"/> is <see cref="ScreenReplace"/>'s default.
+        /// <paramref name="replace"/> is <see cref="ScreenReplace"/>'s default, <paramref name="thumbnailBytes"/>
+        /// <see cref="ScreenThumbnailBytes"/>'s (the memory's size follows).
         /// </summary>
-        private static void ScreenController(AnimatorController controller, int textSync, List<VRCExpressionParameters.Parameter> parameters, bool replace)
+        private static void ScreenController(AnimatorController controller, int textSync, List<VRCExpressionParameters.Parameter> parameters, bool replace, int thumbnailBytes)
         {
             controller.AddParameter(ScreenOpen, AnimatorControllerParameterType.Bool);
             controller.AddParameter(new AnimatorControllerParameter { name = ScreenReplace, type = AnimatorControllerParameterType.Bool, defaultBool = replace });
+            controller.AddParameter(new AnimatorControllerParameter { name = ScreenThumbnailBytes, type = AnimatorControllerParameterType.Int, defaultInt = thumbnailBytes });
             controller.AddParameter(VRMode, AnimatorControllerParameterType.Int);
             controller.AddParameter(ScreenPointer, AnimatorControllerParameterType.Int);
             for (int i = 0; i < ScreenLocalValues; i++) controller.AddParameter(ScreenValue(i), AnimatorControllerParameterType.Float);
@@ -300,16 +338,17 @@ namespace Orbiters.Toolkit.Editor.VRChat
             controller.AddParameter(LocalBlock, AnimatorControllerParameterType.Float);
             for (int i = 0; i < textSync; i++) controller.AddParameter(SyncDigit(i), AnimatorControllerParameterType.Float);
             for (int i = 0; i < ScreenLocalValues; i++) controller.AddParameter(LocalDigit(i), AnimatorControllerParameterType.Float);
-            for (int k = 0; k < ScreenWords; k++) controller.AddParameter(Word(k), AnimatorControllerParameterType.Float);
+            for (int k = 0; k < ScreenWords(thumbnailBytes); k++) controller.AddParameter(Word(k), AnimatorControllerParameterType.Float);
 
-            ScreenBlocks(controller, textSync);
-            ScreenLocalBlocks(controller);
-            ScreenLayer(controller, textSync);
+            ScreenBlocks(controller, textSync, thumbnailBytes);
+            ScreenLocalBlocks(controller, thumbnailBytes);
+            ScreenLayer(controller, textSync, thumbnailBytes);
             GazeDotLayer(controller);
 
             parameters.Add(Parameter(ScreenOpen, synced: false));
             // Not saved: a new upload's option always holds.
             parameters.Add(Parameter(ScreenReplace, synced: false, defaultValue: replace ? 1 : 0));
+            parameters.Add(Parameter(ScreenThumbnailBytes, synced: false, type: VRCExpressionParameters.ValueType.Int, defaultValue: thumbnailBytes));
             parameters.Add(Parameter(ScreenPointer, synced: false, type: VRCExpressionParameters.ValueType.Int));
             for (int i = 0; i < ScreenLocalValues; i++) parameters.Add(Parameter(ScreenValue(i), synced: false, type: VRCExpressionParameters.ValueType.Float));
             for (int hand = 0; hand < 2; hand++)
@@ -339,14 +378,24 @@ namespace Orbiters.Toolkit.Editor.VRChat
             Transition(on, off, (VRMode, AnimatorConditionMode.Greater, 0));
         }
 
-        /// <summary>The first <see cref="TextPointer"/> of the screen and how many blocks it has, for <paramref name="textSync"/> values.</summary>
-        internal static (int first, int blocks) ScreenPointers(int textSync) => (Cells / textSync + 1, (ScreenBytes + textSync - 1) / textSync);
+        /// <summary>
+        /// The first <see cref="TextPointer"/> of the screen and how many blocks it has, for <paramref name="textSync"/>
+        /// values and thumbnails of <paramref name="thumbnailBytes"/>.
+        /// </summary>
+        internal static (int first, int blocks) ScreenPointers(int textSync, int thumbnailBytes) => (Cells / textSync + 1, (ScreenBytes(thumbnailBytes) + textSync - 1) / textSync);
+
+        /// <summary>Whether everyone else's screen can be written through the text channel: its blocks stay below pointer 254.</summary>
+        public static bool ScreenFits(int textSync, int thumbnailBytes)
+        {
+            var (first, blocks) = ScreenPointers(textSync, thumbnailBytes);
+            return first + blocks - 1 < PointerScreenClose;
+        }
 
         // The synced pointer as a float (SyncBlock), only on the clients of everyone else: one state per screen block.
-        private static void ScreenBlocks(AnimatorController controller, int textSync)
+        private static void ScreenBlocks(AnimatorController controller, int textSync, int thumbnailBytes)
         {
             var machine = Layer(controller, "Screen block");
-            var (first, blocks) = ScreenPointers(textSync);
+            var (first, blocks) = ScreenPointers(textSync, thumbnailBytes);
             AnimatorState Set(string name, float block) => HeldPropRig.State(controller, machine, name, ParameterClip(name, SyncBlock, block));
             var none = Set("None", 0);
             machine.defaultState = none;
@@ -359,10 +408,10 @@ namespace Orbiters.Toolkit.Editor.VRChat
         }
 
         // The owner's pointer as a float (LocalBlock): one state per block of 16 values, and clearing.
-        private static void ScreenLocalBlocks(AnimatorController controller)
+        private static void ScreenLocalBlocks(AnimatorController controller, int thumbnailBytes)
         {
             var machine = Layer(controller, "Screen local block");
-            int blocks = (ScreenBytes + ScreenLocalValues - 1) / ScreenLocalValues;
+            int blocks = (ScreenBytes(thumbnailBytes) + ScreenLocalValues - 1) / ScreenLocalValues;
             AnimatorState Set(string name, float block) => HeldPropRig.State(controller, machine, name, ParameterClip(name, LocalBlock, block));
             var none = Set("None", 0);
             machine.defaultState = none;
@@ -381,13 +430,14 @@ namespace Orbiters.Toolkit.Editor.VRChat
         /// still (read from the text's late values: values VRChat applied before their pointer never reach the block before).
         /// The owner's local blocks need no lag: Orbiters desktop never changes their pointer and values in one step.
         /// </summary>
-        private static void ScreenLayer(AnimatorController controller, int textSync)
+        private static void ScreenLayer(AnimatorController controller, int textSync, int thumbnailBytes)
         {
             var machine = Layer(controller, "Screen");
-            var plus = new AnimationClip[ScreenWords];
-            var minus = new AnimationClip[ScreenWords];
-            var high = new AnimationClip[ScreenWords];
-            for (int k = 0; k < ScreenWords; k++)
+            int words = ScreenWords(thumbnailBytes);
+            var plus = new AnimationClip[words];
+            var minus = new AnimationClip[words];
+            var high = new AnimationClip[words];
+            for (int k = 0; k < words; k++)
             {
                 plus[k] = WordClip(k, 1); minus[k] = WordClip(k, -1); high[k] = WordClip(k, 256);
             }
@@ -406,7 +456,7 @@ namespace Orbiters.Toolkit.Editor.VRChat
             // Every word keeps itself.
             var keep = Hidden(new BlendTree { name = "Screen keeps", blendType = BlendTreeType.Direct });
             var keeps = new List<ChildMotion>();
-            for (int k = 0; k < ScreenWords; k++) Add(keeps, plus[k], Word(k));
+            for (int k = 0; k < words; k++) Add(keeps, plus[k], Word(k));
             keep.children = keeps.ToArray();
             Add(children, keep, One);
 
@@ -422,7 +472,7 @@ namespace Orbiters.Toolkit.Editor.VRChat
                     for (int j = 0; j < bytesPerBlock / 2; j++)
                     {
                         int k = ((b - 1) * bytesPerBlock) / 2 + j;
-                        if (k >= ScreenWords) break;
+                        if (k >= words) break;
                         Add(parts, minus[k], Word(k));
                         Add(parts, plus[k], digit(2 * j));
                         Add(parts, high[k], digit(2 * j + 1));
@@ -434,15 +484,15 @@ namespace Orbiters.Toolkit.Editor.VRChat
                 {
                     var all = Hidden(new BlendTree { name = name + " clear", blendType = BlendTreeType.Direct });
                     var parts = new List<ChildMotion>();
-                    for (int k = 0; k < ScreenWords; k++) Add(parts, minus[k], Word(k));
+                    for (int k = 0; k < words; k++) Add(parts, minus[k], Word(k));
                     all.children = parts.ToArray();
                     writes.AddChild(all, ScreenLocalClear);
                 }
                 return writes;
             }
-            var (_, syncBlocks) = ScreenPointers(textSync);
+            var (_, syncBlocks) = ScreenPointers(textSync, thumbnailBytes);
             Add(children, Writes("Screen writes", SyncBlock, textSync, SyncDigit, syncBlocks, false), One);
-            Add(children, Writes("Screen local writes", LocalBlock, ScreenLocalValues, LocalDigit, (ScreenBytes + ScreenLocalValues - 1) / ScreenLocalValues, true), One);
+            Add(children, Writes("Screen local writes", LocalBlock, ScreenLocalValues, LocalDigit, (ScreenBytes(thumbnailBytes) + ScreenLocalValues - 1) / ScreenLocalValues, true), One);
             tree.children = children.ToArray();
 
             var hidden = new AnimationClip { name = "Screen hidden" };
@@ -452,7 +502,7 @@ namespace Orbiters.Toolkit.Editor.VRChat
             var open = HeldPropRig.State(controller, machine, "Open", tree);
             closed.writeDefaultValues = true; open.writeDefaultValues = true;
             machine.defaultState = closed;
-            var (first, blocks) = ScreenPointers(textSync);
+            var (first, blocks) = ScreenPointers(textSync, thumbnailBytes);
             // The owner's opens when the desktop opens it or at once when the menu's Menu toggle is on (a blank screen
             // then says the desktop does not answer), in desktop mode or with Replace (in VR without it the overlay shows
             // the menu); it closes when both are off.

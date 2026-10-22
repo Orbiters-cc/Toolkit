@@ -28,7 +28,7 @@ namespace Orbiters.Toolkit.Editor.VRChat
         // The controller, parameters and menu of each choice of options, shared by every orb switched to it (they name no
         // object of their own: their curves follow paths below the orb).
         // A new menu or parameters get a new folder: orbs switched earlier keep the files they use.
-        internal const string OptionsFolder = "Assets/Orbiters/Orb/Menu 7/";
+        internal const string OptionsFolder = "Assets/Orbiters/Orb/Menu 8/";
 
         [InitializeOnLoadMethod]
         private static void RegisterOrbOptions() => AttachmentHooks.RegisterOptions(root => FindAll(root).SelectMany(orb =>
@@ -44,7 +44,13 @@ namespace Orbiters.Toolkit.Editor.VRChat
                     Choices = OfferedTextSync.Select(n => n.ToString()).ToList(),
                     ChoiceTooltips = OfferedTextSync.Select(n => $"{n} slots: {Bits(n)} synced bits, a full panel in about {SecondsPerPanel(n)} s").ToList(),
                     Current = OfferedTextSync.ToList().IndexOf(current.textSync),
-                    Choose = index => { var now = OptionsOf(target); SetOptions(target, OfferedTextSync[index], now.walkBoost, now.replace); },
+                    // 4 slots can't carry 128-byte thumbnails: they go back to 72.
+                    Choose = index =>
+                    {
+                        var now = OptionsOf(target);
+                        int textSync = OfferedTextSync[index];
+                        SetOptions(target, textSync, now.walkBoost, now.replace, ScreenFits(textSync, now.thumbnailBytes) ? now.thumbnailBytes : DefaultThumbnailBytes);
+                    },
                 },
                 new AttachmentOption
                 {
@@ -54,7 +60,7 @@ namespace Orbiters.Toolkit.Editor.VRChat
                     Choices = new[] { "Off", "On" },
                     ChoiceTooltips = new[] { "No radial", "Orb › Walk boost in your menu sets Orbiters desktop's walk boost" },
                     Current = current.walkBoost ? 1 : 0,
-                    Choose = index => { var now = OptionsOf(target); SetOptions(target, now.textSync, index == 1, now.replace); },
+                    Choose = index => { var now = OptionsOf(target); SetOptions(target, now.textSync, index == 1, now.replace, now.thumbnailBytes); },
                 },
                 new AttachmentOption
                 {
@@ -66,7 +72,24 @@ namespace Orbiters.Toolkit.Editor.VRChat
                     Choices = new[] { "Off", "On" },
                     ChoiceTooltips = new[] { "In VR, Orb's menu opens in Orbiters desktop's SteamVR overlay", "In VR too, Orb's menu opens on a screen in front of you in VRChat" },
                     Current = current.replace ? 1 : 0,
-                    Choose = index => { var now = OptionsOf(target); SetOptions(target, now.textSync, now.walkBoost, index == 1); },
+                    Choose = index => { var now = OptionsOf(target); SetOptions(target, now.textSync, now.walkBoost, index == 1, now.thumbnailBytes); },
+                },
+                new AttachmentOption
+                {
+                    Label = "Thumbnail size",
+                    Tooltip = "How many bytes each YouTube thumbnail on Orb's screen takes. Both sizes show in colour, blurred at first and " +
+                              "sharper as the rest arrives. 128 B end sharper but take longer to send, and need 8 text slots. No synced bits either way.",
+                    Choices = OfferedThumbnailBytes.Select(n => n + " B").ToList(),
+                    ChoiceTooltips = OfferedThumbnailBytes.Select(n => $"{n} bytes a thumbnail: five of them sent in {Seconds(n, ScreenLocalValues, .084f)} s for you, " +
+                                                                        $"{Seconds(n, DefaultTextSync, .3f)} s for people around").ToList(),
+                    Current = OfferedThumbnailBytes.ToList().IndexOf(current.thumbnailBytes),
+                    // 128 bytes need 8 text slots or more: 4 go up to 8.
+                    Choose = index =>
+                    {
+                        var now = OptionsOf(target);
+                        int bytes = OfferedThumbnailBytes[index];
+                        SetOptions(target, ScreenFits(now.textSync, bytes) ? now.textSync : DefaultTextSync, now.walkBoost, now.replace, bytes);
+                    },
                 },
             };
         }).ToList());
@@ -77,47 +100,57 @@ namespace Orbiters.Toolkit.Editor.VRChat
         // A full page is Cells / N blocks, one per 300 ms step (Docs/orb.md).
         private static int SecondsPerPanel(int textSync) => Mathf.CeilToInt(Cells / textSync * .3f);
 
+        // Five thumbnails of `bytes` sent in blocks of `block` bytes, one per `step` seconds (Docs/orb.md, Screen).
+        private static string Seconds(int bytes, int block, float step) => ((5 * bytes + block - 1) / block * step).ToString("0.#", System.Globalization.CultureInfo.InvariantCulture);
+
         /// <summary>The number of text slots of a placed orb, 0 when its VRCFury Full Controller can't be read.</summary>
         public static int TextSyncOf(Transform orb) => OptionsOf(orb).textSync;
 
         /// <summary>
-        /// A placed orb's text slots (0 when its VRCFury Full Controller can't be read), whether it has the Walk boost radial
-        /// and whether its projected screen replaces Orbiters desktop's overlay in VR (<see cref="ScreenReplace"/>).
+        /// A placed orb's text slots (0 when its VRCFury Full Controller can't be read), whether it has the Walk boost radial,
+        /// whether its projected screen replaces Orbiters desktop's overlay in VR (<see cref="ScreenReplace"/>) and the
+        /// bytes of each thumbnail its screen keeps (<see cref="ScreenThumbnailBytes"/>; 72 for an orb made before it).
         /// </summary>
-        public static (int textSync, bool walkBoost, bool replace) OptionsOf(Transform orb)
+        public static (int textSync, bool walkBoost, bool replace, int thumbnailBytes) OptionsOf(Transform orb)
         {
             var parameters = FullController(orb, out _)?.parameters;
-            if (parameters == null) return (0, false, false);
+            if (parameters == null) return (0, false, false, DefaultThumbnailBytes);
+            var thumbnails = parameters.parameters.FirstOrDefault(p => p.name == ScreenThumbnailBytes);
             return (parameters.parameters.Count(p => p.name != null && p.name.StartsWith(TextSyncPrefix, StringComparison.Ordinal)), parameters.parameters.Any(p => p.name == WalkBoost),
-                parameters.parameters.Any(p => p.name == ScreenReplace && p.defaultValue > .5f));
+                parameters.parameters.Any(p => p.name == ScreenReplace && p.defaultValue > .5f), thumbnails != null ? Mathf.RoundToInt(thumbnails.defaultValue) : DefaultThumbnailBytes);
         }
 
         /// <summary>Switches a placed orb to <paramref name="textSync"/> text slots, its other options kept.</summary>
         public static void SetTextSync(Transform orb, int textSync)
         {
             var now = OptionsOf(orb);
-            SetOptions(orb, textSync, now.walkBoost, now.replace);
+            SetOptions(orb, textSync, now.walkBoost, now.replace, now.thumbnailBytes);
         }
 
         /// <summary>
         /// Switches a placed orb to <paramref name="textSync"/> text slots (4, 8 or 16), with or without the Walk boost
-        /// radial, its projected screen replacing Orbiters desktop's overlay in VR or not: its VRCFury Full Controller takes
+        /// radial, its projected screen replacing Orbiters desktop's overlay in VR or not, keeping thumbnails of
+        /// <paramref name="thumbnailBytes"/> (72 or 128; 128 needs 8 text slots or more): its VRCFury Full Controller takes
         /// the controller, parameters and menu made for that choice and its global parameters follow (an orb made without a
-        /// screen gets one). Recorded with Undo; the orb's own files (a gallery's among them) are left as they are.
+        /// screen gets one), and its screen the material for that thumbnail size. Recorded with Undo; the orb's own files (a
+        /// gallery's among them) are left as they are.
         /// <para>
         /// VRCFury reverts every override of its components in a prefab instance when an upload starts, so on an orb placed
         /// from a prefab the Full Controller is first replaced by a copy of the orb's own (the prefab's removed, which VRCFury
         /// keeps): the options would come back off after each upload otherwise.
         /// </para>
         /// </summary>
-        public static void SetOptions(Transform orb, int textSync, bool walkBoost, bool replace = false)
+        public static void SetOptions(Transform orb, int textSync, bool walkBoost, bool replace = false, int thumbnailBytes = DefaultThumbnailBytes)
         {
             if (!TextSyncCounts.Contains(textSync)) throw new ArgumentOutOfRangeException(nameof(textSync), "An orb has 4, 8 or 16 text sync values.");
+            if (!OfferedThumbnailBytes.Contains(thumbnailBytes)) throw new ArgumentOutOfRangeException(nameof(thumbnailBytes), "An orb's thumbnails are 72 or 128 bytes.");
+            if (!ScreenFits(textSync, thumbnailBytes)) throw new ArgumentException(thumbnailBytes + "-byte thumbnails need 8 text slots or more.", nameof(thumbnailBytes));
             var found = FullController(orb, out var component) ?? throw new InvalidOperationException("This orb has no VRCFury Full Controller: add it again.");
-            if (OptionsOf(orb) == (textSync, walkBoost, replace) && HasScreen(orb)) return;
+            if (OptionsOf(orb) == (textSync, walkBoost, replace, thumbnailBytes) && HasScreen(orb) && ScreenDraws(orb, thumbnailBytes)) return;
             if (found.menuIndex < 0) throw new InvalidOperationException("This orb's menu was changed: add it again.");
-            AddScreen(orb);
-            var (controller, parameters, menu) = Shared(textSync, walkBoost, replace);
+            AddScreen(orb, ScreenFolder, thumbnailBytes);
+            SetScreenThumbnails(orb, thumbnailBytes);
+            var (controller, parameters, menu) = Shared(textSync, walkBoost, replace, thumbnailBytes);
             component = OwnComponent(component);
             var serialized = new SerializedObject(component);
             Reference(serialized.FindProperty("content.controllers").GetArrayElementAtIndex(found.controllerIndex).FindPropertyRelative("controller"), controller);
@@ -130,6 +163,15 @@ namespace Orbiters.Toolkit.Editor.VRChat
             serialized.ApplyModifiedProperties();
             Undo.SetCurrentGroupName("Orb options");
             PrefabUtility.RecordPrefabInstancePropertyModifications(component);
+        }
+
+        // Whether the orb's screen draws thumbnails of this size.
+        private static bool ScreenDraws(Transform orb, int thumbnailBytes)
+        {
+            var screen = orb.Find(ScreenObject);
+            var renderer = screen != null ? screen.GetComponent<MeshRenderer>() : null;
+            var material = renderer != null ? renderer.sharedMaterial : null;
+            return material != null && material.shader != null && material.shader.name == ScreenShaderName(thumbnailBytes);
         }
 
         // The component itself, or (part of a prefab instance) a copy of it in its place, the prefab's removed.
@@ -192,9 +234,10 @@ namespace Orbiters.Toolkit.Editor.VRChat
         }
 
         // The controller, parameters and menu for a choice of options, made once in their shared folder.
-        private static (AnimatorController controller, VRCExpressionParameters parameters, VRCExpressionsMenu menu) Shared(int textSync, bool walkBoost, bool replace)
+        private static (AnimatorController controller, VRCExpressionParameters parameters, VRCExpressionsMenu menu) Shared(int textSync, bool walkBoost, bool replace, int thumbnailBytes)
         {
-            string folder = OptionsFolder + "Text slots " + textSync + (walkBoost ? " + walk boost" : "") + (replace ? " + screen in VR" : "");
+            string folder = OptionsFolder + "Text slots " + textSync + (walkBoost ? " + walk boost" : "") + (replace ? " + screen in VR" : "") +
+                            (thumbnailBytes != DefaultThumbnailBytes ? " + " + thumbnailBytes + " B thumbnails" : "");
             var controller = AssetDatabase.LoadAssetAtPath<AnimatorController>(folder + "/Orb.controller");
             var parameters = AssetDatabase.LoadAssetAtPath<VRCExpressionParameters>(folder + "/Parameters.asset");
             var menu = AssetDatabase.LoadAssetAtPath<VRCExpressionsMenu>(folder + "/Menu.asset");
@@ -203,7 +246,7 @@ namespace Orbiters.Toolkit.Editor.VRChat
             if (AssetDatabase.IsValidFolder(folder)) AssetDatabase.DeleteAsset(folder);
             System.IO.Directory.CreateDirectory(folder); AssetDatabase.ImportAsset(folder);
             var root = new GameObject("Orb options");
-            try { BuildController(root, folder, textSync, walkBoost, replace); }
+            try { BuildController(root, folder, textSync, walkBoost, replace, thumbnailBytes); }
             finally { Object.DestroyImmediate(root); }
             AssetDatabase.SaveAssets();
             return (AssetDatabase.LoadAssetAtPath<AnimatorController>(folder + "/Orb.controller"), AssetDatabase.LoadAssetAtPath<VRCExpressionParameters>(folder + "/Parameters.asset"),

@@ -1,9 +1,13 @@
 // Orb's projected screen (Orbiters contracts, Docs/orb.md, Screen): Orb's menu in front of its owner, the same pages
 // Orbiters desktop's SteamVR overlay shows. A page's unchanging part is a picture (_Pages, one slice per page, drawn by
-// the desktop from the menu's layout); what changes is drawn over it from the screen's memory: 744 bytes the animator
-// keeps two to a material property (_W0 to _W371, each b0 + 256 × b1), read here as one array. _Layout says, row by row for each page, where its text slots, thumbnails and buttons are (4-pixel units).
+// the desktop from the menu's layout); what changes is drawn over it from the screen's memory: 744 bytes (1024 with
+// 128-byte thumbnails) the animator keeps two to a material property (_W0 on, each b0 + 256 × b1), read here as one
+// array. _Layout says, row by row for each page, where its text slots, thumbnails and buttons are (4-pixel units).
+// Thumbnails are colour pictures that sharpen layer by layer as they arrive (Docs/orb.md, Thumbnails): their decoder is
+// generated from the design table (OrbThumbnail.json) for the orb's thumbnail size.
 // Pages are 1024 × 576 pixels. Seen from behind it reads the right way round. Viewers who hide custom shaders see
-// nothing of it (VRCFallback). OrbInstaller writes this file, the word properties filled in, as "Orb screen.shader".
+// nothing of it (VRCFallback). OrbInstaller writes this file, the word properties and the decoder filled in, as
+// "Orb screen.shader" (or "Orb screen 128 B.shader").
 Shader "Orbiters/Orb Screen"
 {
     Properties
@@ -15,8 +19,6 @@ Shader "Orbiters/Orb Screen"
         _Text ("Text", Color) = (0.925, 0.929, 0.933, 1)
         _Text2 ("Secondary text", Color) = (0.545, 0.545, 0.58, 1)
         _Accent ("Accent", Color) = (0, 0.855, 0.427, 1)
-        _Dark ("Picture black", Color) = (0.035, 0.035, 0.043, 1)
-        _Light ("Picture white", Color) = (0.86, 0.86, 0.9, 1)
         _Placeholder ("Picture loading", Color) = (0.153, 0.153, 0.165, 1)
 //@PROPERTIES
     }
@@ -35,16 +37,17 @@ Shader "Orbiters/Orb Screen"
             #pragma target 4.5
             #pragma multi_compile_instancing
             #include "UnityCG.cginc"
+//@DEFINES
 
             UNITY_DECLARE_TEX2DARRAY(_Pages);
             Texture2D _Layout;
             sampler2D _MainTex;
             float4 _MainTex_TexelSize;
-            fixed4 _Card, _Text, _Text2, _Accent, _Dark, _Light, _Placeholder;
+            fixed4 _Card, _Text, _Text2, _Accent, _Placeholder;
 
             // The screen's memory as one array over its 372 properties (each takes a register of its own).
             CBUFFER_START(WordBuffer)
-            float _Words[372] : packoffset(c0);
+            float _Words[SCREEN_WORDS] : packoffset(c0);
 //@BUFFER
             CBUFFER_END
 
@@ -59,11 +62,9 @@ Shader "Orbiters/Orb Screen"
             static const float2 Page = float2(1024, 576);
             static const int Pages = 9;
             // The screen's memory (Docs/orb.md, Screen).
-            static const int Hover = 2, Pressed = 3, On = 4, Hidden = 8, Passes = 16, TextStart = 24, PicturesStart = 384, PictureBytes = 72;
+            static const int Hover = 2, Pressed = 3, On = 4, Hidden = 8, Layers = 16, TextStart = 24, PicturesStart = 384, PictureBytes = THUMBNAIL_BYTES;
             // The layout table's columns.
             static const int TableSlots = 1, TablePictures = 33, TableElements = 40, LayoutRows = 10;
-            // Where each display row of a thumbnail is kept (rows are kept pass by pass: every eighth, fourth, second, the rest).
-            static const int KeptOf[18] = { 0, 9, 5, 10, 3, 11, 6, 12, 1, 13, 7, 14, 4, 15, 8, 16, 2, 17 };
 
             struct appdata
             {
@@ -93,12 +94,14 @@ Shader "Orbiters/Orb Screen"
             // Byte i of the memory: word i / 2 holds bytes 2k (low) and 2k + 1 (high) as b0 + 256 b1.
             int Byte(int i)
             {
-                float w = _Words[clamp(i >> 1, 0, 371)];
+                float w = _Words[clamp(i >> 1, 0, SCREEN_WORDS - 1)];
                 float high = floor((w + .5) / 256);
                 return (int)((i & 1) ? high : round(w - high * 256));
             }
 
             bool Bit(int at, int index) { return ((Byte(at + index / 7) >> (index % 7)) & 1) == 1; }
+
+//@THUMBNAIL
 
             // A texel of the layout table, its bytes (the table's rows run from page 0 at the top of its picture).
             int4 Texel(int column, int page) { return (int4)round(_Layout.Load(int3(column, LayoutRows - 1 - page, 0)) * 255); }
@@ -190,21 +193,20 @@ Shader "Orbiters/Orb Screen"
                     colour = lerp(colour, ink, coverage);
                 }
 
-                // Thumbnails (results): 32 × 18 black and white pixels, the passes received so far shown whole.
+                // Thumbnails (results): colour pictures, the layers received so far summed at this point of the picture.
                 [loop] for (int t = 0; t < head.z; t++)
                 {
                     float4 r = float4(Texel(TablePictures + t, page)) * 4;
                     float inside = Rounded(p, r, 10);
                     if (inside <= 0) continue;
-                    int passes = Byte(Passes + t);
+                    int layers = Byte(Layers + t);
                     fixed3 shade = _Placeholder.rgb;
-                    if (passes > 0)
+                    if (layers > 0)
                     {
-                        int2 pixel = clamp(int2((p - r.xy) / r.zw * float2(32, 18)), int2(0, 0), int2(31, 17));
-                        int step = passes >= 4 ? 1 : passes == 3 ? 2 : passes == 2 ? 4 : 8;
-                        int row = pixel.y / step * step;
-                        int b = Byte(PicturesStart + t * PictureBytes + KeptOf[row] * 4 + pixel.x / 8);
-                        shade = ((b >> (7 - pixel.x % 8)) & 1) ? _Light.rgb : _Dark.rgb;
+                        shade = YccToRgb(Thumbnail(PicturesStart + t * PictureBytes, saturate((p - r.xy) / r.zw), layers));
+                        #ifndef UNITY_COLORSPACE_GAMMA
+                        shade = GammaToLinearSpace(shade);
+                        #endif
                     }
                     colour = lerp(colour, shade, inside);
                 }

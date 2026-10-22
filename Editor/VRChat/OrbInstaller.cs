@@ -88,15 +88,19 @@ namespace Orbiters.Toolkit.Editor.VRChat
         /// <summary>
         /// Creates the orb prefab with its controller, menu, parameters, shaders, glyph atlas, meshes and materials in
         /// <paramref name="folder"/>; <paramref name="textSync"/> (4, 8 or 16) is its number of text sync values: more
-        /// fill the panel sooner and cost more of the avatar's synced bits (1 + 8 + 1 + 8 + 8 per value).
+        /// fill the panel sooner and cost more of the avatar's synced bits (1 + 8 + 1 + 8 + 8 per value);
+        /// <paramref name="thumbnailBytes"/> (72 or 128, 128 with 8 text sync values or more) the size of each thumbnail
+        /// its screen keeps.
         /// </summary>
-        public static string CreatePrefab(string folder, int textSync = DefaultTextSync)
+        public static string CreatePrefab(string folder, int textSync = DefaultTextSync, int thumbnailBytes = DefaultThumbnailBytes)
         {
             if (!TextSyncCounts.Contains(textSync)) throw new ArgumentOutOfRangeException(nameof(textSync), "An orb has 4, 8 or 16 text sync values.");
-            return SavePrefab(folder, PrefabName, "Orb", "orb", root => Build(root, folder, textSync));
+            if (!OfferedThumbnailBytes.Contains(thumbnailBytes) || !ScreenFits(textSync, thumbnailBytes))
+                throw new ArgumentOutOfRangeException(nameof(thumbnailBytes), "An orb's thumbnails are 72 or 128 bytes, 128 with 8 text sync values or more.");
+            return SavePrefab(folder, PrefabName, "Orb", "orb", root => Build(root, folder, textSync, thumbnailBytes));
         }
 
-        private static void Build(GameObject root, string folder, int textSync)
+        private static void Build(GameObject root, string folder, int textSync, int thumbnailBytes)
         {
             // Everything turns off with Orb/Visible.
             var shown = Child(root.transform, Shown);
@@ -183,9 +187,9 @@ namespace Orbiters.Toolkit.Editor.VRChat
             screen.localBounds = new Bounds(new Vector3(.15f, 0, -.1f), Vector3.one * 1.4f);
             Quiet(screen);
 
-            BuildController(root, folder, textSync);
+            BuildController(root, folder, textSync, thumbnailBytes: thumbnailBytes);
             // Its files in the orb's folder, which a gallery package carries.
-            AddScreen(root.transform, folder);
+            AddScreen(root.transform, folder, thumbnailBytes);
             panel.gameObject.SetActive(false);
         }
 
