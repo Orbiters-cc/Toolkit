@@ -380,12 +380,16 @@ public class OrbTests
         }
         var parameters = AssetDatabase.LoadAssetAtPath<VRCExpressionParameters>(folder + "/Parameters.asset");
         var screenParameters = parameters.parameters.Where(p => p.name.StartsWith("Orb/Screen/", StringComparison.Ordinal)).ToList();
-        Assert.AreEqual(1 + 1 + 1 + 1 + OrbInstaller.ScreenLocalValues + 8 + 8, screenParameters.Count, "Open, Replace, ThumbnailBytes, the pointer, 16 values, 8 touch points, 4 each for the eyes and the gaze");
+        Assert.AreEqual(1 + 1 + 1 + 1 + 1 + OrbInstaller.ScreenLocalValues + 8 + 8, screenParameters.Count,
+            "Open, Replace, ThumbnailBytes, Version, the pointer, 16 values, 8 touch points, 4 each for the eyes and the gaze");
         Assert.IsTrue(screenParameters.All(p => !p.networkSynced), "No synced bits");
         var replace = screenParameters.Single(p => p.name == OrbInstaller.ScreenReplace);
         Assert.AreEqual((0f, false), (replace.defaultValue, replace.saved), "Off unless the card's option is on, and never saved: each upload's option holds");
         var thumbnails = screenParameters.Single(p => p.name == OrbInstaller.ScreenThumbnailBytes);
         Assert.AreEqual((72f, false, VRCExpressionParameters.ValueType.Int), (thumbnails.defaultValue, thumbnails.saved, thumbnails.valueType), "72 bytes unless the card says 128, never saved");
+        var version = screenParameters.Single(p => p.name == OrbInstaller.ScreenVersionParameter);
+        Assert.AreEqual(((float)OrbInstaller.ScreenVersion, false, VRCExpressionParameters.ValueType.Int), (version.defaultValue, version.saved, version.valueType),
+            "The screen says its version: Orbiters desktop shows a version 3 screen the six-tile Home");
         Assert.AreEqual(OrbInstaller.ScreenShaderName(72), screen.sharedMaterial.shader.name);
         var hold = screen.GetComponent<VRCParentConstraint>();
         Assert.IsFalse(hold.RebakeOffsetsWhenUnfrozen, "Opened again, it appears before the eyes, not where it was");
@@ -552,9 +556,9 @@ public class OrbTests
         if (VrcFury.Writer == null) Assert.Ignore("Requires the VRCFury integration.");
         var prefab = AssetDatabase.LoadAssetAtPath<GameObject>(OrbInstaller.CreatePrefab(folder));
         var placed = (GameObject)PrefabUtility.InstantiatePrefab(prefab, scene);
-        Assert.AreEqual((8, false, false, 72), OrbInstaller.OptionsOf(placed.transform));
+        Assert.AreEqual((8, false, false, 72, false), OrbInstaller.OptionsOf(placed.transform));
         OrbInstaller.SetOptions(placed.transform, 4, true, true);
-        Assert.AreEqual((4, true, true, 72), OrbInstaller.OptionsOf(placed.transform));
+        Assert.AreEqual((4, true, true, 72, false), OrbInstaller.OptionsOf(placed.transform));
         Assert.Throws<ArgumentException>(() => OrbInstaller.SetOptions(placed.transform, 4, true, true, 128), "128-byte thumbnails need 8 text slots");
 
         // What VRCFury does to the avatar before the SDK copies it.
@@ -564,13 +568,13 @@ public class OrbTests
             var mods = PrefabUtility.GetPropertyModifications(component)?.Where(m => m.target == source).ToList();
             if (mods != null && mods.Count > 0) PrefabUtility.RevertObjectOverride(component, InteractionMode.AutomatedAction);
         }
-        Assert.AreEqual((4, true, true, 72), OrbInstaller.OptionsOf(placed.transform), "Kept on the orb's own Full Controller");
+        Assert.AreEqual((4, true, true, 72, false), OrbInstaller.OptionsOf(placed.transform), "Kept on the orb's own Full Controller");
         Assert.AreEqual(1, placed.GetComponents(VrcFury.Component).Length, "The prefab's Full Controller replaced, not doubled");
         Assert.IsTrue(VrcFury.IsGlobalParameter(VrcFury.Features(placed).Single(f => f.kind == "FullController").feature, OrbInstaller.ScreenReplace));
 
         // 128-byte thumbnails: the parameter's default, the screen's material and memory follow.
         OrbInstaller.SetOptions(placed.transform, 8, false, true, 128);
-        Assert.AreEqual((8, false, true, 128), OrbInstaller.OptionsOf(placed.transform));
+        Assert.AreEqual((8, false, true, 128, false), OrbInstaller.OptionsOf(placed.transform));
         var renderer = placed.transform.Find(OrbInstaller.ScreenObject).GetComponent<MeshRenderer>();
         Assert.AreEqual(OrbInstaller.ScreenShaderName(128), renderer.sharedMaterial.shader.name);
         Assert.IsTrue(renderer.sharedMaterial.HasProperty("_W511") && !renderer.sharedMaterial.HasProperty("_W512"), "1024 bytes: 512 words");
@@ -578,9 +582,100 @@ public class OrbTests
 
         // And back: the screen stays, Replace off, 72-byte thumbnails.
         OrbInstaller.SetOptions(placed.transform, 8, false, false);
-        Assert.AreEqual((8, false, false, 72), OrbInstaller.OptionsOf(placed.transform));
+        Assert.AreEqual((8, false, false, 72, false), OrbInstaller.OptionsOf(placed.transform));
         Assert.IsTrue(OrbInstaller.HasScreen(placed.transform));
         Assert.AreEqual(OrbInstaller.ScreenShaderName(72), renderer.sharedMaterial.shader.name);
+    }
+
+    // The Light option (Docs/orb.md): a point light under the orb that everyone sees, in one of eight colours at a
+    // brightness; the orb takes its colour. Switched off, it goes.
+    [Test]
+    public void TheLightOptionMakesTheOrbALightInItsColour()
+    {
+        if (VrcFury.Writer == null) Assert.Ignore("Requires the VRCFury integration.");
+        var prefab = AssetDatabase.LoadAssetAtPath<GameObject>(OrbInstaller.CreatePrefab(folder));
+        var placed = (GameObject)PrefabUtility.InstantiatePrefab(prefab, scene);
+        Assert.IsFalse(OrbInstaller.HasLight(placed.transform));
+        OrbInstaller.SetOptions(placed.transform, 8, false, false, 72, light: true);
+        Assert.AreEqual((8, false, false, 72, true), OrbInstaller.OptionsOf(placed.transform));
+        var light = placed.transform.Find(OrbInstaller.LightObject).GetComponent<Light>();
+        Assert.AreEqual((LightType.Point, LightShadows.None), (light.type, light.shadows));
+        Assert.IsFalse(light.gameObject.activeSelf, "Off until asked");
+
+        string shared = OrbInstaller.OptionsFolder + "Text slots 8 + light";
+        var parameters = AssetDatabase.LoadAssetAtPath<VRCExpressionParameters>(shared + "/Parameters.asset");
+        var own = parameters.parameters.Where(p => p.name.StartsWith(OrbInstaller.Light, StringComparison.Ordinal))
+            .Select(p => (p.name, p.valueType, p.networkSynced, p.saved, p.defaultValue)).ToList();
+        CollectionAssert.AreEqual(new[]
+        {
+            (OrbInstaller.Light, VRCExpressionParameters.ValueType.Bool, true, false, 0f),
+            (OrbInstaller.LightColor, VRCExpressionParameters.ValueType.Int, true, true, 0f),
+            (OrbInstaller.LightLevel, VRCExpressionParameters.ValueType.Float, true, true, OrbInstaller.LightLevelDefault),
+        }, own);
+        Assert.AreEqual(1 + 8 + 1 + 8 + 8 * 8 + 1 + 8 + 8, parameters.CalcTotalCost(), "17 synced bits more");
+        Assert.IsTrue(VrcFury.IsGlobalParameter(VrcFury.Features(placed).Single(f => f.kind == "FullController").feature, OrbInstaller.LightColor));
+        var orbMenu = AssetDatabase.LoadAssetAtPath<VRCExpressionsMenu>(shared + "/Menu.asset").controls.Single().subMenu;
+        var lightMenu = orbMenu.controls.Single(c => c.name == "Light").subMenu;
+        CollectionAssert.AreEqual(new[] { "Light", "Brightness", "Colour" }, lightMenu.controls.Select(c => c.name).ToArray());
+        Assert.AreEqual(OrbInstaller.LightLevel, lightMenu.controls[1].subParameters.Single().name);
+        var colours = lightMenu.controls[2].subMenu.controls;
+        CollectionAssert.AreEqual(Enumerable.Range(0, 8).Select(i => (float)i).ToArray(), colours.Select(c => c.value).ToArray());
+        Assert.IsTrue(colours.All(c => c.parameter.name == OrbInstaller.LightColor));
+
+        // Played: pink at full brightness, then off; the orb is pink while lit, green again after.
+        var root = Object.Instantiate(placed);
+        SceneManager.MoveGameObjectToScene(root, scene);
+        graph = PlayableGraph.Create("Orb light test");
+        playable = AnimatorControllerPlayable.Create(graph, AssetDatabase.LoadAssetAtPath<AnimatorController>(shared + "/Orb.controller"));
+        AnimationPlayableOutput.Create(graph, "Orb", root.AddComponent<Animator>()).SetSourcePlayable(playable);
+        graph.SetTimeUpdateMode(DirectorUpdateMode.Manual); graph.Play();
+        var played = root.transform.Find(OrbInstaller.LightObject).GetComponent<Light>();
+        var body = root.transform.Find(OrbInstaller.Body).GetComponent<MeshRenderer>();
+        Color OrbColour() { var block = new MaterialPropertyBlock(); body.GetPropertyBlock(block); return block.GetColor("_Color"); }
+        Tick(5);
+        Assert.IsFalse(played.gameObject.activeSelf);
+        playable.SetInteger(OrbInstaller.LightColor, 3);
+        playable.SetFloat(OrbInstaller.LightLevel, 1);
+        playable.SetBool(OrbInstaller.Light, true);
+        Tick(20);
+        Assert.IsTrue(played.gameObject.activeSelf);
+        Assert.AreEqual(OrbInstaller.LightColors[3].color.r, played.color.r, .01f);
+        Assert.AreEqual(OrbInstaller.LightColors[3].color.g, played.color.g, .01f);
+        Assert.AreEqual(OrbInstaller.LightBright, played.intensity, .01f);
+        Assert.IsTrue(OrbColour().r > .9f && OrbColour().g < .6f, "The orb is pink: " + OrbColour());
+        playable.SetBool(OrbInstaller.Light, false);
+        Tick(20);
+        Assert.IsFalse(played.gameObject.activeSelf);
+        Assert.IsTrue(OrbColour().r < .1f && OrbColour().g > .5f, "Green again: " + OrbColour());
+
+        OrbInstaller.SetOptions(placed.transform, 8, false, false, 72, light: false);
+        Assert.IsFalse(OrbInstaller.HasLight(placed.transform));
+        Assert.AreEqual((8, false, false, 72, false), OrbInstaller.OptionsOf(placed.transform));
+    }
+
+    // A screen from before version 3 (fewer page slices) takes the current files when the orb's options change, and the
+    // controller then says its version: Orbiters desktop shows it the six-tile Home.
+    [Test]
+    public void AnOlderScreenTakesTheCurrentPagesWithItsVersion()
+    {
+        if (VrcFury.Writer == null) Assert.Ignore("Requires the VRCFury integration.");
+        var prefab = AssetDatabase.LoadAssetAtPath<GameObject>(OrbInstaller.CreatePrefab(folder));
+        var placed = (GameObject)PrefabUtility.InstantiatePrefab(prefab, scene);
+        var renderer = placed.transform.Find(OrbInstaller.ScreenObject).GetComponent<MeshRenderer>();
+        Assert.IsTrue(OrbInstaller.ScreenCurrent(renderer.sharedMaterial, 72), "A new orb's screen is current");
+        var older = new Material(renderer.sharedMaterial);
+        var pages = new Texture2DArray(4, 4, 10, TextureFormat.RGBA32, false);
+        owned.Add(older); owned.Add(pages);
+        older.SetTexture("_Pages", pages);
+        renderer.sharedMaterial = older;
+        Assert.IsFalse(OrbInstaller.ScreenCurrent(older, 72));
+        OrbInstaller.SetOptions(placed.transform, 8, false, true);
+        Assert.IsTrue(OrbInstaller.ScreenCurrent(renderer.sharedMaterial, 72));
+        StringAssert.StartsWith(OrbInstaller.ScreenFolder + "/", AssetDatabase.GetAssetPath(renderer.sharedMaterial));
+        var parameters = AssetDatabase.LoadAssetAtPath<VRCExpressionParameters>(OrbInstaller.OptionsFolder + "Text slots 8 + screen in VR/Parameters.asset");
+        var version = parameters.parameters.Single(p => p.name == OrbInstaller.ScreenVersionParameter);
+        Assert.AreEqual((VRCExpressionParameters.ValueType.Int, false, false, (float)OrbInstaller.ScreenVersion), (version.valueType, version.networkSynced, version.saved, version.defaultValue));
+        Assert.AreEqual(3, OrbInstaller.ScreenVersion);
     }
 
     [TestCase(8, 72)]

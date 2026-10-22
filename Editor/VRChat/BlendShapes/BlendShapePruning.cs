@@ -103,8 +103,11 @@ namespace Orbiters.Toolkit.Editor.VRChat.BlendShapes
             return Prune(avatarRoot, renderer, Used(avatarRoot, renderer, constantsUnused));
         }
 
-        /// <summary>The same, keeping the blendshapes named in <paramref name="used"/> (a file format that keeps only some).</summary>
-        public static Mesh Prune(GameObject avatarRoot, SkinnedMeshRenderer renderer, ICollection<string> used)
+        /// <summary>
+        /// The same, keeping the blendshapes named in <paramref name="used"/> (a file format that keeps only some), those in
+        /// <paramref name="rename"/> under their new name (a name a kept shape already has is left alone).
+        /// </summary>
+        public static Mesh Prune(GameObject avatarRoot, SkinnedMeshRenderer renderer, ICollection<string> used, IReadOnlyDictionary<string, string> rename = null)
         {
             var mesh = renderer.sharedMesh;
             // The editor reads any mesh; Play mode only those imported with Read/Write.
@@ -112,7 +115,14 @@ namespace Orbiters.Toolkit.Editor.VRChat.BlendShapes
             int count = mesh.blendShapeCount;
             var keep = new bool[count];
             for (int i = 0; i < count; i++) keep[i] = used.Contains(mesh.GetBlendShapeName(i));
-            if (keep.All(k => k)) return null;
+            var names = new string[count];
+            var taken = new HashSet<string>(Enumerable.Range(0, count).Where(i => keep[i]).Select(mesh.GetBlendShapeName), StringComparer.Ordinal);
+            for (int i = 0; i < count; i++)
+            {
+                names[i] = mesh.GetBlendShapeName(i);
+                if (keep[i] && rename != null && rename.TryGetValue(names[i], out string to) && !string.IsNullOrEmpty(to) && taken.Add(to)) names[i] = to;
+            }
+            if (keep.All(k => k) && names.Select((n, i) => n == mesh.GetBlendShapeName(i)).All(same => same)) return null;
             var weights = Enumerable.Range(0, count).Select(renderer.GetBlendShapeWeight).ToArray();
 
             var copy = Object.Instantiate(mesh);
@@ -131,11 +141,10 @@ namespace Orbiters.Toolkit.Editor.VRChat.BlendShapes
                 newIndex[i] = keep[i] ? kept++ : -1;
                 if (keep[i])
                 {
-                    string name = mesh.GetBlendShapeName(i);
                     for (int f = 0; f < mesh.GetBlendShapeFrameCount(i); f++)
                     {
                         mesh.GetBlendShapeFrameVertices(i, f, dv, dn, dt);
-                        copy.AddBlendShapeFrame(name, mesh.GetBlendShapeFrameWeight(i, f), dv, dn, dt);
+                        copy.AddBlendShapeFrame(names[i], mesh.GetBlendShapeFrameWeight(i, f), dv, dn, dt);
                     }
                 }
                 else if (weights[i] != 0)

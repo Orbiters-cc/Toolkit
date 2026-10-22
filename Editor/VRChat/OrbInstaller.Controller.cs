@@ -65,7 +65,9 @@ namespace Orbiters.Toolkit.Editor.VRChat
         /// <param name="replace">The projected screen shows Orb's menu in VR too, instead of Orbiters desktop's SteamVR
         /// overlay (<see cref="ScreenReplace"/>'s default). Every orb has the screen (<see cref="ScreenController"/>).</param>
         /// <param name="thumbnailBytes">The bytes of each thumbnail the screen keeps, 72 or 128 (<see cref="ScreenThumbnailBytes"/>'s default).</param>
-        internal static void BuildController(GameObject root, string folder, int textSync, bool walkBoost = false, bool replace = false, int thumbnailBytes = DefaultThumbnailBytes)
+        /// <param name="light">Adds the light's parameters, layer and submenu (<see cref="LightController"/>).</param>
+        internal static void BuildController(GameObject root, string folder, int textSync, bool walkBoost = false, bool replace = false, int thumbnailBytes = DefaultThumbnailBytes,
+            bool light = false)
         {
             var controller = AnimatorController.CreateAnimatorControllerAtPath(folder + "/Orb.controller");
             controller.AddParameter(new AnimatorControllerParameter { name = Visible, type = AnimatorControllerParameterType.Bool, defaultBool = true });
@@ -132,6 +134,7 @@ namespace Orbiters.Toolkit.Editor.VRChat
                 radial.subParameters = new[] { new VRCExpressionsMenu.Control.Parameter { name = WalkBoost } };
                 controls.Add(radial);
             }
+            if (light) LightController(controller, folder, parameters, controls);
             Install(root, folder, controller, MenuPath, "Orb menu", controls, parameters.ToArray(), parameters.Select(p => p.name));
         }
 

@@ -636,6 +636,26 @@ offset: My Avatar attachments, VRCFury Armature Links, and the bone matcher for 
 the posing preview share it. Armature Links follow VRCFury's own rules: the first target that resolves on the avatar
 (humanoid bone, object or avatar root, then its offset path), and position, rotation and scale aligned independently.
 
+### Stick to the skin
+
+`OrbitersAttachment.stickToSkin` (the **Stick to the skin** switch My Avatar shows on a small accessory's card, an
+`AttachmentOption` registered by `SkinStick`) makes a small accessory on the skin follow the skin under it rather than
+one bone. `SkinStick.Find(attachment)` measures where it sits: the accessory (a My Avatar prop on one bone, or a
+creator's single non-recursive VRCFury Armature Link that leaves it where it stands; never clothing or something a
+constraint holds) must be at most a tenth of the avatar's height across, and its closest vertex within 1.5 % of the
+height from one of the avatar's own skins. The skin under the touching part (the mean of its vertices' closest skin
+points, within 3 mm of the closest) gives a triangle; its corners' bone weights, blended by where the spot lies in it,
+are the bones and shares a point of skin there moves by (up to 8, 1 % or more). Skins are baked at their current pose
+and weights into a BVH, kept until a bone, a weight or the mesh changes.
+
+At build (-8960, after VRCFury placed the accessories) each stuck accessory gets a locked VRChat Parent Constraint on
+those bones, offsets measured from each bone's position and rotation without its scale (as the constraint applies them,
+and as Haï's Skinned Mesh Constraint computes them, rather than its Activate), so it stays where it stands and then moves
+as linear blend skinning moves the skin; and an `OrbitersSurfaceFollow` so the body's blendshapes there move it too.
+`AttachmentFollow.Links` gives it a `FollowLink.Blend` of the same bones, which the posing preview, Substance Painter's
+pose and ReFit's motion check apply. An accessory moved off the skin since keeps its switch and follows its bone, with a
+warning in the build log.
+
 ## Follow body blendshapes (beta)
 
 `OrbitersSurfaceFollow` (runtime assembly `Orbiters.Toolkit.VRChat`, `IEditorOnly`, menu **Orbiters › Follow Body
@@ -731,6 +751,17 @@ sync value.
 - Layers: Base (Orb/Visible), State (each state sets everything it shows; any other value is idle), Text visible, Text
   block (the pointer as a float) and Text: one direct blend tree (Write Defaults on, which VRCFury keeps) holding each
   cell in an animator parameter, so the cells stay whatever the avatar's Write Defaults.
+- **Light** (the orb card's option, `SetOptions(..., light: true)`): `…/Orb/Hop/Light`, a point light without shadows
+  reaching 5 m at 1.6 m eye height (`Bind` scales it), off until `Orb/Light` (synced) turns it on in the colour
+  `Orb/Light/Color` (synced, saved: White, Warm, Sunset, Pink, Violet, Blue, Cyan, Green) at `Orb/Light/Level` (synced,
+  saved, 0.6 by default: intensity 0.15 to 3); the orb takes the light's colour (no other layer animates `_Color`), and
+  each of the Light layer's states sets everything it animates, off included, so any Write Defaults leave nothing
+  behind. **Orb › Light** in the menu: the toggle, a Brightness radial and the eight colours. 17 synced bits; any light
+  makes the avatar's PC performance rank Poor, and Quest leaves it out. Orbiters desktop sets it from Orb's menu too.
+- **Screen version 3** (`Orb/Screen/Version`, local, unsaved, 3 by default): the page pictures have 13 slices, for the
+  six-tile Home (page 10), Music (11) and Light (12); Orbiters desktop shows a screen without the parameter the four-tile
+  Home. Changing an orb's options swaps an older screen's material for the current files (`ScreenCurrent`: the shader
+  for its thumbnail size and pages with this version's slices). Shared files in `Orb/Screen 4`, options in `Orb/Menu 9`.
 
 ## Avatar manifests
 

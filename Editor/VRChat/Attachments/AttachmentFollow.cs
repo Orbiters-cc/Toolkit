@@ -7,6 +7,17 @@ using UnityEngine;
 
 namespace Orbiters.Toolkit.Editor.VRChat.Attachments
 {
+    /// <summary>
+    /// One of the bones a follower stuck to the skin is blended between: its share and the follower's offset from the
+    /// bone's position and rotation (<see cref="SkinStick.Frame"/>, without its scale, as a parent constraint measures it).
+    /// </summary>
+    public struct FollowBlend
+    {
+        public Transform Target;
+        public float Weight;
+        public Matrix4x4 Offset;
+    }
+
     /// <summary>One transform that follows an avatar bone, at a fixed offset in that bone's space.</summary>
     public struct FollowLink
     {
@@ -17,9 +28,15 @@ namespace Orbiters.Toolkit.Editor.VRChat.Attachments
         /// <summary>Which rule produced the link, for the accessory list ("VRCFury", "My Avatar", "Name match").</summary>
         public string Source;
         public Transform Accessory;
+        /// <summary>
+        /// Stuck to the skin (<see cref="SkinStick"/>): the follower is blended between these bones, as the build's VRChat
+        /// Parent Constraint holds it, instead of following <see cref="Target"/> alone. Null for the others.
+        /// </summary>
+        public FollowBlend[] Blend;
 
         public void Apply()
         {
+            if (Blend != null && Blend.Length > 0) { ApplyBlend(); return; }
             if (Scale.HasValue)
             {
                 // Per axis, like VRCFury's world scale.
@@ -31,6 +48,44 @@ namespace Orbiters.Toolkit.Editor.VRChat.Attachments
             }
             // Rotation composed separately: a non-uniformly scaled avatar would skew the matrix's rotation.
             Follower.SetPositionAndRotation(Target.TransformPoint(Offset.GetColumn(3)), Target.rotation * Offset.rotation);
+        }
+
+        // Each bone's placement of the follower, averaged by its share: positions linearly, rotations as quaternions turned
+        // to the first one's side.
+        private void ApplyBlend()
+        {
+            var position = Vector3.zero;
+            var sum = new Vector4();
+            Quaternion first = default;
+            float total = 0f;
+            for (int i = 0; i < Blend.Length; i++)
+            {
+                var blend = Blend[i];
+                if (blend.Target == null || blend.Weight <= 0f) continue;
+                position += SkinStick.Frame(blend.Target).MultiplyPoint3x4(blend.Offset.GetColumn(3)) * blend.Weight;
+                var q = blend.Target.rotation * blend.Offset.rotation;
+                if (total == 0f) first = q;
+                float side = Quaternion.Dot(first, q) < 0f ? -blend.Weight : blend.Weight;
+                sum += new Vector4(q.x, q.y, q.z, q.w) * side;
+                total += blend.Weight;
+            }
+            if (total <= 0f) return;
+            sum /= sum.magnitude;
+            Follower.SetPositionAndRotation(position / total, new Quaternion(sum.x, sum.y, sum.z, sum.w));
+        }
+
+        /// <summary>The link with its offsets moved by as much as the follower's rest moved (from <paramref name="before"/> to now).</summary>
+        public FollowLink Rebased(Matrix4x4 before)
+        {
+            var change = before.inverse * Follower.localToWorldMatrix;
+            var link = this;
+            link.Offset = Offset * change;
+            if (Blend != null)
+            {
+                link.Blend = (FollowBlend[])Blend.Clone();
+                for (int i = 0; i < link.Blend.Length; i++) link.Blend[i].Offset = Blend[i].Offset * change;
+            }
+            return link;
         }
     }
 
@@ -83,7 +138,8 @@ namespace Orbiters.Toolkit.Editor.VRChat.Attachments
                 }
                 else if (attachment.mode == OrbitersAttachment.AttachMode.Parent && attachment.parent != null)
                 {
-                    result.Add(new FollowLink { Follower = root, Target = attachment.parent, Offset = Current(root, attachment.parent), Source = "My Avatar", Accessory = root });
+                    result.Add(new FollowLink { Follower = root, Target = attachment.parent, Offset = Current(root, attachment.parent), Source = "My Avatar", Accessory = root,
+                        Blend = SkinStick.Blend(attachment, root.localToWorldMatrix) });
                     handled.UnionWith(root.GetComponentsInChildren<Transform>(true));
                 }
             }
@@ -96,7 +152,11 @@ namespace Orbiters.Toolkit.Editor.VRChat.Attachments
                 var accessory = Accessory(link.From.transform, avatarRoot);
                 var from = link.From.transform;
                 float scaleFactor = link.ScalingFactor(target);
-                result.Add(VrcFuryLink(link, from, target, scaleFactor, accessory));
+                var followed = VrcFuryLink(link, from, target, scaleFactor, accessory);
+                // A creator's prop link that leaves the prop where it stands can stick it to the skin (SkinStick.Holder).
+                var stuck = accessory.GetComponent<OrbitersAttachment>();
+                if (stuck != null && stuck.stickToSkin && !link.Recursive) followed.Blend = SkinStick.Blend(stuck, from.localToWorldMatrix);
+                result.Add(followed);
                 handled.Add(from);
                 if (!link.Recursive) { handled.UnionWith(from.GetComponentsInChildren<Transform>(true)); continue; }
                 // VRCFury merges children with the same name, after removing the suffix the link root adds to its bone name.

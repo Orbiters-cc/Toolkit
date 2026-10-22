@@ -240,6 +240,7 @@ namespace Orbiters.Toolkit.Editor.VRChat
             var turn = Quaternion.Inverse(bone.rotation);
             sight.Sources[0] = new VRCConstraintSource(bone, 1, turn * (gaze.position - bone.position), (turn * gaze.rotation).eulerAngles);
             PlaceScreen(orb);
+            FitLight(orb);
             EditorUtility.SetDirty(follow); EditorUtility.SetDirty(level); EditorUtility.SetDirty(sight);
         }
 

@@ -35,6 +35,9 @@ namespace Orbiters.Toolkit.VRChat
         public Transform parent;
         [Tooltip("Body blendshapes also drive the same-named shapes of this accessory's meshes.")]
         public bool syncBlendShapes = true;
+        [Tooltip("A small accessory on the skin (a piercing, a stud): it moves with the skin under it, blended between the bones moving the skin there " +
+                 "and with the body's blendshapes, instead of one bone. Applied to the build copy with a VRChat Parent Constraint.")]
+        public bool stickToSkin;
         public SkinnedMeshRenderer body;
         [HideInInspector] public string source, variant;
         /// <summary>A short clean name to show for it (AI suggested, e.g. "Glowsticks for Ultipaw"); empty: its object's name.</summary>

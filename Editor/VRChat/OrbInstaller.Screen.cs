@@ -54,8 +54,16 @@ namespace Orbiters.Toolkit.Editor.VRChat
         // any point of the screen, so its dot shows in front of it); the senders' radius and the dot's.
         internal const string Gaze = Head + "/Gaze", GazePoint = Gaze + "/Point", GazeDot = GazePoint + "/Dot";
         internal const float GazeDistance = .38f, GazeRadius = .01f, GazeDotRadius = .004f;
-        /// <summary>The screen protocol's version (the avatar manifest's <c>orb.screen</c>): 2, colour thumbnails.</summary>
-        public const int ScreenVersion = 2;
+        /// <summary>
+        /// The screen's version (the avatar manifest's <c>orb.screen</c>, and <see cref="ScreenVersionParameter"/>'s default):
+        /// 2 colour thumbnails, 3 the six-tile Home with the Music and Light pages.
+        /// </summary>
+        public const int ScreenVersion = 3;
+        /// <summary>
+        /// Local, not saved, set by no menu: the screen's version (<see cref="ScreenVersion"/>), which Orbiters desktop reads
+        /// to know the pages the screen has. Screens before version 3 lack it.
+        /// </summary>
+        public const string ScreenVersionParameter = "Orb/Screen/Version";
         public const int ScreenLocalValues = 16;
         /// <summary><see cref="TextPointer"/>: everyone else's screen closes (and clears).</summary>
         public const int PointerScreenClose = 254;
@@ -75,13 +83,13 @@ namespace Orbiters.Toolkit.Editor.VRChat
         };
         // The screen's shared files: made once for every orb that has a screen, and for every orb switched to a thumbnail
         // size its own files lack.
-        internal const string ScreenFolder = "Assets/Orbiters/Orb/Screen 3";
+        internal const string ScreenFolder = "Assets/Orbiters/Orb/Screen 4";
         private const string ScreenShaderTemplate = "Packages/orbiters.toolkit/Editor/VRChat/OrbScreen.shader.txt";
         // Drawn by Orbiters desktop (`orbiters-desktop --orb-menu`) from the menu's layout: the page pictures (a slice per
         // page, the first empty) and the layout table.
         private const string ScreenPagesTemplate = "Packages/orbiters.toolkit/Editor/VRChat/OrbScreenPages.png.bytes";
         private const string ScreenLayoutTemplate = "Packages/orbiters.toolkit/Editor/VRChat/OrbScreenLayout.png.bytes";
-        internal const int ScreenPageSlices = 10;
+        internal const int ScreenPageSlices = 13;
 
         public static string ScreenValue(int index) => ScreenValuePrefix + index;
         public static string ScreenTouch(bool right, int index) => ScreenTouchPrefix + (right ? "R" : "L") + index;
@@ -284,13 +292,21 @@ namespace Orbiters.Toolkit.Editor.VRChat
             var screen = orb.Find(ScreenObject);
             var renderer = screen != null ? screen.GetComponent<MeshRenderer>() : null;
             if (renderer == null) return;
-            var current = renderer.sharedMaterial;
-            if (current != null && current.shader != null && current.shader.name == ScreenShaderName(thumbnailBytes)) return;
+            if (ScreenCurrent(renderer.sharedMaterial, thumbnailBytes)) return;
             var (_, material) = ScreenAssets(ScreenFolder, thumbnailBytes);
             Undo.RecordObject(renderer, "Orb thumbnail size");
             renderer.sharedMaterial = material;
             PrefabUtility.RecordPrefabInstancePropertyModifications(renderer);
         }
+
+        /// <summary>
+        /// Whether a screen material draws this version's pages (a slice each: older screens have fewer) with thumbnails of
+        /// <paramref name="thumbnailBytes"/>. An older one is swapped for the current files when the orb's options change,
+        /// with the controller saying its version.
+        /// </summary>
+        internal static bool ScreenCurrent(Material material, int thumbnailBytes) =>
+            material != null && material.shader != null && material.shader.name == ScreenShaderName(thumbnailBytes) &&
+            material.HasProperty("_Pages") && material.GetTexture("_Pages") is Texture2DArray pages && pages.depth == ScreenPageSlices;
 
         // The screen before the eyes, which the panel's place tells (the panel sits at eyes + PanelFromEyes).
         private static void PlaceScreen(Transform orb)
@@ -325,6 +341,7 @@ namespace Orbiters.Toolkit.Editor.VRChat
             controller.AddParameter(ScreenOpen, AnimatorControllerParameterType.Bool);
             controller.AddParameter(new AnimatorControllerParameter { name = ScreenReplace, type = AnimatorControllerParameterType.Bool, defaultBool = replace });
             controller.AddParameter(new AnimatorControllerParameter { name = ScreenThumbnailBytes, type = AnimatorControllerParameterType.Int, defaultInt = thumbnailBytes });
+            controller.AddParameter(new AnimatorControllerParameter { name = ScreenVersionParameter, type = AnimatorControllerParameterType.Int, defaultInt = ScreenVersion });
             controller.AddParameter(VRMode, AnimatorControllerParameterType.Int);
             controller.AddParameter(ScreenPointer, AnimatorControllerParameterType.Int);
             for (int i = 0; i < ScreenLocalValues; i++) controller.AddParameter(ScreenValue(i), AnimatorControllerParameterType.Float);
@@ -349,6 +366,7 @@ namespace Orbiters.Toolkit.Editor.VRChat
             // Not saved: a new upload's option always holds.
             parameters.Add(Parameter(ScreenReplace, synced: false, defaultValue: replace ? 1 : 0));
             parameters.Add(Parameter(ScreenThumbnailBytes, synced: false, type: VRCExpressionParameters.ValueType.Int, defaultValue: thumbnailBytes));
+            parameters.Add(Parameter(ScreenVersionParameter, synced: false, type: VRCExpressionParameters.ValueType.Int, defaultValue: ScreenVersion));
             parameters.Add(Parameter(ScreenPointer, synced: false, type: VRCExpressionParameters.ValueType.Int));
             for (int i = 0; i < ScreenLocalValues; i++) parameters.Add(Parameter(ScreenValue(i), synced: false, type: VRCExpressionParameters.ValueType.Float));
             for (int hand = 0; hand < 2; hand++)

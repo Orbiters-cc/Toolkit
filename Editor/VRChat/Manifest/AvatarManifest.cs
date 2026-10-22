@@ -125,7 +125,12 @@ namespace Orbiters.Toolkit.Editor.VRChat.Manifest
                 var sync = new Regex("^" + Regex.Escape(OrbInstaller.TextSyncPrefix) + "[0-9]+$");
                 int count = manifest.Parameters.Count(p => sync.IsMatch(p.Name));
                 if (OrbInstaller.TextSyncCounts.Contains(count)) manifest.OrbTextSync = count;
-                if (manifest.Parameters.Any(p => p.Name == OrbInstaller.ScreenPointer)) manifest.OrbScreen = OrbInstaller.ScreenVersion;
+                // The screen's own version (older screens lack the parameter: version 2).
+                if (manifest.Parameters.Any(p => p.Name == OrbInstaller.ScreenPointer))
+                {
+                    var version = manifest.Parameters.FirstOrDefault(p => p.Name == OrbInstaller.ScreenVersionParameter);
+                    manifest.OrbScreen = version != null ? Mathf.RoundToInt(version.Default) : 2;
+                }
             }
             return manifest;
         }

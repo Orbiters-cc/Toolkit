@@ -90,7 +90,7 @@ namespace Orbiters.Toolkit.Editor.VRChat.Posing
                 result.Add(new Accessory
                 {
                     Root = group.Key, Name = group.Key.name,
-                    Rule = rigid ? "on " + links[0].Target.name : links[0].Source,
+                    Rule = rigid ? (links[0].Blend != null ? "on the skin" : "on " + links[0].Target.name) : links[0].Source,
                     Following = links.Count - driven, Total = rigid ? 1 : Mathf.Max(bones, links.Count),
                     Reason = modular ? "Modular Avatar attaches it: shown by name match."
                         : driven > 0 ? $"{driven} bone{(driven == 1 ? " is" : "s are")} driven by constraints and left alone." : null,
@@ -138,7 +138,9 @@ namespace Orbiters.Toolkit.Editor.VRChat.Posing
                 var link = Links[i];
                 int before = earlier.FindIndex(e => e.link.Follower == link.Follower && e.link.Target == link.Target);
                 if (before < 0) continue;
-                link.Offset = earlier[before].link.Offset * earlier[before].rest.inverse * link.Follower.localToWorldMatrix;
+                var rebased = earlier[before].link.Rebased(earlier[before].rest);
+                link.Offset = rebased.Offset;
+                if (link.Blend != null && rebased.Blend != null) link.Blend = rebased.Blend;
                 Links[i] = link;
             }
             // Parents first, so each child is placed from its parent's new pose.
