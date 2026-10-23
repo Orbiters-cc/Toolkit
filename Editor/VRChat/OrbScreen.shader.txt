@@ -6,8 +6,10 @@
 // Thumbnails are colour pictures that sharpen layer by layer as they arrive (Docs/orb.md, Thumbnails): their decoder is
 // generated from the design table (OrbThumbnail.json) for the orb's thumbnail size.
 // Pages are 1024 × 576 pixels. Seen from behind (by the people around, or in a mirror) it shows the back, slice 0 of
-// the pages ("Orb menu, look at the other side"): the menu is its owner's, on the side they face. Viewers who hide
-// custom shaders see nothing of it (VRCFallback). OrbInstaller writes this file, the word properties and the decoder
+// the pages ("Orb menu, look at the other side"): the menu is its owner's, on the side they face. With _Retro (the retro
+// look, Docs/orb.md) the pages are the retro ones and what changes is drawn as Orbiters desktop's retro overlay draws it:
+// cut corners, hover outlines, pressed elements inverted, chosen ones in brackets, pictures as green dots, scanlines.
+// Viewers who hide custom shaders see nothing of it (VRCFallback). OrbInstaller writes this file, the word properties and the decoder
 // filled in, as "Orb screen.shader" (or "Orb screen 128 B.shader").
 Shader "Orbiters/Orb Screen"
 {
@@ -22,12 +24,14 @@ Shader "Orbiters/Orb Screen"
         _Accent ("Accent", Color) = (0, 0.855, 0.427, 1)
         _Placeholder ("Picture loading", Color) = (0.153, 0.153, 0.165, 1)
         [ToggleUI] _Retro ("Retro look", Float) = 0
+        _Dim ("Retro dim", Color) = (0.094, 0.384, 0.196, 1)
+        _Hot ("Retro hot", Color) = (0.784, 1, 0.843, 1)
 //@PROPERTIES
     }
     SubShader
     {
         // OrbScreen: the files' revision (OrbInstaller.ScreenRevision); a screen of an older one is swapped for these.
-        Tags { "Queue" = "Transparent" "RenderType" = "Transparent" "IgnoreProjector" = "True" "VRCFallback" = "Hidden" "OrbScreen" = "5" }
+        Tags { "Queue" = "Transparent" "RenderType" = "Transparent" "IgnoreProjector" = "True" "VRCFallback" = "Hidden" "OrbScreen" = "6" }
         Cull Off
         ZWrite Off
         Blend SrcAlpha OneMinusSrcAlpha
@@ -48,6 +52,7 @@ Shader "Orbiters/Orb Screen"
             float4 _MainTex_TexelSize;
             fixed4 _Card, _Text, _Text2, _Accent, _Placeholder;
             float _Retro;
+            fixed4 _Dim, _Hot;
 
             // The screen's memory as one array over its 372 properties (each takes a register of its own).
             CBUFFER_START(WordBuffer)
@@ -126,40 +131,59 @@ Shader "Orbiters/Orb Screen"
                 return saturate(.5 - distance / pixel);
             }
 
+            // The retro look's shapes, in page pixels: a rectangle (x, y, width, height) with its corners cut by `cut`, as a
+            // signed distance (negative inside); coverage of a distance a pixel wide; corner brackets of arms `len` long and
+            // `width` thick on a rectangle's corners.
+            float Chamfer(float2 p, float4 r, float cut)
+            {
+                float2 extent = r.zw * .5;
+                float2 q = abs(p - (r.xy + extent));
+                float box = max(q.x - extent.x, q.y - extent.y);
+                return max(box, (q.x + q.y - (extent.x + extent.y - cut)) * .70710678);
+            }
+            float Cover(float distance, float pixel) { return saturate(.5 - distance / pixel); }
+            float Brackets(float2 p, float4 r, float len, float width, float pixel)
+            {
+                float2 lo = r.xy, hi = r.xy + r.zw, mid = (lo + hi) * .5;
+                float2 corner = float2(p.x < mid.x ? lo.x : hi.x, p.y < mid.y ? lo.y : hi.y);
+                float2 q = (p - corner) * float2(p.x < mid.x ? 1 : -1, p.y < mid.y ? 1 : -1);
+                float across = max(max(-q.x, q.x - len), max(-q.y, q.y - width));
+                float down = max(max(-q.x, q.x - width), max(-q.y, q.y - len));
+                return Cover(min(across, down), pixel);
+            }
+            // Retro pictures (Docs/orb.md, Retro look): 96 × 54 dots, the light stretched and dithered (4 × 4 Bayer) into
+            // four steps.
+            static const float2 Dots = float2(96, 54);
+            static const float Bayer[16] = { 0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5 };
+            int DotStep(float light, float2 cell)
+            {
+                float level = saturate((light - .08) / .84) * 3;
+                float threshold = (Bayer[(int)fmod(cell.y, 4) * 4 + (int)fmod(cell.x, 4)] + .5) / 16;
+                return min((int)floor(level + threshold), 3);
+            }
+
             // The back, slice 0 of the pages (Orb over "Orb menu" and "look at the other side"), the right way round from
             // behind.
             fixed4 Back(float2 uv)
             {
                 uv.x = 1 - uv.x;
-                float alpha = Rounded(float2(uv.x, 1 - uv.y) * Page, float4(0, 0, Page), 28);
+                float2 p = float2(uv.x, 1 - uv.y) * Page;
+                float alpha = _Retro > .5 ? Cover(Chamfer(p, float4(0, 0, Page), 20), max(fwidth(p.x), 1e-4)) : Rounded(p, float4(0, 0, Page), 28);
                 if (alpha <= 0) discard;
                 return fixed4(UNITY_SAMPLE_TEX2DARRAY(_Pages, float3(uv, 0)).rgb, alpha);
             }
 
-            // The retro look (Docs/orb.md, Retro look): the colour's light on three phosphor steps, every third row darker
-            // (averaged once rows get thinner than a pixel, `rowWidth` the rows a pixel spans, so far away they never
-            // shimmer), the corners faded.
+            // The retro look's tube: every third row darker (averaged once rows get thinner than a pixel, `rowWidth` the rows
+            // a pixel spans, so far away they never shimmer), the corners faded.
             fixed3 Retro(fixed3 colour, float2 uv, float rowWidth)
             {
-                #ifdef UNITY_COLORSPACE_GAMMA
-                float3 g = colour;
-                #else
-                float3 g = LinearToGammaSpace(colour);
-                #endif
-                float t = pow(saturate((dot(g, float3(.2126, .7152, .0722)) - .05) / .85), .85);
-                float3 dark = float3(6, 16, 9) / 255, mid = float3(40, 230, 110) / 255, hot = float3(200, 255, 215) / 255;
-                float3 c = t < .75 ? lerp(dark, mid, t / .75) : lerp(mid, hot, (t - .75) / .25);
+                float3 c = colour;
                 float row = (1 - uv.y) * Page.y;
                 // Rows 2, 5, 8… (fmod's remainder is not exact on GPUs: a third of the row index's fraction instead).
                 float scan = frac(floor(row) / 3) > .5 ? .72 : 1;
                 c *= lerp(scan, 1 - .28 / 3, saturate(rowWidth - .5));
                 float2 d = uv * 2 - 1;
-                c *= 1 - .22 * (.6 * d.x * d.x + d.y * d.y);
-                #ifdef UNITY_COLORSPACE_GAMMA
-                return c;
-                #else
-                return GammaToLinearSpace(c);
-                #endif
+                return c * (1 - .22 * (.6 * d.x * d.x + d.y * d.y));
             }
 
             fixed4 Front(v2f i);
@@ -180,8 +204,13 @@ Shader "Orbiters/Orb Screen"
             {
                 float2 uv = i.uv;
                 float2 p = float2(uv.x, 1 - uv.y) * Page;
-                float alpha = Rounded(p, float4(0, 0, Page), 28);
+                bool retro = _Retro > .5;
+                float pixel = max(fwidth(p.x), 1e-4);
+                float alpha = retro ? Cover(Chamfer(p, float4(0, 0, Page), 20), pixel) : Rounded(p, float4(0, 0, Page), 28);
                 if (alpha <= 0) discard;
+                // Retro: the pressed element, inverted once its text is drawn.
+                float4 pressedAt = 0;
+                float pressedCut = 0;
                 int page = Byte(0);
                 bool known = page >= 1 && page <= Pages;
                 fixed3 colour = known ? UNITY_SAMPLE_TEX2DARRAY(_Pages, float3(uv.x, uv.y, page)).rgb : _Card.rgb;
@@ -198,6 +227,24 @@ Shader "Orbiters/Orb Screen"
                     int4 at = Texel(TableElements + 2 * e, page);
                     int4 look = Texel(TableElements + 2 * e + 1, page);
                     float4 r = float4(at) * 4;
+                    if (retro)
+                    {
+                        float cut = r.w < 64 ? 7 : 14;
+                        if (hidden) colour = lerp(colour, _Card.rgb, Cover(Chamfer(p, r + float4(-3, -3, 6, 6), cut + 2), pixel));
+                        else if (unavailable) colour = lerp(colour, _Card.rgb, .6 * Cover(Chamfer(p, r, cut), pixel));
+                        else
+                        {
+                            if (e == pressed) { pressedAt = r; pressedCut = cut; }
+                            else if (e == hover)
+                            {
+                                float d = Chamfer(p, r + float4(-3, -3, 6, 6), cut + 1);
+                                colour = lerp(colour, _Accent.rgb, .1 * Cover(d, pixel));
+                                colour = lerp(colour, _Hot.rgb, Cover(abs(d + 1.25) - 1.25, pixel));
+                            }
+                            if (on) colour = lerp(colour, _Hot.rgb, Brackets(p, r + float4(-6, -6, 12, 12), 14, 3, pixel));
+                        }
+                        continue;
+                    }
                     // A hidden button goes, its soft edge too.
                     if (hidden)
                     {
@@ -261,9 +308,30 @@ Shader "Orbiters/Orb Screen"
                 [loop] for (int t = 0; t < head.z; t++)
                 {
                     float4 r = float4(Texel(TablePictures + t, page)) * 4;
+                    int layers = Byte(Layers + t);
+                    if (retro)
+                    {
+                        // The music page's art place is part of its picture until the art came.
+                        if (layers == 0 && page == 11) continue;
+                        float box = Cover(Chamfer(p, r, 0), pixel);
+                        if (layers > 0) colour = lerp(colour, _Accent.rgb, Brackets(p, r + float4(-3, -3, 6, 6), 10, 1.5, pixel));
+                        if (box <= 0) continue;
+                        fixed3 shade = _Placeholder.rgb;
+                        if (layers > 0)
+                        {
+                            float2 f = saturate((p - r.xy) / r.zw) * Dots;
+                            float2 cell = min(floor(f), Dots - 1);
+                            int level = DotStep(Thumbnail(PicturesStart + t * PictureBytes, (cell + .5) / Dots, layers).x, cell);
+                            shade = level == 3 ? _Hot.rgb : level == 2 ? _Accent.rgb : level == 1 ? _Dim.rgb : _Card.rgb;
+                            // A dark gap between dots once they are large enough to show one.
+                            float2 inCell = f - cell;
+                            if (r.z / Dots.x > 3 * pixel && max(inCell.x, inCell.y) > .78) shade = _Card.rgb;
+                        }
+                        colour = lerp(colour, shade, box);
+                        continue;
+                    }
                     float inside = Rounded(p, r, 10);
                     if (inside <= 0) continue;
-                    int layers = Byte(Layers + t);
                     // The music page's art place is part of its picture until the art came.
                     if (layers == 0 && page == 11) continue;
                     fixed3 shade = _Placeholder.rgb;
@@ -284,6 +352,9 @@ Shader "Orbiters/Orb Screen"
                     float d = abs(length(p - float2(60, 52)) - (31 + 4 * pulse));
                     colour = lerp(colour, _Accent.rgb, saturate(1.5 - d) * (.7 - .5 * pulse));
                 }
+                // Retro: the pressed element lit, what is on it dark.
+                if (retro && pressedAt.z > 0)
+                    colour = lerp(colour, _Accent.rgb + _Card.rgb - colour, Cover(Chamfer(p, pressedAt, pressedCut), pixel));
                 return fixed4(colour, alpha);
             }
             ENDCG

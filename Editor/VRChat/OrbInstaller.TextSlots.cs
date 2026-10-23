@@ -28,7 +28,7 @@ namespace Orbiters.Toolkit.Editor.VRChat
         // The controller, parameters and menu of each choice of options, shared by every orb switched to it (they name no
         // object of their own: their curves follow paths below the orb).
         // A new menu or parameters get a new folder: orbs switched earlier keep the files they use.
-        internal const string OptionsFolder = "Assets/Orbiters/Orb/Menu 9/";
+        internal const string OptionsFolder = "Assets/Orbiters/Orb/Menu 10/";
 
         [InitializeOnLoadMethod]
         private static void RegisterOrbOptions() => AttachmentHooks.RegisterOptions(root => FindAll(root).SelectMany(orb =>
@@ -98,6 +98,7 @@ namespace Orbiters.Toolkit.Editor.VRChat
                               "at a time reads as typed out. Orbiters desktop's overlay has its own Look. No synced bits.",
                     Choices = new[] { "Modern", "Retro" },
                     ChoiceTooltips = new[] { "Orbiters' own look", "A green phosphor terminal, as on an old computer" },
+                    ChoicePictures = LookPictures(),
                     Current = RetroOf(orb) ? 1 : 0,
                     Choose = index => SetLook(target, index == 1),
                 },
@@ -171,11 +172,21 @@ namespace Orbiters.Toolkit.Editor.VRChat
             if (!OfferedThumbnailBytes.Contains(thumbnailBytes)) throw new ArgumentOutOfRangeException(nameof(thumbnailBytes), "An orb's thumbnails are 72 or 128 bytes.");
             if (!ScreenFits(textSync, thumbnailBytes)) throw new ArgumentException(thumbnailBytes + "-byte thumbnails need 8 text slots or more.", nameof(thumbnailBytes));
             var found = FullController(orb, out var component) ?? throw new InvalidOperationException("This orb has no VRCFury Full Controller: add it again.");
-            if (OptionsOf(orb) == (textSync, walkBoost, replace, thumbnailBytes, light) && HasScreen(orb) && ScreenDraws(orb, thumbnailBytes) && HasLight(orb) == light)
+            if (OptionsOf(orb) == (textSync, walkBoost, replace, thumbnailBytes, light) && HasScreen(orb) && ScreenDraws(orb, thumbnailBytes) && HasLight(orb) == light &&
+                HasPointing(orb))
                 return;
             if (found.menuIndex < 0) throw new InvalidOperationException("This orb's menu was changed: add it again.");
             AddScreen(orb, ScreenFolder, thumbnailBytes);
             SetScreenThumbnails(orb, thumbnailBytes);
+            // A screen from before version 4 points with rays from now on, held to the avatar's fingertips.
+            if (!HasPointing(orb))
+            {
+                AddPointing(orb);
+                var avatar = orb.GetComponentInParent<VRC.SDK3.Avatars.Components.VRCAvatarDescriptor>();
+                var animator = avatar != null ? avatar.GetComponent<Animator>() : null;
+                var head = orb.Find(Head);
+                if (animator != null && animator.isHuman && head != null) BindPointers(orb, avatar.transform, animator, Mathf.Abs(head.lossyScale.x));
+            }
             SetLightObject(orb, light);
             var (controller, parameters, menu) = Shared(textSync, walkBoost, replace, thumbnailBytes, light);
             component = OwnComponent(component);

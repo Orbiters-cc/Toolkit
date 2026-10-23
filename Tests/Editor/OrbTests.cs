@@ -368,7 +368,7 @@ public class OrbTests
         Assert.AreEqual(folder + "/Orb screen.mat", AssetDatabase.GetAssetPath(screen.sharedMaterial), "Its files in the orb's folder, which a package carries");
         Assert.IsFalse(screen.gameObject.activeSelf, "Hidden until it opens");
         var receivers = screen.GetComponentsInChildren<VRCContactReceiver>(true);
-        Assert.AreEqual(8 + 4 + 4, receivers.Length, "Four touch points per index finger, four each for the eyes and the gaze point");
+        Assert.AreEqual(6 + 4 + 4, receivers.Length, "Three touch points per hand's pointer, four each for the eyes and the gaze point");
         foreach (var r in receivers)
         {
             Assert.IsTrue(r.localOnly && r.allowSelf && !r.allowOthers, "Local: the owner's own fingers only, nothing in the performance rank");
@@ -376,12 +376,12 @@ public class OrbTests
             if (r.parameter.StartsWith(OrbInstaller.ScreenGazePrefix, StringComparison.Ordinal)) { Assert.AreEqual(OrbInstaller.GazeTag, r.collisionTags.Single()); continue; }
             if (r.parameter.StartsWith(OrbInstaller.ScreenEyePrefix, StringComparison.Ordinal)) { Assert.AreEqual(OrbInstaller.EyeTag, r.collisionTags.Single()); continue; }
             StringAssert.StartsWith(OrbInstaller.ScreenTouchPrefix, r.parameter);
-            Assert.AreEqual(r.parameter.Contains("/R") ? "FingerIndexR" : "FingerIndexL", r.collisionTags.Single());
+            Assert.AreEqual(OrbInstaller.PointerTag(r.parameter.Contains("/R")), r.collisionTags.Single());
         }
         var parameters = AssetDatabase.LoadAssetAtPath<VRCExpressionParameters>(folder + "/Parameters.asset");
         var screenParameters = parameters.parameters.Where(p => p.name.StartsWith("Orb/Screen/", StringComparison.Ordinal)).ToList();
-        Assert.AreEqual(1 + 1 + 1 + 1 + 1 + OrbInstaller.ScreenLocalValues + 8 + 8, screenParameters.Count,
-            "Open, Replace, ThumbnailBytes, Version, the pointer, 16 values, 8 touch points, 4 each for the eyes and the gaze");
+        Assert.AreEqual(1 + 1 + 1 + 1 + 1 + OrbInstaller.ScreenLocalValues + 6 + 8 + 4, screenParameters.Count,
+            "Open, Replace, ThumbnailBytes, Version, the pointer, 16 values, 6 touch points, 4 each for the eyes and the gaze, each ray's hit and ratio");
         Assert.IsTrue(screenParameters.All(p => !p.networkSynced), "No synced bits");
         var replace = screenParameters.Single(p => p.name == OrbInstaller.ScreenReplace);
         Assert.AreEqual((0f, false), (replace.defaultValue, replace.saved), "Off unless the card's option is on, and never saved: each upload's option holds");
@@ -389,7 +389,7 @@ public class OrbTests
         Assert.AreEqual((72f, false, VRCExpressionParameters.ValueType.Int), (thumbnails.defaultValue, thumbnails.saved, thumbnails.valueType), "72 bytes unless the card says 128, never saved");
         var version = screenParameters.Single(p => p.name == OrbInstaller.ScreenVersionParameter);
         Assert.AreEqual(((float)OrbInstaller.ScreenVersion, false, VRCExpressionParameters.ValueType.Int), (version.defaultValue, version.saved, version.valueType),
-            "The screen says its version: Orbiters desktop shows a version 3 screen the six-tile Home");
+            "The screen says its version: Orbiters desktop shows a version 3 screen the six-tile Home, and lets a version 4 one point with rays");
         Assert.AreEqual(OrbInstaller.ScreenShaderName(72), screen.sharedMaterial.shader.name);
         var hold = screen.GetComponent<VRCParentConstraint>();
         Assert.IsFalse(hold.RebakeOffsetsWhenUnfrozen, "Opened again, it appears before the eyes, not where it was");
@@ -548,6 +548,82 @@ public class OrbTests
         Assert.IsFalse(dot.activeSelf, "Nobody else sees it");
     }
 
+    // Pointing (Docs/orb.md, Pointing): a raycast from each index fingertip along the finger, as large as the orb, at a
+    // solid box on the screen's face.
+    [Test]
+    public void ItPointsFromTheIndexFingertipsAtASolidScreen()
+    {
+        if (VrcFury.Writer == null) Assert.Ignore("Requires the VRCFury integration.");
+        var prefab = AssetDatabase.LoadAssetAtPath<GameObject>(OrbInstaller.CreatePrefab(folder));
+        var (avatar, _) = Humanoid(eyes: 1.2f);
+        var orb = ((GameObject)PrefabUtility.InstantiatePrefab(prefab, avatar)).transform;
+        AttachmentHooks.Prepare(orb.gameObject, avatar);
+        var animator = avatar.GetComponent<Animator>();
+        foreach (bool right in new[] { false, true })
+        {
+            var pointer = orb.Find(OrbInstaller.Pointer(right));
+            var distal = animator.GetBoneTransform(right ? HumanBodyBones.RightIndexDistal : HumanBodyBones.LeftIndexDistal);
+            var middle = animator.GetBoneTransform(right ? HumanBodyBones.RightIndexIntermediate : HumanBodyBones.LeftIndexIntermediate);
+            Assert.AreEqual(distal, pointer.GetComponent<VRCParentConstraint>().Sources[0].SourceTransform, "Held to the last finger bone");
+            var tip = distal.position + (distal.position - middle.position) * .8f;
+            Assert.Less(Vector3.Distance(tip, pointer.position), 1e-4f, "At the fingertip");
+            Assert.Less(Vector3.Angle((tip - middle.position).normalized, pointer.forward), .1f, "Along the finger");
+            Assert.AreEqual(1.2f / OrbInstaller.ReferenceEyes, pointer.lossyScale.x, 1e-4f, "As large as the orb");
+            var ray = pointer.GetComponent<VRC.SDK3.Avatars.Components.VRCRaycast>();
+            Assert.AreEqual((Vector3.forward, OrbInstaller.RayLength, true, OrbInstaller.Ray(right)), (ray.RaycastDirection, ray.Distance, ray.ApplyTransformScale, ray.Parameter));
+            Assert.AreEqual(VRC.SDK3.Avatars.Components.VRCRaycast.CollisionMode.HitWorldsAndPlayers, ray.RaycastCollisionMode);
+            Assert.AreEqual(pointer.Find("Bead"), ray.ResultTransform);
+            var sender = ray.ResultTransform.GetComponent<VRCContactSender>();
+            Assert.IsTrue(sender.localOnly);
+            Assert.AreEqual(OrbInstaller.PointerTag(right), sender.collisionTags.Single());
+            Assert.AreEqual(OrbInstaller.PointRadius / OrbInstaller.ReferenceEyes * 1.2f, sender.radius * sender.transform.lossyScale.x, 1e-6f, "A known, tiny contact");
+        }
+        var surface = orb.Find(OrbInstaller.Surface).GetComponent<BoxCollider>();
+        Assert.IsFalse(surface.isTrigger, "VRChat's raycasts pass through triggers");
+        Assert.AreEqual(new Vector3(OrbInstaller.ScreenWidth, OrbInstaller.ScreenHeight, OrbInstaller.SurfaceDepth), surface.size);
+        Assert.IsFalse(surface.gameObject.activeSelf, "Only while the screen is open for its owner");
+        Assert.IsFalse(orb.Find(OrbInstaller.Pointers).gameObject.activeSelf);
+    }
+
+    [Test]
+    public void ThePointersShowForTheirOwnerInVrWhileTheScreenIsOpen()
+    {
+        if (VrcFury.Writer == null) Assert.Ignore("Requires the VRCFury integration.");
+        var (root, _) = PlayWithScreen(textSync: 8);
+        var pointers = root.transform.Find(OrbInstaller.Pointers).gameObject;
+        var surface = root.transform.Find(OrbInstaller.Surface).gameObject;
+        var bead = root.transform.Find(OrbInstaller.Pointer(true) + "/Bead").gameObject;
+        var beam = root.transform.Find(OrbInstaller.Pointer(true) + "/Beam");
+        playable.SetBool("IsLocal", true);
+        playable.SetInteger(OrbInstaller.VRMode, 1);
+        playable.SetBool(OrbInstaller.ScreenReplace, true);
+        Tick(3);
+        Assert.IsFalse(pointers.activeSelf || surface.activeSelf, "Menu closed");
+        playable.SetBool(OrbInstaller.Menu, true);
+        Tick(3);
+        Assert.IsTrue(pointers.activeSelf && surface.activeSelf, "In VR, the menu open on the screen");
+        Assert.IsFalse(bead.activeSelf, "The ray meets nothing yet");
+        playable.SetBool(OrbInstaller.RayHit(true), true);
+        playable.SetFloat(OrbInstaller.RayRatio(true), .5f);
+        Tick(3);
+        Assert.IsTrue(bead.activeSelf && beam.gameObject.activeSelf);
+        Assert.AreEqual(OrbInstaller.RayLength / 4, beam.localScale.z, 1e-4f, "The beam reaches the bead: half the ray, a needle centred on its half");
+        Assert.AreEqual(OrbInstaller.RayLength / 4, beam.localPosition.z, 1e-4f);
+        playable.SetBool(OrbInstaller.RayHit(true), false);
+        Tick(3);
+        Assert.IsFalse(bead.activeSelf || beam.gameObject.activeSelf);
+        playable.SetInteger(OrbInstaller.VRMode, 0);
+        Tick(3);
+        Assert.IsFalse(pointers.activeSelf, "Desktop mode points by looking");
+        playable.SetInteger(OrbInstaller.VRMode, 1);
+        playable.SetBool("IsLocal", false);
+        playable.SetBool(OrbInstaller.Menu, false);
+        Tick(3);
+        playable.SetBool(OrbInstaller.Menu, true);
+        Tick(3);
+        Assert.IsFalse(pointers.activeSelf || surface.activeSelf, "Nobody else has them");
+    }
+
     // VRCFury reverts every override of its components in a prefab instance when an upload starts (VRCFPrefabFixer): the
     // options of an orb placed from a prefab survive it.
     [Test]
@@ -676,7 +752,7 @@ public class OrbTests
         var parameters = AssetDatabase.LoadAssetAtPath<VRCExpressionParameters>(OrbInstaller.OptionsFolder + "Text slots 8 + screen in VR/Parameters.asset");
         var version = parameters.parameters.Single(p => p.name == OrbInstaller.ScreenVersionParameter);
         Assert.AreEqual((VRCExpressionParameters.ValueType.Int, false, false, (float)OrbInstaller.ScreenVersion), (version.valueType, version.networkSynced, version.saved, version.defaultValue));
-        Assert.AreEqual(3, OrbInstaller.ScreenVersion);
+        Assert.AreEqual(4, OrbInstaller.ScreenVersion);
     }
 
     // The retro look is the screen's material alone: it stays through the orb's other options, and goes back.
@@ -691,6 +767,9 @@ public class OrbTests
         OrbInstaller.SetLook(placed.transform, true);
         Assert.IsTrue(OrbInstaller.RetroOf(placed.transform));
         Assert.IsTrue(OrbInstaller.ScreenCurrent(renderer.sharedMaterial, 72));
+        StringAssert.EndsWith("Orb screen pages retro.png", AssetDatabase.GetAssetPath(renderer.sharedMaterial.GetTexture("_Pages")), "The retro look's own pages");
+        Assert.AreEqual(new Color32(2, 10, 4, 255), (Color32)renderer.sharedMaterial.GetColor("_Card"), "Its phosphor palette");
+        Assert.AreEqual(new Color32(43, 227, 106, 255), (Color32)renderer.sharedMaterial.GetColor("_Accent"));
         StringAssert.StartsWith(OrbInstaller.ScreenFolder + "/", AssetDatabase.GetAssetPath(renderer.sharedMaterial));
         OrbInstaller.SetOptions(placed.transform, 8, false, true, 128);
         Assert.IsTrue(OrbInstaller.RetroOf(placed.transform), "another thumbnail size keeps the look");
@@ -783,6 +862,8 @@ public class OrbTests
             float x = side == "L" ? -1 : 1;
             Add("UpperArm" + side, "Chest", new Vector3(.15f * x, .15f, 0)); Add("LowerArm" + side, "UpperArm" + side, new Vector3(.25f * x, 0, 0));
             Add("Hand" + side, "LowerArm" + side, new Vector3(.25f * x, 0, 0));
+            Add("Index1" + side, "Hand" + side, new Vector3(.08f * x, 0, .02f)); Add("Index2" + side, "Index1" + side, new Vector3(.03f * x, 0, 0));
+            Add("Index3" + side, "Index2" + side, new Vector3(.02f * x, 0, 0));
             Add("UpperLeg" + side, "Hips", new Vector3(.1f * x, -.05f, 0)); Add("LowerLeg" + side, "UpperLeg" + side, new Vector3(0, -.45f, 0));
             Add("Foot" + side, "LowerLeg" + side, new Vector3(0, -.45f, 0));
         }
@@ -791,6 +872,8 @@ public class OrbTests
             ["Hips"] = "Hips", ["Spine"] = "Spine", ["Chest"] = "Chest", ["Neck"] = "Neck", ["Head"] = "Head",
             ["LeftUpperArm"] = "UpperArmL", ["LeftLowerArm"] = "LowerArmL", ["LeftHand"] = "HandL",
             ["RightUpperArm"] = "UpperArmR", ["RightLowerArm"] = "LowerArmR", ["RightHand"] = "HandR",
+            ["Left Index Proximal"] = "Index1L", ["Left Index Intermediate"] = "Index2L", ["Left Index Distal"] = "Index3L",
+            ["Right Index Proximal"] = "Index1R", ["Right Index Intermediate"] = "Index2R", ["Right Index Distal"] = "Index3R",
             ["LeftUpperLeg"] = "UpperLegL", ["LeftLowerLeg"] = "LowerLegL", ["LeftFoot"] = "FootL",
             ["RightUpperLeg"] = "UpperLegR", ["RightLowerLeg"] = "LowerLegR", ["RightFoot"] = "FootR",
         };

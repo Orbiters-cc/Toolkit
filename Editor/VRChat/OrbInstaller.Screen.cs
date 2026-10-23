@@ -25,8 +25,9 @@ namespace Orbiters.Toolkit.Editor.VRChat
     /// The desktop writes the screen's memory, 744 bytes (1024 with 128-byte thumbnails, <see cref="ScreenThumbnailBytes"/>)
     /// kept two to an animated animator parameter (each word b0 + 256 × b1, so a cleared word is two zero bytes): for its owner through local parameters (<see cref="ScreenPointer"/>
     /// and 16 <see cref="ScreenValue"/>s a block, as fast as VRChat takes them), for everyone else through the text
-    /// panel's synced channel (<see cref="TextPointer"/> past the panel's blocks; 254 closes the screen). Eight local
-    /// contact receivers (four per index finger) say where a finger is. In desktop mode, where fingers can't reach it, its
+    /// panel's synced channel (<see cref="TextPointer"/> past the panel's blocks; 254 closes the screen). In VR each index
+    /// fingertip points at it with a ray (<see cref="AddPointing"/>), three local contact receivers per hand saying where
+    /// the ray's bead is. In desktop mode, where fingers can't reach it, its
     /// owner points by looking: two local contact senders held on the head bone, at the eyes and on the line of sight
     /// before them (<see cref="Gaze"/>, a small dot while the menu is open), and eight more receivers say where they look
     /// from, and a left click presses. No synced bits; the contacts are local and cost nothing in VRChat's performance rank.
@@ -56,9 +57,10 @@ namespace Orbiters.Toolkit.Editor.VRChat
         internal const float GazeDistance = .38f, GazeRadius = .01f, GazeDotRadius = .004f;
         /// <summary>
         /// The screen's version (the avatar manifest's <c>orb.screen</c>, and <see cref="ScreenVersionParameter"/>'s default):
-        /// 2 colour thumbnails, 3 the six-tile Home with the Music and Light pages.
+        /// 2 colour thumbnails, 3 the six-tile Home with the Music and Light pages, 4 pointing with rays from the fingertips
+        /// (<see cref="AddPointing"/>).
         /// </summary>
-        public const int ScreenVersion = 3;
+        public const int ScreenVersion = 4;
         /// <summary>
         /// Local, not saved, set by no menu: the screen's version (<see cref="ScreenVersion"/>), which Orbiters desktop reads
         /// to know the pages the screen has. Screens before version 3 lack it.
@@ -85,12 +87,14 @@ namespace Orbiters.Toolkit.Editor.VRChat
         // size its own files lack.
         internal const string ScreenFolder = "Assets/Orbiters/Orb/Screen " + ScreenRevision;
         // The screen files' revision, the shader's OrbScreen tag: 5 draws the back as a card ("Orb menu, look at the other
-        // side").
-        internal const string ScreenRevision = "5";
+        // side"), 6 the retro look's own pages and live parts.
+        internal const string ScreenRevision = "6";
         private const string ScreenShaderTemplate = "Packages/orbiters.toolkit/Editor/VRChat/OrbScreen.shader.txt";
         // Drawn by Orbiters desktop (`orbiters-desktop --orb-menu`) from the menu's layout: the page pictures (a slice per
         // page, the first empty) and the layout table.
         private const string ScreenPagesTemplate = "Packages/orbiters.toolkit/Editor/VRChat/OrbScreenPages.png.bytes";
+        // The same pages in the retro look (`orbiters-desktop --orb-menu`'s "Orb screen pages retro.png").
+        private const string ScreenPagesRetroTemplate = "Packages/orbiters.toolkit/Editor/VRChat/OrbScreenPagesRetro.png.bytes";
         private const string ScreenLayoutTemplate = "Packages/orbiters.toolkit/Editor/VRChat/OrbScreenLayout.png.bytes";
         internal const int ScreenPageSlices = 13;
 
@@ -129,6 +133,10 @@ namespace Orbiters.Toolkit.Editor.VRChat
             if (look != null && look.shader == material.shader) return (mesh, look);
             look = new Material(material) { name = ScreenFileName(thumbnailBytes) + " retro" };
             look.SetFloat(RetroProperty, 1);
+            string pagesPath = folder + "/Orb screen pages retro.png";
+            look.SetTexture("_Pages", AssetDatabase.LoadAssetAtPath<Texture2DArray>(pagesPath) ?? ScreenPages(pagesPath, ScreenPagesRetroTemplate));
+            // The phosphor palette, as Orbiters desktop's retro overlay paints (Docs/orb.md, Retro look).
+            foreach (var (name, colour) in RetroColours) look.SetColor(name, colour);
             AssetDatabase.DeleteAsset(path);
             AssetDatabase.CreateAsset(look, path);
             AssetDatabase.SaveAssets();
@@ -136,6 +144,30 @@ namespace Orbiters.Toolkit.Editor.VRChat
         }
 
         private const string RetroProperty = "_Retro";
+        // Pictures of Orb's menu in each look (`orbiters-desktop --orb-menu`'s "Orb preview.png" and "Orb preview
+        // retro.png"), for the Look option on the orb's card; read once.
+        private static readonly string[] LookPictureFiles =
+            { "Packages/orbiters.toolkit/Editor/VRChat/OrbPreview.png.bytes", "Packages/orbiters.toolkit/Editor/VRChat/OrbPreviewRetro.png.bytes" };
+        private static Texture2D[] lookPictures;
+
+        internal static IReadOnlyList<Texture> LookPictures()
+        {
+            if (lookPictures != null && lookPictures.All(t => t != null)) return lookPictures;
+            lookPictures = LookPictureFiles.Select(path =>
+            {
+                var file = AssetDatabase.LoadAssetAtPath<TextAsset>(path);
+                var picture = new Texture2D(2, 2, TextureFormat.RGBA32, false) { name = System.IO.Path.GetFileNameWithoutExtension(path), hideFlags = HideFlags.HideAndDontSave };
+                if (file != null) picture.LoadImage(file.bytes);
+                return picture;
+            }).ToArray();
+            return lookPictures;
+        }
+        private static readonly (string name, Color32 colour)[] RetroColours =
+        {
+            ("_Card", new Color32(2, 10, 4, 255)), ("_Text", new Color32(125, 255, 166, 255)), ("_Text2", new Color32(47, 184, 94, 255)),
+            ("_Accent", new Color32(43, 227, 106, 255)), ("_Placeholder", new Color32(5, 24, 11, 255)), ("_Dim", new Color32(24, 98, 50, 255)),
+            ("_Hot", new Color32(200, 255, 215, 255)),
+        };
 
         /// <summary>Whether a placed orb's screen has the retro look (a green phosphor terminal).</summary>
         public static bool RetroOf(Transform orb)
@@ -177,7 +209,7 @@ namespace Orbiters.Toolkit.Editor.VRChat
             if (material == null || material.shader == null || !material.shader.isSupported)
             {
                 var shader = ScreenShader(folder + "/" + name + ".shader", thumbnailBytes);
-                var pages = AssetDatabase.LoadAssetAtPath<Texture2DArray>(folder + "/Orb screen pages.png") ?? ScreenPages(folder + "/Orb screen pages.png");
+                var pages = AssetDatabase.LoadAssetAtPath<Texture2DArray>(folder + "/Orb screen pages.png") ?? ScreenPages(folder + "/Orb screen pages.png", ScreenPagesTemplate);
                 var layout = AssetDatabase.LoadAssetAtPath<Texture2D>(folder + "/Orb screen layout.png") ?? ScreenLayout(folder + "/Orb screen layout.png");
                 var glyphs = Atlas(folder);
                 material = new Material(shader) { name = name };
@@ -230,9 +262,9 @@ namespace Orbiters.Toolkit.Editor.VRChat
         }
 
         // The pages as a texture array (a slice per page id), sRGB, mipmapped.
-        private static Texture2DArray ScreenPages(string path)
+        private static Texture2DArray ScreenPages(string path, string template)
         {
-            CopyFile(ScreenPagesTemplate, path);
+            CopyFile(template, path);
             var importer = (TextureImporter)AssetImporter.GetAtPath(path);
             var settings = new TextureImporterSettings();
             importer.ReadTextureSettings(settings);
@@ -301,8 +333,9 @@ namespace Orbiters.Toolkit.Editor.VRChat
             var hold = screen.AddComponent<VRCParentConstraint>();
             hold.Sources.Add(new VRCConstraintSource(head, 1));
             hold.Locked = true; hold.IsActive = true; hold.FreezeToWorld = false; hold.RebakeOffsetsWhenUnfrozen = false;
+            // Each hand's bead, on the touch points in the screen's plane.
             for (int hand = 0; hand < 2; hand++)
-            for (int i = 0; i < ScreenTouchPoints.Length; i++)
+            for (int i = 0; i < PointingTouchPoints; i++)
             {
                 bool right = hand == 1;
                 var point = Child(screen.transform, "Touch " + (right ? "R" : "L") + i);
@@ -311,7 +344,7 @@ namespace Orbiters.Toolkit.Editor.VRChat
                 receiver.shapeType = ContactBase.ShapeType.Sphere; receiver.radius = ScreenTouchRadius;
                 receiver.allowSelf = true; receiver.allowOthers = false; receiver.localOnly = true;
                 receiver.receiverType = ContactReceiver.ReceiverType.Proximity; receiver.parameter = ScreenTouch(right, i);
-                receiver.collisionTags.Add(right ? "FingerIndexR" : "FingerIndexL");
+                receiver.collisionTags.Add(PointerTag(right));
             }
             // The eyes' and the gaze point's, at the same places.
             foreach (var (name, tag, parameter) in new (string, string, Func<int, string>)[] { ("Eye ", EyeTag, ScreenEye), ("Gaze ", GazeTag, ScreenGaze) })
@@ -326,6 +359,7 @@ namespace Orbiters.Toolkit.Editor.VRChat
                 receiver.collisionTags.Add(tag);
             }
             PlaceScreen(orb);
+            AddPointing(orb);
             return screen.transform;
         }
 
@@ -393,7 +427,7 @@ namespace Orbiters.Toolkit.Editor.VRChat
             controller.AddParameter(ScreenPointer, AnimatorControllerParameterType.Int);
             for (int i = 0; i < ScreenLocalValues; i++) controller.AddParameter(ScreenValue(i), AnimatorControllerParameterType.Float);
             for (int hand = 0; hand < 2; hand++)
-            for (int i = 0; i < ScreenTouchPoints.Length; i++) controller.AddParameter(ScreenTouch(hand == 1, i), AnimatorControllerParameterType.Float);
+            for (int i = 0; i < PointingTouchPoints; i++) controller.AddParameter(ScreenTouch(hand == 1, i), AnimatorControllerParameterType.Float);
             for (int i = 0; i < ScreenTouchPoints.Length; i++) controller.AddParameter(ScreenEye(i), AnimatorControllerParameterType.Float);
             for (int i = 0; i < ScreenTouchPoints.Length; i++) controller.AddParameter(ScreenGaze(i), AnimatorControllerParameterType.Float);
             // VRChat's: whether this client is the avatar's owner.
@@ -408,6 +442,7 @@ namespace Orbiters.Toolkit.Editor.VRChat
             ScreenLocalBlocks(controller, thumbnailBytes);
             ScreenLayer(controller, textSync, thumbnailBytes);
             GazeDotLayer(controller);
+            PointingController(controller, parameters);
 
             parameters.Add(Parameter(ScreenOpen, synced: false));
             // Not saved: a new upload's option always holds.
@@ -417,7 +452,7 @@ namespace Orbiters.Toolkit.Editor.VRChat
             parameters.Add(Parameter(ScreenPointer, synced: false, type: VRCExpressionParameters.ValueType.Int));
             for (int i = 0; i < ScreenLocalValues; i++) parameters.Add(Parameter(ScreenValue(i), synced: false, type: VRCExpressionParameters.ValueType.Float));
             for (int hand = 0; hand < 2; hand++)
-            for (int i = 0; i < ScreenTouchPoints.Length; i++) parameters.Add(Parameter(ScreenTouch(hand == 1, i), synced: false, type: VRCExpressionParameters.ValueType.Float));
+            for (int i = 0; i < PointingTouchPoints; i++) parameters.Add(Parameter(ScreenTouch(hand == 1, i), synced: false, type: VRCExpressionParameters.ValueType.Float));
             for (int i = 0; i < ScreenTouchPoints.Length; i++) parameters.Add(Parameter(ScreenEye(i), synced: false, type: VRCExpressionParameters.ValueType.Float));
             for (int i = 0; i < ScreenTouchPoints.Length; i++) parameters.Add(Parameter(ScreenGaze(i), synced: false, type: VRCExpressionParameters.ValueType.Float));
         }

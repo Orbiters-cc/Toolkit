@@ -72,6 +72,11 @@ namespace Orbiters.Toolkit.Editor.VRChat.Attachments
         public IReadOnlyList<string> Choices;
         /// <summary>Per choice, what it means (or null).</summary>
         public IReadOnlyList<string> ChoiceTooltips;
+        /// <summary>
+        /// Per choice, a small picture of what it looks like (or null): the card shows the chosen one under its switch, and
+        /// another while the pointer is over that choice.
+        /// </summary>
+        public IReadOnlyList<Texture> ChoicePictures;
         /// <summary>The choice that holds now, −1 for none of them.</summary>
         public int Current;
         public Action<int> Choose;

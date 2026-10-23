@@ -761,18 +761,30 @@ sync value.
 - **Screen version 3** (`Orb/Screen/Version`, local, unsaved, 3 by default): the page pictures have 13 slices, for the
   six-tile Home (page 10), Music (11) and Light (12); Orbiters desktop shows a screen without the parameter the four-tile
   Home. Changing an orb's options swaps an older screen's material for the current files (`ScreenCurrent`: the shader
-  for its thumbnail size and pages with this version's slices). Shared files in `Orb/Screen 5`, options in `Orb/Menu 9`.
+  for its thumbnail size and pages with this version's slices). Shared files in `Orb/Screen 6`, options in `Orb/Menu 10`.
 - Seen from behind (by the people around, or in a mirror), Orb's screen shows its back: Orb over "Orb menu" and "look
   at the other side", slice 0 of the pages, drawn by Orbiters desktop as its SteamVR overlay's back. Which side the
   camera is on comes from its place, not from the face drawn (VRChat's mirrors turn that round). The shader carries its
-  files' revision (tag `OrbScreen`, 5): changing an orb's options swaps a screen of an older one for these. Elements
+  files' revision (tag `OrbScreen`, 6): changing an orb's options swaps a screen of an older one for these. Elements
   the desktop greys out (memory bytes 21 to 23: fast walk while VRChat runs in desktop mode, "Only in VR") fade into
   the card.
-- A **Look** option on the orb's card (`SetLook`, `RetroOf`): Orbiters' own, or **Retro**, a green phosphor terminal
-  (contracts' Docs/orb.md, Retro look: the page's light on three phosphor steps, scanlines that average out once
-  thinner than a pixel, faded corners) on which text arriving a block at a time reads as typed out. It is the screen's
-  material alone ("Orb screen retro" beside each size's), kept through the other options: no parameter, no synced bit.
+- A **Look** option on the orb's card (`SetLook`, `RetroOf`): Orbiters' own, or **Retro**, a cassette-futurism terminal
+  (contracts' Docs/orb.md, Retro look): its own page pictures (`OrbScreenPagesRetro.png.bytes`, cut corners, bracketed
+  icons, monospace capitals, a dot grid, a double frame), the phosphor palette, hover outlines, pressed elements
+  inverted, chosen ones in brackets, scanlines, and thumbnails as 96 × 54 green dots in four dithered steps, read from
+  the same bytes as Orbiters' own look. Text arriving a block at a time reads as typed out. It is the screen's material
+  alone ("Orb screen retro" beside each size's), kept through the other options: no parameter, no synced bit. The
+  option shows a picture of each look (`AttachmentOption.ChoicePictures`, from `orbiters-desktop --orb-menu`), and
   Orbiters desktop's overlay has the same look as a setting of its own.
+- **Pointing** (screen version 4, contracts' Docs/orb.md, Pointing; `AddPointing`): a VRChat raycast (`VRCRaycast`,
+  "Hit Worlds And Players", 0.6 m scaled with the orb) from each index fingertip along the finger meets a thin solid box
+  on the screen's face, shown to its owner as a beam and a bead (the orb's own mesh and material); the bead's local
+  contact (tags `OrbPointerL`/`OrbPointerR`, radius 2 mm) on three touch points per hand tells Orbiters desktop exactly
+  where it is, and the fingertip within 2.1 cm along the ray presses (`Orb/Screen/Ray/L`, `R`: `_Hit`, `_Ratio`, local).
+  The pointers, the box and the raycasts exist only for the owner, in VR, while the screen is open (layers Pointing,
+  Pointer L, Pointer R). `Bind` holds them to the index fingertips (the last finger bone's child, else as far past it as
+  that bone is long); an orb's options changing gives an older screen its pointers. Finger contacts no longer touch the
+  screen. Shared files in `Orb/Screen 6` (revision 6), options in `Orb/Menu 10`.
 
 ## Avatar manifests
 
