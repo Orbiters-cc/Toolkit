@@ -83,7 +83,10 @@ namespace Orbiters.Toolkit.Editor.VRChat
         };
         // The screen's shared files: made once for every orb that has a screen, and for every orb switched to a thumbnail
         // size its own files lack.
-        internal const string ScreenFolder = "Assets/Orbiters/Orb/Screen 4";
+        internal const string ScreenFolder = "Assets/Orbiters/Orb/Screen " + ScreenRevision;
+        // The screen files' revision, the shader's OrbScreen tag: 5 draws the back as a card ("Orb menu, look at the other
+        // side").
+        internal const string ScreenRevision = "5";
         private const string ScreenShaderTemplate = "Packages/orbiters.toolkit/Editor/VRChat/OrbScreen.shader.txt";
         // Drawn by Orbiters desktop (`orbiters-desktop --orb-menu`) from the menu's layout: the page pictures (a slice per
         // page, the first empty) and the layout table.
@@ -114,9 +117,52 @@ namespace Orbiters.Toolkit.Editor.VRChat
         /// The screen's shader (word properties and thumbnail decoder written out), pages, layout, glyphs, mesh and
         /// material for thumbnails of <paramref name="thumbnailBytes"/>, made once in <paramref name="folder"/> (a new orb's
         /// own; the shared <see cref="ScreenFolder"/> for an orb made without a screen or switched to another thumbnail size;
-        /// tests use their own). Each size has its own shader and material; the mesh is shared.
+        /// tests use their own). Each size has its own shader and material; the mesh is shared. The retro look
+        /// (<paramref name="retro"/>, Docs/orb.md, Retro look) is a second material of the same shader beside it.
         /// </summary>
-        internal static (Mesh mesh, Material material) ScreenAssets(string folder = ScreenFolder, int thumbnailBytes = DefaultThumbnailBytes)
+        internal static (Mesh mesh, Material material) ScreenAssets(string folder = ScreenFolder, int thumbnailBytes = DefaultThumbnailBytes, bool retro = false)
+        {
+            var (mesh, material) = ModernScreenAssets(folder, thumbnailBytes);
+            if (!retro) return (mesh, material);
+            string path = folder + "/" + ScreenFileName(thumbnailBytes) + " retro.mat";
+            var look = AssetDatabase.LoadAssetAtPath<Material>(path);
+            if (look != null && look.shader == material.shader) return (mesh, look);
+            look = new Material(material) { name = ScreenFileName(thumbnailBytes) + " retro" };
+            look.SetFloat(RetroProperty, 1);
+            AssetDatabase.DeleteAsset(path);
+            AssetDatabase.CreateAsset(look, path);
+            AssetDatabase.SaveAssets();
+            return (mesh, look);
+        }
+
+        private const string RetroProperty = "_Retro";
+
+        /// <summary>Whether a placed orb's screen has the retro look (a green phosphor terminal).</summary>
+        public static bool RetroOf(Transform orb)
+        {
+            var screen = orb != null ? orb.Find(ScreenObject) : null;
+            var material = screen != null && screen.TryGetComponent(out MeshRenderer renderer) ? renderer.sharedMaterial : null;
+            return material != null && material.HasProperty(RetroProperty) && material.GetFloat(RetroProperty) > .5f;
+        }
+
+        /// <summary>
+        /// Gives a placed orb's screen the retro look or Orbiters' own (with Undo): the shared material of its thumbnail size
+        /// and look. Nothing else changes: no parameter, no synced bit.
+        /// </summary>
+        public static void SetLook(Transform orb, bool retro)
+        {
+            var screen = orb.Find(ScreenObject);
+            var renderer = screen != null ? screen.GetComponent<MeshRenderer>() : null;
+            if (renderer == null) throw new InvalidOperationException("This orb has no screen: choose its options again.");
+            int thumbnailBytes = OptionsOf(orb).thumbnailBytes;
+            if (RetroOf(orb) == retro && ScreenCurrent(renderer.sharedMaterial, thumbnailBytes)) return;
+            var (_, material) = ScreenAssets(ScreenFolder, thumbnailBytes, retro);
+            Undo.RecordObject(renderer, "Orb look");
+            renderer.sharedMaterial = material;
+            PrefabUtility.RecordPrefabInstancePropertyModifications(renderer);
+        }
+
+        private static (Mesh mesh, Material material) ModernScreenAssets(string folder, int thumbnailBytes)
         {
             string name = ScreenFileName(thumbnailBytes);
             string materialPath = folder + "/" + name + ".mat", meshPath = folder + "/Orb screen mesh.asset";
@@ -293,7 +339,7 @@ namespace Orbiters.Toolkit.Editor.VRChat
             var renderer = screen != null ? screen.GetComponent<MeshRenderer>() : null;
             if (renderer == null) return;
             if (ScreenCurrent(renderer.sharedMaterial, thumbnailBytes)) return;
-            var (_, material) = ScreenAssets(ScreenFolder, thumbnailBytes);
+            var (_, material) = ScreenAssets(ScreenFolder, thumbnailBytes, RetroOf(orb));
             Undo.RecordObject(renderer, "Orb thumbnail size");
             renderer.sharedMaterial = material;
             PrefabUtility.RecordPrefabInstancePropertyModifications(renderer);
@@ -301,11 +347,12 @@ namespace Orbiters.Toolkit.Editor.VRChat
 
         /// <summary>
         /// Whether a screen material draws this version's pages (a slice each: older screens have fewer) with thumbnails of
-        /// <paramref name="thumbnailBytes"/>. An older one is swapped for the current files when the orb's options change,
-        /// with the controller saying its version.
+        /// <paramref name="thumbnailBytes"/>, from this revision's shader. An older one is swapped for the current files when
+        /// the orb's options change, with the controller saying its version.
         /// </summary>
         internal static bool ScreenCurrent(Material material, int thumbnailBytes) =>
             material != null && material.shader != null && material.shader.name == ScreenShaderName(thumbnailBytes) &&
+            material.GetTag("OrbScreen", false) == ScreenRevision &&
             material.HasProperty("_Pages") && material.GetTexture("_Pages") is Texture2DArray pages && pages.depth == ScreenPageSlices;
 
         // The screen before the eyes, which the panel's place tells (the panel sits at eyes + PanelFromEyes).

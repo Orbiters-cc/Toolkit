@@ -761,7 +761,18 @@ sync value.
 - **Screen version 3** (`Orb/Screen/Version`, local, unsaved, 3 by default): the page pictures have 13 slices, for the
   six-tile Home (page 10), Music (11) and Light (12); Orbiters desktop shows a screen without the parameter the four-tile
   Home. Changing an orb's options swaps an older screen's material for the current files (`ScreenCurrent`: the shader
-  for its thumbnail size and pages with this version's slices). Shared files in `Orb/Screen 4`, options in `Orb/Menu 9`.
+  for its thumbnail size and pages with this version's slices). Shared files in `Orb/Screen 5`, options in `Orb/Menu 9`.
+- Seen from behind (by the people around, or in a mirror), Orb's screen shows its back: Orb over "Orb menu" and "look
+  at the other side", slice 0 of the pages, drawn by Orbiters desktop as its SteamVR overlay's back. Which side the
+  camera is on comes from its place, not from the face drawn (VRChat's mirrors turn that round). The shader carries its
+  files' revision (tag `OrbScreen`, 5): changing an orb's options swaps a screen of an older one for these. Elements
+  the desktop greys out (memory bytes 21 to 23: fast walk while VRChat runs in desktop mode, "Only in VR") fade into
+  the card.
+- A **Look** option on the orb's card (`SetLook`, `RetroOf`): Orbiters' own, or **Retro**, a green phosphor terminal
+  (contracts' Docs/orb.md, Retro look: the page's light on three phosphor steps, scanlines that average out once
+  thinner than a pixel, faded corners) on which text arriving a block at a time reads as typed out. It is the screen's
+  material alone ("Orb screen retro" beside each size's), kept through the other options: no parameter, no synced bit.
+  Orbiters desktop's overlay has the same look as a setting of its own.
 
 ## Avatar manifests
 

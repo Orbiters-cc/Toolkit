@@ -93,6 +93,16 @@ namespace Orbiters.Toolkit.Editor.VRChat
                 },
                 new AttachmentOption
                 {
+                    Label = "Look",
+                    Tooltip = "How Orb's screen looks in VRChat: Orbiters' own, or a green phosphor terminal on which text arriving a block " +
+                              "at a time reads as typed out. Orbiters desktop's overlay has its own Look. No synced bits.",
+                    Choices = new[] { "Modern", "Retro" },
+                    ChoiceTooltips = new[] { "Orbiters' own look", "A green phosphor terminal, as on an old computer" },
+                    Current = RetroOf(orb) ? 1 : 0,
+                    Choose = index => SetLook(target, index == 1),
+                },
+                new AttachmentOption
+                {
                     Label = "Light",
                     Tooltip = "Orb can become a light, for a dark world or a photo: on or off, eight colours and a brightness, from Orb's menu " +
                               "or Orb › Light in your menu. Everyone around sees it. Costs 17 synced bits, and any light makes the avatar's PC " +

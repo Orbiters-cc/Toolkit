@@ -663,6 +663,7 @@ public class OrbTests
         var placed = (GameObject)PrefabUtility.InstantiatePrefab(prefab, scene);
         var renderer = placed.transform.Find(OrbInstaller.ScreenObject).GetComponent<MeshRenderer>();
         Assert.IsTrue(OrbInstaller.ScreenCurrent(renderer.sharedMaterial, 72), "A new orb's screen is current");
+        Assert.AreEqual(OrbInstaller.ScreenRevision, renderer.sharedMaterial.GetTag("OrbScreen", false), "its shader says its files' revision");
         var older = new Material(renderer.sharedMaterial);
         var pages = new Texture2DArray(4, 4, 10, TextureFormat.RGBA32, false);
         owned.Add(older); owned.Add(pages);
@@ -676,6 +677,27 @@ public class OrbTests
         var version = parameters.parameters.Single(p => p.name == OrbInstaller.ScreenVersionParameter);
         Assert.AreEqual((VRCExpressionParameters.ValueType.Int, false, false, (float)OrbInstaller.ScreenVersion), (version.valueType, version.networkSynced, version.saved, version.defaultValue));
         Assert.AreEqual(3, OrbInstaller.ScreenVersion);
+    }
+
+    // The retro look is the screen's material alone: it stays through the orb's other options, and goes back.
+    [Test]
+    public void TheRetroLookIsTheScreensMaterialAndStaysThroughOptions()
+    {
+        if (VrcFury.Writer == null) Assert.Ignore("Requires the VRCFury integration.");
+        var prefab = AssetDatabase.LoadAssetAtPath<GameObject>(OrbInstaller.CreatePrefab(folder));
+        var placed = (GameObject)PrefabUtility.InstantiatePrefab(prefab, scene);
+        var renderer = placed.transform.Find(OrbInstaller.ScreenObject).GetComponent<MeshRenderer>();
+        Assert.IsFalse(OrbInstaller.RetroOf(placed.transform), "Orbiters' own look by default");
+        OrbInstaller.SetLook(placed.transform, true);
+        Assert.IsTrue(OrbInstaller.RetroOf(placed.transform));
+        Assert.IsTrue(OrbInstaller.ScreenCurrent(renderer.sharedMaterial, 72));
+        StringAssert.StartsWith(OrbInstaller.ScreenFolder + "/", AssetDatabase.GetAssetPath(renderer.sharedMaterial));
+        OrbInstaller.SetOptions(placed.transform, 8, false, true, 128);
+        Assert.IsTrue(OrbInstaller.RetroOf(placed.transform), "another thumbnail size keeps the look");
+        Assert.IsTrue(OrbInstaller.ScreenCurrent(renderer.sharedMaterial, 128));
+        OrbInstaller.SetLook(placed.transform, false);
+        Assert.IsFalse(OrbInstaller.RetroOf(placed.transform));
+        Assert.IsTrue(OrbInstaller.ScreenCurrent(renderer.sharedMaterial, 128));
     }
 
     [TestCase(8, 72)]

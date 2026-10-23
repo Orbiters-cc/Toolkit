@@ -5,9 +5,10 @@
 // array. _Layout says, row by row for each page, where its text slots, thumbnails and buttons are (4-pixel units).
 // Thumbnails are colour pictures that sharpen layer by layer as they arrive (Docs/orb.md, Thumbnails): their decoder is
 // generated from the design table (OrbThumbnail.json) for the orb's thumbnail size.
-// Pages are 1024 × 576 pixels. Seen from behind it reads the right way round. Viewers who hide custom shaders see
-// nothing of it (VRCFallback). OrbInstaller writes this file, the word properties and the decoder filled in, as
-// "Orb screen.shader" (or "Orb screen 128 B.shader").
+// Pages are 1024 × 576 pixels. Seen from behind (by the people around, or in a mirror) it shows the back, slice 0 of
+// the pages ("Orb menu, look at the other side"): the menu is its owner's, on the side they face. Viewers who hide
+// custom shaders see nothing of it (VRCFallback). OrbInstaller writes this file, the word properties and the decoder
+// filled in, as "Orb screen.shader" (or "Orb screen 128 B.shader").
 Shader "Orbiters/Orb Screen"
 {
     Properties
@@ -20,11 +21,13 @@ Shader "Orbiters/Orb Screen"
         _Text2 ("Secondary text", Color) = (0.545, 0.545, 0.58, 1)
         _Accent ("Accent", Color) = (0, 0.855, 0.427, 1)
         _Placeholder ("Picture loading", Color) = (0.153, 0.153, 0.165, 1)
+        [ToggleUI] _Retro ("Retro look", Float) = 0
 //@PROPERTIES
     }
     SubShader
     {
-        Tags { "Queue" = "Transparent" "RenderType" = "Transparent" "IgnoreProjector" = "True" "VRCFallback" = "Hidden" }
+        // OrbScreen: the files' revision (OrbInstaller.ScreenRevision); a screen of an older one is swapped for these.
+        Tags { "Queue" = "Transparent" "RenderType" = "Transparent" "IgnoreProjector" = "True" "VRCFallback" = "Hidden" "OrbScreen" = "5" }
         Cull Off
         ZWrite Off
         Blend SrcAlpha OneMinusSrcAlpha
@@ -44,6 +47,7 @@ Shader "Orbiters/Orb Screen"
             sampler2D _MainTex;
             float4 _MainTex_TexelSize;
             fixed4 _Card, _Text, _Text2, _Accent, _Placeholder;
+            float _Retro;
 
             // The screen's memory as one array over its 372 properties (each takes a register of its own).
             CBUFFER_START(WordBuffer)
@@ -62,7 +66,8 @@ Shader "Orbiters/Orb Screen"
             static const float2 Page = float2(1024, 576);
             static const int Pages = 12;
             // The screen's memory (Docs/orb.md, Screen).
-            static const int Hover = 2, Pressed = 3, On = 4, Hidden = 8, Layers = 16, TextStart = 24, PicturesStart = 384, PictureBytes = THUMBNAIL_BYTES;
+            static const int Hover = 2, Pressed = 3, On = 4, Hidden = 8, Layers = 16, Unavailable = 21, TextStart = 24, PicturesStart = 384,
+                PictureBytes = THUMBNAIL_BYTES;
             // The layout table's columns.
             static const int TableSlots = 1, TablePictures = 33, TableElements = 40, LayoutRows = 13;
 
@@ -77,6 +82,9 @@ Shader "Orbiters/Orb Screen"
             {
                 float4 pos : SV_POSITION;
                 float2 uv : TEXCOORD0;
+                // 1 when the camera is behind the screen (the quad's front faces -z): a side that VFACE gets wrong in
+                // mirrors and render textures.
+                float behind : TEXCOORD1;
                 UNITY_VERTEX_OUTPUT_STEREO
             };
 
@@ -88,6 +96,8 @@ Shader "Orbiters/Orb Screen"
                 UNITY_INITIALIZE_VERTEX_OUTPUT_STEREO(o);
                 o.pos = UnityObjectToClipPos(v.vertex);
                 o.uv = v.uv;
+                float3 world = mul(unity_ObjectToWorld, v.vertex).xyz;
+                o.behind = dot(UnityObjectToWorldNormal(float3(0, 0, -1)), _WorldSpaceCameraPos - world) < 0;
                 return o;
             }
 
@@ -116,11 +126,59 @@ Shader "Orbiters/Orb Screen"
                 return saturate(.5 - distance / pixel);
             }
 
-            fixed4 frag(v2f i, fixed facing : VFACE) : SV_Target
+            // The back, slice 0 of the pages (Orb over "Orb menu" and "look at the other side"), the right way round from
+            // behind.
+            fixed4 Back(float2 uv)
+            {
+                uv.x = 1 - uv.x;
+                float alpha = Rounded(float2(uv.x, 1 - uv.y) * Page, float4(0, 0, Page), 28);
+                if (alpha <= 0) discard;
+                return fixed4(UNITY_SAMPLE_TEX2DARRAY(_Pages, float3(uv, 0)).rgb, alpha);
+            }
+
+            // The retro look (Docs/orb.md, Retro look): the colour's light on three phosphor steps, every third row darker
+            // (averaged once rows get thinner than a pixel, `rowWidth` the rows a pixel spans, so far away they never
+            // shimmer), the corners faded.
+            fixed3 Retro(fixed3 colour, float2 uv, float rowWidth)
+            {
+                #ifdef UNITY_COLORSPACE_GAMMA
+                float3 g = colour;
+                #else
+                float3 g = LinearToGammaSpace(colour);
+                #endif
+                float t = pow(saturate((dot(g, float3(.2126, .7152, .0722)) - .05) / .85), .85);
+                float3 dark = float3(6, 16, 9) / 255, mid = float3(40, 230, 110) / 255, hot = float3(200, 255, 215) / 255;
+                float3 c = t < .75 ? lerp(dark, mid, t / .75) : lerp(mid, hot, (t - .75) / .25);
+                float row = (1 - uv.y) * Page.y;
+                // Rows 2, 5, 8… (fmod's remainder is not exact on GPUs: a third of the row index's fraction instead).
+                float scan = frac(floor(row) / 3) > .5 ? .72 : 1;
+                c *= lerp(scan, 1 - .28 / 3, saturate(rowWidth - .5));
+                float2 d = uv * 2 - 1;
+                c *= 1 - .22 * (.6 * d.x * d.x + d.y * d.y);
+                #ifdef UNITY_COLORSPACE_GAMMA
+                return c;
+                #else
+                return GammaToLinearSpace(c);
+                #endif
+            }
+
+            fixed4 Front(v2f i);
+
+            fixed4 frag(v2f i) : SV_Target
+            {
+                // Before any branch or discard: the page rows a pixel spans, for the retro look's scanlines.
+                float rowWidth = fwidth(i.uv.y * Page.y);
+                // The side the camera is on (the whole quad's: the branch is the same for every pixel of it).
+                fixed4 c;
+                if (i.behind > .5) c = Back(i.uv);
+                else c = Front(i);
+                if (_Retro > .5) c.rgb = Retro(c.rgb, i.uv, rowWidth);
+                return c;
+            }
+
+            fixed4 Front(v2f i)
             {
                 float2 uv = i.uv;
-                // From behind (and in mirrors) the page reads the right way round.
-                if (facing < 0) uv.x = 1 - uv.x;
                 float2 p = float2(uv.x, 1 - uv.y) * Page;
                 float alpha = Rounded(p, float4(0, 0, Page), 28);
                 if (alpha <= 0) discard;
@@ -132,11 +190,11 @@ Shader "Orbiters/Orb Screen"
                 int4 head = Texel(0, page);
                 int hover = Byte(Hover) - 1, pressed = Byte(Pressed) - 1;
 
-                // Buttons: hidden ones go, then what is hovered, pressed and switched on.
+                // Buttons: hidden ones go, greyed out ones fade into the card, then what is hovered, pressed and switched on.
                 [loop] for (int e = 0; e < head.w; e++)
                 {
-                    bool hidden = Bit(Hidden, e), on = e < 28 && Bit(On, e);
-                    if (!hidden && !on && e != hover && e != pressed) continue;
+                    bool hidden = Bit(Hidden, e), on = e < 28 && Bit(On, e), unavailable = e < 21 && Bit(Unavailable, e);
+                    if (!hidden && !on && !unavailable && e != hover && e != pressed) continue;
                     int4 at = Texel(TableElements + 2 * e, page);
                     int4 look = Texel(TableElements + 2 * e + 1, page);
                     float4 r = float4(at) * 4;
@@ -148,6 +206,12 @@ Shader "Orbiters/Orb Screen"
                     }
                     float inside = Rounded(p, r, look.x);
                     if (inside <= 0) continue;
+                    // Not available now (fast walk in desktop mode): the card shows through, as on the overlay.
+                    if (unavailable)
+                    {
+                        colour = lerp(colour, _Card.rgb, .6 * inside);
+                        continue;
+                    }
                     // Looks 3 and 9: green and red buttons, darkened when pressed. White over the page in sRGB, as the
                     // overlay paints it.
                     bool solid = look.y == 3 || look.y == 9;
