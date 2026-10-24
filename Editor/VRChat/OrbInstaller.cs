@@ -15,45 +15,45 @@ using Object = UnityEngine.Object;
 
 namespace Orbiters.Toolkit.Editor.VRChat
 {
-    /// <summary>What Orb is doing (<see cref="OrbInstaller.State"/>); any other value shows as <see cref="Idle"/>.</summary>
+    /// <summary>What N4N0 is doing (<see cref="OrbInstaller.State"/>); any other value shows as <see cref="Idle"/>.</summary>
     public enum OrbState { Idle, Listening, Thinking, Talking, Sleeping, Happy, Annoyed, Surprised }
 
     /// <summary>
-    /// Orb, the Orbiters companion (Orbiters contracts, Docs/orb.md): a small glowing orb with eyes that floats beside its
+    /// N4N0, the Orbiters companion (Orbiters contracts, Docs/orb.md): a small glowing orb with eyes that floats beside its
     /// owner's head, lazily and with a spring (a PhysBone chain anyone can grab and let spring back), and the text panel it
-    /// projects in front of its owner, which everyone around reads. Orbiters desktop drives it over OSC through global
-    /// parameters: what Orb is doing (<see cref="State"/>: its eyes, glow, a ring, the projector beam) and the panel's text,
-    /// a block of cells at a time (KillFrenzy Avatar Text's protocol under Orb's names). Its owner talks to it by holding the
-    /// menu's Talk button or touching it. The panel sits low and to the orb's side of its owner's view and never in front of
+    /// projects in front of its owner, which everyone around reads. Orbiters - N4N0 drives it over OSC through global
+    /// parameters: what N4N0 is doing (<see cref="State"/>: its eyes, glow, a ring, the projector beam) and the panel's text,
+    /// a block of cells at a time (KillFrenzy Avatar Text's protocol under N4N0's names). Its owner talks to it by holding the
+    /// menu's Talk button or touching it. The panel sits low and to N4N0's side of its owner's view and never in front of
     /// their face; seen from further away it grows away from the face. Native avatar components only, its two shaders and
     /// glyph atlas copied into its folder and no Orbiters script: <see cref="Bind"/> ties it to the avatar's head and eyes.
     /// </summary>
     public static partial class OrbInstaller
     {
-        public const string MenuPath = "Orb";
-        public const string PrefabName = "Orb.prefab";
+        public const string MenuPath = "N4N0";
+        public const string PrefabName = "N4N0.prefab";
         // The contract's avatar parameters: global, so they keep these names in the avatar.
-        public const string Visible = "Orb/Visible", State = "Orb/State", Talk = "Orb/Talk", Touch = "Orb/Touch";
-        public const string TextVisible = "Orb/Text/Visible", TextPointer = "Orb/Text/Pointer", TextSyncPrefix = "Orb/Text/Sync";
+        public const string Visible = "N4N0/Visible", State = "N4N0/State", Talk = "N4N0/Talk", Touch = "N4N0/Touch";
+        public const string TextVisible = "N4N0/Text/Visible", TextPointer = "N4N0/Text/Pointer", TextSyncPrefix = "N4N0/Text/Sync";
         public const int Columns = 32, Rows = 4, Cells = Columns * Rows, DefaultTextSync = 8;
         /// <summary><see cref="TextPointer"/>: write nothing; clear every cell.</summary>
         public const int PointerNone = 0, PointerClear = 255;
-        /// <summary>The numbers of text sync values an orb may have.</summary>
+        /// <summary>The numbers of text sync values N4N0 may have.</summary>
         public static readonly IReadOnlyList<int> TextSyncCounts = new[] { 4, 8, 16 };
 
-        internal const string Shown = "Shown", Head = Shown + "/Head", Tether = Head + "/Tether", Ball = Tether + "/1/2/Orb";
+        internal const string Shown = "Shown", Head = Shown + "/Head", Tether = Head + "/Tether", Ball = Tether + "/1/2/Ball";
         internal const string Hop = Ball + "/Hop", Body = Hop + "/Body", Emitter = Hop + "/Emitter", Toucher = Ball + "/Touch", Panel = Head + "/Panel";
         internal static readonly Color Colour = new Color(0, 218 / 255f, 109 / 255f);
 
         // The layout is for an avatar whose eyes are 1.6 m up; Bind scales it with the avatar's eye height.
         internal const float ReferenceEyes = 1.6f;
-        // The orb's radius; each of the tether's two links (the orb rests on its tip, above its root).
+        // N4N0's radius; each of the tether's two links (N4N0 rests on its tip, above its root).
         internal const float Radius = .045f, Link = .05f, TouchRadius = .07f;
         // A cell of the panel (a glyph twice as tall as wide), the plate's margin around the text and the glow past it
         // (the text shader's Margin).
         internal const float CellWidth = .009f, CellHeight = .018f, PlatePad = .006f, PlateGlow = .004f;
         internal const float PageWidth = Columns * CellWidth + 2 * PlatePad, PageHeight = Rows * CellHeight + 2 * PlatePad;
-        // From the eyes (right, up, forward, turned with the avatar): the orb floats beside the head, a little before the
+        // From the eyes (right, up, forward, turned with the avatar): N4N0 floats beside the head, a little before the
         // ear, out of the way between the face and the people around; the panel's corner nearest the face is low and to
         // the right of its owner's view, out of its middle, and below the face as people in front see it.
         internal static readonly Vector3 OrbFromEyes = new Vector3(.26f, .02f, .12f), PanelFromEyes = new Vector3(.06f, -.18f, .5f);
@@ -65,10 +65,10 @@ namespace Orbiters.Toolkit.Editor.VRChat
         // Drawn by the contracts' Tools~/OrbTextAtlas from the glyph table: 2048 × 4096, 16 × 16 tiles of 128 × 256.
         private const string AtlasTemplate = "Packages/orbiters.toolkit/Editor/VRChat/OrbText.png.bytes";
 
-        /// <summary><see cref="TextSyncPrefix"/> and <paramref name="index"/>: "Orb/Text/Sync3".</summary>
+        /// <summary><see cref="TextSyncPrefix"/> and <paramref name="index"/>: "N4N0/Text/Sync3".</summary>
         public static string TextSync(int index) => TextSyncPrefix + index;
 
-        /// <summary>The orbs below <paramref name="root"/>, known by their touch contact.</summary>
+        /// <summary>The N4N0s below <paramref name="root"/>, known by their touch contact.</summary>
         internal static IEnumerable<Transform> FindAll(GameObject root) => root == null ? Enumerable.Empty<Transform>() :
             root.GetComponentsInChildren<VRCContactReceiver>(true).Where(r => r.parameter == Touch).Select(r => RootOf(r.transform)).Where(o => o != null).ToList();
 
@@ -86,7 +86,7 @@ namespace Orbiters.Toolkit.Editor.VRChat
         }, root => FindAll(root).Any());
 
         /// <summary>
-        /// Creates the orb prefab with its controller, menu, parameters, shaders, glyph atlas, meshes and materials in
+        /// Creates the N4N0 prefab with its controller, menu, parameters, shaders, glyph atlas, meshes and materials in
         /// <paramref name="folder"/>; <paramref name="textSync"/> (4, 8 or 16) is its number of text sync values: more
         /// fill the panel sooner and cost more of the avatar's synced bits (1 + 8 + 1 + 8 + 8 per value);
         /// <paramref name="thumbnailBytes"/> (72 or 128, 128 with 8 text sync values or more) the size of each thumbnail
@@ -94,15 +94,15 @@ namespace Orbiters.Toolkit.Editor.VRChat
         /// </summary>
         public static string CreatePrefab(string folder, int textSync = DefaultTextSync, int thumbnailBytes = DefaultThumbnailBytes)
         {
-            if (!TextSyncCounts.Contains(textSync)) throw new ArgumentOutOfRangeException(nameof(textSync), "An orb has 4, 8 or 16 text sync values.");
+            if (!TextSyncCounts.Contains(textSync)) throw new ArgumentOutOfRangeException(nameof(textSync), "N4N0 has 4, 8 or 16 text sync values.");
             if (!OfferedThumbnailBytes.Contains(thumbnailBytes) || !ScreenFits(textSync, thumbnailBytes))
-                throw new ArgumentOutOfRangeException(nameof(thumbnailBytes), "An orb's thumbnails are 72 or 128 bytes, 128 with 8 text sync values or more.");
-            return SavePrefab(folder, PrefabName, "Orb", "orb", root => Build(root, folder, textSync, thumbnailBytes));
+                throw new ArgumentOutOfRangeException(nameof(thumbnailBytes), "N4N0's thumbnails are 72 or 128 bytes, 128 with 8 text sync values or more.");
+            return SavePrefab(folder, PrefabName, "N4N0", "N4N0", root => Build(root, folder, textSync, thumbnailBytes));
         }
 
         private static void Build(GameObject root, string folder, int textSync, int thumbnailBytes)
         {
-            // Everything turns off with Orb/Visible.
+            // Everything turns off with N4N0/Visible.
             var shown = Child(root.transform, Shown);
             // On the head bone, turned like the avatar (sources set by Bind), and as large as the avatar's eyes are high.
             var head = Child(shown, "Head");
@@ -114,11 +114,11 @@ namespace Orbiters.Toolkit.Editor.VRChat
             level.Sources.Add(new VRCConstraintSource(null, 1));
             level.IsActive = true; level.Locked = true;
 
-            // The tether's root stays with the head; its two links and the orb on their tip lag behind, overshoot and settle.
+            // The tether's root stays with the head; its two links and N4N0 on their tip lag behind, overshoot and settle.
             var tether = Child(head, "Tether");
             var link = Child(tether, "1"); link.localPosition = Vector3.up * Link;
             var tip = Child(link, "2"); tip.localPosition = Vector3.up * Link;
-            var ball = Child(tip, "Orb");
+            var ball = Child(tip, "Ball");
             var hop = Child(ball, "Hop");
             var emitter = Child(hop, "Emitter");
             var panel = Child(head, "Panel");
@@ -128,28 +128,28 @@ namespace Orbiters.Toolkit.Editor.VRChat
             phys.rootTransform = tether; phys.integrationType = VRCPhysBoneBase.IntegrationType.Simplified;
             phys.pull = .15f; phys.spring = .8f; phys.gravity = 0; phys.gravityFalloff = 0;
             phys.immobileType = VRCPhysBoneBase.ImmobileType.AllMotion; phys.immobile = .2f;
-            // Only the tip, where the orb is, can be grabbed; pulled, the tether stretches and springs back.
+            // Only the tip, where N4N0 is, can be grabbed; pulled, the tether stretches and springs back.
             phys.radius = Radius; phys.radiusCurve = AnimationCurve.Constant(0, .49f, 0);
             phys.radiusCurve.AddKey(new Keyframe(.5f, 1)); phys.radiusCurve.AddKey(new Keyframe(1, 1));
             phys.allowCollision = VRCPhysBoneBase.AdvancedBool.False;
             phys.allowGrabbing = VRCPhysBoneBase.AdvancedBool.True; phys.allowPosing = VRCPhysBoneBase.AdvancedBool.False;
             phys.grabMovement = .7f; phys.snapToHand = false; phys.maxStretch = 1.5f; phys.resetWhenDisabled = true;
-            // What the orb holds is no part of the chain.
+            // What N4N0 holds is no part of the chain.
             phys.ignoreTransforms = new List<Transform> { ball };
 
-            // The owner's hands touching the orb (Orb/Touch, the owner's own and only on the owner's client).
+            // The owner's hands touching N4N0 (N4N0/Touch, the owner's own and only on the owner's client).
             var touch = Child(ball, "Touch").gameObject.AddComponent<VRCContactReceiver>();
             touch.shapeType = ContactBase.ShapeType.Sphere; touch.radius = TouchRadius;
             touch.allowSelf = true; touch.allowOthers = false; touch.localOnly = true;
             touch.receiverType = ContactReceiver.ReceiverType.Constant; touch.parameter = Touch;
             touch.collisionTags.Add("Hand"); touch.collisionTags.Add("Finger");
 
-            var shader = CopyShader(ShaderTemplate, folder + "/Orb.shader");
+            var shader = CopyShader(ShaderTemplate, folder + "/N4N0.shader");
             var body = Child(hop, "Body");
             body.localScale = Vector3.one * Radius;
             body.gameObject.AddComponent<MeshFilter>().sharedMesh = OrbMesh(folder);
             var bodyRenderer = body.gameObject.AddComponent<MeshRenderer>();
-            bodyRenderer.sharedMaterials = new[] { OrbMaterial(folder, shader, "Orb core", false), OrbMaterial(folder, shader, "Orb glow", true) };
+            bodyRenderer.sharedMaterials = new[] { OrbMaterial(folder, shader, "N4N0 core", false), OrbMaterial(folder, shader, "N4N0 glow", true) };
             Quiet(bodyRenderer);
 
             // Desktop mode's pointer (the screen's eye and gaze receivers find it): the owner's eyes and a point on their
@@ -177,24 +177,24 @@ namespace Orbiters.Toolkit.Editor.VRChat
             dot.gameObject.SetActive(false);
 
             // The panel and its beam are one skinned mesh: the plate and the beam's far end on the panel, its near end on
-            // the orb, wherever the tether takes it.
-            var textShader = CopyShader(TextShaderTemplate, folder + "/Orb text.shader");
+            // N4N0, wherever the tether takes it.
+            var textShader = CopyShader(TextShaderTemplate, folder + "/N4N0 text.shader");
             var screen = panel.gameObject.AddComponent<SkinnedMeshRenderer>();
             screen.sharedMesh = PanelMesh(folder, panel, emitter);
             screen.bones = new[] { panel, emitter }; screen.rootBone = panel; screen.quality = SkinQuality.Bone1;
-            screen.sharedMaterials = new[] { TextMaterial(folder, textShader, "Orb text", Atlas(folder), false), TextMaterial(folder, textShader, "Orb beam", null, true) };
-            // The plate grown twice for far viewers, the beam and the orb on its tether, wherever they sway.
+            screen.sharedMaterials = new[] { TextMaterial(folder, textShader, "N4N0 text", Atlas(folder), false), TextMaterial(folder, textShader, "N4N0 beam", null, true) };
+            // The plate grown twice for far viewers, the beam and N4N0 on its tether, wherever they sway.
             screen.localBounds = new Bounds(new Vector3(.15f, 0, -.1f), Vector3.one * 1.4f);
             Quiet(screen);
 
             BuildController(root, folder, textSync, thumbnailBytes: thumbnailBytes);
-            // Its files in the orb's folder, which a gallery package carries.
+            // Its files in N4N0's folder, which a gallery package carries.
             AddScreen(root.transform, folder, thumbnailBytes);
             panel.gameObject.SetActive(false);
         }
 
         /// <summary>
-        /// Places the tether (so the orb rests on its tip) and the panel from where the eyes are in the head object's space.
+        /// Places the tether (so N4N0 rests on its tip) and the panel from where the eyes are in the head object's space.
         /// The panel faces ahead, upright: a plain rectangle for its owner looking ahead (its rows level, slightly
         /// foreshortened when looked at) and for the people in front.
         /// </summary>
@@ -207,7 +207,7 @@ namespace Orbiters.Toolkit.Editor.VRChat
 
         /// <summary>
         /// Fits a placed orb to <paramref name="avatar"/>: it follows the head bone, turned like the avatar, sized by how
-        /// high the avatar's eyes are, the orb beside the eyes and the panel below them. Recorded with Undo; binding again
+        /// high the avatar's eyes are, N4N0 beside the eyes and the panel below them. Recorded with Undo; binding again
         /// (another avatar, a moved armature) replaces the earlier fit.
         /// </summary>
         public static void Bind(Transform orb, Transform avatar)
@@ -223,7 +223,7 @@ namespace Orbiters.Toolkit.Editor.VRChat
             var sight = gaze != null ? gaze.GetComponent<VRCParentConstraint>() : null;
             if (follow == null || level == null || follow.Sources.Count < 1 || level.Sources.Count < 1 || tether == null || panel == null ||
                 sight == null || sight.Sources.Count < 1)
-                throw new InvalidOperationException("This orb was modified: add it again.");
+                throw new InvalidOperationException("This N4N0 was modified: add it again.");
             var bone = animator.GetBoneTransform(HumanBodyBones.Head) ?? animator.GetBoneTransform(HumanBodyBones.Neck) ?? animator.GetBoneTransform(HumanBodyBones.Hips);
             var eyes = Eyes(avatar, bone);
             float size = Mathf.Clamp(Vector3.Dot(eyes - avatar.position, avatar.up) / ReferenceEyes, .3f, 3);
@@ -291,7 +291,7 @@ namespace Orbiters.Toolkit.Editor.VRChat
         // Its colour is the glyphs' coverage, not a colour: read linearly.
         private static Texture2D Atlas(string folder)
         {
-            string path = folder + "/Orb text.png";
+            string path = folder + "/N4N0 text.png";
             CopyFile(AtlasTemplate, path);
             var importer = (TextureImporter)AssetImporter.GetAtPath(path);
             importer.textureType = TextureImporterType.Default; importer.sRGBTexture = false;
@@ -309,12 +309,12 @@ namespace Orbiters.Toolkit.Editor.VRChat
             var vertices = new List<Vector3>();
             var core = Sphere(vertices, 1, 28, 18);
             var halo = Sphere(vertices, 1.7f, 18, 12);
-            var mesh = new Mesh { name = "Orb" };
+            var mesh = new Mesh { name = "N4N0" };
             mesh.SetVertices(vertices); mesh.SetNormals(vertices.Select(v => v.normalized).ToList());
             mesh.subMeshCount = 2;
             mesh.SetTriangles(core, 0); mesh.SetTriangles(halo, 1);
             mesh.RecalculateBounds();
-            AssetDatabase.CreateAsset(mesh, folder + "/Orb mesh.asset");
+            AssetDatabase.CreateAsset(mesh, folder + "/N4N0 mesh.asset");
             return mesh;
         }
 
@@ -343,7 +343,7 @@ namespace Orbiters.Toolkit.Editor.VRChat
 
         /// <summary>
         /// The panel's mesh, made for a full page (the text shader shrinks it to the text): the plate (with the margin its glow
-        /// takes) facing the owner, and the beam, a pyramid from the orb's middle to the plate's corners. A plate vertex's
+        /// takes) facing the owner, and the beam, a pyramid from N4N0's middle to the plate's corners. A plate vertex's
         /// first UV is its corner; a beam vertex's second UV is where it is across its side and along the beam.
         /// </summary>
         private static Mesh PanelMesh(string folder, Transform panel, Transform emitter)
@@ -369,7 +369,7 @@ namespace Orbiters.Toolkit.Editor.VRChat
                 sides.Add(vertices.Count); Add(OnPage(ring[k], 0), ring[k], new Vector2(0, 1), 0);
                 sides.Add(vertices.Count); Add(OnPage(ring[(k + 1) % 4], 0), ring[(k + 1) % 4], new Vector2(1, 1), 0);
             }
-            var mesh = new Mesh { name = "Orb panel" };
+            var mesh = new Mesh { name = "N4N0 panel" };
             mesh.SetVertices(vertices); mesh.SetUVs(0, corners); mesh.SetUVs(1, beam);
             mesh.SetNormals(vertices.Select(_ => Vector3.back).ToList());
             mesh.subMeshCount = 2;
@@ -377,7 +377,7 @@ namespace Orbiters.Toolkit.Editor.VRChat
             mesh.boneWeights = weights.ToArray();
             mesh.bindposes = new[] { Matrix4x4.identity, emitter.worldToLocalMatrix * panel.localToWorldMatrix };
             mesh.RecalculateBounds();
-            AssetDatabase.CreateAsset(mesh, folder + "/Orb panel mesh.asset");
+            AssetDatabase.CreateAsset(mesh, folder + "/N4N0 panel mesh.asset");
             return mesh;
         }
     }

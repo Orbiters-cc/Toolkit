@@ -54,7 +54,7 @@ namespace Orbiters.Toolkit.Editor.Meshes
     /// <summary>
     /// Compares versions of a model part by part: vertices moved (a heat map from yellow to red), parts placed elsewhere,
     /// other materials, blendshapes or bones, parts added or removed. Models are read from their file (<see cref="FbxReader"/>),
-    /// so nothing is imported. Shared by Unit Git's 3D view and MCB's version comparison.
+    /// so nothing is imported. Shared by Mixer Git's 3D view and MCB's version comparison.
     /// </summary>
     public static class MeshComparison
     {

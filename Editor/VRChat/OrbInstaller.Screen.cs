@@ -16,9 +16,9 @@ using Object = UnityEngine.Object;
 namespace Orbiters.Toolkit.Editor.VRChat
 {
     /// <summary>
-    /// Orb's projected screen (Orbiters contracts, Docs/orb.md, Screen), on every orb: Orb's menu shown in front of its
-    /// owner, where everyone around sees it. Its owner's opens only in VRChat's desktop mode or with the orb card's
-    /// "Replace Orbiters overlay" option (<see cref="ScreenReplace"/>); in VR without it, Orbiters desktop's SteamVR overlay
+    /// N4N0's projected screen (Orbiters contracts, Docs/orb.md, Screen), on every N4N0: N4N0's menu shown in front of its
+    /// owner, where everyone around sees it. Its owner's opens only in VRChat's desktop mode or with the N4N0 card's
+    /// "Replace Orbiters overlay" option (<see cref="ScreenReplace"/>); in VR without it, Orbiters - N4N0's SteamVR overlay
     /// shows the menu instead. When it opens it stays where it appeared (frozen in the world) so a hand reaching for it
     /// never pushes it away.
     /// <para>
@@ -35,22 +35,22 @@ namespace Orbiters.Toolkit.Editor.VRChat
     /// </summary>
     public static partial class OrbInstaller
     {
-        public const string ScreenOpen = "Orb/Screen/Open", ScreenPointer = "Orb/Screen/Pointer";
-        public const string ScreenValuePrefix = "Orb/Screen/Value", ScreenTouchPrefix = "Orb/Screen/Touch/";
+        public const string ScreenOpen = "N4N0/Screen/Open", ScreenPointer = "N4N0/Screen/Pointer";
+        public const string ScreenValuePrefix = "N4N0/Screen/Value", ScreenTouchPrefix = "N4N0/Screen/Touch/";
         /// <summary>
-        /// Local, never changed by a menu: on when the orb card's "Replace Orbiters overlay" option is (its default value),
-        /// so the screen shows Orb's menu in VR too. Orbiters desktop reads it to choose between its overlay and the screen.
+        /// Local, never changed by a menu: on when the N4N0 card's "Replace Orbiters overlay" option is (its default value),
+        /// so the screen shows N4N0's menu in VR too. Orbiters - N4N0 reads it to choose between its overlay and the screen.
         /// </summary>
-        public const string ScreenReplace = "Orb/Screen/Replace";
+        public const string ScreenReplace = "N4N0/Screen/Replace";
         /// <summary>VRChat's: 1 in VR, 0 in desktop mode.</summary>
         internal const string VRMode = "VRMode";
         /// <summary>
         /// How near the owner's eyes and a point on their line of sight (the gaze point) are to each touch point, as
         /// <see cref="ScreenTouchPrefix"/> for fingers: the hovered point is where the line through both meets the screen.
         /// </summary>
-        public const string ScreenEyePrefix = "Orb/Screen/Eye", ScreenGazePrefix = "Orb/Screen/Gaze";
+        public const string ScreenEyePrefix = "N4N0/Screen/Eye", ScreenGazePrefix = "N4N0/Screen/Gaze";
         /// <summary>The two senders' collision tags: only the screen's eye and gaze receivers take them.</summary>
-        public const string EyeTag = "OrbEye", GazeTag = "OrbGaze";
+        public const string EyeTag = "N4N0Eye", GazeTag = "N4N0Gaze";
         // At the eyes, turned with the head bone; the gaze point on the line of sight, this far before them (nearer than
         // any point of the screen, so its dot shows in front of it); the senders' radius and the dot's.
         internal const string Gaze = Head + "/Gaze", GazePoint = Gaze + "/Point", GazeDot = GazePoint + "/Dot";
@@ -62,10 +62,10 @@ namespace Orbiters.Toolkit.Editor.VRChat
         /// </summary>
         public const int ScreenVersion = 4;
         /// <summary>
-        /// Local, not saved, set by no menu: the screen's version (<see cref="ScreenVersion"/>), which Orbiters desktop reads
+        /// Local, not saved, set by no menu: the screen's version (<see cref="ScreenVersion"/>), which Orbiters - N4N0 reads
         /// to know the pages the screen has. Screens before version 3 lack it.
         /// </summary>
-        public const string ScreenVersionParameter = "Orb/Screen/Version";
+        public const string ScreenVersionParameter = "N4N0/Screen/Version";
         public const int ScreenLocalValues = 16;
         /// <summary><see cref="TextPointer"/>: everyone else's screen closes (and clears).</summary>
         public const int PointerScreenClose = 254;
@@ -83,17 +83,17 @@ namespace Orbiters.Toolkit.Editor.VRChat
             new Vector3(-ScreenWidth / 2 - .05f, ScreenHeight / 2 + .05f, 0), new Vector3(ScreenWidth / 2 + .05f, ScreenHeight / 2 + .05f, 0),
             new Vector3(0, -ScreenHeight / 2 - .05f, 0), new Vector3(0, 0, .15f),
         };
-        // The screen's shared files: made once for every orb that has a screen, and for every orb switched to a thumbnail
+        // The screen's shared files: made once for every N4N0 that has a screen, and for every N4N0 switched to a thumbnail
         // size its own files lack.
-        internal const string ScreenFolder = "Assets/Orbiters/Orb/Screen " + ScreenRevision;
-        // The screen files' revision, the shader's OrbScreen tag: 5 draws the back as a card ("Orb menu, look at the other
+        internal const string ScreenFolder = "Assets/Orbiters/N4N0/Screen " + ScreenRevision;
+        // The screen files' revision, the shader's OrbScreen tag: 5 draws the back as a card ("N4N0 menu, look at the other
         // side"), 6 the retro look's own pages and live parts.
         internal const string ScreenRevision = "6";
         private const string ScreenShaderTemplate = "Packages/orbiters.toolkit/Editor/VRChat/OrbScreen.shader.txt";
-        // Drawn by Orbiters desktop (`orbiters-desktop --orb-menu`) from the menu's layout: the page pictures (a slice per
+        // Drawn by Orbiters - N4N0 (`orbiters-desktop --orb-menu`) from the menu's layout: the page pictures (a slice per
         // page, the first empty) and the layout table.
         private const string ScreenPagesTemplate = "Packages/orbiters.toolkit/Editor/VRChat/OrbScreenPages.png.bytes";
-        // The same pages in the retro look (`orbiters-desktop --orb-menu`'s "Orb screen pages retro.png").
+        // The same pages in the retro look (`orbiters-desktop --orb-menu`'s "N4N0 screen pages retro.png").
         private const string ScreenPagesRetroTemplate = "Packages/orbiters.toolkit/Editor/VRChat/OrbScreenPagesRetro.png.bytes";
         private const string ScreenLayoutTemplate = "Packages/orbiters.toolkit/Editor/VRChat/OrbScreenLayout.png.bytes";
         internal const int ScreenPageSlices = 13;
@@ -106,10 +106,10 @@ namespace Orbiters.Toolkit.Editor.VRChat
         // The screen's own animator parameters: its words, the bytes the values carry (synced and local), the blocks the two
         // pointers write (one update late, as the local bytes; the synced bytes come from the text's late values,
         // ValueLag updates later still).
-        internal const string SyncBlock = "Orb/Screen/SyncBlock", LocalBlock = "Orb/Screen/LocalBlock";
-        internal static string Word(int k) => "Orb/Screen/Word" + k;
-        internal static string SyncDigit(int i) => "Orb/Screen/SyncDigit" + i;
-        internal static string LocalDigit(int i) => "Orb/Screen/LocalDigit" + i;
+        internal const string SyncBlock = "N4N0/Screen/SyncBlock", LocalBlock = "N4N0/Screen/LocalBlock";
+        internal static string Word(int k) => "N4N0/Screen/Word" + k;
+        internal static string SyncDigit(int i) => "N4N0/Screen/SyncDigit" + i;
+        internal static string LocalDigit(int i) => "N4N0/Screen/LocalDigit" + i;
         internal static string WordProperty(int k) => "material._W" + k;
 
         /// <summary>Whether a placed orb has the screen object.</summary>
@@ -120,7 +120,7 @@ namespace Orbiters.Toolkit.Editor.VRChat
         /// <summary>
         /// The screen's shader (word properties and thumbnail decoder written out), pages, layout, glyphs, mesh and
         /// material for thumbnails of <paramref name="thumbnailBytes"/>, made once in <paramref name="folder"/> (a new orb's
-        /// own; the shared <see cref="ScreenFolder"/> for an orb made without a screen or switched to another thumbnail size;
+        /// own; the shared <see cref="ScreenFolder"/> for N4N0 made without a screen or switched to another thumbnail size;
         /// tests use their own). Each size has its own shader and material; the mesh is shared. The retro look
         /// (<paramref name="retro"/>, Docs/orb.md, Retro look) is a second material of the same shader beside it.
         /// </summary>
@@ -133,9 +133,9 @@ namespace Orbiters.Toolkit.Editor.VRChat
             if (look != null && look.shader == material.shader) return (mesh, look);
             look = new Material(material) { name = ScreenFileName(thumbnailBytes) + " retro" };
             look.SetFloat(RetroProperty, 1);
-            string pagesPath = folder + "/Orb screen pages retro.png";
+            string pagesPath = folder + "/N4N0 screen pages retro.png";
             look.SetTexture("_Pages", AssetDatabase.LoadAssetAtPath<Texture2DArray>(pagesPath) ?? ScreenPages(pagesPath, ScreenPagesRetroTemplate));
-            // The phosphor palette, as Orbiters desktop's retro overlay paints (Docs/orb.md, Retro look).
+            // The phosphor palette, as Orbiters - N4N0's retro overlay paints (Docs/orb.md, Retro look).
             foreach (var (name, colour) in RetroColours) look.SetColor(name, colour);
             AssetDatabase.DeleteAsset(path);
             AssetDatabase.CreateAsset(look, path);
@@ -144,8 +144,8 @@ namespace Orbiters.Toolkit.Editor.VRChat
         }
 
         private const string RetroProperty = "_Retro";
-        // Pictures of Orb's menu in each look (`orbiters-desktop --orb-menu`'s "Orb preview.png" and "Orb preview
-        // retro.png"), for the Look option on the orb's card; read once.
+        // Pictures of N4N0's menu in each look (`orbiters-desktop --orb-menu`'s "N4N0 preview.png" and "N4N0 preview
+        // retro.png"), for the Look option on N4N0's card; read once.
         private static readonly string[] LookPictureFiles =
             { "Packages/orbiters.toolkit/Editor/VRChat/OrbPreview.png.bytes", "Packages/orbiters.toolkit/Editor/VRChat/OrbPreviewRetro.png.bytes" };
         private static Texture2D[] lookPictures;
@@ -185,11 +185,11 @@ namespace Orbiters.Toolkit.Editor.VRChat
         {
             var screen = orb.Find(ScreenObject);
             var renderer = screen != null ? screen.GetComponent<MeshRenderer>() : null;
-            if (renderer == null) throw new InvalidOperationException("This orb has no screen: choose its options again.");
+            if (renderer == null) throw new InvalidOperationException("This N4N0 has no screen: choose its options again.");
             int thumbnailBytes = OptionsOf(orb).thumbnailBytes;
             if (RetroOf(orb) == retro && ScreenCurrent(renderer.sharedMaterial, thumbnailBytes)) return;
             var (_, material) = ScreenAssets(ScreenFolder, thumbnailBytes, retro);
-            Undo.RecordObject(renderer, "Orb look");
+            Undo.RecordObject(renderer, "N4N0 look");
             renderer.sharedMaterial = material;
             PrefabUtility.RecordPrefabInstancePropertyModifications(renderer);
         }
@@ -197,7 +197,7 @@ namespace Orbiters.Toolkit.Editor.VRChat
         private static (Mesh mesh, Material material) ModernScreenAssets(string folder, int thumbnailBytes)
         {
             string name = ScreenFileName(thumbnailBytes);
-            string materialPath = folder + "/" + name + ".mat", meshPath = folder + "/Orb screen mesh.asset";
+            string materialPath = folder + "/" + name + ".mat", meshPath = folder + "/N4N0 screen mesh.asset";
             var material = AssetDatabase.LoadAssetAtPath<Material>(materialPath);
             var mesh = AssetDatabase.LoadAssetAtPath<Mesh>(meshPath);
             if (material != null && mesh != null && material.shader != null && material.shader.isSupported) return (mesh, material);
@@ -209,8 +209,8 @@ namespace Orbiters.Toolkit.Editor.VRChat
             if (material == null || material.shader == null || !material.shader.isSupported)
             {
                 var shader = ScreenShader(folder + "/" + name + ".shader", thumbnailBytes);
-                var pages = AssetDatabase.LoadAssetAtPath<Texture2DArray>(folder + "/Orb screen pages.png") ?? ScreenPages(folder + "/Orb screen pages.png", ScreenPagesTemplate);
-                var layout = AssetDatabase.LoadAssetAtPath<Texture2D>(folder + "/Orb screen layout.png") ?? ScreenLayout(folder + "/Orb screen layout.png");
+                var pages = AssetDatabase.LoadAssetAtPath<Texture2DArray>(folder + "/N4N0 screen pages.png") ?? ScreenPages(folder + "/N4N0 screen pages.png", ScreenPagesTemplate);
+                var layout = AssetDatabase.LoadAssetAtPath<Texture2D>(folder + "/N4N0 screen layout.png") ?? ScreenLayout(folder + "/N4N0 screen layout.png");
                 var glyphs = Atlas(folder);
                 material = new Material(shader) { name = name };
                 material.SetTexture("_Pages", pages);
@@ -230,11 +230,11 @@ namespace Orbiters.Toolkit.Editor.VRChat
             return (mesh, material);
         }
 
-        // The screen's files for a thumbnail size: "Orb screen" for 72 bytes, "Orb screen 128 B" for 128.
-        private static string ScreenFileName(int thumbnailBytes) => thumbnailBytes == DefaultThumbnailBytes ? "Orb screen" : "Orb screen " + thumbnailBytes + " B";
+        // The screen's files for a thumbnail size: "N4N0 screen" for 72 bytes, "N4N0 screen 128 B" for 128.
+        private static string ScreenFileName(int thumbnailBytes) => thumbnailBytes == DefaultThumbnailBytes ? "N4N0 screen" : "N4N0 screen " + thumbnailBytes + " B";
 
         /// <summary>The name of the screen's shader for thumbnails of <paramref name="thumbnailBytes"/>.</summary>
-        internal static string ScreenShaderName(int thumbnailBytes) => "Orbiters/Orb Screen (" + thumbnailBytes + " B thumbnails)";
+        internal static string ScreenShaderName(int thumbnailBytes) => "Orbiters/N4N0 Screen (" + thumbnailBytes + " B thumbnails)";
 
         // The template with its word properties, their registers and their sum written out, and the thumbnail decoder.
         private static Shader ScreenShader(string path, int thumbnailBytes)
@@ -251,7 +251,7 @@ namespace Orbiters.Toolkit.Editor.VRChat
                 sum.Append(k % 12 == 0 ? "\n                " : " ").Append($"+ _W{k}");
             }
             string defines = $"            #define SCREEN_WORDS {ScreenWords(thumbnailBytes)}\n            #define THUMBNAIL_BYTES {thumbnailBytes}";
-            string text = template.text.Replace("Shader \"Orbiters/Orb Screen\"", "Shader \"" + ScreenShaderName(thumbnailBytes) + "\"")
+            string text = template.text.Replace("Shader \"Orbiters/N4N0 Screen\"", "Shader \"" + ScreenShaderName(thumbnailBytes) + "\"")
                 .Replace("//@PROPERTIES", properties.ToString().TrimEnd()).Replace("//@BUFFER", buffer.ToString().TrimEnd()).Replace("//@SUM", sum.ToString())
                 .Replace("//@DEFINES", defines).Replace("//@THUMBNAIL", ThumbnailDecoder(thumbnailBytes));
             System.IO.File.WriteAllText(path, text);
@@ -297,7 +297,7 @@ namespace Orbiters.Toolkit.Editor.VRChat
         private static Mesh ScreenMesh()
         {
             float x = ScreenWidth / 2, y = ScreenHeight / 2;
-            var mesh = new Mesh { name = "Orb screen" };
+            var mesh = new Mesh { name = "N4N0 screen" };
             mesh.SetVertices(new List<Vector3> { new Vector3(-x, -y, 0), new Vector3(x, -y, 0), new Vector3(-x, y, 0), new Vector3(x, y, 0) });
             mesh.SetUVs(0, new List<Vector2> { new Vector2(0, 0), new Vector2(1, 0), new Vector2(0, 1), new Vector2(1, 1) });
             mesh.SetNormals(Enumerable.Repeat(Vector3.back, 4).ToList());
@@ -319,10 +319,10 @@ namespace Orbiters.Toolkit.Editor.VRChat
             if (existing != null) return existing;
             var head = orb.Find(Head);
             var panel = orb.Find(Panel);
-            if (head == null || panel == null) throw new InvalidOperationException("This orb was modified: add it again.");
+            if (head == null || panel == null) throw new InvalidOperationException("This N4N0 was modified: add it again.");
             var (mesh, material) = ScreenAssets(folder, thumbnailBytes);
             var screen = new GameObject("Screen");
-            Undo.RegisterCreatedObjectUndo(screen, "Orb screen");
+            Undo.RegisterCreatedObjectUndo(screen, "N4N0 screen");
             screen.transform.SetParent(head, false);
             screen.SetActive(false);
             screen.AddComponent<MeshFilter>().sharedMesh = mesh;
@@ -374,7 +374,7 @@ namespace Orbiters.Toolkit.Editor.VRChat
             if (renderer == null) return;
             if (ScreenCurrent(renderer.sharedMaterial, thumbnailBytes)) return;
             var (_, material) = ScreenAssets(ScreenFolder, thumbnailBytes, RetroOf(orb));
-            Undo.RecordObject(renderer, "Orb thumbnail size");
+            Undo.RecordObject(renderer, "N4N0 thumbnail size");
             renderer.sharedMaterial = material;
             PrefabUtility.RecordPrefabInstancePropertyModifications(renderer);
         }
@@ -382,7 +382,7 @@ namespace Orbiters.Toolkit.Editor.VRChat
         /// <summary>
         /// Whether a screen material draws this version's pages (a slice each: older screens have fewer) with thumbnails of
         /// <paramref name="thumbnailBytes"/>, from this revision's shader. An older one is swapped for the current files when
-        /// the orb's options change, with the controller saying its version.
+        /// N4N0's options change, with the controller saying its version.
         /// </summary>
         internal static bool ScreenCurrent(Material material, int thumbnailBytes) =>
             material != null && material.shader != null && material.shader.name == ScreenShaderName(thumbnailBytes) &&
@@ -413,7 +413,7 @@ namespace Orbiters.Toolkit.Editor.VRChat
         // ---- The animator ----
 
         /// <summary>
-        /// The screen's parameters, layers and expression parameters (all local), added to an orb's controller;
+        /// The screen's parameters, layers and expression parameters (all local), added to N4N0's controller;
         /// <paramref name="replace"/> is <see cref="ScreenReplace"/>'s default, <paramref name="thumbnailBytes"/>
         /// <see cref="ScreenThumbnailBytes"/>'s (the memory's size follows).
         /// </summary>
@@ -528,7 +528,7 @@ namespace Orbiters.Toolkit.Editor.VRChat
         /// instead; local pointer 255 clears every word. The bytes (from the values through 1D trees: direct weights can't be
         /// negative) and the blocks are one update late together, the synced bytes <see cref="ValueLag"/> updates later
         /// still (read from the text's late values: values VRChat applied before their pointer never reach the block before).
-        /// The owner's local blocks need no lag: Orbiters desktop never changes their pointer and values in one step.
+        /// The owner's local blocks need no lag: Orbiters - N4N0 never changes their pointer and values in one step.
         /// </summary>
         private static void ScreenLayer(AnimatorController controller, int textSync, int thumbnailBytes)
         {

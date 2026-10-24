@@ -8,7 +8,7 @@ using UnityEditor;
 using UnityEngine;
 using Object = UnityEngine.Object;
 
-// Orb's screen thumbnails (Orbiters contracts, Docs/orb.md, Thumbnails): the decoder the installer generates for the
+// N4N0's screen thumbnails (Orbiters contracts, Docs/orb.md, Thumbnails): the decoder the installer generates for the
 // screen's shader, drawn on the GPU, gives what the contracts' Rust reference decodes from the same bytes
 // (OrbThumbnailVectors.json is the contracts' TestVectors~/orb_thumbnail.json; OrbThumbnail.json its Docs/orb-thumbnail.json).
 public class OrbThumbnailTests
@@ -43,7 +43,7 @@ public class OrbThumbnailTests
     }
 
     // The generated decoder in a shader of its own: the thumbnail at byte 0 of the memory, at _Point (x, y, layers).
-    private static Shader Probe(int thumbnailBytes) => ShaderUtil.CreateShaderAsset(@"Shader ""Hidden/Orbiters/Orb thumbnail probe""
+    private static Shader Probe(int thumbnailBytes) => ShaderUtil.CreateShaderAsset(@"Shader ""Hidden/Orbiters/N4N0 thumbnail probe""
 {
     SubShader
     {

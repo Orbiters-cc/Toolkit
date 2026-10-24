@@ -14,7 +14,7 @@ using VRC.SDKBase.Editor.BuildPipeline;
 using Object = UnityEngine.Object;
 using Control = VRC.SDK3.Avatars.ScriptableObjects.VRCExpressionsMenu.Control;
 
-// The avatar manifest Orbiters desktop reads (contracts Docs/avatar-manifest.md and its schema): file names, tags, and the
+// The avatar manifest Orbiters - N4N0 reads (contracts Docs/avatar-manifest.md and its schema): file names, tags, and the
 // menu and parameters as VRChat shows them.
 public class AvatarManifestTests
 {
@@ -82,9 +82,9 @@ public class AvatarManifestTests
     public void TheManifestListsTheMenuAsVRChatShowsIt()
     {
         var clothes = Menu(Item("<b>Hoodie</b>", Control.ControlType.Toggle, "VF12_Clothes/Hoodie"), Item("Nude", Control.ControlType.Toggle, "VF13_Nude"));
-        var orb = Menu(Item("Show Orb", Control.ControlType.Toggle, OrbInstaller.Visible), Item("Talk", Control.ControlType.Button, OrbInstaller.Talk));
+        var orb = Menu(Item("Show N4N0", Control.ControlType.Toggle, OrbInstaller.Visible), Item("Talk", Control.ControlType.Button, OrbInstaller.Talk));
         var main = Menu(Folder("Clothes", clothes), Item("Hair colour", Control.ControlType.RadialPuppet, "", "Hair/Hue"),
-            Item("Move", Control.ControlType.TwoAxisPuppet, "Move/Open", "Move/X", "Move/Y"), Folder("Orb", orb), Folder("Clothes again", clothes));
+            Item("Move", Control.ControlType.TwoAxisPuppet, "Move/Open", "Move/X", "Move/Y"), Folder("N4N0", orb), Folder("Clothes again", clothes));
         // A loop back to the main menu.
         clothes.controls.Add(Folder("Back", main));
         var parameters = new List<VRCExpressionParameters.Parameter>
@@ -114,7 +114,7 @@ public class AvatarManifestTests
         Assert.AreEqual(.25, (double)json["parameters"].First(p => (string)p["name"] == "Hair/Hue")["default"], 1e-6);
 
         var controls = json["controls"].ToDictionary(c => string.Join("/", c["path"].Select(l => (string)l)));
-        CollectionAssert.AreEqual(new[] { "Clothes", "Clothes/Hoodie", "Clothes/Nude", "Hair colour", "Move", "Orb", "Orb/Show Orb", "Orb/Talk" }, controls.Keys,
+        CollectionAssert.AreEqual(new[] { "Clothes", "Clothes/Hoodie", "Clothes/Nude", "Hair colour", "Move", "N4N0", "N4N0/Show N4N0", "N4N0/Talk" }, controls.Keys,
             "Parents before their contents, each submenu once, rich text gone");
         var toggle = controls["Clothes/Hoodie"];
         Assert.AreEqual(("toggle", "VF12_Clothes/Hoodie", 1.0), ((string)toggle["type"], (string)toggle["parameter"], (double)toggle["value"]));
@@ -128,9 +128,9 @@ public class AvatarManifestTests
         Assert.AreEqual(("two_axis", "Move/Open"), ((string)puppet["type"], (string)puppet["parameter"]));
         CollectionAssert.AreEqual(new[] { "Move/X", "Move/Y" }, puppet["sub_parameters"].Select(t => (string)t));
         CollectionAssert.AreEqual(new[] { "Up", "Right", "Down", "Left" }, puppet["labels"].Select(t => (string)t));
-        CollectionAssert.AreEqual(new[] { "orb" }, controls["Orb"]["tags"].Select(t => (string)t), "A folder of Orb's controls");
-        Assert.AreEqual("button", (string)controls["Orb/Talk"]["type"]);
-        CollectionAssert.Contains(controls["Orb/Talk"]["tags"].Select(t => (string)t).ToList(), "orb");
+        CollectionAssert.AreEqual(new[] { "orb" }, controls["N4N0"]["tags"].Select(t => (string)t), "A folder of N4N0's controls");
+        Assert.AreEqual("button", (string)controls["N4N0/Talk"]["type"]);
+        CollectionAssert.Contains(controls["N4N0/Talk"]["tags"].Select(t => (string)t).ToList(), "orb");
 
         // Written in one step under its id's file name; a newer build replaces it.
         string path = AvatarManifestExporter.Write(manifest, "local:sdk_Rexouium");

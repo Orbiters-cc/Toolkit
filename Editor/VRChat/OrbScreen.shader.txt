@@ -1,17 +1,17 @@
-// Orb's projected screen (Orbiters contracts, Docs/orb.md, Screen): Orb's menu in front of its owner, the same pages
-// Orbiters desktop's SteamVR overlay shows. A page's unchanging part is a picture (_Pages, one slice per page, drawn by
+// N4N0's projected screen (Orbiters contracts, Docs/orb.md, Screen): N4N0's menu in front of its owner, the same pages
+// Orbiters - N4N0's SteamVR overlay shows. A page's unchanging part is a picture (_Pages, one slice per page, drawn by
 // the desktop from the menu's layout); what changes is drawn over it from the screen's memory: 744 bytes (1024 with
 // 128-byte thumbnails) the animator keeps two to a material property (_W0 on, each b0 + 256 × b1), read here as one
 // array. _Layout says, row by row for each page, where its text slots, thumbnails and buttons are (4-pixel units).
 // Thumbnails are colour pictures that sharpen layer by layer as they arrive (Docs/orb.md, Thumbnails): their decoder is
-// generated from the design table (OrbThumbnail.json) for the orb's thumbnail size.
+// generated from the design table (OrbThumbnail.json) for N4N0's thumbnail size.
 // Pages are 1024 × 576 pixels. Seen from behind (by the people around, or in a mirror) it shows the back, slice 0 of
-// the pages ("Orb menu, look at the other side"): the menu is its owner's, on the side they face. With _Retro (the retro
-// look, Docs/orb.md) the pages are the retro ones and what changes is drawn as Orbiters desktop's retro overlay draws it:
+// the pages ("N4N0 menu, look at the other side"): the menu is its owner's, on the side they face. With _Retro (the retro
+// look, Docs/orb.md) the pages are the retro ones and what changes is drawn as Orbiters - N4N0's retro overlay draws it:
 // cut corners, hover outlines, pressed elements inverted, chosen ones in brackets, pictures as green dots, scanlines.
 // Viewers who hide custom shaders see nothing of it (VRCFallback). OrbInstaller writes this file, the word properties and the decoder
-// filled in, as "Orb screen.shader" (or "Orb screen 128 B.shader").
-Shader "Orbiters/Orb Screen"
+// filled in, as "N4N0 screen.shader" (or "N4N0 screen 128 B.shader").
+Shader "Orbiters/N4N0 Screen"
 {
     Properties
     {
@@ -162,7 +162,7 @@ Shader "Orbiters/Orb Screen"
                 return min((int)floor(level + threshold), 3);
             }
 
-            // The back, slice 0 of the pages (Orb over "Orb menu" and "look at the other side"), the right way round from
+            // The back, slice 0 of the pages (N4N0 over "N4N0 menu" and "look at the other side"), the right way round from
             // behind.
             fixed4 Back(float2 uv)
             {
@@ -345,7 +345,7 @@ Shader "Orbiters/Orb Screen"
                     colour = lerp(colour, shade, inside);
                 }
 
-                // Orb listening (Home, four or six tiles): its microphone breathes.
+                // N4N0 listening (Home, four or six tiles): its microphone breathes.
                 if ((page == 1 || page == 10) && (Byte(1) & 1))
                 {
                     float pulse = .5 + .5 * sin(_Time.y * 4);

@@ -11,8 +11,8 @@ namespace Orbiters.Toolkit.Editor
 {
     /// <summary>
     /// What an issue report goes through before it leaves the computer (<see cref="Redact"/>), masking before cutting (a
-    /// secret cut in half no longer matches). The rules are those of Orbiters Logger's anonymized project reports
-    /// (Logger's ReportPrivacy: the Logger keeps its own copy, it depends on no package and the Toolkit not on it):
+    /// secret cut in half no longer matches). The rules are those of Mixer console's anonymized project reports
+    /// (Mixer console's ReportPrivacy: the Mixer console keeps its own copy, it depends on no package and the Toolkit not on it):
     /// tokens (Orbiters' own whoever's they are, Git hosts', API keys), sign-in headers, cookies, VRChat auth cookies,
     /// passwords and keys in addresses, settings, JSON and command lines, Discord webhooks, JSON web tokens, private and
     /// store license keys, e-mails (%40 too), VRChat ids, machine ids and serials, the user and computer names, and the

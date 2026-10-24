@@ -1,11 +1,11 @@
-// Orb, the Orbiters companion: a glowing orb with simple eyes, and its halo. The eyes are drawn on the side of the orb that
+// N4N0, the Orbiters companion: a glowing orb with simple eyes, and its halo. The eyes are drawn on the side of N4N0 that
 // faces whoever looks at it (seen from between their eyes, so both eyes of a headset agree), upright with the world:
-// everyone, its owner too, sees Orb look at them. Their shape is a few numbers the animator sets for each state (open,
+// everyone, its owner too, sees N4N0 look at them. Their shape is a few numbers the animator sets for each state (open,
 // wide, bent into arcs, lidded, tilted), so going from one state to the next morphs them. Blinking, breathing and the slow
-// bob run here. The halo material only adds light: a soft glow and, while Orb thinks, a dashed ring turning around it.
+// bob run here. The halo material only adds light: a soft glow and, while N4N0 thinks, a dashed ring turning around it.
 // Viewers who hide custom shaders see the core as a plain green ball and no halo (VRCFallback).
-// OrbInstaller copies this file into each orb's folder as "Orb.shader".
-Shader "Orbiters/Orb"
+// OrbInstaller copies this file into each N4N0's folder as "N4N0.shader".
+Shader "Orbiters/N4N0"
 {
     Properties
     {
@@ -66,7 +66,7 @@ Shader "Orbiters/Orb"
                 #endif
             }
 
-            // The orb's radius in metres (the core mesh is a unit sphere).
+            // N4N0's radius in metres (the core mesh is a unit sphere).
             float Radius() { return length(unity_ObjectToWorld._m00_m10_m20); }
 
             // A slow bob, slower and lower while asleep, and the breath that goes with it (0 to 1).
@@ -156,7 +156,7 @@ Shader "Orbiters/Orb"
                     float3 light = colour * pow(saturate((1.7 - d) / .7), 2.2) * smoothstep(.92, 1.06, d) * .7 * glow;
                     if (_Ring > .001)
                     {
-                        // The ring is a band in a tilted plane through the orb's middle, slowly precessing; its dashes chase
+                        // The ring is a band in a tilted plane through N4N0's middle, slowly precessing; its dashes chase
                         // around it. The view ray hits that plane once; the core hides the part behind it.
                         float precess = _Time.y * .7;
                         float3 axis = normalize(float3(sin(.42) * cos(precess), cos(.42), sin(.42) * sin(precess)));

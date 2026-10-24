@@ -42,7 +42,7 @@ namespace Orbiters.Toolkit.Editor.VRChat.Attachments
             if (options != null && !OptionSources.Contains(options)) OptionSources.Add(options);
         }
 
-        /// <summary>The settings the props below <paramref name="placed"/> offer (Orb's text slots), for the tools' cards.</summary>
+        /// <summary>The settings the props below <paramref name="placed"/> offer (N4N0's text slots), for the tools' cards.</summary>
         public static List<AttachmentOption> Options(GameObject placed) =>
             placed == null ? new List<AttachmentOption>() : OptionSources.SelectMany(source => source(placed) ?? Enumerable.Empty<AttachmentOption>()).ToList();
 

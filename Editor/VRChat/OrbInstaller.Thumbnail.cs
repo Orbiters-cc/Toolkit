@@ -10,8 +10,8 @@ using UnityEngine;
 namespace Orbiters.Toolkit.Editor.VRChat
 {
     /// <summary>
-    /// The thumbnails on Orb's projected screen (Orbiters contracts, Docs/orb.md, Thumbnails): 64 × 36 colour pictures as a
-    /// sum of cosines, kept in 72 or 128 bytes (the orb card's "Thumbnail size"), in layers that sharpen them as they
+    /// The thumbnails on N4N0's projected screen (Orbiters contracts, Docs/orb.md, Thumbnails): 64 × 36 colour pictures as a
+    /// sum of cosines, kept in 72 or 128 bytes (the N4N0 card's "Thumbnail size"), in layers that sharpen them as they
     /// arrive. Which fields, with how many bits and which weight, is the contracts' design table, of which
     /// <c>OrbThumbnail.json</c> is a copy; the screen's shader gets its decoder from it, as straight-line code (a loop
     /// over a table cost about twenty times as much).
@@ -19,11 +19,11 @@ namespace Orbiters.Toolkit.Editor.VRChat
     public static partial class OrbInstaller
     {
         /// <summary>
-        /// Local, never changed by a menu: the bytes of each thumbnail the screen keeps (its default value is the orb card's
-        /// choice). Orbiters desktop reads it to write the screen's memory, which is <see cref="ScreenBytes"/> long.
+        /// Local, never changed by a menu: the bytes of each thumbnail the screen keeps (its default value is the N4N0 card's
+        /// choice). Orbiters - N4N0 reads it to write the screen's memory, which is <see cref="ScreenBytes"/> long.
         /// </summary>
-        public const string ScreenThumbnailBytes = "Orb/Screen/ThumbnailBytes";
-        /// <summary>The thumbnail sizes an orb's card offers: 72 bytes (three layers) or 128 (four; 8 text slots or more).</summary>
+        public const string ScreenThumbnailBytes = "N4N0/Screen/ThumbnailBytes";
+        /// <summary>The thumbnail sizes N4N0's card offers: 72 bytes (three layers) or 128 (four; 8 text slots or more).</summary>
         public static readonly IReadOnlyList<int> OfferedThumbnailBytes = new[] { 72, 128 };
         public const int DefaultThumbnailBytes = 72;
         /// <summary>Where each layer ends, in bytes from a thumbnail's first.</summary>

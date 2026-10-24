@@ -12,23 +12,23 @@ namespace Orbiters.Toolkit.Editor.VRChat
 {
     public static partial class OrbInstaller
     {
-        /// <summary>The optional Walk boost radial's parameter (local, saved): Orbiters desktop's walk boost, 0 off to 1 strongest.</summary>
-        public const string WalkBoost = "Orb/WalkBoost";
-        /// <summary>The menu's 3D picture button (local): Orbiters desktop takes a 3D picture with VRChat's camera.</summary>
-        public const string Photo3D = "Orb/Photo3D";
+        /// <summary>The optional Walk boost radial's parameter (local, saved): Orbiters - N4N0's walk boost, 0 off to 1 strongest.</summary>
+        public const string WalkBoost = "N4N0/WalkBoost";
+        /// <summary>The menu's 3D picture button (local): Orbiters - N4N0 takes a 3D picture with VRChat's camera.</summary>
+        public const string Photo3D = "N4N0/Photo3D";
         /// <summary>
-        /// The menu's Menu toggle (local): Orb's menu open (the projected screen when the orb has one, else Orbiters
-        /// desktop's SteamVR overlay); the desktop turns it off when the menu closes on its own. The one direct trigger.
+        /// The menu's Menu toggle (local): N4N0's menu open (the projected screen when N4N0 has one, else Orbiters -
+        /// N4N0's SteamVR overlay); the desktop turns it off when the menu closes on its own. The one direct trigger.
         /// </summary>
-        public const string Menu = "Orb/Menu";
-        /// <summary>Orb › Call (local): the contacts on the panel, the chosen one, call or answer, decline or hang up.</summary>
-        public const string CallMenu = "Orb/Call/Menu", CallPick = "Orb/Call/Pick", CallGo = "Orb/Call/Go", CallEnd = "Orb/Call/End";
-        /// <summary>The text slots a person picks between on an orb's card: 4 costs 50 synced bits, 8 fills the panel twice as fast for 82.</summary>
+        public const string Menu = "N4N0/Menu";
+        /// <summary>N4N0 › Call (local): the contacts on the panel, the chosen one, call or answer, decline or hang up.</summary>
+        public const string CallMenu = "N4N0/Call/Menu", CallPick = "N4N0/Call/Pick", CallGo = "N4N0/Call/Go", CallEnd = "N4N0/Call/End";
+        /// <summary>The text slots a person picks between on N4N0's card: 4 costs 50 synced bits, 8 fills the panel twice as fast for 82.</summary>
         public static readonly IReadOnlyList<int> OfferedTextSync = new[] { 4, 8 };
-        // The controller, parameters and menu of each choice of options, shared by every orb switched to it (they name no
-        // object of their own: their curves follow paths below the orb).
+        // The controller, parameters and menu of each choice of options, shared by every N4N0 switched to it (they name no
+        // object of their own: their curves follow paths below N4N0).
         // A new menu or parameters get a new folder: orbs switched earlier keep the files they use.
-        internal const string OptionsFolder = "Assets/Orbiters/Orb/Menu 10/";
+        internal const string OptionsFolder = "Assets/Orbiters/N4N0/Menu 10/";
 
         [InitializeOnLoadMethod]
         private static void RegisterOrbOptions() => AttachmentHooks.RegisterOptions(root => FindAll(root).SelectMany(orb =>
@@ -40,7 +40,7 @@ namespace Orbiters.Toolkit.Editor.VRChat
                 new AttachmentOption
                 {
                     Label = "Text slots",
-                    Tooltip = "How many characters of Orb's panel are sent at once. More fill the panel sooner and cost more of the avatar's synced parameter bits.",
+                    Tooltip = "How many characters of N4N0's panel are sent at once. More fill the panel sooner and cost more of the avatar's synced parameter bits.",
                     Choices = OfferedTextSync.Select(n => n.ToString()).ToList(),
                     ChoiceTooltips = OfferedTextSync.Select(n => $"{n} slots: {Bits(n)} synced bits, a full panel in about {SecondsPerPanel(n)} s").ToList(),
                     Current = OfferedTextSync.ToList().IndexOf(current.textSync),
@@ -55,29 +55,29 @@ namespace Orbiters.Toolkit.Editor.VRChat
                 new AttachmentOption
                 {
                     Label = "Add walk boost in menu",
-                    Tooltip = "A Walk boost radial in Orb's menu: how much faster Orbiters desktop makes you walk in VR. No synced bits.",
+                    Tooltip = "A Walk boost radial in N4N0's menu: how much faster Orbiters - N4N0 makes you walk in VR. No synced bits.",
                     IsToggle = true,
                     Choices = new[] { "Off", "On" },
-                    ChoiceTooltips = new[] { "No radial", "Orb › Walk boost in your menu sets Orbiters desktop's walk boost" },
+                    ChoiceTooltips = new[] { "No radial", "N4N0 › Walk boost in your menu sets Orbiters - N4N0's walk boost" },
                     Current = current.walkBoost ? 1 : 0,
                     Choose = index => { var now = OptionsOf(target); SetOptions(target, now.textSync, index == 1, now.replace, now.thumbnailBytes, now.light); },
                 },
                 new AttachmentOption
                 {
                     Label = "Replace Orbiters overlay",
-                    Tooltip = "Orb's menu (fast walk, YouTube, calls, a 3D picture) opens on a screen in front of you in VRChat, touched with your index finger, " +
+                    Tooltip = "N4N0's menu (fast walk, YouTube, calls, a 3D picture) opens on a screen in front of you in VRChat, touched with your index finger, " +
                               "where people around see it too. In desktop mode it always does: look at a button (a small dot shows where) and left-click. " +
-                              "In VR it opens in Orbiters desktop's SteamVR overlay unless this is on. No synced bits; its contacts are local and don't count in VRChat's performance rank.",
+                              "In VR it opens in Orbiters - N4N0's SteamVR overlay unless this is on. No synced bits; its contacts are local and don't count in VRChat's performance rank.",
                     IsToggle = true,
                     Choices = new[] { "Off", "On" },
-                    ChoiceTooltips = new[] { "In VR, Orb's menu opens in Orbiters desktop's SteamVR overlay", "In VR too, Orb's menu opens on a screen in front of you in VRChat" },
+                    ChoiceTooltips = new[] { "In VR, N4N0's menu opens in Orbiters - N4N0's SteamVR overlay", "In VR too, N4N0's menu opens on a screen in front of you in VRChat" },
                     Current = current.replace ? 1 : 0,
                     Choose = index => { var now = OptionsOf(target); SetOptions(target, now.textSync, now.walkBoost, index == 1, now.thumbnailBytes, now.light); },
                 },
                 new AttachmentOption
                 {
                     Label = "Thumbnail size",
-                    Tooltip = "How many bytes each YouTube thumbnail on Orb's screen takes. Both sizes show in colour, blurred at first and " +
+                    Tooltip = "How many bytes each YouTube thumbnail on N4N0's screen takes. Both sizes show in colour, blurred at first and " +
                               "sharper as the rest arrives. 128 B end sharper but take longer to send, and need 8 text slots. No synced bits either way.",
                     Choices = OfferedThumbnailBytes.Select(n => n + " B").ToList(),
                     ChoiceTooltips = OfferedThumbnailBytes.Select(n => $"{n} bytes a thumbnail: five of them sent in {Seconds(n, ScreenLocalValues, .084f)} s for you, " +
@@ -94,8 +94,8 @@ namespace Orbiters.Toolkit.Editor.VRChat
                 new AttachmentOption
                 {
                     Label = "Look",
-                    Tooltip = "How Orb's screen looks in VRChat: Orbiters' own, or a green phosphor terminal on which text arriving a block " +
-                              "at a time reads as typed out. Orbiters desktop's overlay has its own Look. No synced bits.",
+                    Tooltip = "How N4N0's screen looks in VRChat: Orbiters' own, or a green phosphor terminal on which text arriving a block " +
+                              "at a time reads as typed out. Orbiters - N4N0's overlay has its own Look. No synced bits.",
                     Choices = new[] { "Modern", "Retro" },
                     ChoiceTooltips = new[] { "Orbiters' own look", "A green phosphor terminal, as on an old computer" },
                     ChoicePictures = LookPictures(),
@@ -105,19 +105,19 @@ namespace Orbiters.Toolkit.Editor.VRChat
                 new AttachmentOption
                 {
                     Label = "Light",
-                    Tooltip = "Orb can become a light, for a dark world or a photo: on or off, eight colours and a brightness, from Orb's menu " +
-                              "or Orb › Light in your menu. Everyone around sees it. Costs 17 synced bits, and any light makes the avatar's PC " +
+                    Tooltip = "N4N0 can become a light, for a dark world or a photo: on or off, eight colours and a brightness, from N4N0's menu " +
+                              "or N4N0 › Light in your menu. Everyone around sees it. Costs 17 synced bits, and any light makes the avatar's PC " +
                               "performance rank Poor (Quest leaves it out).",
                     IsToggle = true,
                     Choices = new[] { "Off", "On" },
-                    ChoiceTooltips = new[] { "No light", "Orb › Light in your menu, and Light in Orb's menu" },
+                    ChoiceTooltips = new[] { "No light", "N4N0 › Light in your menu, and Light in N4N0's menu" },
                     Current = current.light ? 1 : 0,
                     Choose = index => { var now = OptionsOf(target); SetOptions(target, now.textSync, now.walkBoost, now.replace, now.thumbnailBytes, index == 1); },
                 },
             };
         }).ToList());
 
-        /// <summary>The synced bits an orb with <paramref name="textSync"/> text slots costs.</summary>
+        /// <summary>The synced bits N4N0 with <paramref name="textSync"/> text slots costs.</summary>
         public static int Bits(int textSync) => 1 + 8 + 1 + 8 + 8 * textSync;
 
         // A full page is Cells / N blocks, one per 300 ms step (Docs/orb.md).
@@ -131,8 +131,8 @@ namespace Orbiters.Toolkit.Editor.VRChat
 
         /// <summary>
         /// A placed orb's text slots (0 when its VRCFury Full Controller can't be read), whether it has the Walk boost radial,
-        /// whether its projected screen replaces Orbiters desktop's overlay in VR (<see cref="ScreenReplace"/>), the
-        /// bytes of each thumbnail its screen keeps (<see cref="ScreenThumbnailBytes"/>; 72 for an orb made before it) and
+        /// whether its projected screen replaces Orbiters - N4N0's overlay in VR (<see cref="ScreenReplace"/>), the
+        /// bytes of each thumbnail its screen keeps (<see cref="ScreenThumbnailBytes"/>; 72 for N4N0 made before it) and
         /// whether it has the light (<see cref="Light"/>).
         /// </summary>
         public static (int textSync, bool walkBoost, bool replace, int thumbnailBytes, bool light) OptionsOf(Transform orb)
@@ -154,28 +154,28 @@ namespace Orbiters.Toolkit.Editor.VRChat
 
         /// <summary>
         /// Switches a placed orb to <paramref name="textSync"/> text slots (4, 8 or 16), with or without the Walk boost
-        /// radial, its projected screen replacing Orbiters desktop's overlay in VR or not, keeping thumbnails of
+        /// radial, its projected screen replacing Orbiters - N4N0's overlay in VR or not, keeping thumbnails of
         /// <paramref name="thumbnailBytes"/> (72 or 128; 128 needs 8 text slots or more), with or without the light
         /// (<paramref name="light"/>): its VRCFury Full Controller takes the controller, parameters and menu made for that
-        /// choice and its global parameters follow (an orb made without a screen gets one), its screen the current material
+        /// choice and its global parameters follow (N4N0 made without a screen gets one), its screen the current material
         /// for that thumbnail size (an older screen's pages go too), and the light object comes or goes. Recorded with Undo;
-        /// the orb's own files (a gallery's among them) are left as they are.
+        /// N4N0's own files (a gallery's among them) are left as they are.
         /// <para>
-        /// VRCFury reverts every override of its components in a prefab instance when an upload starts, so on an orb placed
-        /// from a prefab the Full Controller is first replaced by a copy of the orb's own (the prefab's removed, which VRCFury
+        /// VRCFury reverts every override of its components in a prefab instance when an upload starts, so on N4N0 placed
+        /// from a prefab the Full Controller is first replaced by a copy of N4N0's own (the prefab's removed, which VRCFury
         /// keeps): the options would come back off after each upload otherwise.
         /// </para>
         /// </summary>
         public static void SetOptions(Transform orb, int textSync, bool walkBoost, bool replace = false, int thumbnailBytes = DefaultThumbnailBytes, bool light = false)
         {
-            if (!TextSyncCounts.Contains(textSync)) throw new ArgumentOutOfRangeException(nameof(textSync), "An orb has 4, 8 or 16 text sync values.");
-            if (!OfferedThumbnailBytes.Contains(thumbnailBytes)) throw new ArgumentOutOfRangeException(nameof(thumbnailBytes), "An orb's thumbnails are 72 or 128 bytes.");
+            if (!TextSyncCounts.Contains(textSync)) throw new ArgumentOutOfRangeException(nameof(textSync), "N4N0 has 4, 8 or 16 text sync values.");
+            if (!OfferedThumbnailBytes.Contains(thumbnailBytes)) throw new ArgumentOutOfRangeException(nameof(thumbnailBytes), "N4N0's thumbnails are 72 or 128 bytes.");
             if (!ScreenFits(textSync, thumbnailBytes)) throw new ArgumentException(thumbnailBytes + "-byte thumbnails need 8 text slots or more.", nameof(thumbnailBytes));
-            var found = FullController(orb, out var component) ?? throw new InvalidOperationException("This orb has no VRCFury Full Controller: add it again.");
+            var found = FullController(orb, out var component) ?? throw new InvalidOperationException("This N4N0 has no VRCFury Full Controller: add it again.");
             if (OptionsOf(orb) == (textSync, walkBoost, replace, thumbnailBytes, light) && HasScreen(orb) && ScreenDraws(orb, thumbnailBytes) && HasLight(orb) == light &&
                 HasPointing(orb))
                 return;
-            if (found.menuIndex < 0) throw new InvalidOperationException("This orb's menu was changed: add it again.");
+            if (found.menuIndex < 0) throw new InvalidOperationException("This N4N0's menu was changed: add it again.");
             AddScreen(orb, ScreenFolder, thumbnailBytes);
             SetScreenThumbnails(orb, thumbnailBytes);
             // A screen from before version 4 points with rays from now on, held to the avatar's fingertips.
@@ -199,11 +199,11 @@ namespace Orbiters.Toolkit.Editor.VRChat
             globals.arraySize = names.Count;
             for (int i = 0; i < names.Count; i++) globals.GetArrayElementAtIndex(i).stringValue = names[i];
             serialized.ApplyModifiedProperties();
-            Undo.SetCurrentGroupName("Orb options");
+            Undo.SetCurrentGroupName("N4N0 options");
             PrefabUtility.RecordPrefabInstancePropertyModifications(component);
         }
 
-        // Whether the orb's screen draws this version's pages with thumbnails of this size.
+        // Whether N4N0's screen draws this version's pages with thumbnails of this size.
         private static bool ScreenDraws(Transform orb, int thumbnailBytes)
         {
             var screen = orb.Find(ScreenObject);
@@ -227,8 +227,8 @@ namespace Orbiters.Toolkit.Editor.VRChat
             public int controllerIndex, parametersIndex, menuIndex = -1;
         }
 
-        // The orb's Full Controller: the VRCFury component on it whose parameters hold Orb's text pointer, with its menu
-        // (the one opening Orb's submenu).
+        // N4N0's Full Controller: the VRCFury component on it whose parameters hold N4N0's text pointer, with its menu
+        // (the one opening N4N0's submenu).
         private static Found FullController(Transform orb, out Component component)
         {
             component = null;
@@ -276,18 +276,18 @@ namespace Orbiters.Toolkit.Editor.VRChat
         {
             string folder = OptionsFolder + "Text slots " + textSync + (walkBoost ? " + walk boost" : "") + (replace ? " + screen in VR" : "") +
                             (thumbnailBytes != DefaultThumbnailBytes ? " + " + thumbnailBytes + " B thumbnails" : "") + (light ? " + light" : "");
-            var controller = AssetDatabase.LoadAssetAtPath<AnimatorController>(folder + "/Orb.controller");
+            var controller = AssetDatabase.LoadAssetAtPath<AnimatorController>(folder + "/N4N0.controller");
             var parameters = AssetDatabase.LoadAssetAtPath<VRCExpressionParameters>(folder + "/Parameters.asset");
             var menu = AssetDatabase.LoadAssetAtPath<VRCExpressionsMenu>(folder + "/Menu.asset");
             if (controller != null && parameters != null && menu != null) return (controller, parameters, menu);
-            if (VrcFury.Writer == null) throw new InvalidOperationException("Install VRCFury in Creator Companion to change Orb's options.");
+            if (VrcFury.Writer == null) throw new InvalidOperationException("Install VRCFury in Creator Companion to change N4N0's options.");
             if (AssetDatabase.IsValidFolder(folder)) AssetDatabase.DeleteAsset(folder);
             System.IO.Directory.CreateDirectory(folder); AssetDatabase.ImportAsset(folder);
-            var root = new GameObject("Orb options");
+            var root = new GameObject("N4N0 options");
             try { BuildController(root, folder, textSync, walkBoost, replace, thumbnailBytes, light); }
             finally { Object.DestroyImmediate(root); }
             AssetDatabase.SaveAssets();
-            return (AssetDatabase.LoadAssetAtPath<AnimatorController>(folder + "/Orb.controller"), AssetDatabase.LoadAssetAtPath<VRCExpressionParameters>(folder + "/Parameters.asset"),
+            return (AssetDatabase.LoadAssetAtPath<AnimatorController>(folder + "/N4N0.controller"), AssetDatabase.LoadAssetAtPath<VRCExpressionParameters>(folder + "/Parameters.asset"),
                 AssetDatabase.LoadAssetAtPath<VRCExpressionsMenu>(folder + "/Menu.asset"));
         }
     }

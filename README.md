@@ -521,7 +521,7 @@ The package also depends on Unity's Newtonsoft JSON package.
 (meshes placed in the file root's space with Unity's axes and scale, blendshape signatures, bones, material names; with
 `FbxReadOptions.Render` UV-split vertices and one submesh per material slot, with `FbxReadOptions.ShapeOffsets` each
 blendshape's offsets). `MeshComparison` measures how far each vertex moved, index by index or to the other version's
-surface when the topology changed, and describes parts as moved, reshaped, re-materialed, added or removed. Unit Git's 3D
+surface when the topology changed, and describes parts as moved, reshaped, re-materialed, added or removed. Mixer Git's 3D
 view and MCB's version differences use it.
 
 ## Feature flags and optional packages
@@ -722,81 +722,87 @@ one bone. It is a preview: accessories go back where they were when it is switch
 script reload and on entering Play Mode. Bones driven by constraints are left to them; accessories Modular Avatar
 attaches are shown by name match.
 
-## Orb
+## N4N0
 
-`OrbInstaller.CreatePrefab(folder, textSync = 8)` builds Orb, the Orbiters companion, into a folder below Assets/ (the
-gallery packages each version in a folder of its own): the prefab, its controller, menu (**Orb** › Show Orb, Talk) and
+`OrbInstaller.CreatePrefab(folder, textSync = 8)` builds N4N0, the Orbiters companion, into a folder below Assets/ (the
+gallery packages each version in a folder of its own): the prefab, its controller, menu (**N4N0** › Show N4N0, Talk) and
 parameters, its two shaders and its glyph atlas (copied from the Toolkit's `Orb.shader.txt`, `OrbText.shader.txt` and
 `OrbText.png.bytes`, so the package refers to no Toolkit file), meshes and materials. VRCFury merges it (a Full
 Controller whose parameters are global); `Bind`, run by `AttachmentHooks` when it is attached, ties it to the avatar's
 head bone, turns it with the avatar and sizes it by the avatar's eye height.
 
-What Orbiters desktop sends is the contract in Orbiters contracts' Docs/orb.md: `Orb/Visible` (saved, on by default),
-`Orb/State` (`OrbState`: idle, listening, thinking, talking, sleeping, happy, annoyed, surprised), `Orb/Text/Visible`,
-`Orb/Text/Pointer` and `Orb/Text/Sync0`… (a block of 4, 8 or 16 of the panel's 128 cells per pointer; 255 clears), and
-it reads `Orb/Talk` (the menu's button) and `Orb/Touch` (the owner's hands, local). Synced bits: 1 + 8 + 1 + 8 + 8 per
+N4N0 was called Orb. Its code keeps that name (`OrbInstaller`, `OrbState`, the `Orb*` template files, `IsOrb`, the
+avatar manifest's `orb` keys and tag); everything it puts in a project or on an avatar says N4N0: the prefab and its
+object, files and folders (`Assets/Orbiters/N4N0/…`), shaders (`Orbiters/N4N0`, `Orbiters/N4N0 Text`, `Orbiters/N4N0
+Screen (…)`), menu and parameters (`N4N0/…`) and contact tags (`N4N0PointerL`/`R`, `N4N0Eye`, `N4N0Gaze`). The sphere
+on the tether's tip is `Ball`.
+
+What Orbiters - N4N0 sends is the contract in Orbiters contracts' Docs/orb.md: `N4N0/Visible` (saved, on by default),
+`N4N0/State` (`OrbState`: idle, listening, thinking, talking, sleeping, happy, annoyed, surprised), `N4N0/Text/Visible`,
+`N4N0/Text/Pointer` and `N4N0/Text/Sync0`… (a block of 4, 8 or 16 of the panel's 128 cells per pointer; 255 clears), and
+it reads `N4N0/Talk` (the menu's button) and `N4N0/Touch` (the owner's hands, local). Synced bits: 1 + 8 + 1 + 8 + 8 per
 sync value.
 
 - `Shown/Head` follows the head bone (position constraint) turned like the avatar (rotation constraint on the avatar
-  root): the orb and its panel stay where its owner can look at them however the head turns or leans.
+  root): N4N0 and its panel stay where its owner can look at them however the head turns or leans.
 - `Shown/Head/Tether`: a two-link PhysBone (pull 0.15, momentum 0.8, no gravity, 20 % immobile) whose tip carries the
-  orb (`…/Orb`, left out of the chain): it lags, overshoots and settles; anyone can grab it and let it spring back. The
-  orb rests beside the head, 26 cm to the right of the eyes and 12 cm before them. `Orb/Hop` jumps when surprised;
-  `Orb/Hop/Body` draws the core and its halo (two materials of `Orbiters/Orb`: face, blinks and bob on the GPU; a ring
-  while thinking); `Orb/Touch` is the contact.
-- `Shown/Head/Panel`: one skinned mesh for the plate and the beam (`Orbiters/Orb Text`), its pivot the plate's corner
+  ball (`…/Ball`, left out of the chain): it lags, overshoots and settles; anyone can grab it and let it spring back.
+  N4N0 rests beside the head, 26 cm to the right of the eyes and 12 cm before them. `Ball/Hop` jumps when surprised;
+  `Ball/Hop/Body` draws the core and its halo (two materials of `Orbiters/N4N0`: face, blinks and bob on the GPU; a
+  ring while thinking); `Ball/Touch` is the contact.
+- `Shown/Head/Panel`: one skinned mesh for the plate and the beam (`Orbiters/N4N0 Text`), its pivot the plate's corner
   nearest the face, 6 cm right, 18 cm below and 50 cm before the eyes, facing ahead. The shader shrinks the plate to the
   text, flips it for readers behind it and in mirrors, and grows it (up to 1.6 times, from 3 m) for viewers further than
   arm's length, away from the face.
-- Layers: Base (Orb/Visible), State (each state sets everything it shows; any other value is idle), Text visible, Text
+- Layers: Base (N4N0/Visible), State (each state sets everything it shows; any other value is idle), Text visible, Text
   block (the pointer as a float) and Text: one direct blend tree (Write Defaults on, which VRCFury keeps) holding each
   cell in an animator parameter, so the cells stay whatever the avatar's Write Defaults.
-- **Light** (the orb card's option, `SetOptions(..., light: true)`): `…/Orb/Hop/Light`, a point light without shadows
-  reaching 5 m at 1.6 m eye height (`Bind` scales it), off until `Orb/Light` (synced) turns it on in the colour
-  `Orb/Light/Color` (synced, saved: White, Warm, Sunset, Pink, Violet, Blue, Cyan, Green) at `Orb/Light/Level` (synced,
-  saved, 0.6 by default: intensity 0.15 to 3); the orb takes the light's colour (no other layer animates `_Color`), and
+- **Light** (the N4N0 card's option, `SetOptions(..., light: true)`): `…/Ball/Hop/Light`, a point light without shadows
+  reaching 5 m at 1.6 m eye height (`Bind` scales it), off until `N4N0/Light` (synced) turns it on in the colour
+  `N4N0/Light/Color` (synced, saved: White, Warm, Sunset, Pink, Violet, Blue, Cyan, Green) at `N4N0/Light/Level` (synced,
+  saved, 0.6 by default: intensity 0.15 to 3); N4N0 takes the light's colour (no other layer animates `_Color`), and
   each of the Light layer's states sets everything it animates, off included, so any Write Defaults leave nothing
-  behind. **Orb › Light** in the menu: the toggle, a Brightness radial and the eight colours. 17 synced bits; any light
-  makes the avatar's PC performance rank Poor, and Quest leaves it out. Orbiters desktop sets it from Orb's menu too.
-- **Screen version 3** (`Orb/Screen/Version`, local, unsaved, 3 by default): the page pictures have 13 slices, for the
-  six-tile Home (page 10), Music (11) and Light (12); Orbiters desktop shows a screen without the parameter the four-tile
-  Home. Changing an orb's options swaps an older screen's material for the current files (`ScreenCurrent`: the shader
-  for its thumbnail size and pages with this version's slices). Shared files in `Orb/Screen 6`, options in `Orb/Menu 10`.
-- Seen from behind (by the people around, or in a mirror), Orb's screen shows its back: Orb over "Orb menu" and "look
-  at the other side", slice 0 of the pages, drawn by Orbiters desktop as its SteamVR overlay's back. Which side the
+  behind. **N4N0 › Light** in the menu: the toggle, a Brightness radial and the eight colours. 17 synced bits; any light
+  makes the avatar's PC performance rank Poor, and Quest leaves it out. Orbiters - N4N0 sets it from N4N0's menu too.
+- **Screen version 3** (`N4N0/Screen/Version`, local, unsaved, 3 by default): the page pictures have 13 slices, for the
+  six-tile Home (page 10), Music (11) and Light (12); Orbiters - N4N0 shows a screen without the parameter the four-tile
+  Home. Changing N4N0's options swaps an older screen's material for the current files (`ScreenCurrent`: the shader
+  for its thumbnail size and pages with this version's slices). Shared files in `N4N0/Screen 6`, options in `N4N0/Menu 10`.
+- Seen from behind (by the people around, or in a mirror), N4N0's screen shows its back: N4N0 over "N4N0 menu" and "look
+  at the other side", slice 0 of the pages, drawn by Orbiters - N4N0 as its SteamVR overlay's back. Which side the
   camera is on comes from its place, not from the face drawn (VRChat's mirrors turn that round). The shader carries its
-  files' revision (tag `OrbScreen`, 6): changing an orb's options swaps a screen of an older one for these. Elements
+  files' revision (tag `OrbScreen`, 6): changing N4N0's options swaps a screen of an older one for these. Elements
   the desktop greys out (memory bytes 21 to 23: fast walk while VRChat runs in desktop mode, "Only in VR") fade into
   the card.
-- A **Look** option on the orb's card (`SetLook`, `RetroOf`): Orbiters' own, or **Retro**, a cassette-futurism terminal
+- A **Look** option on N4N0's card (`SetLook`, `RetroOf`): Orbiters' own, or **Retro**, a cassette-futurism terminal
   (contracts' Docs/orb.md, Retro look): its own page pictures (`OrbScreenPagesRetro.png.bytes`, cut corners, bracketed
   icons, monospace capitals, a dot grid, a double frame), the phosphor palette, hover outlines, pressed elements
   inverted, chosen ones in brackets, scanlines, and thumbnails as 96 × 54 green dots in four dithered steps, read from
   the same bytes as Orbiters' own look. Text arriving a block at a time reads as typed out. It is the screen's material
-  alone ("Orb screen retro" beside each size's), kept through the other options: no parameter, no synced bit. The
+  alone ("N4N0 screen retro" beside each size's), kept through the other options: no parameter, no synced bit. The
   option shows a picture of each look (`AttachmentOption.ChoicePictures`, from `orbiters-desktop --orb-menu`), and
-  Orbiters desktop's overlay has the same look as a setting of its own.
+  Orbiters - N4N0's overlay has the same look as a setting of its own.
 - **Pointing** (screen version 4, contracts' Docs/orb.md, Pointing; `AddPointing`): a VRChat raycast (`VRCRaycast`,
-  "Hit Worlds And Players", 0.6 m scaled with the orb) from each index fingertip along the finger meets a thin solid box
-  on the screen's face, shown to its owner as a beam and a bead (the orb's own mesh and material); the bead's local
-  contact (tags `OrbPointerL`/`OrbPointerR`, radius 2 mm) on three touch points per hand tells Orbiters desktop exactly
-  where it is, and the fingertip within 2.1 cm along the ray presses (`Orb/Screen/Ray/L`, `R`: `_Hit`, `_Ratio`, local).
+  "Hit Worlds And Players", 0.6 m scaled with N4N0) from each index fingertip along the finger meets a thin solid box
+  on the screen's face, shown to its owner as a beam and a bead (N4N0's own mesh and material); the bead's local
+  contact (tags `N4N0PointerL`/`N4N0PointerR`, radius 2 mm) on three touch points per hand tells Orbiters - N4N0 exactly
+  where it is, and the fingertip within 2.1 cm along the ray presses (`N4N0/Screen/Ray/L`, `R`: `_Hit`, `_Ratio`, local).
   The pointers, the box and the raycasts exist only for the owner, in VR, while the screen is open (layers Pointing,
   Pointer L, Pointer R). `Bind` holds them to the index fingertips (the last finger bone's child, else as far past it as
-  that bone is long); an orb's options changing gives an older screen its pointers. Finger contacts no longer touch the
-  screen. Shared files in `Orb/Screen 6` (revision 6), options in `Orb/Menu 10`.
+  that bone is long); N4N0's options changing gives an older screen its pointers. Finger contacts no longer touch the
+  screen. Shared files in `N4N0/Screen 6` (revision 6), options in `N4N0/Menu 10`.
 
 ## Avatar manifests
 
 `AvatarManifestExporter` (a VRChat build step at `int.MaxValue`, after VRCFury's parameter compressor, Modular Avatar /
 NDMF and every Orbiters step) writes `%LOCALAPPDATA%\Orbiters\Avatars\<blueprint id>.json` while the SDK builds an
-avatar for Windows: Orbiters contracts' Docs/avatar-manifest.md, read by Orbiters desktop when VRChat loads that avatar.
+avatar for Windows: Orbiters contracts' Docs/avatar-manifest.md, read by Orbiters - N4N0 when VRChat loads that avatar.
 `AvatarManifest.Read(builtAvatar, id)` takes the expression parameters as built (VRCFury's `VF##_` names included) and
 every control of the menu by its labels (rich text removed, each submenu once at its first place), with what it sets and
 its tags (`AvatarManifestTags`: words of the label, its folders and its parameters' names, in English, French, Spanish,
-German and Japanese); `orb.text_sync` when the Orb prop is there. Build & Test also writes
+German and Japanese); `orb.text_sync` when the N4N0 prop is there. Build & Test also writes
 `local_sdk_<avatar name>-<hash>.json` (`AvatarManifest.FileName`: characters other than letters, digits, _ and - become
-_, and then the FNV-1a hash of the id follows, as Orbiters desktop names it); an avatar given its id only at upload gets
+_, and then the FNV-1a hash of the id follows, as Orbiters - N4N0 names it); an avatar given its id only at upload gets
 its file when the upload succeeds. Problems are said in the Console and never
 stop a build; Android and iOS builds, Play Mode and `HiddenAvatarBuild` write nothing.
 

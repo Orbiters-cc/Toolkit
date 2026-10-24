@@ -15,7 +15,7 @@ namespace Orbiters.Toolkit.Editor.VRChat.Manifest
     /// <summary>
     /// What an avatar's menu does, in the words of its labels, with the parameter names the avatar is uploaded with
     /// (VRCFury's VF##_… among them): Orbiters contracts' avatar manifest (Docs/avatar-manifest.md). VRChat tells OSC apps
-    /// an avatar's parameters, never its menu, so Orbiters desktop (and Orb) read this file to know that "Hoodie" is the
+    /// an avatar's parameters, never its menu, so Orbiters - N4N0 reads this file to know that "Hoodie" is the
     /// toggle setting VF12_Clothes/Hoodie to 1. <see cref="Read"/> takes it from a built avatar's descriptor;
     /// <see cref="AvatarManifestExporter"/> writes it while the VRChat SDK builds one.
     /// </summary>
@@ -27,9 +27,9 @@ namespace Orbiters.Toolkit.Editor.VRChat.Manifest
         public string AvatarId, Name, WrittenUtc, Generator;
         public readonly List<Parameter> Parameters = new List<Parameter>();
         public readonly List<Control> Controls = new List<Control>();
-        /// <summary>The Orb prop's number of text sync values (4, 8 or 16), when the avatar carries it.</summary>
+        /// <summary>The N4N0 prop's number of text sync values (4, 8 or 16), when the avatar carries it.</summary>
         public int? OrbTextSync;
-        /// <summary>The Orb prop's projected screen: its protocol's version (<see cref="OrbInstaller.ScreenVersion"/>), 0 without one.</summary>
+        /// <summary>The N4N0 prop's projected screen: its protocol's version (<see cref="OrbInstaller.ScreenVersion"/>), 0 without one.</summary>
         public int OrbScreen;
 
         /// <summary>An expression parameter as uploaded. <see cref="Type"/>: "bool", "int" or "float".</summary>
@@ -119,7 +119,7 @@ namespace Orbiters.Toolkit.Editor.VRChat.Manifest
             }
             if (descriptor.expressionsMenu != null)
                 manifest.Walk(descriptor.expressionsMenu, new List<string>(), AvatarTags.None, new HashSet<VRCExpressionsMenu> { descriptor.expressionsMenu });
-            // The prop is there when its pointer is; its sync values are counted as Orbiters desktop counts them.
+            // The prop is there when its pointer is; its sync values are counted as Orbiters - N4N0 counts them.
             if (manifest.Parameters.Any(p => p.Name == OrbInstaller.TextPointer))
             {
                 var sync = new Regex("^" + Regex.Escape(OrbInstaller.TextSyncPrefix) + "[0-9]+$");
@@ -161,7 +161,7 @@ namespace Orbiters.Toolkit.Editor.VRChat.Manifest
                     control.Labels = Pad((c.labels ?? Array.Empty<VRCExpressionsMenu.Control.Label>()).Select(l => Plain(l.name)).ToList(), 4);
                 var names = new[] { control.Parameter }.Concat(control.SubParameters).Where(n => !string.IsNullOrEmpty(n)).ToList();
                 control.Tags = folder | AvatarManifestTags.Of(c.name, names);
-                // Orb's own controls, and a folder of nothing else.
+                // N4N0's own controls, and a folder of nothing else.
                 if (names.Any(IsOrb) || submenu && c.subMenu != null && c.subMenu.controls != null && c.subMenu.controls.Count > 0 &&
                     c.subMenu.controls.All(s => s != null && IsOrb(s.parameter?.name)))
                     control.Tags |= AvatarTags.Orb;
@@ -171,7 +171,7 @@ namespace Orbiters.Toolkit.Editor.VRChat.Manifest
             }
         }
 
-        private static bool IsOrb(string parameter) => parameter != null && parameter.StartsWith("Orb/", StringComparison.Ordinal);
+        private static bool IsOrb(string parameter) => parameter != null && parameter.StartsWith("N4N0/", StringComparison.Ordinal);
 
         private static string Named(string name) => string.IsNullOrEmpty(name) ? null : name;
 

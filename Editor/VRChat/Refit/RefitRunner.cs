@@ -52,7 +52,7 @@ namespace Orbiters.Toolkit.Editor.VRChat.Refit
     public sealed class RefitBatchResult
     {
         public readonly List<RefitItemResult> Items = new List<RefitItemResult>();
-        /// <summary>Generated or changed project files (meshes, cache entries), e.g. for a Unit Git checkpoint.</summary>
+        /// <summary>Generated or changed project files (meshes, cache entries), e.g. for a Mixer Git checkpoint.</summary>
         public readonly List<string> ChangedAssets = new List<string>();
         public bool Cancelled;
 

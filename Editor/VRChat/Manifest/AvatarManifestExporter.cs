@@ -43,7 +43,7 @@ namespace Orbiters.Toolkit.Editor.VRChat.Manifest
         public bool OnPreprocessAvatar(GameObject avatar)
         {
             try { Export(avatar); }
-            catch (Exception ex) { Debug.LogWarning("Orbiters Toolkit could not write the avatar manifest Orbiters desktop reads: " + ex.Message); }
+            catch (Exception ex) { Debug.LogWarning("Orbiters Toolkit could not write the avatar manifest Orbiters - N4N0 reads: " + ex.Message); }
             return true;
         }
 
@@ -107,7 +107,7 @@ namespace Orbiters.Toolkit.Editor.VRChat.Manifest
             {
                 if (built != null && !string.IsNullOrEmpty(avatarId) && built.AvatarId != avatarId) Write(built, avatarId);
             }
-            catch (Exception ex) { Debug.LogWarning("Orbiters Toolkit could not write the avatar manifest Orbiters desktop reads: " + ex.Message); }
+            catch (Exception ex) { Debug.LogWarning("Orbiters Toolkit could not write the avatar manifest Orbiters - N4N0 reads: " + ex.Message); }
         }
     }
 }

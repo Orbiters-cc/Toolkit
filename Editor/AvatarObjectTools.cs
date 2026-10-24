@@ -28,7 +28,7 @@ namespace Orbiters.Toolkit.Editor
     /// </summary>
     public sealed class AvatarObjectUpdate
     {
-        /// <summary>What it updates, as people know it ("Orb", "Ultipaw 2").</summary>
+        /// <summary>What it updates, as people know it ("N4N0", "Ultipaw 2").</summary>
         public string Name;
         /// <summary>The version on the avatar and the newer one.</summary>
         public string From, To;

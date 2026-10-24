@@ -4,7 +4,7 @@ using System.Text.RegularExpressions;
 namespace Orbiters.Toolkit.Editor
 {
     /// <summary>
-    /// What a search field asks for, as the Logger's search does: a piece of text found anywhere (any case unless asked),
+    /// What a search field asks for, as the Mixer console's search does: a piece of text found anywhere (any case unless asked),
     /// or a .NET regular expression. An invalid expression matches everything and says why in <see cref="Error"/>, so a
     /// list never empties while one is being typed. An expression that takes too long on one value (catastrophic
     /// backtracking, often while it is being typed) matches nothing more from then on and says so in

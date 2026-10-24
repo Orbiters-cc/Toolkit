@@ -30,7 +30,7 @@ SOFTWARE.
 ```
 
 ## KillFrenzy Avatar Text
-The text panel of Orb, the Orbiters companion, uses KillFrenzy Avatar Text's way of drawing text from an avatar's animator: its shader (`Editor/VRChat/OrbText.shader.txt`, copied into each Orb's folder as "Orb text.shader", which keeps this notice) is derived from KillFrenzy Avatar Text's, and the text travels by its protocol of a pointer and sync values. Changed for Orb: another atlas, glyphs past 127, a plate behind the text, the projector beam, and cells kept by a direct blend tree.
+The text panel of N4N0, the Orbiters companion, uses KillFrenzy Avatar Text's way of drawing text from an avatar's animator: its shader (`Editor/VRChat/OrbText.shader.txt`, copied into each N4N0's folder as "N4N0 text.shader", which keeps this notice) is derived from KillFrenzy Avatar Text's, and the text travels by its protocol of a pointer and sync values. Changed for N4N0: another atlas, glyphs past 127, a plate behind the text, the projector beam, and cells kept by a direct blend tree.
 https://github.com/killfrenzy96/KillFrenzyAvatarText
 ```
 Copyright 2023 KillFrenzy / Evan Tran
@@ -42,8 +42,8 @@ The above copyright notice and this permission notice shall be included in all c
 THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ```
 
-## Orb's glyph fonts
-The glyphs of Orb's text panel (`Editor/VRChat/OrbText.png.bytes`, copied into each Orb's folder as "Orb text.png") are drawn from these fonts by Orbiters' atlas tool, under the SIL Open Font License 1.1.
+## N4N0's glyph fonts
+The glyphs of N4N0's text panel (`Editor/VRChat/OrbText.png.bytes`, copied into each N4N0's folder as "N4N0 text.png") are drawn from these fonts by Orbiters' atlas tool, under the SIL Open Font License 1.1.
 https://openfontlicense.org
 - Cascadia Mono (every glyph but one): Copyright (c) 2019 - Present, Microsoft Corporation, with Reserved Font Name Cascadia Code.
 - Noto Sans JP (★): Copyright 2014-2021 Adobe (http://www.adobe.com/), with Reserved Font Name 'Source'.

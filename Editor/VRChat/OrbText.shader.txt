@@ -1,5 +1,5 @@
 /*
-Orb's text panel, from KillFrenzy Avatar Text's shader (KF_AvatarTextShader):
+N4N0's text panel, from KillFrenzy Avatar Text's shader (KF_AvatarTextShader):
 
 Copyright 2023 KillFrenzy / Evan Tran
 
@@ -21,17 +21,17 @@ WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
 CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 */
 
-// The panel Orb projects (Orbiters contracts, Docs/orb.md): 4 rows of 32 cells, each holding a glyph of the panel's atlas
+// The panel N4N0 projects (Orbiters contracts, Docs/orb.md): 4 rows of 32 cells, each holding a glyph of the panel's atlas
 // in a material property the animator sets (_Char0 to _Char127, KillFrenzy Avatar Text's way of reaching them as one
-// array). Changed for Orb: a 16 × 16 atlas of tiles twice as tall as wide (tile g at column g mod 16, row g div 16 from the
+// array). Changed for N4N0: a 16 × 16 atlas of tiles twice as tall as wide (tile g at column g mod 16, row g div 16 from the
 // top), glyphs past 127 sent as negative values and wrapped (g − 256), a dark plate behind the text that is only as large
-// as the text, the beam the orb projects it with (the second material, _Part 1), and the panel growing for people further
+// as the text, the beam N4N0 projects it with (the second material, _Part 1), and the panel growing for people further
 // away about its corner nearest its owner's face, so it never grows over that face. The panel and its beam are one skinned
-// mesh: the plate and the beam's far end on the panel, the beam's near end on the orb. Skinning puts the panel's scale in
+// mesh: the plate and the beam's far end on the panel, the beam's near end on N4N0. Skinning puts the panel's scale in
 // the vertices, so sizes here are in the panel's own metres and positions are only rescaled. Text seen from behind or in a
 // mirror reads the right way round. Viewers who hide custom shaders see nothing of it (VRCFallback).
-// OrbInstaller copies this file into each orb's folder as "Orb text.shader".
-Shader "Orbiters/Orb Text"
+// OrbInstaller copies this file into each N4N0's folder as "N4N0 text.shader".
+Shader "Orbiters/N4N0 Text"
 {
     Properties
     {
@@ -359,7 +359,7 @@ Shader "Orbiters/Orb Text"
                 float4 vertex : POSITION;
                 // The plate: its corner (x 0 left, 1 right; y 0 bottom, 1 top). The beam: the plate corner its far end goes to.
                 float2 corner : TEXCOORD0;
-                // The beam: across a side (0 to 1) and along it (0 at the orb, 1 at the plate).
+                // The beam: across a side (0 to 1) and along it (0 at N4N0, 1 at the plate).
                 float2 beam : TEXCOORD1;
                 UNITY_VERTEX_INPUT_INSTANCE_ID
             };
@@ -479,8 +479,8 @@ Shader "Orbiters/Orb Text"
             fixed4 Beam(v2f i)
             {
                 float along = i.beam.y, across = i.beam.x;
-                // A faint veil with fine bright lines along the pyramid's edges, a gentle shimmer running from the orb to the
-                // panel; it leaves the orb from inside and thins out towards the panel.
+                // A faint veil with fine bright lines along the pyramid's edges, a gentle shimmer running from N4N0 to the
+                // panel; it leaves N4N0 from inside and thins out towards the panel.
                 float edges = pow(1 - saturate(min(across, 1 - across) * 2), 28);
                 float run = .8 + .2 * sin(along * 14 - _Time.y * 4);
                 float fade = smoothstep(.02, .15, along) * (1 - .6 * along);

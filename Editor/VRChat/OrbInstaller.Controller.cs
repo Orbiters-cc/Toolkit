@@ -14,20 +14,20 @@ namespace Orbiters.Toolkit.Editor.VRChat
         // The text's own animator parameters (never avatar parameters): the block the sync values write, one update late,
         // and the values, ValueLag updates later still; what each cell holds, as the float its glyph was sent as; a
         // constant 1.
-        internal const string Block = "Orb/Text/Block", One = "Orb/One";
-        internal static string Value(int index) => "Orb/Text/Value" + index;
+        internal const string Block = "N4N0/Text/Block", One = "N4N0/One";
+        internal static string Value(int index) => "N4N0/Text/Value" + index;
         // How many updates later than the pointer the sync values reach the cells: VRChat may apply the values a frame
         // or two before the pointer sent with them, which wrote each block with the next one's letters. The values go
         // through ValueLag copies, an update each, before the value the cells read (TextLate(i, ValueLag)).
         internal const int ValueLag = 2;
-        internal static string TextLate(int index, int stage) => "Orb/Text/Late" + stage + "/" + index;
-        internal static string Cell(int cell) => "Orb/Text/Cell" + cell;
+        internal static string TextLate(int index, int stage) => "N4N0/Text/Late" + stage + "/" + index;
+        internal static string Cell(int cell) => "N4N0/Text/Cell" + cell;
         // The panel's cell properties (the text shader's _Char0 to _Char127).
         internal static string CellProperty(int cell) => "material._Char" + cell;
         // How long a change of state takes to show (the eyes morph meanwhile).
         internal const float StateBlend = .18f;
 
-        /// <summary>How a state looks: the orb shader's properties, the projector beam, and whether the orb hops.</summary>
+        /// <summary>How a state looks: the N4N0 shader's properties, the projector beam, and whether N4N0 hops.</summary>
         internal sealed class Look
         {
             public float Glow = 1, Open = 1, Wide = 1, Curve, Lid, Tilt, LookX, LookY, Anger, Ring, Talk, Blink = 1, Bob = 1, Sleep, Beam;
@@ -61,20 +61,20 @@ namespace Orbiters.Toolkit.Editor.VRChat
             new Look { Glow = 1.3f, Open = 1.1f, Wide = 1.45f, LookY = .03f, Blink = 0, Hops = true },
         };
 
-        /// <param name="walkBoost">Adds the Walk boost radial (<see cref="WalkBoost"/>, local and saved): Orbiters desktop's walk boost.</param>
-        /// <param name="replace">The projected screen shows Orb's menu in VR too, instead of Orbiters desktop's SteamVR
-        /// overlay (<see cref="ScreenReplace"/>'s default). Every orb has the screen (<see cref="ScreenController"/>).</param>
+        /// <param name="walkBoost">Adds the Walk boost radial (<see cref="WalkBoost"/>, local and saved): Orbiters - N4N0's walk boost.</param>
+        /// <param name="replace">The projected screen shows N4N0's menu in VR too, instead of Orbiters - N4N0's SteamVR
+        /// overlay (<see cref="ScreenReplace"/>'s default). Every N4N0 has the screen (<see cref="ScreenController"/>).</param>
         /// <param name="thumbnailBytes">The bytes of each thumbnail the screen keeps, 72 or 128 (<see cref="ScreenThumbnailBytes"/>'s default).</param>
         /// <param name="light">Adds the light's parameters, layer and submenu (<see cref="LightController"/>).</param>
         internal static void BuildController(GameObject root, string folder, int textSync, bool walkBoost = false, bool replace = false, int thumbnailBytes = DefaultThumbnailBytes,
             bool light = false)
         {
-            var controller = AnimatorController.CreateAnimatorControllerAtPath(folder + "/Orb.controller");
+            var controller = AnimatorController.CreateAnimatorControllerAtPath(folder + "/N4N0.controller");
             controller.AddParameter(new AnimatorControllerParameter { name = Visible, type = AnimatorControllerParameterType.Bool, defaultBool = true });
             controller.AddParameter(State, AnimatorControllerParameterType.Int);
             controller.AddParameter(Talk, AnimatorControllerParameterType.Bool);
             controller.AddParameter(Touch, AnimatorControllerParameterType.Bool);
-            // Read by Orbiters desktop over OSC only, as the walk boost.
+            // Read by Orbiters - N4N0 over OSC only, as the walk boost.
             controller.AddParameter(Photo3D, AnimatorControllerParameterType.Bool);
             controller.AddParameter(Menu, AnimatorControllerParameterType.Bool);
             foreach (var button in new[] { CallMenu, CallGo, CallEnd }) controller.AddParameter(button, AnimatorControllerParameterType.Bool);
@@ -90,7 +90,7 @@ namespace Orbiters.Toolkit.Editor.VRChat
             for (int i = 0; i < textSync; i++) controller.AddParameter(TextLate(i, stage), AnimatorControllerParameterType.Float);
             for (int c = 0; c < Cells; c++) controller.AddParameter(Cell(c), AnimatorControllerParameterType.Float);
             controller.AddParameter(new AnimatorControllerParameter { name = One, type = AnimatorControllerParameterType.Float, defaultFloat = 1 });
-            // Read by Orbiters desktop over OSC only: no layer uses it.
+            // Read by Orbiters - N4N0 over OSC only: no layer uses it.
             if (walkBoost) controller.AddParameter(WalkBoost, AnimatorControllerParameterType.Float);
 
             Toggled(controller, controller.layers[0].stateMachine, Visible, Shown);
@@ -119,8 +119,8 @@ namespace Orbiters.Toolkit.Editor.VRChat
             ScreenController(controller, textSync, parameters, replace, thumbnailBytes);
             var controls = new List<VRCExpressionsMenu.Control>
             {
-                Control("Show Orb", VRCExpressionsMenu.Control.ControlType.Toggle, Visible),
-                // Opens Orb's menu directly (the other triggers go through Orbiters desktop: a binding, a word, a touch).
+                Control("Show N4N0", VRCExpressionsMenu.Control.ControlType.Toggle, Visible),
+                // Opens N4N0's menu directly (the other triggers go through Orbiters - N4N0: a binding, a word, a touch).
                 Control("Menu", VRCExpressionsMenu.Control.ControlType.Toggle, Menu),
                 Control("Talk", VRCExpressionsMenu.Control.ControlType.Button, Talk),
                 Control("3D picture", VRCExpressionsMenu.Control.ControlType.Button, Photo3D),
@@ -135,12 +135,12 @@ namespace Orbiters.Toolkit.Editor.VRChat
                 controls.Add(radial);
             }
             if (light) LightController(controller, folder, parameters, controls);
-            Install(root, folder, controller, MenuPath, "Orb menu", controls, parameters.ToArray(), parameters.Select(p => p.name));
+            Install(root, folder, controller, MenuPath, "N4N0 menu", controls, parameters.ToArray(), parameters.Select(p => p.name));
         }
 
         /// <summary>
-        /// Orb › Call (Orbiters contracts' Docs/orb-calls.md): the contacts on the panel, a radial choosing one, call or
-        /// answer, decline or hang up. All read by Orbiters desktop over OSC.
+        /// N4N0 › Call (Orbiters contracts' Docs/orb-calls.md): the contacts on the panel, a radial choosing one, call or
+        /// answer, decline or hang up. All read by Orbiters - N4N0 over OSC.
         /// </summary>
         private static VRCExpressionsMenu.Control CallSubmenu(string folder)
         {
@@ -154,13 +154,13 @@ namespace Orbiters.Toolkit.Editor.VRChat
                 Control("Call / Answer", VRCExpressionsMenu.Control.ControlType.Button, CallGo),
                 Control("Hang up", VRCExpressionsMenu.Control.ControlType.Button, CallEnd),
             };
-            AssetDatabase.CreateAsset(menu, AssetDatabase.GenerateUniqueAssetPath(folder + "/Orb call menu.asset"));
+            AssetDatabase.CreateAsset(menu, AssetDatabase.GenerateUniqueAssetPath(folder + "/N4N0 call menu.asset"));
             var call = Control("Call", VRCExpressionsMenu.Control.ControlType.SubMenu, "");
             call.subMenu = menu;
             return call;
         }
 
-        // An object shown while a bool is on: in "Shown" by default (the orb), else "Hidden" (the panel).
+        // An object shown while a bool is on: in "Shown" by default (N4N0), else "Hidden" (the panel).
         private static void Toggled(AnimatorController controller, AnimatorStateMachine machine, string parameter, string path)
         {
             var hidden = new AnimationClip(); Curve(hidden, path, typeof(GameObject), "m_IsActive", 0);
@@ -172,9 +172,9 @@ namespace Orbiters.Toolkit.Editor.VRChat
             Transition(on, off, (parameter, AnimatorConditionMode.IfNot, 0));
         }
 
-        // ---- What Orb is doing ----
+        // ---- What N4N0 is doing ----
 
-        // One state for each value of Orb/State, reached from any other; each sets everything the layer animates, so states
+        // One state for each value of N4N0/State, reached from any other; each sets everything the layer animates, so states
         // blend into one another and leave nothing behind (Write Defaults on or off).
         private static void States(AnimatorController controller)
         {
@@ -229,7 +229,7 @@ namespace Orbiters.Toolkit.Editor.VRChat
         // ---- The text ----
 
         /// <summary>
-        /// Orb/Text/Pointer as a float (<see cref="Block"/>, for the text's blend trees): one state per block, clearing and
+        /// N4N0/Text/Pointer as a float (<see cref="Block"/>, for the text's blend trees): one state per block, clearing and
         /// nothing, each setting it. It is one update late (the values the text layer copies are later still).
         /// </summary>
         private static void Blocks(AnimatorController controller, int textSync)

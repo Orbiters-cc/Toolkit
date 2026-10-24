@@ -15,19 +15,19 @@ using Object = UnityEngine.Object;
 namespace Orbiters.Toolkit.Editor.VRChat
 {
     /// <summary>
-    /// Pointing at Orb's screen (Orbiters contracts, Docs/orb.md, Pointing; screen version 4): a VRChat raycast from each
+    /// Pointing at N4N0's screen (Orbiters contracts, Docs/orb.md, Pointing; screen version 4): a VRChat raycast from each
     /// index fingertip, along the finger, meets a thin solid box on the screen's face. Its owner sees a beam from the
     /// fingertip and a bead where the ray meets the screen at once (the avatar draws them), and the bead's contact on
-    /// three of the screen's touch points tells Orbiters desktop exactly where it is; the fingertip coming within 2.1 cm
+    /// three of the screen's touch points tells Orbiters - N4N0 exactly where it is; the fingertip coming within 2.1 cm
     /// along the ray presses. Everything is on its owner's client only, in VR, while the screen is open: no synced bits,
     /// and contacts, the box and the raycasts cost nothing for anyone else.
     /// </summary>
     public static partial class OrbInstaller
     {
         /// <summary>Each hand's raycast parameter: VRChat adds <c>_Hit</c> and <c>_Ratio</c> (and <c>_Distance</c>).</summary>
-        public const string RayPrefix = "Orb/Screen/Ray/";
-        /// <summary>The bead's contact tag, <c>OrbPointerL</c> or <c>OrbPointerR</c>: only that hand's touch points take it.</summary>
-        public const string PointerTagPrefix = "OrbPointer";
+        public const string RayPrefix = "N4N0/Screen/Ray/";
+        /// <summary>The bead's contact tag, <c>N4N0PointerL</c> or <c>N4N0PointerR</c>: only that hand's touch points take it.</summary>
+        public const string PointerTagPrefix = "N4N0Pointer";
         internal const string Pointers = Shown + "/Pointers", Surface = ScreenObject + "/Surface";
         // The ray's reach, the bead's contact and look, the beam's thickness (at 1.6 m eye height: they scale with the avatar).
         internal const float RayLength = .6f, PointRadius = .002f, BeadRadius = .0035f, BeamRadius = .0012f;
@@ -53,11 +53,11 @@ namespace Orbiters.Toolkit.Editor.VRChat
             var screen = orb.Find(ScreenObject);
             var shown = orb.Find(Shown);
             var body = orb.Find(Body);
-            if (screen == null || shown == null || body == null) throw new InvalidOperationException("This orb was modified: add it again.");
+            if (screen == null || shown == null || body == null) throw new InvalidOperationException("This N4N0 was modified: add it again.");
             if (screen.Find("Surface") == null)
             {
                 var surface = new GameObject("Surface");
-                Undo.RegisterCreatedObjectUndo(surface, "Orb pointing");
+                Undo.RegisterCreatedObjectUndo(surface, "N4N0 pointing");
                 surface.transform.SetParent(screen, false);
                 surface.SetActive(false);
                 // Solid (VRChat's raycasts pass through triggers), authored on Default; only its owner's client has it,
@@ -79,14 +79,14 @@ namespace Orbiters.Toolkit.Editor.VRChat
                 var receiver = point != null ? point.GetComponent<VRCContactReceiver>() : null;
                 if (receiver == null) continue;
                 if (receiver.collisionTags.Count == 1 && receiver.collisionTags[0] == PointerTag(right)) continue;
-                Undo.RecordObject(receiver, "Orb pointing");
+                Undo.RecordObject(receiver, "N4N0 pointing");
                 receiver.collisionTags.Clear();
                 receiver.collisionTags.Add(PointerTag(right));
                 PrefabUtility.RecordPrefabInstancePropertyModifications(receiver);
             }
             if (orb.Find(Pointers) != null) return;
             var pointers = new GameObject("Pointers");
-            Undo.RegisterCreatedObjectUndo(pointers, "Orb pointing");
+            Undo.RegisterCreatedObjectUndo(pointers, "N4N0 pointing");
             pointers.transform.SetParent(shown, false);
             pointers.SetActive(false);
             var mesh = body.GetComponent<MeshFilter>().sharedMesh;
@@ -133,7 +133,7 @@ namespace Orbiters.Toolkit.Editor.VRChat
 
         /// <summary>
         /// Holds a placed orb's pointers to <paramref name="animator"/>'s index fingertips, along the fingers, as large as
-        /// the orb (<paramref name="size"/>). An avatar without index fingers has no pointer for that hand.
+        /// N4N0 (<paramref name="size"/>). An avatar without index fingers has no pointer for that hand.
         /// </summary>
         private static void BindPointers(Transform orb, Transform avatar, Animator animator, float size)
         {
@@ -168,7 +168,7 @@ namespace Orbiters.Toolkit.Editor.VRChat
         }
 
         /// <summary>
-        /// The pointing layers and parameters of an orb's controller: the pointers and the screen's box on while the
+        /// The pointing layers and parameters of N4N0's controller: the pointers and the screen's box on while the
         /// screen is open for its owner in VR, and each hand's bead and beam shown while its ray meets the screen.
         /// </summary>
         private static void PointingController(AnimatorController controller, List<VRCExpressionParameters.Parameter> parameters)

@@ -20,7 +20,7 @@ using VRC.SDK3.Dynamics.Contact.Components;
 using VRC.SDK3.Dynamics.PhysBone.Components;
 using Object = UnityEngine.Object;
 
-// Orb, the Orbiters companion (contracts Docs/orb.md), built whole into a temporary folder: its parameters as the desktop
+// N4N0, the Orbiters companion (contracts Docs/orb.md), built whole into a temporary folder: its parameters as the desktop
 // finds them, the text protocol on the panel's cells, its states, and its fit on an avatar.
 public class OrbTests
 {
@@ -59,24 +59,24 @@ public class OrbTests
 
         var expected = new List<(string name, VRCExpressionParameters.ValueType type, bool synced, bool saved, float value)>
         {
-            ("Orb/Visible", VRCExpressionParameters.ValueType.Bool, true, true, 1),
-            ("Orb/State", VRCExpressionParameters.ValueType.Int, true, false, 0),
-            ("Orb/Talk", VRCExpressionParameters.ValueType.Bool, false, false, 0),
-            ("Orb/Touch", VRCExpressionParameters.ValueType.Bool, false, false, 0),
-            ("Orb/Photo3D", VRCExpressionParameters.ValueType.Bool, false, false, 0),
-            ("Orb/Menu", VRCExpressionParameters.ValueType.Bool, false, false, 0),
-            ("Orb/Call/Menu", VRCExpressionParameters.ValueType.Bool, false, false, 0),
-            ("Orb/Call/Pick", VRCExpressionParameters.ValueType.Float, false, false, 0),
-            ("Orb/Call/Go", VRCExpressionParameters.ValueType.Bool, false, false, 0),
-            ("Orb/Call/End", VRCExpressionParameters.ValueType.Bool, false, false, 0),
-            ("Orb/Text/Visible", VRCExpressionParameters.ValueType.Bool, true, false, 0),
-            ("Orb/Text/Pointer", VRCExpressionParameters.ValueType.Int, true, false, 0),
+            ("N4N0/Visible", VRCExpressionParameters.ValueType.Bool, true, true, 1),
+            ("N4N0/State", VRCExpressionParameters.ValueType.Int, true, false, 0),
+            ("N4N0/Talk", VRCExpressionParameters.ValueType.Bool, false, false, 0),
+            ("N4N0/Touch", VRCExpressionParameters.ValueType.Bool, false, false, 0),
+            ("N4N0/Photo3D", VRCExpressionParameters.ValueType.Bool, false, false, 0),
+            ("N4N0/Menu", VRCExpressionParameters.ValueType.Bool, false, false, 0),
+            ("N4N0/Call/Menu", VRCExpressionParameters.ValueType.Bool, false, false, 0),
+            ("N4N0/Call/Pick", VRCExpressionParameters.ValueType.Float, false, false, 0),
+            ("N4N0/Call/Go", VRCExpressionParameters.ValueType.Bool, false, false, 0),
+            ("N4N0/Call/End", VRCExpressionParameters.ValueType.Bool, false, false, 0),
+            ("N4N0/Text/Visible", VRCExpressionParameters.ValueType.Bool, true, false, 0),
+            ("N4N0/Text/Pointer", VRCExpressionParameters.ValueType.Int, true, false, 0),
         };
-        for (int i = 0; i < 8; i++) expected.Add(("Orb/Text/Sync" + i, VRCExpressionParameters.ValueType.Float, true, false, 0));
+        for (int i = 0; i < 8; i++) expected.Add(("N4N0/Text/Sync" + i, VRCExpressionParameters.ValueType.Float, true, false, 0));
         var parameters = AssetDatabase.LoadAssetAtPath<VRCExpressionParameters>(folder + "/Parameters.asset");
         // The screen's parameters follow (TheScreensTouchPointsAndParametersAreLocal).
         CollectionAssert.AreEqual(expected, parameters.parameters.Take(expected.Count).Select(p => (p.name, p.valueType, p.networkSynced, p.saved, p.defaultValue)).ToList());
-        Assert.IsTrue(parameters.parameters.Skip(expected.Count).All(p => p.name.StartsWith("Orb/Screen/", StringComparison.Ordinal)));
+        Assert.IsTrue(parameters.parameters.Skip(expected.Count).All(p => p.name.StartsWith("N4N0/Screen/", StringComparison.Ordinal)));
         Assert.AreEqual(1 + 8 + 1 + 8 + 8 * 8, parameters.CalcTotalCost(), "Synced bits: 1 + 8 + 1 + 8 + 8·N");
 
         // Global in the Full Controller, so VRCFury keeps the names OSC looks for; its own parameters are renamed as usual.
@@ -85,7 +85,7 @@ public class OrbTests
         Assert.IsFalse(VrcFury.IsGlobalParameter(full, OrbInstaller.Cell(0)));
         Assert.IsTrue(expected.All(p => VrcParameters.OscDriven(p.name)), "Optimizers leave OSC's parameters alone");
 
-        var controller = AssetDatabase.LoadAssetAtPath<AnimatorController>(folder + "/Orb.controller");
+        var controller = AssetDatabase.LoadAssetAtPath<AnimatorController>(folder + "/N4N0.controller");
         var types = controller.parameters.ToDictionary(p => p.name, p => p.type);
         foreach (var p in expected)
             Assert.AreEqual(p.type == VRCExpressionParameters.ValueType.Int ? AnimatorControllerParameterType.Int
@@ -93,19 +93,19 @@ public class OrbTests
         Assert.IsTrue(controller.parameters.Single(p => p.name == OrbInstaller.Visible).defaultBool, "Shown until asked otherwise");
 
         var menu = AssetDatabase.LoadAssetAtPath<VRCExpressionsMenu>(folder + "/Menu.asset").controls.Single();
-        Assert.AreEqual(("Orb", VRCExpressionsMenu.Control.ControlType.SubMenu), (menu.name, menu.type));
+        Assert.AreEqual(("N4N0", VRCExpressionsMenu.Control.ControlType.SubMenu), (menu.name, menu.type));
         CollectionAssert.AreEqual(new[]
             {
-                ("Show Orb", VRCExpressionsMenu.Control.ControlType.Toggle, "Orb/Visible"), ("Menu", VRCExpressionsMenu.Control.ControlType.Toggle, "Orb/Menu"),
-                ("Talk", VRCExpressionsMenu.Control.ControlType.Button, "Orb/Talk"),
-                ("3D picture", VRCExpressionsMenu.Control.ControlType.Button, "Orb/Photo3D"), ("Call", VRCExpressionsMenu.Control.ControlType.SubMenu, ""),
+                ("Show N4N0", VRCExpressionsMenu.Control.ControlType.Toggle, "N4N0/Visible"), ("Menu", VRCExpressionsMenu.Control.ControlType.Toggle, "N4N0/Menu"),
+                ("Talk", VRCExpressionsMenu.Control.ControlType.Button, "N4N0/Talk"),
+                ("3D picture", VRCExpressionsMenu.Control.ControlType.Button, "N4N0/Photo3D"), ("Call", VRCExpressionsMenu.Control.ControlType.SubMenu, ""),
             },
             menu.subMenu.controls.Select(c => (c.name, c.type, c.parameter.name)).ToArray());
 
-        // The rig: the tether's tip carries the orb, the owner's hands touch it, the panel waits off.
+        // The rig: the tether's tip carries N4N0, the owner's hands touch it, the panel waits off.
         var root = prefab.transform;
         var tether = root.Find(OrbInstaller.Tether).GetComponent<VRCPhysBone>();
-        Assert.AreEqual(root.Find(OrbInstaller.Ball), tether.ignoreTransforms.Single(), "What the orb holds is no part of the chain");
+        Assert.AreEqual(root.Find(OrbInstaller.Ball), tether.ignoreTransforms.Single(), "What N4N0 holds is no part of the chain");
         Assert.AreEqual(0, tether.gravity);
         var touch = root.Find(OrbInstaller.Toucher).GetComponent<VRCContactReceiver>();
         Assert.IsTrue(touch.allowSelf && !touch.allowOthers && touch.localOnly);
@@ -114,11 +114,11 @@ public class OrbTests
         var panel = root.Find(OrbInstaller.Panel);
         Assert.IsFalse(panel.gameObject.activeSelf, "No text yet");
         var screen = panel.GetComponent<SkinnedMeshRenderer>();
-        CollectionAssert.AreEqual(new[] { panel, root.Find(OrbInstaller.Emitter) }, screen.bones, "The beam reaches from the orb to the panel");
-        Assert.IsTrue(screen.sharedMaterials.All(m => m.shader.name == "Orbiters/Orb Text" && m.shader.isSupported));
-        Assert.AreEqual("Orbiters/Orb", root.Find(OrbInstaller.Body).GetComponent<MeshRenderer>().sharedMaterial.shader.name);
+        CollectionAssert.AreEqual(new[] { panel, root.Find(OrbInstaller.Emitter) }, screen.bones, "The beam reaches from N4N0 to the panel");
+        Assert.IsTrue(screen.sharedMaterials.All(m => m.shader.name == "Orbiters/N4N0 Text" && m.shader.isSupported));
+        Assert.AreEqual("Orbiters/N4N0", root.Find(OrbInstaller.Body).GetComponent<MeshRenderer>().sharedMaterial.shader.name);
         var atlas = (Texture2D)screen.sharedMaterials[0].GetTexture("_MainTex");
-        Assert.AreEqual(folder + "/Orb text.png", AssetDatabase.GetAssetPath(atlas));
+        Assert.AreEqual(folder + "/N4N0 text.png", AssetDatabase.GetAssetPath(atlas));
         Assert.AreEqual(2048, Mathf.Max(atlas.width, atlas.height), "Imported at most 2048 on its longest side");
         Assert.AreEqual(2, atlas.height / atlas.width, "16 × 16 tiles twice as tall as wide");
         Assert.Greater(atlas.mipmapCount, 1);
@@ -133,7 +133,7 @@ public class OrbTests
         var parameters = AssetDatabase.LoadAssetAtPath<VRCExpressionParameters>(folder + "/Parameters.asset");
         Assert.AreEqual(1 + 8 + 1 + 8 + 8 * sync, parameters.CalcTotalCost());
         Assert.AreEqual(sync, parameters.parameters.Count(p => p.name.StartsWith(OrbInstaller.TextSyncPrefix, StringComparison.Ordinal)));
-        var controller = AssetDatabase.LoadAssetAtPath<AnimatorController>(folder + "/Orb.controller");
+        var controller = AssetDatabase.LoadAssetAtPath<AnimatorController>(folder + "/N4N0.controller");
         var blocks = controller.layers.Single(l => l.name == "Text block").stateMachine.states.Count(s => s.state.name.StartsWith("Block "));
         Assert.AreEqual(OrbInstaller.Cells / sync, blocks);
         Assert.Throws<ArgumentOutOfRangeException>(() => OrbInstaller.CreatePrefab(folder + "-5", 5));
@@ -148,7 +148,7 @@ public class OrbTests
         var screen = root.transform.Find(OrbInstaller.Panel).GetComponent<SkinnedMeshRenderer>();
         playable.SetBool(OrbInstaller.TextVisible, true);
         Tick(3);
-        Assert.IsTrue(screen.gameObject.activeSelf, "Orb/Text/Visible shows the panel");
+        Assert.IsTrue(screen.gameObject.activeSelf, "N4N0/Text/Visible shows the panel");
 
         int[] Page() { var block = new MaterialPropertyBlock(); screen.GetPropertyBlock(block); return Enumerable.Range(0, 128).Select(c => Glyph(block.GetFloat("_Char" + c))).ToArray(); }
         void Send(int pointer, params int[] glyphs)
@@ -259,7 +259,7 @@ public class OrbTests
         Assert.AreEqual((1f, 0f, 0f, 1f), (Look("_Open"), Look("_Anger"), Beam(), Look("_Glow")), "Any other value shows as idle");
 
         playable.SetBool(OrbInstaller.Visible, false); Tick(3);
-        Assert.IsFalse(root.transform.Find(OrbInstaller.Shown).gameObject.activeSelf, "Orb/Visible off hides the orb and its panel");
+        Assert.IsFalse(root.transform.Find(OrbInstaller.Shown).gameObject.activeSelf, "N4N0/Visible off hides N4N0 and its panel");
         playable.SetBool(OrbInstaller.Visible, true); Tick(3);
         Assert.IsTrue(root.transform.Find(OrbInstaller.Shown).gameObject.activeSelf);
     }
@@ -278,7 +278,7 @@ public class OrbTests
         Assert.AreEqual(avatar, frame.GetComponent<VRCRotationConstraint>().Sources[0].SourceTransform, "Turned like the avatar");
         Assert.Less(Vector3.Distance(head.position, frame.position), 1e-4f);
         Assert.AreEqual(1.2f / OrbInstaller.ReferenceEyes, frame.lossyScale.x, 1e-4f, "As large as the avatar's eyes are high");
-        // The orb at the side of the eyes and in front of them, the panel lower and further, out of the face's way.
+        // N4N0 at the side of the eyes and in front of them, the panel lower and further, out of the face's way.
         var eyes = avatar.TransformPoint(avatar.GetComponent<VRCAvatarDescriptor>().ViewPosition);
         var ball = orb.Find(OrbInstaller.Tether + "/1/2");
         var corner = orb.Find(OrbInstaller.Panel);
@@ -328,7 +328,7 @@ public class OrbTests
 
     // ---- The projected screen (Docs/orb.md, Screen) ----
 
-    // An orb (every orb has its screen), playing.
+    // N4N0 (every N4N0 has its screen), playing.
     private (GameObject root, MeshRenderer screen) PlayWithScreen(int textSync = 8, int thumbnailBytes = 72)
     {
         var root = Play(AssetDatabase.LoadAssetAtPath<GameObject>(OrbInstaller.CreatePrefab(folder, textSync, thumbnailBytes)));
@@ -365,7 +365,7 @@ public class OrbTests
         if (VrcFury.Writer == null) Assert.Ignore("Requires the VRCFury integration.");
         var (root, screen) = PlayWithScreen();
         Assert.IsTrue(OrbInstaller.HasScreen(root.transform));
-        Assert.AreEqual(folder + "/Orb screen.mat", AssetDatabase.GetAssetPath(screen.sharedMaterial), "Its files in the orb's folder, which a package carries");
+        Assert.AreEqual(folder + "/N4N0 screen.mat", AssetDatabase.GetAssetPath(screen.sharedMaterial), "Its files in N4N0's folder, which a package carries");
         Assert.IsFalse(screen.gameObject.activeSelf, "Hidden until it opens");
         var receivers = screen.GetComponentsInChildren<VRCContactReceiver>(true);
         Assert.AreEqual(6 + 4 + 4, receivers.Length, "Three touch points per hand's pointer, four each for the eyes and the gaze point");
@@ -379,7 +379,7 @@ public class OrbTests
             Assert.AreEqual(OrbInstaller.PointerTag(r.parameter.Contains("/R")), r.collisionTags.Single());
         }
         var parameters = AssetDatabase.LoadAssetAtPath<VRCExpressionParameters>(folder + "/Parameters.asset");
-        var screenParameters = parameters.parameters.Where(p => p.name.StartsWith("Orb/Screen/", StringComparison.Ordinal)).ToList();
+        var screenParameters = parameters.parameters.Where(p => p.name.StartsWith("N4N0/Screen/", StringComparison.Ordinal)).ToList();
         Assert.AreEqual(1 + 1 + 1 + 1 + 1 + OrbInstaller.ScreenLocalValues + 6 + 8 + 4, screenParameters.Count,
             "Open, Replace, ThumbnailBytes, Version, the pointer, 16 values, 6 touch points, 4 each for the eyes and the gaze, each ray's hit and ratio");
         Assert.IsTrue(screenParameters.All(p => !p.networkSynced), "No synced bits");
@@ -389,7 +389,7 @@ public class OrbTests
         Assert.AreEqual((72f, false, VRCExpressionParameters.ValueType.Int), (thumbnails.defaultValue, thumbnails.saved, thumbnails.valueType), "72 bytes unless the card says 128, never saved");
         var version = screenParameters.Single(p => p.name == OrbInstaller.ScreenVersionParameter);
         Assert.AreEqual(((float)OrbInstaller.ScreenVersion, false, VRCExpressionParameters.ValueType.Int), (version.defaultValue, version.saved, version.valueType),
-            "The screen says its version: Orbiters desktop shows a version 3 screen the six-tile Home, and lets a version 4 one point with rays");
+            "The screen says its version: Orbiters - N4N0 shows a version 3 screen the six-tile Home, and lets a version 4 one point with rays");
         Assert.AreEqual(OrbInstaller.ScreenShaderName(72), screen.sharedMaterial.shader.name);
         var hold = screen.GetComponent<VRCParentConstraint>();
         Assert.IsFalse(hold.RebakeOffsetsWhenUnfrozen, "Opened again, it appears before the eyes, not where it was");
@@ -404,7 +404,7 @@ public class OrbTests
         playable.SetInteger(OrbInstaller.VRMode, 0);
         playable.SetBool(OrbInstaller.ScreenOpen, true);
         Tick(3);
-        Assert.IsTrue(screen.gameObject.activeSelf, "Orb/Screen/Open shows it in desktop mode");
+        Assert.IsTrue(screen.gameObject.activeSelf, "N4N0/Screen/Open shows it in desktop mode");
         Assert.IsTrue(screen.GetComponent<VRCParentConstraint>().FreezeToWorld, "Frozen where it appeared");
 
         void Local(int pointer, byte[] bytes, int from)
@@ -448,7 +448,7 @@ public class OrbTests
         // The menu's Menu toggle opens it at once, whatever the desktop does, and closes it when both are off.
         playable.SetBool(OrbInstaller.Menu, true);
         Tick(3);
-        Assert.IsTrue(screen.gameObject.activeSelf, "Orb/Menu shows the owner's screen");
+        Assert.IsTrue(screen.gameObject.activeSelf, "N4N0/Menu shows the owner's screen");
         playable.SetBool(OrbInstaller.ScreenOpen, true);
         playable.SetBool(OrbInstaller.Menu, false);
         Tick(3);
@@ -473,7 +473,7 @@ public class OrbTests
     }
 
     // Desktop mode: the owner points by looking. The eyes and the gaze point stay on the line of sight however the head
-    // turns, and Orbiters desktop's reading (Docs/orb.md, Screen: the line through the two located points, on the
+    // turns, and Orbiters - N4N0's reading (Docs/orb.md, Screen: the line through the two located points, on the
     // screen's plane) lands where the owner looks.
     [Test]
     public void TheGazePointFollowsTheLineOfSightOntoTheScreen()
@@ -548,7 +548,7 @@ public class OrbTests
         Assert.IsFalse(dot.activeSelf, "Nobody else sees it");
     }
 
-    // Pointing (Docs/orb.md, Pointing): a raycast from each index fingertip along the finger, as large as the orb, at a
+    // Pointing (Docs/orb.md, Pointing): a raycast from each index fingertip along the finger, as large as N4N0, at a
     // solid box on the screen's face.
     [Test]
     public void ItPointsFromTheIndexFingertipsAtASolidScreen()
@@ -568,7 +568,7 @@ public class OrbTests
             var tip = distal.position + (distal.position - middle.position) * .8f;
             Assert.Less(Vector3.Distance(tip, pointer.position), 1e-4f, "At the fingertip");
             Assert.Less(Vector3.Angle((tip - middle.position).normalized, pointer.forward), .1f, "Along the finger");
-            Assert.AreEqual(1.2f / OrbInstaller.ReferenceEyes, pointer.lossyScale.x, 1e-4f, "As large as the orb");
+            Assert.AreEqual(1.2f / OrbInstaller.ReferenceEyes, pointer.lossyScale.x, 1e-4f, "As large as N4N0");
             var ray = pointer.GetComponent<VRC.SDK3.Avatars.Components.VRCRaycast>();
             Assert.AreEqual((Vector3.forward, OrbInstaller.RayLength, true, OrbInstaller.Ray(right)), (ray.RaycastDirection, ray.Distance, ray.ApplyTransformScale, ray.Parameter));
             Assert.AreEqual(VRC.SDK3.Avatars.Components.VRCRaycast.CollisionMode.HitWorldsAndPlayers, ray.RaycastCollisionMode);
@@ -625,7 +625,7 @@ public class OrbTests
     }
 
     // VRCFury reverts every override of its components in a prefab instance when an upload starts (VRCFPrefabFixer): the
-    // options of an orb placed from a prefab survive it.
+    // options of N4N0 placed from a prefab survive it.
     [Test]
     public void OptionsOfAPlacedOrbSurviveVrcFurysRevertBeforeAnUpload()
     {
@@ -644,7 +644,7 @@ public class OrbTests
             var mods = PrefabUtility.GetPropertyModifications(component)?.Where(m => m.target == source).ToList();
             if (mods != null && mods.Count > 0) PrefabUtility.RevertObjectOverride(component, InteractionMode.AutomatedAction);
         }
-        Assert.AreEqual((4, true, true, 72, false), OrbInstaller.OptionsOf(placed.transform), "Kept on the orb's own Full Controller");
+        Assert.AreEqual((4, true, true, 72, false), OrbInstaller.OptionsOf(placed.transform), "Kept on N4N0's own Full Controller");
         Assert.AreEqual(1, placed.GetComponents(VrcFury.Component).Length, "The prefab's Full Controller replaced, not doubled");
         Assert.IsTrue(VrcFury.IsGlobalParameter(VrcFury.Features(placed).Single(f => f.kind == "FullController").feature, OrbInstaller.ScreenReplace));
 
@@ -663,8 +663,8 @@ public class OrbTests
         Assert.AreEqual(OrbInstaller.ScreenShaderName(72), renderer.sharedMaterial.shader.name);
     }
 
-    // The Light option (Docs/orb.md): a point light under the orb that everyone sees, in one of eight colours at a
-    // brightness; the orb takes its colour. Switched off, it goes.
+    // The Light option (Docs/orb.md): a point light under N4N0 that everyone sees, in one of eight colours at a
+    // brightness; N4N0 takes its colour. Switched off, it goes.
     [Test]
     public void TheLightOptionMakesTheOrbALightInItsColour()
     {
@@ -698,12 +698,12 @@ public class OrbTests
         CollectionAssert.AreEqual(Enumerable.Range(0, 8).Select(i => (float)i).ToArray(), colours.Select(c => c.value).ToArray());
         Assert.IsTrue(colours.All(c => c.parameter.name == OrbInstaller.LightColor));
 
-        // Played: pink at full brightness, then off; the orb is pink while lit, green again after.
+        // Played: pink at full brightness, then off; N4N0 is pink while lit, green again after.
         var root = Object.Instantiate(placed);
         SceneManager.MoveGameObjectToScene(root, scene);
-        graph = PlayableGraph.Create("Orb light test");
-        playable = AnimatorControllerPlayable.Create(graph, AssetDatabase.LoadAssetAtPath<AnimatorController>(shared + "/Orb.controller"));
-        AnimationPlayableOutput.Create(graph, "Orb", root.AddComponent<Animator>()).SetSourcePlayable(playable);
+        graph = PlayableGraph.Create("N4N0 light test");
+        playable = AnimatorControllerPlayable.Create(graph, AssetDatabase.LoadAssetAtPath<AnimatorController>(shared + "/N4N0.controller"));
+        AnimationPlayableOutput.Create(graph, "N4N0", root.AddComponent<Animator>()).SetSourcePlayable(playable);
         graph.SetTimeUpdateMode(DirectorUpdateMode.Manual); graph.Play();
         var played = root.transform.Find(OrbInstaller.LightObject).GetComponent<Light>();
         var body = root.transform.Find(OrbInstaller.Body).GetComponent<MeshRenderer>();
@@ -718,7 +718,7 @@ public class OrbTests
         Assert.AreEqual(OrbInstaller.LightColors[3].color.r, played.color.r, .01f);
         Assert.AreEqual(OrbInstaller.LightColors[3].color.g, played.color.g, .01f);
         Assert.AreEqual(OrbInstaller.LightBright, played.intensity, .01f);
-        Assert.IsTrue(OrbColour().r > .9f && OrbColour().g < .6f, "The orb is pink: " + OrbColour());
+        Assert.IsTrue(OrbColour().r > .9f && OrbColour().g < .6f, "N4N0 is pink: " + OrbColour());
         playable.SetBool(OrbInstaller.Light, false);
         Tick(20);
         Assert.IsFalse(played.gameObject.activeSelf);
@@ -729,8 +729,8 @@ public class OrbTests
         Assert.AreEqual((8, false, false, 72, false), OrbInstaller.OptionsOf(placed.transform));
     }
 
-    // A screen from before version 3 (fewer page slices) takes the current files when the orb's options change, and the
-    // controller then says its version: Orbiters desktop shows it the six-tile Home.
+    // A screen from before version 3 (fewer page slices) takes the current files when N4N0's options change, and the
+    // controller then says its version: Orbiters - N4N0 shows it the six-tile Home.
     [Test]
     public void AnOlderScreenTakesTheCurrentPagesWithItsVersion()
     {
@@ -755,7 +755,7 @@ public class OrbTests
         Assert.AreEqual(4, OrbInstaller.ScreenVersion);
     }
 
-    // The retro look is the screen's material alone: it stays through the orb's other options, and goes back.
+    // The retro look is the screen's material alone: it stays through N4N0's other options, and goes back.
     [Test]
     public void TheRetroLookIsTheScreensMaterialAndStaysThroughOptions()
     {
@@ -767,7 +767,7 @@ public class OrbTests
         OrbInstaller.SetLook(placed.transform, true);
         Assert.IsTrue(OrbInstaller.RetroOf(placed.transform));
         Assert.IsTrue(OrbInstaller.ScreenCurrent(renderer.sharedMaterial, 72));
-        StringAssert.EndsWith("Orb screen pages retro.png", AssetDatabase.GetAssetPath(renderer.sharedMaterial.GetTexture("_Pages")), "The retro look's own pages");
+        StringAssert.EndsWith("N4N0 screen pages retro.png", AssetDatabase.GetAssetPath(renderer.sharedMaterial.GetTexture("_Pages")), "The retro look's own pages");
         Assert.AreEqual(new Color32(2, 10, 4, 255), (Color32)renderer.sharedMaterial.GetColor("_Card"), "Its phosphor palette");
         Assert.AreEqual(new Color32(43, 227, 106, 255), (Color32)renderer.sharedMaterial.GetColor("_Accent"));
         StringAssert.StartsWith(OrbInstaller.ScreenFolder + "/", AssetDatabase.GetAssetPath(renderer.sharedMaterial));
@@ -825,9 +825,9 @@ public class OrbTests
     {
         var root = Object.Instantiate(prefab);
         SceneManager.MoveGameObjectToScene(root, scene);
-        graph = PlayableGraph.Create("Orb test");
-        playable = AnimatorControllerPlayable.Create(graph, AssetDatabase.LoadAssetAtPath<AnimatorController>(folder + "/Orb.controller"));
-        AnimationPlayableOutput.Create(graph, "Orb", root.AddComponent<Animator>()).SetSourcePlayable(playable);
+        graph = PlayableGraph.Create("N4N0 test");
+        playable = AnimatorControllerPlayable.Create(graph, AssetDatabase.LoadAssetAtPath<AnimatorController>(folder + "/N4N0.controller"));
+        AnimationPlayableOutput.Create(graph, "N4N0", root.AddComponent<Animator>()).SetSourcePlayable(playable);
         graph.SetTimeUpdateMode(DirectorUpdateMode.Manual); graph.Play();
         return root;
     }
@@ -844,7 +844,7 @@ public class OrbTests
     // A humanoid avatar in the preview scene whose eyes are this high: its root and head bone.
     private (Transform avatar, Transform head) Humanoid(float eyes)
     {
-        var root = new GameObject("Orb avatar");
+        var root = new GameObject("N4N0 avatar");
         SceneManager.MoveGameObjectToScene(root, scene);
         float k = eyes / 1.6f;
         var bones = new Dictionary<string, Transform>();

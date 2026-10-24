@@ -11,21 +11,21 @@ using Object = UnityEngine.Object;
 namespace Orbiters.Toolkit.Editor.VRChat
 {
     /// <summary>
-    /// Orb's light (Orbiters contracts' Docs/orb.md, the Light option on the orb's card): the orb becomes a light, for a
-    /// dark world or a photo. A point light under the orb, without shadows, lit in one of eight colours at a brightness
-    /// from 0 to 1; the orb takes the light's colour. Everyone around sees it (17 synced bits). Orbiters desktop sets it
-    /// from Orb's menu, and Orb › Light in the expressions menu does too.
+    /// N4N0's light (Orbiters contracts' Docs/orb.md, the Light option on N4N0's card): N4N0 becomes a light, for a
+    /// dark world or a photo. A point light under N4N0, without shadows, lit in one of eight colours at a brightness
+    /// from 0 to 1; N4N0 takes the light's colour. Everyone around sees it (17 synced bits). Orbiters - N4N0 sets it
+    /// from N4N0's menu, and N4N0 › Light in the expressions menu does too.
     /// </summary>
     public static partial class OrbInstaller
     {
         /// <summary>On (synced, not saved), its colour (an index of <see cref="LightColors"/>) and brightness (synced, saved).</summary>
-        public const string Light = "Orb/Light", LightColor = "Orb/Light/Color", LightLevel = "Orb/Light/Level";
+        public const string Light = "N4N0/Light", LightColor = "N4N0/Light/Color", LightLevel = "N4N0/Light/Level";
         public const float LightLevelDefault = .6f;
         internal const string LightObject = Hop + "/Light";
         // How far the light reaches at ReferenceEyes (Bind scales it with the avatar), and its intensity at level 0 and 1.
         internal const float LightRange = 5f, LightDim = .15f, LightBright = 3f;
 
-        /// <summary>The light's colours, as Orbiters desktop's menu names them (contracts <c>orb::LIGHT_COLORS</c>, sRGB).</summary>
+        /// <summary>The light's colours, as Orbiters - N4N0's menu names them (contracts <c>orb::LIGHT_COLORS</c>, sRGB).</summary>
         public static readonly IReadOnlyList<(string name, Color color)> LightColors = new[]
         {
             ("White", Srgb(255, 255, 255)), ("Warm", Srgb(255, 197, 143)), ("Sunset", Srgb(255, 128, 64)), ("Pink", Srgb(255, 105, 180)),
@@ -51,9 +51,9 @@ namespace Orbiters.Toolkit.Editor.VRChat
                 return;
             }
             if (existing != null) return;
-            var hop = orb.Find(Hop) ?? throw new InvalidOperationException("This orb was modified: add it again.");
+            var hop = orb.Find(Hop) ?? throw new InvalidOperationException("This N4N0 was modified: add it again.");
             var go = new GameObject("Light");
-            Undo.RegisterCreatedObjectUndo(go, "Orb light");
+            Undo.RegisterCreatedObjectUndo(go, "N4N0 light");
             go.transform.SetParent(hop, false);
             var light = go.AddComponent<UnityEngine.Light>();
             light.type = LightType.Point;
@@ -67,7 +67,7 @@ namespace Orbiters.Toolkit.Editor.VRChat
             go.SetActive(false);
         }
 
-        // As far as the orb is large: the light's range never scales with its object.
+        // As far as N4N0 is large: the light's range never scales with its object.
         private static void FitLight(UnityEngine.Light light) => light.range = LightRange * Mathf.Abs(light.transform.lossyScale.x);
 
         /// <summary>Fits a placed orb's light to how large Bind made it.</summary>
@@ -80,9 +80,9 @@ namespace Orbiters.Toolkit.Editor.VRChat
         }
 
         /// <summary>
-        /// The light's parameters, its layer and the Orb › Light submenu: on, a brightness radial and the colours. One state
+        /// The light's parameters, its layer and the N4N0 › Light submenu: on, a brightness radial and the colours. One state
         /// per colour, its brightness a blend of a dim and a bright clip; each state sets everything the layer animates (the
-        /// light's object, colour and intensity, the orb's colour), off included, so any Write Defaults leave nothing behind.
+        /// light's object, colour and intensity, N4N0's colour), off included, so any Write Defaults leave nothing behind.
         /// </summary>
         private static void LightController(AnimatorController controller, string folder, List<VRCExpressionParameters.Parameter> parameters, List<VRCExpressionsMenu.Control> controls)
         {
@@ -120,7 +120,7 @@ namespace Orbiters.Toolkit.Editor.VRChat
                 toggle.value = i;
                 return toggle;
             }).ToList();
-            AssetDatabase.CreateAsset(colours, AssetDatabase.GenerateUniqueAssetPath(folder + "/Orb light colours.asset"));
+            AssetDatabase.CreateAsset(colours, AssetDatabase.GenerateUniqueAssetPath(folder + "/N4N0 light colours.asset"));
             var colourMenu = Control("Colour", VRCExpressionsMenu.Control.ControlType.SubMenu, "");
             colourMenu.subMenu = colours;
             // A radial sets its first sub-parameter; its own parameter (none here) is only on while it is open.
@@ -128,13 +128,13 @@ namespace Orbiters.Toolkit.Editor.VRChat
             brightness.subParameters = new[] { new VRCExpressionsMenu.Control.Parameter { name = LightLevel } };
             var menu = ScriptableObject.CreateInstance<VRCExpressionsMenu>();
             menu.controls = new List<VRCExpressionsMenu.Control> { Control("Light", VRCExpressionsMenu.Control.ControlType.Toggle, Light), brightness, colourMenu };
-            AssetDatabase.CreateAsset(menu, AssetDatabase.GenerateUniqueAssetPath(folder + "/Orb light menu.asset"));
+            AssetDatabase.CreateAsset(menu, AssetDatabase.GenerateUniqueAssetPath(folder + "/N4N0 light menu.asset"));
             var light = Control("Light", VRCExpressionsMenu.Control.ControlType.SubMenu, "");
             light.subMenu = menu;
             controls.Add(light);
         }
 
-        // The light on, in a colour at an intensity; the orb takes the colour.
+        // The light on, in a colour at an intensity; N4N0 takes the colour.
         private static AnimationClip LightClip(string name, Color color, float intensity)
         {
             var clip = new AnimationClip { name = name };
@@ -148,7 +148,7 @@ namespace Orbiters.Toolkit.Editor.VRChat
             return clip;
         }
 
-        // The orb's colour (its core and halo): no other layer animates it.
+        // N4N0's colour (its core and halo): no other layer animates it.
         private static void OrbColour(AnimationClip clip, Color color)
         {
             Curve(clip, Body, typeof(MeshRenderer), "material._Color.r", color.r);
