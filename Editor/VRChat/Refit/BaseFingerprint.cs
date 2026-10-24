@@ -62,7 +62,7 @@ namespace Orbiters.Toolkit.Editor.VRChat.Refit
         public static async Task<BaseIdentity> IdentifyAsync(SkinnedMeshRenderer body, CancellationToken cancellation)
         {
             if (body == null || body.sharedMesh == null) return null;
-            string meshPath = AssetDatabase.GetAssetPath(body.sharedMesh);
+            string meshPath = AssetDatabase.GetAssetPath(WorkingMeshes.AssetOf(body.sharedMesh));
             if (string.IsNullOrEmpty(meshPath) || !meshPath.StartsWith("Assets/", StringComparison.Ordinal)) return null;
             string fullPath = Path.GetFullPath(meshPath);
             string token = AuthenticationService.GetAuth()?.token;
