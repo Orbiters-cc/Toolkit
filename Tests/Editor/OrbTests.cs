@@ -445,17 +445,35 @@ public class OrbTests
         Assert.IsFalse(screen.gameObject.activeSelf);
         Assert.IsFalse(screen.GetComponent<VRCParentConstraint>().FreezeToWorld, "Closed, it follows the head again");
 
-        // The menu's Menu toggle opens it at once, whatever the desktop does, and closes it when both are off.
+        // The menu's Menu toggle opens it at once, whatever the desktop does, and turning it off closes it, even while
+        // the desktop still has it open (the app quit or froze; in VRChat a driver then clears N4N0/Screen/Open).
         playable.SetBool(OrbInstaller.Menu, true);
         Tick(3);
         Assert.IsTrue(screen.gameObject.activeSelf, "N4N0/Menu shows the owner's screen");
         playable.SetBool(OrbInstaller.ScreenOpen, true);
         playable.SetBool(OrbInstaller.Menu, false);
         Tick(3);
-        Assert.IsTrue(screen.gameObject.activeSelf, "Still open while the desktop has it open");
+        Assert.IsFalse(screen.gameObject.activeSelf, "Menu off closes it, though the desktop left it open");
         playable.SetBool(OrbInstaller.ScreenOpen, false);
         Tick(3);
         Assert.IsFalse(screen.gameObject.activeSelf, "Both off: closed");
+
+        // One the desktop opened with Menu off stays until the desktop closes it, or Menu goes on and off.
+        playable.SetBool(OrbInstaller.ScreenOpen, true);
+        Tick(3);
+        Assert.IsTrue(screen.gameObject.activeSelf, "The desktop opens it");
+        playable.SetBool(OrbInstaller.Menu, true);
+        Tick(3);
+        playable.SetBool(OrbInstaller.Menu, false);
+        Tick(3);
+        Assert.IsFalse(screen.gameObject.activeSelf, "Menu on, then off, closes it");
+        playable.SetBool(OrbInstaller.ScreenOpen, false);
+        Tick(3);
+        var closing = AssetDatabase.LoadAssetAtPath<AnimatorController>(folder + "/N4N0.controller").layers.Single(l => l.name == "Screen")
+            .stateMachine.states.Single(s => s.state.name == "Closed by menu").state;
+        var driver = closing.behaviours.OfType<VRC.SDK3.Avatars.Components.VRCAvatarParameterDriver>().Single();
+        Assert.IsTrue(driver.localOnly);
+        Assert.AreEqual((OrbInstaller.ScreenOpen, 0f), (driver.parameters.Single().name, driver.parameters.Single().value), "Menu off clears what the desktop set");
 
         // In VR the overlay shows the menu, unless the screen replaces it.
         playable.SetInteger(OrbInstaller.VRMode, 1);

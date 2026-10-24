@@ -1,5 +1,12 @@
 # Orbiters Toolkit
 
+## 0.4.4 — 2026-10-24
+
+- N4N0's Menu toggle has the last word on its owner's screen: turning it off closes the screen and clears
+  `N4N0/Screen/Open` (a parameter driver), also when Orbiters - N4N0 opened it and then quit or froze, where the screen
+  stayed open and answered nothing. A screen the desktop opened with Menu off closes with Menu on, then off. Options
+  files in `N4N0/Menu 11`: an N4N0 built with this version, or one whose options change, gets the fix.
+
 ## 0.4.3 — 2026-10-24
 
 - **N4N0** is Orb's new name in everything the Toolkit puts in a project or on an avatar: the prefab and its object,
