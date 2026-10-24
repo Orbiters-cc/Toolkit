@@ -6,6 +6,12 @@
   `N4N0/Screen/Open` (a parameter driver), also when Orbiters - N4N0 opened it and then quit or froze, where the screen
   stayed open and answered nothing. A screen the desktop opened with Menu off closes with Menu on, then off. Options
   files in `N4N0/Menu 11`: an N4N0 built with this version, or one whose options change, gets the fix.
+- **Item settings** (`ItemSettings`): a creator's asset gets settings on its card, like N4N0's, from a file named like
+  its prefab with `.settings.json` beside it (`Jacket.prefab`, `Jacket.settings.json`). A setting is a switch or a
+  choice; an option shows or hides the item's objects (it hides what the setting's other options show), puts
+  materials in renderer slots and sets blendshapes, with a picture if it has one. What holds is read back from the
+  item, an update keeps it (matched by label), and `ItemSettings.Read` checks a file against its prefab. Orbiters'
+  documentation: Item settings.
 
 ## 0.4.3 — 2026-10-24
 
