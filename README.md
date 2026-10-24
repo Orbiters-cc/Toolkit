@@ -1,5 +1,32 @@
 # Orbiters Toolkit
 
+## 0.4.3 — 2026-10-24
+
+- **N4N0** is Orb's new name in everything the Toolkit puts in a project or on an avatar: the prefab and its object,
+  files and folders (`Assets/Orbiters/N4N0/…`), shaders, menu and parameters (`N4N0/…`), contact tags, screen pictures
+  and texts. Orbiters desktop is Orbiters - N4N0, and texts name the Mixer console, Mixer Git and Avatar Gizmos (were the
+  Logger, Unit Git and XRay Gizmos). The code keeps its names (`OrbInstaller`, `OrbState`, the `Orb*` templates,
+  `IsOrb`, the avatar manifest's `orb` keys); the sphere on the tether's tip is `Ball`. An avatar with Orb needs N4N0
+  installed again.
+- **Colour thumbnails** on N4N0's projected screen (contracts 0.6.0): 64 × 36 pictures, blurred as their first layer
+  arrives and sharper with each next one, decoded by straight-line shader code generated from `OrbThumbnail.json`
+  (about 0.4 ms per million pixels at 128 bytes on an RTX 4080). A **Thumbnail size** option on N4N0's card picks
+  72 bytes (as before) or 128 (sharper, slower to arrive, with 8 text slots or more).
+- A **Light** option on N4N0's card: a point light under it in eight colours at a synced level, N4N0 › Light in the
+  menu (17 synced bits; any light makes the avatar's PC performance rank Poor, and Quest leaves it out). **Screen
+  version 3** adds the six-tile Home and the Music and Light pages.
+- N4N0's screen shows its **back** from behind, mirrors included, and elements Orbiters - N4N0 greys out fade into the
+  card. A **Look** option gives the screen a **retro** look: a cassette-futurism terminal with its own pages, a phosphor
+  palette, hover outlines, inverted presses, bracketed choices and thumbnails as dithered green dots; the option shows a
+  picture of each look on the card (`AttachmentOption.ChoicePictures`).
+- N4N0's screen **points with rays** in VR (screen version 4): a VRChat raycast from each index fingertip meets the
+  screen, its owner sees a beam and a bead, and a fingertip within 2.1 cm presses (owner only, while it is open).
+  Shared files in `N4N0/Screen 6`, options in `N4N0/Menu 10`.
+- **Stick to the skin** (`OrbitersAttachment.stickToSkin`, `SkinStick`): a small accessory on the skin follows the skin
+  under it, through one VRChat Parent Constraint on the bones there, and the body's blendshapes there.
+- `WorkingMeshes`: a tool editing a working copy of a mesh (Mixer) names the original, so the base fingerprint reads the
+  original model while a session edits the body.
+
 ## 0.4.2 — 2026-10-21
 
 - **Orb**, the Orbiters companion (`OrbInstaller.CreatePrefab(folder, textSync)`, Orbiters contracts' Docs/orb.md): a
