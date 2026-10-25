@@ -7,6 +7,19 @@
   (`OrbitersBrowserLogin.Callback`: a port the system picks and a random path); the tool trades that one-time code,
   with the secret only it holds, for its credential. No code to type, and a link someone else sends connects nothing.
   Needs the Orbiters server's new sign-in; older Toolkit versions can no longer sign in once it is live.
+- **N4N0's menu looks projected and follows its owner**, as N4N0's speech panel does: the page's dark card is a tinted,
+  see-through plate with a bright edge, a glow past it, a light from the top and faint scan lines, front and back,
+  and N4N0's beam reaches its corners (a second part of the now skinned screen, `OrbBeam`). It no longer freezes in
+  the world: it hangs from a PhysBone swing rooted at the eyes (`Head/Screen swing`), lagging behind the head and
+  the avatar's turns and settling in front of them. The retro look keeps its own tube.
+- **Link cards** (`OrbInstaller.Card`): Orbiters - N4N0 drops the screen in the world with a link on it; it stays
+  where it is for its owner while `N4N0/Screen/Drop` is on, even in VR without Replace and through Menu off, and for
+  everyone else from text pointer 253 until 254. Meanwhile it carries an `N4N0Card` contact sender, which every
+  N4N0's hand receivers feel (`N4N0/Card/TouchL`, `TouchR`, local): a grab copies the link. Screen blocks now stay
+  below pointer 253.
+- **Screen version 5**: the seven-tile Home (with States), the States page and the link card's page, from
+  Orbiters - N4N0's new pictures (16 page slices). Screen files revision 7, options files in `N4N0/Menu 12`. An N4N0
+  built before this version must be updated as a whole (My Avatar) before its options change.
 
 ## 0.4.4 — 2026-10-24
 

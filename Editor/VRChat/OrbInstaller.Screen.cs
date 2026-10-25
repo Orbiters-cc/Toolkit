@@ -10,6 +10,7 @@ using VRC.Dynamics;
 using VRC.SDK3.Avatars.ScriptableObjects;
 using VRC.SDK3.Dynamics.Constraint.Components;
 using VRC.SDK3.Dynamics.Contact.Components;
+using VRC.SDK3.Dynamics.PhysBone.Components;
 using static Orbiters.Toolkit.Editor.VRChat.HeldPropRig;
 using Object = UnityEngine.Object;
 
@@ -19,8 +20,9 @@ namespace Orbiters.Toolkit.Editor.VRChat
     /// N4N0's projected screen (Orbiters contracts, Docs/orb.md, Screen), on every N4N0: N4N0's menu shown in front of its
     /// owner, where everyone around sees it. Its owner's opens only in VRChat's desktop mode or with the N4N0 card's
     /// "Replace Orbiters overlay" option (<see cref="ScreenReplace"/>); in VR without it, Orbiters - N4N0's SteamVR overlay
-    /// shows the menu instead. When it opens it stays where it appeared (frozen in the world) so a hand reaching for it
-    /// never pushes it away.
+    /// shows the menu instead. It looks projected, as N4N0's speech panel, N4N0's beam reaching its corners, and it follows
+    /// its owner loosely, as N4N0 does: held to a PhysBone swing rooted at the eyes (<see cref="ScreenRig"/>), it lags behind
+    /// the head and the avatar's turns and settles in front of them.
     /// <para>
     /// The desktop writes the screen's memory, 744 bytes (1024 with 128-byte thumbnails, <see cref="ScreenThumbnailBytes"/>)
     /// kept two to an animated animator parameter (each word b0 + 256 × b1, so a cleared word is two zero bytes): for its owner through local parameters (<see cref="ScreenPointer"/>
@@ -58,9 +60,9 @@ namespace Orbiters.Toolkit.Editor.VRChat
         /// <summary>
         /// The screen's version (the avatar manifest's <c>orb.screen</c>, and <see cref="ScreenVersionParameter"/>'s default):
         /// 2 colour thumbnails, 3 the six-tile Home with the Music and Light pages, 4 pointing with rays from the fingertips
-        /// (<see cref="AddPointing"/>).
+        /// (<see cref="AddPointing"/>), 5 the seven-tile Home with the States page and the link card (<see cref="AddCard"/>).
         /// </summary>
-        public const int ScreenVersion = 4;
+        public const int ScreenVersion = 5;
         /// <summary>
         /// Local, not saved, set by no menu: the screen's version (<see cref="ScreenVersion"/>), which Orbiters - N4N0 reads
         /// to know the pages the screen has. Screens before version 3 lack it.
@@ -72,8 +74,16 @@ namespace Orbiters.Toolkit.Editor.VRChat
         /// <summary><see cref="ScreenPointer"/>: the owner's screen memory clears.</summary>
         public const int ScreenLocalClear = 255;
         internal const string ScreenObject = Head + "/Screen";
+        /// <summary>
+        /// The screen's swing: a PhysBone whose root, at the eyes, turns towards its one bone at the screen's middle (a root
+        /// may turn, not move); the screen is held to the root, so it swings around the eyes after the head and the
+        /// avatar's turns, and settles. Nobody can grab it and nothing collides with it.
+        /// </summary>
+        internal const string ScreenRig = Head + "/Screen swing", ScreenArm = ScreenRig + "/Arm";
         // The screen, 16:9, and where its middle sits from the eyes (right, up, forward): low and close enough to touch.
         internal const float ScreenWidth = .48f, ScreenHeight = .27f;
+        // The mesh's margin past the screen's border, where its glow fades out (the shader's).
+        internal const float ScreenGlow = .008f;
         internal static readonly Vector3 ScreenFromEyes = new Vector3(0, -.2f, .42f);
         // The touch points (orbiters-orb's menu::touch): past the top corners, under the bottom's middle, behind the middle;
         // their radius reaches the far corner of the screen.
@@ -87,16 +97,17 @@ namespace Orbiters.Toolkit.Editor.VRChat
         // size its own files lack.
         internal const string ScreenFolder = "Assets/Orbiters/N4N0/Screen " + ScreenRevision;
         // The screen files' revision, the shader's OrbScreen tag: 5 draws the back as a card ("N4N0 menu, look at the other
-        // side"), 6 the retro look's own pages and live parts.
-        internal const string ScreenRevision = "6";
+        // side"), 6 the retro look's own pages and live parts, 7 the projected look and N4N0's beam on a skinned screen.
+        internal const string ScreenRevision = "7";
         private const string ScreenShaderTemplate = "Packages/orbiters.toolkit/Editor/VRChat/OrbScreen.shader.txt";
+        private const string BeamShaderTemplate = "Packages/orbiters.toolkit/Editor/VRChat/OrbBeam.shader.txt";
         // Drawn by Orbiters - N4N0 (`orbiters-desktop --orb-menu`) from the menu's layout: the page pictures (a slice per
         // page, the first empty) and the layout table.
         private const string ScreenPagesTemplate = "Packages/orbiters.toolkit/Editor/VRChat/OrbScreenPages.png.bytes";
         // The same pages in the retro look (`orbiters-desktop --orb-menu`'s "N4N0 screen pages retro.png").
         private const string ScreenPagesRetroTemplate = "Packages/orbiters.toolkit/Editor/VRChat/OrbScreenPagesRetro.png.bytes";
         private const string ScreenLayoutTemplate = "Packages/orbiters.toolkit/Editor/VRChat/OrbScreenLayout.png.bytes";
-        internal const int ScreenPageSlices = 13;
+        internal const int ScreenPageSlices = 16;
 
         public static string ScreenValue(int index) => ScreenValuePrefix + index;
         public static string ScreenTouch(bool right, int index) => ScreenTouchPrefix + (right ? "R" : "L") + index;
@@ -172,10 +183,44 @@ namespace Orbiters.Toolkit.Editor.VRChat
         /// <summary>Whether a placed orb's screen has the retro look (a green phosphor terminal).</summary>
         public static bool RetroOf(Transform orb)
         {
-            var screen = orb != null ? orb.Find(ScreenObject) : null;
-            var material = screen != null && screen.TryGetComponent(out MeshRenderer renderer) ? renderer.sharedMaterial : null;
+            var renderer = ScreenRenderer(orb);
+            var material = renderer != null ? renderer.sharedMaterial : null;
             return material != null && material.HasProperty(RetroProperty) && material.GetFloat(RetroProperty) > .5f;
         }
+
+        /// <summary>A placed orb's screen renderer (its first material draws the pages, its second N4N0's beam), or null.</summary>
+        internal static SkinnedMeshRenderer ScreenRenderer(Transform orb)
+        {
+            var screen = orb != null ? orb.Find(ScreenObject) : null;
+            // TryGetComponent: a real null when missing (an older N4N0's screen has a MeshRenderer), not Unity's fake one.
+            return screen != null && screen.TryGetComponent(out SkinnedMeshRenderer renderer) ? renderer : null;
+        }
+
+        /// <summary>
+        /// N4N0's beam towards the screen in <paramref name="folder"/> (made once), in Orbiters' green or the retro
+        /// look's phosphor.
+        /// </summary>
+        internal static Material ScreenBeam(string folder = ScreenFolder, bool retro = false)
+        {
+            string path = folder + "/N4N0 screen beam" + (retro ? " retro" : "") + ".mat";
+            var beam = AssetDatabase.LoadAssetAtPath<Material>(path);
+            if (beam != null && beam.shader != null && beam.shader.isSupported) return beam;
+            var shader = AssetDatabase.LoadAssetAtPath<Shader>(folder + "/N4N0 beam.shader") ?? CopyShader(BeamShaderTemplate, folder + "/N4N0 beam.shader");
+            beam = new Material(shader) { name = "N4N0 screen beam" + (retro ? " retro" : "") };
+            if (retro) beam.SetColor("_EdgeColor", RetroColours.First(c => c.name == "_Accent").colour);
+            // Softer than the speech panel's: the menu is larger and nearer its owner's eyes, and stays open.
+            beam.SetFloat("_Beam", .6f);
+            // Under the screen, which is drawn over its end.
+            beam.renderQueue = (int)RenderQueue.Transparent - 1;
+            AssetDatabase.DeleteAsset(path);
+            AssetDatabase.CreateAsset(beam, path);
+            AssetDatabase.SaveAssets();
+            return beam;
+        }
+
+        // Both materials of a screen renderer: the pages, then the beam of the same look.
+        private static void SetScreenMaterials(SkinnedMeshRenderer renderer, Material pages, bool retro) =>
+            renderer.sharedMaterials = new[] { pages, ScreenBeam(System.IO.Path.GetDirectoryName(AssetDatabase.GetAssetPath(pages)).Replace('\\', '/'), retro) };
 
         /// <summary>
         /// Gives a placed orb's screen the retro look or Orbiters' own (with Undo): the shared material of its thumbnail size
@@ -183,16 +228,18 @@ namespace Orbiters.Toolkit.Editor.VRChat
         /// </summary>
         public static void SetLook(Transform orb, bool retro)
         {
-            var screen = orb.Find(ScreenObject);
-            var renderer = screen != null ? screen.GetComponent<MeshRenderer>() : null;
-            if (renderer == null) throw new InvalidOperationException("This N4N0 has no screen: choose its options again.");
+            var renderer = ScreenRenderer(orb);
+            if (renderer == null) throw new InvalidOperationException(HasScreen(orb) ? OlderScreen : "This N4N0 has no screen: choose its options again.");
             int thumbnailBytes = OptionsOf(orb).thumbnailBytes;
             if (RetroOf(orb) == retro && ScreenCurrent(renderer.sharedMaterial, thumbnailBytes)) return;
             var (_, material) = ScreenAssets(ScreenFolder, thumbnailBytes, retro);
             Undo.RecordObject(renderer, "N4N0 look");
-            renderer.sharedMaterial = material;
+            SetScreenMaterials(renderer, material, retro);
             PrefabUtility.RecordPrefabInstancePropertyModifications(renderer);
         }
+
+        /// <summary>A screen from before the skinned one (revision 7): the N4N0 it belongs to must be updated as a whole.</summary>
+        internal const string OlderScreen = "This N4N0 is older than Orbiters Toolkit: update it in My Avatar first.";
 
         private static (Mesh mesh, Material material) ModernScreenAssets(string folder, int thumbnailBytes)
         {
@@ -293,15 +340,40 @@ namespace Orbiters.Toolkit.Editor.VRChat
             return AssetDatabase.LoadAssetAtPath<Texture2D>(path);
         }
 
-        // A quad facing its owner (who looks along +Z), its first UV the page (0, 0 bottom left).
+        /// <summary>
+        /// The screen's skinned mesh. Its first part is a quad facing its owner (who looks along +Z), bound to the screen,
+        /// with a margin for the glow: its first UV is the page (0, 0 bottom left), past 0 and 1 in the margin. Its second
+        /// is N4N0's beam, a pyramid from N4N0 to the screen's corners: the apex at the origin of the second bone (N4N0's
+        /// emitter), the corners bound to the screen; its second UV is where a vertex is across its side and along the beam.
+        /// Both bind poses are the identity, so one mesh serves every screen wherever its N4N0 floats.
+        /// </summary>
         private static Mesh ScreenMesh()
         {
-            float x = ScreenWidth / 2, y = ScreenHeight / 2;
+            float x = ScreenWidth / 2, y = ScreenHeight / 2, u = ScreenGlow / ScreenWidth, v = ScreenGlow / ScreenHeight;
+            var vertices = new List<Vector3>(); var page = new List<Vector2>(); var beam = new List<Vector2>(); var weights = new List<BoneWeight>();
+            void Add(Vector3 position, Vector2 onPage, Vector2 along, int bone)
+            {
+                vertices.Add(position); page.Add(onPage); beam.Add(along); weights.Add(new BoneWeight { boneIndex0 = bone, weight0 = 1 });
+            }
+            float gx = x + ScreenGlow, gy = y + ScreenGlow;
+            Add(new Vector3(-gx, -gy, 0), new Vector2(-u, -v), Vector2.zero, 0); Add(new Vector3(gx, -gy, 0), new Vector2(1 + u, -v), Vector2.zero, 0);
+            Add(new Vector3(-gx, gy, 0), new Vector2(-u, 1 + v), Vector2.zero, 0); Add(new Vector3(gx, gy, 0), new Vector2(1 + u, 1 + v), Vector2.zero, 0);
+            var quad = new List<int> { 2, 3, 1, 2, 1, 0 };
+            var ring = new[] { new Vector3(-x, y, 0), new Vector3(x, y, 0), new Vector3(x, -y, 0), new Vector3(-x, -y, 0) };
+            var sides = new List<int>();
+            for (int k = 0; k < 4; k++)
+            {
+                sides.Add(vertices.Count); Add(Vector3.zero, Vector2.zero, new Vector2(.5f, 0), 1);
+                sides.Add(vertices.Count); Add(ring[k], Vector2.zero, new Vector2(0, 1), 0);
+                sides.Add(vertices.Count); Add(ring[(k + 1) % 4], Vector2.zero, new Vector2(1, 1), 0);
+            }
             var mesh = new Mesh { name = "N4N0 screen" };
-            mesh.SetVertices(new List<Vector3> { new Vector3(-x, -y, 0), new Vector3(x, -y, 0), new Vector3(-x, y, 0), new Vector3(x, y, 0) });
-            mesh.SetUVs(0, new List<Vector2> { new Vector2(0, 0), new Vector2(1, 0), new Vector2(0, 1), new Vector2(1, 1) });
-            mesh.SetNormals(Enumerable.Repeat(Vector3.back, 4).ToList());
-            mesh.SetTriangles(new[] { 2, 3, 1, 2, 1, 0 }, 0);
+            mesh.SetVertices(vertices); mesh.SetUVs(0, page); mesh.SetUVs(1, beam);
+            mesh.SetNormals(Enumerable.Repeat(Vector3.back, vertices.Count).ToList());
+            mesh.subMeshCount = 2;
+            mesh.SetTriangles(quad, 0); mesh.SetTriangles(sides, 1);
+            mesh.boneWeights = weights.ToArray();
+            mesh.bindposes = new[] { Matrix4x4.identity, Matrix4x4.identity };
             mesh.RecalculateBounds();
             return mesh;
         }
@@ -310,8 +382,8 @@ namespace Orbiters.Toolkit.Editor.VRChat
 
         /// <summary>
         /// Adds the screen to a placed orb (with Undo): in front of its owner's eyes, hidden until the animator shows it,
-        /// with its touch points, for thumbnails of <paramref name="thumbnailBytes"/>. Its place follows the panel's (both
-        /// are fitted from the eyes).
+        /// held to its swing (<see cref="ScreenRig"/>), with N4N0's beam and its touch points, for thumbnails of
+        /// <paramref name="thumbnailBytes"/>. Its place follows the panel's (both are fitted from the eyes).
         /// </summary>
         internal static Transform AddScreen(Transform orb, string folder = ScreenFolder, int thumbnailBytes = DefaultThumbnailBytes)
         {
@@ -319,20 +391,41 @@ namespace Orbiters.Toolkit.Editor.VRChat
             if (existing != null) return existing;
             var head = orb.Find(Head);
             var panel = orb.Find(Panel);
-            if (head == null || panel == null) throw new InvalidOperationException("This N4N0 was modified: add it again.");
+            var emitter = orb.Find(Emitter);
+            if (head == null || panel == null || emitter == null) throw new InvalidOperationException("This N4N0 was modified: add it again.");
             var (mesh, material) = ScreenAssets(folder, thumbnailBytes);
+
+            // The swing: its root at the eyes, its bone at the screen's middle (PlaceScreen puts them there), simulated
+            // even while the screen is closed so it opens settled. Loose like N4N0's tether, but steadier: it lags, sways
+            // a little and settles, never further than 30° from straight ahead.
+            var rig = Child(head, "Screen swing");
+            Undo.RegisterCreatedObjectUndo(rig.gameObject, "N4N0 screen");
+            Child(rig, "Arm");
+            var swing = rig.gameObject.AddComponent<VRCPhysBone>();
+            swing.rootTransform = rig; swing.integrationType = VRCPhysBoneBase.IntegrationType.Simplified;
+            swing.pull = .2f; swing.spring = .3f; swing.gravity = 0; swing.gravityFalloff = 0;
+            swing.immobileType = VRCPhysBoneBase.ImmobileType.AllMotion; swing.immobile = .3f;
+            swing.limitType = VRCPhysBoneBase.LimitType.Angle; swing.maxAngleX = 30;
+            swing.radius = 0; swing.allowCollision = VRCPhysBoneBase.AdvancedBool.False;
+            swing.allowGrabbing = VRCPhysBoneBase.AdvancedBool.False; swing.allowPosing = VRCPhysBoneBase.AdvancedBool.False;
+            // The arm is the chain's only bone: its end, a little further ahead.
+            swing.endpointPosition = Vector3.forward * .05f;
+
             var screen = new GameObject("Screen");
             Undo.RegisterCreatedObjectUndo(screen, "N4N0 screen");
             screen.transform.SetParent(head, false);
             screen.SetActive(false);
-            screen.AddComponent<MeshFilter>().sharedMesh = mesh;
-            var renderer = screen.AddComponent<MeshRenderer>();
-            renderer.sharedMaterial = material;
+            var renderer = screen.AddComponent<SkinnedMeshRenderer>();
+            renderer.sharedMesh = mesh;
+            renderer.bones = new[] { screen.transform, emitter }; renderer.rootBone = screen.transform; renderer.quality = SkinQuality.Bone1;
+            SetScreenMaterials(renderer, material, false);
+            // The screen with its glow, and N4N0 on its tether beside the head wherever it sways.
+            renderer.localBounds = new Bounds(new Vector3(.13f, .11f, -.15f), Vector3.one * 1.2f);
             Quiet(renderer);
-            // Follows the head (its parent) while closed; frozen in the world while open.
+            // Held to the swing's root, where PlaceScreen fits it.
             var hold = screen.AddComponent<VRCParentConstraint>();
-            hold.Sources.Add(new VRCConstraintSource(head, 1));
-            hold.Locked = true; hold.IsActive = true; hold.FreezeToWorld = false; hold.RebakeOffsetsWhenUnfrozen = false;
+            hold.Sources.Add(new VRCConstraintSource(rig, 1));
+            hold.Locked = true; hold.IsActive = true;
             // Each hand's bead, on the touch points in the screen's plane.
             for (int hand = 0; hand < 2; hand++)
             for (int i = 0; i < PointingTouchPoints; i++)
@@ -360,6 +453,7 @@ namespace Orbiters.Toolkit.Editor.VRChat
             }
             PlaceScreen(orb);
             AddPointing(orb);
+            AddCard(orb);
             return screen.transform;
         }
 
@@ -369,13 +463,13 @@ namespace Orbiters.Toolkit.Editor.VRChat
         /// </summary>
         internal static void SetScreenThumbnails(Transform orb, int thumbnailBytes)
         {
-            var screen = orb.Find(ScreenObject);
-            var renderer = screen != null ? screen.GetComponent<MeshRenderer>() : null;
+            var renderer = ScreenRenderer(orb);
             if (renderer == null) return;
             if (ScreenCurrent(renderer.sharedMaterial, thumbnailBytes)) return;
-            var (_, material) = ScreenAssets(ScreenFolder, thumbnailBytes, RetroOf(orb));
+            bool retro = RetroOf(orb);
+            var (_, material) = ScreenAssets(ScreenFolder, thumbnailBytes, retro);
             Undo.RecordObject(renderer, "N4N0 thumbnail size");
-            renderer.sharedMaterial = material;
+            SetScreenMaterials(renderer, material, retro);
             PrefabUtility.RecordPrefabInstancePropertyModifications(renderer);
         }
 
@@ -389,22 +483,28 @@ namespace Orbiters.Toolkit.Editor.VRChat
             material.GetTag("OrbScreen", false) == ScreenRevision &&
             material.HasProperty("_Pages") && material.GetTexture("_Pages") is Texture2DArray pages && pages.depth == ScreenPageSlices;
 
-        // The screen before the eyes, which the panel's place tells (the panel sits at eyes + PanelFromEyes).
+        // The screen before the eyes, which the panel's place tells (the panel sits at eyes + PanelFromEyes): the swing's root
+        // at the eyes, its arm and the screen at the screen's middle.
         private static void PlaceScreen(Transform orb)
         {
             var screen = orb.Find(ScreenObject);
             var panel = orb.Find(Panel);
-            if (screen == null || panel == null) return;
+            var rig = orb.Find(ScreenRig);
+            var arm = orb.Find(ScreenArm);
+            if (screen == null || panel == null || rig == null || arm == null) return;
             var eyes = panel.localPosition - PanelFromEyes;
             var hold = screen.GetComponent<VRCParentConstraint>();
-            Undo.RecordObjects(new Object[] { screen, hold }, "Fit orb screen");
+            Undo.RecordObjects(new Object[] { screen, hold, rig, arm }, "Fit orb screen");
+            rig.localPosition = eyes; rig.localRotation = Quaternion.identity;
+            arm.localPosition = ScreenFromEyes; arm.localRotation = Quaternion.identity;
             screen.localPosition = eyes + ScreenFromEyes;
             screen.localRotation = Quaternion.identity;
             if (hold != null && hold.Sources.Count > 0)
             {
+                // In the root's frame without its scale, as VRChat's constraints take offsets.
                 var source = hold.Sources[0];
-                source.ParentPositionOffset = screen.localPosition;
-                source.ParentRotationOffset = Vector3.zero;
+                source.ParentPositionOffset = Quaternion.Inverse(rig.rotation) * (screen.position - rig.position);
+                source.ParentRotationOffset = (Quaternion.Inverse(rig.rotation) * screen.rotation).eulerAngles;
                 hold.Sources[0] = source;
                 EditorUtility.SetDirty(hold);
             }
@@ -420,6 +520,7 @@ namespace Orbiters.Toolkit.Editor.VRChat
         private static void ScreenController(AnimatorController controller, int textSync, List<VRCExpressionParameters.Parameter> parameters, bool replace, int thumbnailBytes)
         {
             controller.AddParameter(ScreenOpen, AnimatorControllerParameterType.Bool);
+            controller.AddParameter(ScreenDrop, AnimatorControllerParameterType.Bool);
             controller.AddParameter(new AnimatorControllerParameter { name = ScreenReplace, type = AnimatorControllerParameterType.Bool, defaultBool = replace });
             controller.AddParameter(new AnimatorControllerParameter { name = ScreenThumbnailBytes, type = AnimatorControllerParameterType.Int, defaultInt = thumbnailBytes });
             controller.AddParameter(new AnimatorControllerParameter { name = ScreenVersionParameter, type = AnimatorControllerParameterType.Int, defaultInt = ScreenVersion });
@@ -443,6 +544,7 @@ namespace Orbiters.Toolkit.Editor.VRChat
             ScreenLayer(controller, textSync, thumbnailBytes);
             GazeDotLayer(controller);
             PointingController(controller, parameters);
+            CardController(controller, parameters);
 
             parameters.Add(Parameter(ScreenOpen, synced: false));
             // Not saved: a new upload's option always holds.
@@ -484,11 +586,14 @@ namespace Orbiters.Toolkit.Editor.VRChat
         /// </summary>
         internal static (int first, int blocks) ScreenPointers(int textSync, int thumbnailBytes) => (Cells / textSync + 1, (ScreenBytes(thumbnailBytes) + textSync - 1) / textSync);
 
-        /// <summary>Whether everyone else's screen can be written through the text channel: its blocks stay below pointer 254.</summary>
+        /// <summary>
+        /// Whether everyone else's screen can be written through the text channel: its blocks stay below pointer 253 (the
+        /// dropped card's; 254 closes it).
+        /// </summary>
         public static bool ScreenFits(int textSync, int thumbnailBytes)
         {
             var (first, blocks) = ScreenPointers(textSync, thumbnailBytes);
-            return first + blocks - 1 < PointerScreenClose;
+            return first + blocks - 1 < PointerCardDropped;
         }
 
         // The synced pointer as a float (SyncBlock), only on the clients of everyone else: one state per screen block.
@@ -547,10 +652,9 @@ namespace Orbiters.Toolkit.Editor.VRChat
             var children = new List<ChildMotion>();
             void Add(List<ChildMotion> list, Motion motion, string weight) => list.Add(new ChildMotion { motion = motion, directBlendParameter = weight, timeScale = 1 });
 
-            // Shown, frozen in the world.
+            // Shown.
             var shown = new AnimationClip { name = "Screen shown" };
             Curve(shown, ScreenObject, typeof(GameObject), "m_IsActive", 1);
-            Curve(shown, ScreenObject, typeof(VRCParentConstraint), "FreezeToWorld", 1);
             Add(children, shown, One);
             // The digits.
             for (int i = 0; i < textSync; i++) Add(children, Digit(SyncDigit(i), TextLate(i, ValueLag)), One);
@@ -599,7 +703,6 @@ namespace Orbiters.Toolkit.Editor.VRChat
 
             var hidden = new AnimationClip { name = "Screen hidden" };
             Curve(hidden, ScreenObject, typeof(GameObject), "m_IsActive", 0);
-            Curve(hidden, ScreenObject, typeof(VRCParentConstraint), "FreezeToWorld", 0);
             var closed = HeldPropRig.State(controller, machine, "Closed", hidden);
             var open = HeldPropRig.State(controller, machine, "Open", tree);
             // The owner's screen while the menu's Menu toggle is on, and after it is turned off: turning Menu off always
@@ -608,8 +711,14 @@ namespace Orbiters.Toolkit.Editor.VRChat
             var openByMenu = HeldPropRig.State(controller, machine, "Open by menu", tree);
             var closedByMenu = HeldPropRig.State(controller, machine, "Closed by menu", hidden);
             Drive(closedByMenu, (ScreenOpen, false));
-            foreach (var state in new[] { closed, open, openByMenu, closedByMenu }) state.writeDefaultValues = true;
+            // The owner's dropped link card (N4N0/Screen/Drop): shown whatever the mode, Replace and the Menu toggle say, and
+            // before anything else; ended, it closes, then opens again as they say.
+            var dropped = HeldPropRig.State(controller, machine, "Dropped", tree);
+            foreach (var state in new[] { closed, open, openByMenu, closedByMenu, dropped }) state.writeDefaultValues = true;
             machine.defaultState = closed;
+            foreach (var state in new[] { closed, open, openByMenu, closedByMenu })
+                Transition(state, dropped, ("IsLocal", AnimatorConditionMode.If, 0), (ScreenDrop, AnimatorConditionMode.If, 0));
+            Transition(dropped, closed, ("IsLocal", AnimatorConditionMode.If, 0), (ScreenDrop, AnimatorConditionMode.IfNot, 0));
             var (first, blocks) = ScreenPointers(textSync, thumbnailBytes);
             // The owner's opens at once when the Menu toggle is on (a blank screen then says the desktop does not answer)
             // or when the desktop opens it, in desktop mode or with Replace (in VR without it the overlay shows the menu).
@@ -634,7 +743,7 @@ namespace Orbiters.Toolkit.Editor.VRChat
         {
             var clip = Hidden(new AnimationClip { name = "Word " + k + " " + value });
             Curve(clip, "", typeof(Animator), Word(k), value);
-            Curve(clip, ScreenObject, typeof(MeshRenderer), WordProperty(k), value);
+            Curve(clip, ScreenObject, typeof(SkinnedMeshRenderer), WordProperty(k), value);
             return clip;
         }
 

@@ -241,6 +241,7 @@ namespace Orbiters.Toolkit.Editor.VRChat
             sight.Sources[0] = new VRCConstraintSource(bone, 1, turn * (gaze.position - bone.position), (turn * gaze.rotation).eulerAngles);
             PlaceScreen(orb);
             BindPointers(orb, avatar, animator, size);
+            BindCardHands(orb, animator, size);
             FitLight(orb);
             EditorUtility.SetDirty(follow); EditorUtility.SetDirty(level); EditorUtility.SetDirty(sight);
         }

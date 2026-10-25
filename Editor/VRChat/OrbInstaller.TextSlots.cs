@@ -28,7 +28,7 @@ namespace Orbiters.Toolkit.Editor.VRChat
         // The controller, parameters and menu of each choice of options, shared by every N4N0 switched to it (they name no
         // object of their own: their curves follow paths below N4N0).
         // A new menu or parameters get a new folder: orbs switched earlier keep the files they use.
-        internal const string OptionsFolder = "Assets/Orbiters/N4N0/Menu 11/";
+        internal const string OptionsFolder = "Assets/Orbiters/N4N0/Menu 12/";
 
         [InitializeOnLoadMethod]
         private static void RegisterOrbOptions() => AttachmentHooks.RegisterOptions(root => FindAll(root).SelectMany(orb =>
@@ -176,6 +176,8 @@ namespace Orbiters.Toolkit.Editor.VRChat
                 HasPointing(orb))
                 return;
             if (found.menuIndex < 0) throw new InvalidOperationException("This N4N0's menu was changed: add it again.");
+            // The controllers made here drive the skinned screen: an older N4N0's screen would stop showing anything.
+            if (HasScreen(orb) && ScreenRenderer(orb) == null) throw new InvalidOperationException(OlderScreen);
             AddScreen(orb, ScreenFolder, thumbnailBytes);
             SetScreenThumbnails(orb, thumbnailBytes);
             // A screen from before version 4 points with rays from now on, held to the avatar's fingertips.
@@ -206,8 +208,7 @@ namespace Orbiters.Toolkit.Editor.VRChat
         // Whether N4N0's screen draws this version's pages with thumbnails of this size.
         private static bool ScreenDraws(Transform orb, int thumbnailBytes)
         {
-            var screen = orb.Find(ScreenObject);
-            var renderer = screen != null ? screen.GetComponent<MeshRenderer>() : null;
+            var renderer = ScreenRenderer(orb);
             return renderer != null && ScreenCurrent(renderer.sharedMaterial, thumbnailBytes);
         }
 

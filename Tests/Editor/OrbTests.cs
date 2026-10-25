@@ -15,6 +15,7 @@ using UnityEngine.Playables;
 using UnityEngine.SceneManagement;
 using VRC.SDK3.Avatars.Components;
 using VRC.SDK3.Avatars.ScriptableObjects;
+using VRC.Dynamics;
 using VRC.SDK3.Dynamics.Constraint.Components;
 using VRC.SDK3.Dynamics.Contact.Components;
 using VRC.SDK3.Dynamics.PhysBone.Components;
@@ -76,7 +77,8 @@ public class OrbTests
         var parameters = AssetDatabase.LoadAssetAtPath<VRCExpressionParameters>(folder + "/Parameters.asset");
         // The screen's parameters follow (TheScreensTouchPointsAndParametersAreLocal).
         CollectionAssert.AreEqual(expected, parameters.parameters.Take(expected.Count).Select(p => (p.name, p.valueType, p.networkSynced, p.saved, p.defaultValue)).ToList());
-        Assert.IsTrue(parameters.parameters.Skip(expected.Count).All(p => p.name.StartsWith("N4N0/Screen/", StringComparison.Ordinal)));
+        Assert.IsTrue(parameters.parameters.Skip(expected.Count).All(p => p.name.StartsWith("N4N0/Screen/", StringComparison.Ordinal) || p.name.StartsWith("N4N0/Card/", StringComparison.Ordinal)),
+            "then the screen's and the link card's");
         Assert.AreEqual(1 + 8 + 1 + 8 + 8 * 8, parameters.CalcTotalCost(), "Synced bits: 1 + 8 + 1 + 8 + 8·N");
 
         // Global in the Full Controller, so VRCFury keeps the names OSC looks for; its own parameters are renamed as usual.
@@ -329,14 +331,14 @@ public class OrbTests
     // ---- The projected screen (Docs/orb.md, Screen) ----
 
     // N4N0 (every N4N0 has its screen), playing.
-    private (GameObject root, MeshRenderer screen) PlayWithScreen(int textSync = 8, int thumbnailBytes = 72)
+    private (GameObject root, SkinnedMeshRenderer screen) PlayWithScreen(int textSync = 8, int thumbnailBytes = 72)
     {
         var root = Play(AssetDatabase.LoadAssetAtPath<GameObject>(OrbInstaller.CreatePrefab(folder, textSync, thumbnailBytes)));
-        return (root, root.transform.Find(OrbInstaller.ScreenObject).GetComponent<MeshRenderer>());
+        return (root, root.transform.Find(OrbInstaller.ScreenObject).GetComponent<SkinnedMeshRenderer>());
     }
 
     // The screen's memory as its shader reads it (word k: b0 + 256 b1).
-    private static byte[] Memory(MeshRenderer screen, int thumbnailBytes = 72)
+    private static byte[] Memory(Renderer screen, int thumbnailBytes = 72)
     {
         var block = new MaterialPropertyBlock();
         screen.GetPropertyBlock(block);
@@ -380,8 +382,8 @@ public class OrbTests
         }
         var parameters = AssetDatabase.LoadAssetAtPath<VRCExpressionParameters>(folder + "/Parameters.asset");
         var screenParameters = parameters.parameters.Where(p => p.name.StartsWith("N4N0/Screen/", StringComparison.Ordinal)).ToList();
-        Assert.AreEqual(1 + 1 + 1 + 1 + 1 + OrbInstaller.ScreenLocalValues + 6 + 8 + 4, screenParameters.Count,
-            "Open, Replace, ThumbnailBytes, Version, the pointer, 16 values, 6 touch points, 4 each for the eyes and the gaze, each ray's hit and ratio");
+        Assert.AreEqual(1 + 1 + 1 + 1 + 1 + OrbInstaller.ScreenLocalValues + 6 + 8 + 4 + 1, screenParameters.Count,
+            "Open, Replace, ThumbnailBytes, Version, the pointer, 16 values, 6 touch points, 4 each for the eyes and the gaze, each ray's hit and ratio, Drop");
         Assert.IsTrue(screenParameters.All(p => !p.networkSynced), "No synced bits");
         var replace = screenParameters.Single(p => p.name == OrbInstaller.ScreenReplace);
         Assert.AreEqual((0f, false), (replace.defaultValue, replace.saved), "Off unless the card's option is on, and never saved: each upload's option holds");
@@ -391,8 +393,121 @@ public class OrbTests
         Assert.AreEqual(((float)OrbInstaller.ScreenVersion, false, VRCExpressionParameters.ValueType.Int), (version.defaultValue, version.saved, version.valueType),
             "The screen says its version: Orbiters - N4N0 shows a version 3 screen the six-tile Home, and lets a version 4 one point with rays");
         Assert.AreEqual(OrbInstaller.ScreenShaderName(72), screen.sharedMaterial.shader.name);
+        Assert.AreEqual(folder + "/N4N0 screen beam.mat", AssetDatabase.GetAssetPath(screen.sharedMaterials[1]), "N4N0's beam, in N4N0's folder too");
         var hold = screen.GetComponent<VRCParentConstraint>();
-        Assert.IsFalse(hold.RebakeOffsetsWhenUnfrozen, "Opened again, it appears before the eyes, not where it was");
+        Assert.AreEqual(root.transform.Find(OrbInstaller.ScreenRig), hold.Sources[0].SourceTransform, "Held to its swing");
+        Assert.IsFalse(hold.FreezeToWorld, "It follows its owner, never frozen in the world");
+    }
+
+    [Test]
+    public void TheScreenSwingsAroundTheEyesAfterItsOwnerWithN4N0sBeam()
+    {
+        if (VrcFury.Writer == null) Assert.Ignore("Requires the VRCFury integration.");
+        var prefab = AssetDatabase.LoadAssetAtPath<GameObject>(OrbInstaller.CreatePrefab(folder));
+        var (avatar, _) = Humanoid(eyes: 1.4f);
+        var orb = ((GameObject)PrefabUtility.InstantiatePrefab(prefab, avatar)).transform;
+        AttachmentHooks.Prepare(orb.gameObject, avatar);
+        var rig = orb.Find(OrbInstaller.ScreenRig);
+        var screen = orb.Find(OrbInstaller.ScreenObject);
+        var swing = rig.GetComponent<VRCPhysBone>();
+        Assert.AreEqual(rig, swing.rootTransform);
+        Assert.AreEqual((VRCPhysBoneBase.AdvancedBool.False, VRCPhysBoneBase.AdvancedBool.False, VRCPhysBoneBase.AdvancedBool.False),
+            (swing.allowGrabbing, swing.allowCollision, swing.allowPosing), "Nobody grabs, poses or pushes it");
+        Assert.AreEqual(0, swing.gravity, "It hangs straight ahead, not down");
+        Assert.AreEqual(1, rig.childCount, "Its arm is the chain's only bone");
+        Assert.AreNotEqual(Vector3.zero, swing.endpointPosition, "A lone bone needs its end");
+        var renderer = screen.GetComponent<SkinnedMeshRenderer>();
+        CollectionAssert.AreEqual(new[] { screen, orb.Find(OrbInstaller.Emitter) }, renderer.bones, "The beam's apex rides N4N0");
+        Assert.AreEqual("Orbiters/N4N0 Beam", renderer.sharedMaterials[1].shader.name);
+        Assert.AreEqual(2, renderer.sharedMesh.subMeshCount, "The page, then the beam");
+        // Shown, as the animator shows it when it opens: a hidden screen's constraint does not run.
+        screen.gameObject.SetActive(true);
+        var solver = new ConstraintSolver();
+        try
+        {
+            solver.Track(orb.gameObject);
+            solver.Solve();
+            var eyes = avatar.TransformPoint(avatar.GetComponent<VRCAvatarDescriptor>().ViewPosition);
+            float size = 1.4f / OrbInstaller.ReferenceEyes;
+            Assert.Less(Vector3.Distance(eyes, rig.position), 1e-3f, "The swing turns around the eyes");
+            Assert.Less(Vector3.Distance(eyes + avatar.rotation * OrbInstaller.ScreenFromEyes * size, screen.position), 1e-3f, "Before the eyes at rest");
+            Assert.Less(Quaternion.Angle(avatar.rotation, screen.rotation), .01f, "Facing its owner");
+            // The PhysBone turns the root, lagging behind the head and the avatar's turns: the screen swings with it around
+            // the eyes, still facing them.
+            var lag = Quaternion.Euler(8, -20, 0);
+            rig.localRotation = lag;
+            solver.Solve();
+            Assert.Less(Vector3.Distance(eyes + avatar.rotation * lag * OrbInstaller.ScreenFromEyes * size, screen.position), 1e-3f);
+            Assert.Less(Quaternion.Angle(avatar.rotation * lag, screen.rotation), .01f);
+        }
+        finally { solver.Release(); }
+    }
+
+    // The link card (Docs/orb.md, Link card): the screen held where it was dropped, for its owner from N4N0/Screen/Drop and for
+    // everyone else from pointer 253 until 254 closes it, its sender on meanwhile; every N4N0's hands feel cards, locally.
+    [Test]
+    public void ADroppedLinkCardStaysWhereItIsAndHandsFeelIt()
+    {
+        if (VrcFury.Writer == null) Assert.Ignore("Requires the VRCFury integration.");
+        var (root, screen) = PlayWithScreen();
+        var sender = root.transform.Find(OrbInstaller.CardSender).GetComponent<VRCContactSender>();
+        Assert.AreEqual((OrbInstaller.CardTag, false), (sender.collisionTags.Single(), sender.localOnly), "Everyone's hands feel the card");
+        Assert.IsFalse(sender.gameObject.activeSelf, "Off until a card is dropped");
+        foreach (bool right in new[] { false, true })
+        {
+            var receiver = root.transform.Find(OrbInstaller.CardHand(right)).GetComponent<VRCContactReceiver>();
+            Assert.AreEqual((OrbInstaller.CardTag, OrbInstaller.CardTouch(right)), (receiver.collisionTags.Single(), receiver.parameter));
+            Assert.IsTrue(receiver.allowSelf && receiver.allowOthers && receiver.localOnly, "Its own card and others', on its owner's client only");
+        }
+        var parameters = AssetDatabase.LoadAssetAtPath<VRCExpressionParameters>(folder + "/Parameters.asset").parameters;
+        foreach (var name in new[] { OrbInstaller.ScreenDrop, OrbInstaller.CardTouch(false), OrbInstaller.CardTouch(true) })
+            Assert.IsFalse(parameters.Single(p => p.name == name).networkSynced, name + " is local");
+        var hold = screen.GetComponent<VRCParentConstraint>();
+
+        // Its owner's: N4N0/Screen/Drop.
+        playable.SetBool("IsLocal", true);
+        playable.SetInteger(OrbInstaller.VRMode, 0);
+        playable.SetBool(OrbInstaller.ScreenOpen, true);
+        playable.SetBool(OrbInstaller.ScreenDrop, true);
+        Tick(3);
+        Assert.IsTrue(screen.gameObject.activeSelf && hold.FreezeToWorld && sender.gameObject.activeSelf, "Dropped: held where it is, felt");
+        playable.SetBool(OrbInstaller.ScreenDrop, false);
+        Tick(3);
+        Assert.IsFalse(hold.FreezeToWorld || sender.gameObject.activeSelf, "Picked up again: it follows its owner");
+        playable.SetBool(OrbInstaller.ScreenOpen, false);
+        Tick(3);
+        Assert.IsFalse(screen.gameObject.activeSelf);
+        // In VR without Replace the overlay shows the menu, but a dropped card shows on the screen, and the Menu toggle
+        // turned off meanwhile closes nothing.
+        playable.SetInteger(OrbInstaller.VRMode, 1);
+        playable.SetBool(OrbInstaller.Menu, true);
+        playable.SetBool(OrbInstaller.ScreenDrop, true);
+        Tick(3);
+        Assert.IsTrue(screen.gameObject.activeSelf && hold.FreezeToWorld, "The card shows in VR too");
+        playable.SetBool(OrbInstaller.Menu, false);
+        Tick(3);
+        Assert.IsTrue(screen.gameObject.activeSelf, "Menu off doesn't take the card away");
+        playable.SetBool(OrbInstaller.ScreenDrop, false);
+        Tick(3);
+        Assert.IsFalse(screen.gameObject.activeSelf, "Gone with the card");
+        playable.SetInteger(OrbInstaller.VRMode, 0);
+
+        // Everyone else's: pointer 253 holds it through the blocks that follow, until 254 closes it.
+        playable.SetBool("IsLocal", false);
+        int first = OrbInstaller.ScreenPointers(8, 72).first;
+        playable.SetInteger(OrbInstaller.TextPointer, first);
+        Tick(3);
+        Assert.IsTrue(screen.gameObject.activeSelf);
+        Assert.IsFalse(hold.FreezeToWorld);
+        playable.SetInteger(OrbInstaller.TextPointer, OrbInstaller.PointerCardDropped);
+        Tick(3);
+        Assert.IsTrue(hold.FreezeToWorld && sender.gameObject.activeSelf);
+        playable.SetInteger(OrbInstaller.TextPointer, first + 1);
+        Tick(3);
+        Assert.IsTrue(hold.FreezeToWorld, "Still where it was while its blocks arrive");
+        playable.SetInteger(OrbInstaller.TextPointer, OrbInstaller.PointerScreenClose);
+        Tick(3);
+        Assert.IsFalse(screen.gameObject.activeSelf || hold.FreezeToWorld || sender.gameObject.activeSelf, "254 closes the card");
     }
 
     [Test]
@@ -405,7 +520,7 @@ public class OrbTests
         playable.SetBool(OrbInstaller.ScreenOpen, true);
         Tick(3);
         Assert.IsTrue(screen.gameObject.activeSelf, "N4N0/Screen/Open shows it in desktop mode");
-        Assert.IsTrue(screen.GetComponent<VRCParentConstraint>().FreezeToWorld, "Frozen where it appeared");
+        Assert.IsFalse(screen.GetComponent<VRCParentConstraint>().FreezeToWorld, "It follows its owner");
 
         void Local(int pointer, byte[] bytes, int from)
         {
@@ -443,7 +558,6 @@ public class OrbTests
         playable.SetBool(OrbInstaller.ScreenOpen, false);
         Tick(3);
         Assert.IsFalse(screen.gameObject.activeSelf);
-        Assert.IsFalse(screen.GetComponent<VRCParentConstraint>().FreezeToWorld, "Closed, it follows the head again");
 
         // The menu's Menu toggle opens it at once, whatever the desktop does, and turning it off closes it, even while
         // the desktop still has it open (the app quit or froze; in VRChat a driver then clears N4N0/Screen/Open).
@@ -669,7 +783,7 @@ public class OrbTests
         // 128-byte thumbnails: the parameter's default, the screen's material and memory follow.
         OrbInstaller.SetOptions(placed.transform, 8, false, true, 128);
         Assert.AreEqual((8, false, true, 128, false), OrbInstaller.OptionsOf(placed.transform));
-        var renderer = placed.transform.Find(OrbInstaller.ScreenObject).GetComponent<MeshRenderer>();
+        var renderer = placed.transform.Find(OrbInstaller.ScreenObject).GetComponent<SkinnedMeshRenderer>();
         Assert.AreEqual(OrbInstaller.ScreenShaderName(128), renderer.sharedMaterial.shader.name);
         Assert.IsTrue(renderer.sharedMaterial.HasProperty("_W511") && !renderer.sharedMaterial.HasProperty("_W512"), "1024 bytes: 512 words");
         Assert.IsTrue(VrcFury.IsGlobalParameter(VrcFury.Features(placed).Single(f => f.kind == "FullController").feature, OrbInstaller.ScreenThumbnailBytes));
@@ -755,7 +869,7 @@ public class OrbTests
         if (VrcFury.Writer == null) Assert.Ignore("Requires the VRCFury integration.");
         var prefab = AssetDatabase.LoadAssetAtPath<GameObject>(OrbInstaller.CreatePrefab(folder));
         var placed = (GameObject)PrefabUtility.InstantiatePrefab(prefab, scene);
-        var renderer = placed.transform.Find(OrbInstaller.ScreenObject).GetComponent<MeshRenderer>();
+        var renderer = placed.transform.Find(OrbInstaller.ScreenObject).GetComponent<SkinnedMeshRenderer>();
         Assert.IsTrue(OrbInstaller.ScreenCurrent(renderer.sharedMaterial, 72), "A new orb's screen is current");
         Assert.AreEqual(OrbInstaller.ScreenRevision, renderer.sharedMaterial.GetTag("OrbScreen", false), "its shader says its files' revision");
         var older = new Material(renderer.sharedMaterial);
@@ -770,7 +884,7 @@ public class OrbTests
         var parameters = AssetDatabase.LoadAssetAtPath<VRCExpressionParameters>(OrbInstaller.OptionsFolder + "Text slots 8 + screen in VR/Parameters.asset");
         var version = parameters.parameters.Single(p => p.name == OrbInstaller.ScreenVersionParameter);
         Assert.AreEqual((VRCExpressionParameters.ValueType.Int, false, false, (float)OrbInstaller.ScreenVersion), (version.valueType, version.networkSynced, version.saved, version.defaultValue));
-        Assert.AreEqual(4, OrbInstaller.ScreenVersion);
+        Assert.AreEqual(5, OrbInstaller.ScreenVersion);
     }
 
     // The retro look is the screen's material alone: it stays through N4N0's other options, and goes back.
@@ -780,11 +894,12 @@ public class OrbTests
         if (VrcFury.Writer == null) Assert.Ignore("Requires the VRCFury integration.");
         var prefab = AssetDatabase.LoadAssetAtPath<GameObject>(OrbInstaller.CreatePrefab(folder));
         var placed = (GameObject)PrefabUtility.InstantiatePrefab(prefab, scene);
-        var renderer = placed.transform.Find(OrbInstaller.ScreenObject).GetComponent<MeshRenderer>();
+        var renderer = placed.transform.Find(OrbInstaller.ScreenObject).GetComponent<SkinnedMeshRenderer>();
         Assert.IsFalse(OrbInstaller.RetroOf(placed.transform), "Orbiters' own look by default");
         OrbInstaller.SetLook(placed.transform, true);
         Assert.IsTrue(OrbInstaller.RetroOf(placed.transform));
         Assert.IsTrue(OrbInstaller.ScreenCurrent(renderer.sharedMaterial, 72));
+        Assert.AreEqual(new Color32(43, 227, 106, 255), (Color32)renderer.sharedMaterials[1].GetColor("_EdgeColor"), "N4N0's beam in the phosphor's green");
         StringAssert.EndsWith("N4N0 screen pages retro.png", AssetDatabase.GetAssetPath(renderer.sharedMaterial.GetTexture("_Pages")), "The retro look's own pages");
         Assert.AreEqual(new Color32(2, 10, 4, 255), (Color32)renderer.sharedMaterial.GetColor("_Card"), "Its phosphor palette");
         Assert.AreEqual(new Color32(43, 227, 106, 255), (Color32)renderer.sharedMaterial.GetColor("_Accent"));
@@ -795,6 +910,7 @@ public class OrbTests
         OrbInstaller.SetLook(placed.transform, false);
         Assert.IsFalse(OrbInstaller.RetroOf(placed.transform));
         Assert.IsTrue(OrbInstaller.ScreenCurrent(renderer.sharedMaterial, 128));
+        Assert.AreEqual("N4N0 screen beam", renderer.sharedMaterials[1].name, "and its beam goes back to Orbiters' green");
     }
 
     [TestCase(8, 72)]

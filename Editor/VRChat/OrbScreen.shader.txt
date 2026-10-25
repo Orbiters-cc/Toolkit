@@ -5,6 +5,10 @@
 // array. _Layout says, row by row for each page, where its text slots, thumbnails and buttons are (4-pixel units).
 // Thumbnails are colour pictures that sharpen layer by layer as they arrive (Docs/orb.md, Thumbnails): their decoder is
 // generated from the design table (OrbThumbnail.json) for N4N0's thumbnail size.
+// It looks projected, as N4N0's speech panel (OrbText's Plate): the page's dark card is the projection's tinted,
+// see-through plate (what the page shows stays solid), brighter towards its top, with faint scan lines running down, a thin
+// bright line just inside its border and a soft glow past it (the mesh has a margin for it); N4N0's beam reaches its corners
+// (OrbBeam, the screen's second part). The retro look keeps its own tube instead.
 // Pages are 1024 × 576 pixels. Seen from behind (by the people around, or in a mirror) it shows the back, slice 0 of
 // the pages ("N4N0 menu, look at the other side"): the menu is its owner's, on the side they face. With _Retro (the retro
 // look, Docs/orb.md) the pages are the retro ones and what changes is drawn as Orbiters - N4N0's retro overlay draws it:
@@ -26,12 +30,14 @@ Shader "Orbiters/N4N0 Screen"
         [ToggleUI] _Retro ("Retro look", Float) = 0
         _Dim ("Retro dim", Color) = (0.094, 0.384, 0.196, 1)
         _Hot ("Retro hot", Color) = (0.784, 1, 0.843, 1)
+        _Plate ("Projected plate", Color) = (0.008, 0.03, 0.02, 0.82)
+        _Edge ("Projected edge", Color) = (0, 0.855, 0.427, 1)
 //@PROPERTIES
     }
     SubShader
     {
         // OrbScreen: the files' revision (OrbInstaller.ScreenRevision); a screen of an older one is swapped for these.
-        Tags { "Queue" = "Transparent" "RenderType" = "Transparent" "IgnoreProjector" = "True" "VRCFallback" = "Hidden" "OrbScreen" = "6" }
+        Tags { "Queue" = "Transparent" "RenderType" = "Transparent" "IgnoreProjector" = "True" "VRCFallback" = "Hidden" "OrbScreen" = "7" }
         Cull Off
         ZWrite Off
         Blend SrcAlpha OneMinusSrcAlpha
@@ -52,7 +58,7 @@ Shader "Orbiters/N4N0 Screen"
             float4 _MainTex_TexelSize;
             fixed4 _Card, _Text, _Text2, _Accent, _Placeholder;
             float _Retro;
-            fixed4 _Dim, _Hot;
+            fixed4 _Dim, _Hot, _Plate, _Edge;
 
             // The screen's memory as one array over its 372 properties (each takes a register of its own).
             CBUFFER_START(WordBuffer)
@@ -69,12 +75,12 @@ Shader "Orbiters/N4N0 Screen"
             }
 
             static const float2 Page = float2(1024, 576);
-            static const int Pages = 12;
+            static const int Pages = 15;
             // The screen's memory (Docs/orb.md, Screen).
             static const int Hover = 2, Pressed = 3, On = 4, Hidden = 8, Layers = 16, Unavailable = 21, TextStart = 24, PicturesStart = 384,
                 PictureBytes = THUMBNAIL_BYTES;
             // The layout table's columns.
-            static const int TableSlots = 1, TablePictures = 33, TableElements = 40, LayoutRows = 13;
+            static const int TableSlots = 1, TablePictures = 33, TableElements = 40, LayoutRows = 16;
 
             struct appdata
             {
@@ -121,14 +127,19 @@ Shader "Orbiters/N4N0 Screen"
             // A texel of the layout table, its bytes (the table's rows run from page 0 at the top of its picture).
             int4 Texel(int column, int page) { return (int4)round(_Layout.Load(int3(column, LayoutRows - 1 - page, 0)) * 255); }
 
-            // Coverage of a rounded rectangle (x, y, width, height) at p, a pixel's width antialiased.
-            float Rounded(float2 p, float4 r, float radius)
+            // The signed distance from a rounded rectangle (x, y, width, height) at p (negative inside), and its coverage, a
+            // pixel's width antialiased.
+            float RoundedDistance(float2 p, float4 r, float radius)
             {
                 float2 half = r.zw * .5;
                 float2 d = abs(p - (r.xy + half)) - (half - radius);
-                float distance = length(max(d, 0)) + min(max(d.x, d.y), 0) - radius;
+                return length(max(d, 0)) + min(max(d.x, d.y), 0) - radius;
+            }
+
+            float Rounded(float2 p, float4 r, float radius)
+            {
                 float pixel = max(fwidth(p.x), 1e-4);
-                return saturate(.5 - distance / pixel);
+                return saturate(.5 - RoundedDistance(p, r, radius) / pixel);
             }
 
             // The retro look's shapes, in page pixels: a rectangle (x, y, width, height) with its corners cut by `cut`, as a
@@ -186,17 +197,57 @@ Shader "Orbiters/N4N0 Screen"
                 return c * (1 - .22 * (.6 * d.x * d.x + d.y * d.y));
             }
 
+            // The projected look over a side as drawn (`picture`: its page picture before anything was drawn over it; not
+            // past the border, which is the glow). Where the picture is its dark card and nothing was drawn over it, the
+            // plate shows, tinted and see-through; scan lines about five page rows apart run down over everything, gone once
+            // they would be thinner than a pixel (`rowWidth`).
+            fixed4 Projected(fixed4 c, fixed3 picture, float2 uv, float rowWidth)
+            {
+                float2 p = float2(uv.x, 1 - uv.y) * Page;
+                // Hidden elements are covered with the card's own colour: that is plate too.
+                float card = max((1 - saturate((Luminance(picture) - Luminance(_Card.rgb)) * 60)) * (1 - saturate(length(c.rgb - picture) * 20)),
+                    1 - saturate(length(c.rgb - _Card.rgb) * 150));
+                float shade = 1.2 - .35 * saturate(p.y / Page.y);
+                float scan = lerp(1, .93 + .07 * sin(p.y * 1.3125 - _Time.y * 5), saturate(2.5 - rowWidth * 1.3125));
+                c.rgb = lerp(c.rgb, _Plate.rgb * shade, card) * scan;
+                c.a *= lerp(1, _Plate.a, card);
+                // The thin bright line, two pixels wide and as far inside the border.
+                float pixel = max(fwidth(p.x), 1e-4);
+                float rule = 1 - smoothstep(1 - pixel, 1 + pixel, abs(RoundedDistance(p, float4(0, 0, Page), 28) + 2.4));
+                c.rgb = lerp(c.rgb, _Edge.rgb * 1.4, rule * .85);
+                c.a = max(c.a, rule * .85);
+                return c;
+            }
+
             fixed4 Front(v2f i);
 
             fixed4 frag(v2f i) : SV_Target
             {
-                // Before any branch or discard: the page rows a pixel spans, for the retro look's scanlines.
+                // Before any branch or discard: the page rows a pixel spans, for the scan lines.
                 float rowWidth = fwidth(i.uv.y * Page.y);
+                bool retro = _Retro > .5;
+                // Past the page's border, in the mesh's margin, on either side: only the projection's glow.
+                float border = RoundedDistance(float2(i.uv.x, 1 - i.uv.y) * Page, float4(0, 0, Page), 28);
+                if (!retro && border > 0)
+                {
+                    float glow = exp(-border / 3.5) * .35;
+                    if (glow < .003) discard;
+                    return fixed4(_Edge.rgb, glow);
+                }
                 // The side the camera is on (the whole quad's: the branch is the same for every pixel of it).
                 fixed4 c;
-                if (i.behind > .5) c = Back(i.uv);
-                else c = Front(i);
-                if (_Retro > .5) c.rgb = Retro(c.rgb, i.uv, rowWidth);
+                if (i.behind > .5)
+                {
+                    c = Back(i.uv);
+                    if (!retro) c = Projected(c, c.rgb, float2(1 - i.uv.x, i.uv.y), rowWidth);
+                }
+                else
+                {
+                    c = Front(i);
+                    int page = Byte(0);
+                    if (!retro) c = Projected(c, page >= 1 && page <= Pages ? UNITY_SAMPLE_TEX2DARRAY(_Pages, float3(i.uv, page)).rgb : _Card.rgb, i.uv, rowWidth);
+                }
+                if (retro) c.rgb = Retro(c.rgb, i.uv, rowWidth);
                 return c;
             }
 
@@ -345,8 +396,8 @@ Shader "Orbiters/N4N0 Screen"
                     colour = lerp(colour, shade, inside);
                 }
 
-                // N4N0 listening (Home, four or six tiles): its microphone breathes.
-                if ((page == 1 || page == 10) && (Byte(1) & 1))
+                // N4N0 listening (Home, four, six or seven tiles): its microphone breathes.
+                if ((page == 1 || page == 10 || page == 13) && (Byte(1) & 1))
                 {
                     float pulse = .5 + .5 * sin(_Time.y * 4);
                     float d = abs(length(p - float2(60, 52)) - (31 + 4 * pulse));
