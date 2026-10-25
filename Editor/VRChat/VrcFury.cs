@@ -19,8 +19,10 @@ namespace Orbiters.Toolkit.Editor.VRChat
         {
             /// <summary>A recursive Armature Link from <paramref name="from"/> to a humanoid bone, or to <paramref name="toObject"/> when not humanoid.</summary>
             Component ArmatureLink(GameObject host, GameObject from, HumanBodyBones toBone, GameObject toObject);
-            /// <summary>A saved menu toggle turning <paramref name="target"/> on and off.</summary>
+            /// <summary>A saved menu toggle turning <paramref name="target"/> on and off, with Orbiters' default icon.</summary>
             Component Toggle(GameObject host, string menuPath, GameObject target, bool defaultOn);
+            /// <summary>Sets the menu icon of a toggle made here (Orbiters' default one when <paramref name="icon"/> is null), without Undo.</summary>
+            void Icon(Component toggle, Texture2D icon);
             /// <summary>
             /// Merges a prop's controller, menu and parameters without changing the avatar's authored assets. VRCFury gives a
             /// Full Controller's parameters names of their own in the avatar (VF##_…), except <paramref name="globalParameters"/>

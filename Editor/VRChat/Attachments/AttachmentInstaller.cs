@@ -64,8 +64,13 @@ namespace Orbiters.Toolkit.Editor.VRChat.Attachments
                     break;
             }
 
+            // An accessory its creator gave no toggle gets one, its icon the accessory's picture as worn (once placed).
             if (options.AddToggle && !plan.HasToggle && plan.Kind != AttachmentKind.Empty && VrcFury.Writer != null)
-                Track(attachment, VrcFury.Writer.Toggle(root, options.MenuFolder + "/" + MenuName(root.name), root, root.activeSelf));
+            {
+                var toggle = VrcFury.Writer.Toggle(root, options.MenuFolder + "/" + MenuName(root.name), root, root.activeSelf);
+                Track(attachment, toggle);
+                AttachmentIcons.After(attachment, toggle);
+            }
 
             var copies = options.SyncBlendShapes && !plan.HasBlendShapeLink ? BlendShapeCopies(attachment) : new List<BlendShapeCopy>();
             attachment.syncBlendShapes = copies.Count > 0;

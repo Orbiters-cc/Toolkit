@@ -32,7 +32,7 @@ namespace Orbiters.Toolkit.Editor.VRCFury
                 toggle.SetSaved();
                 if (defaultOn) toggle.SetDefaultOn();
                 toggle.GetActions().AddTurnOn(target);
-            }, Icon);
+            }, DefaultIcon);
         }
 
         public Component ShapeChoice(GameObject host, string menuPath, string exclusiveTag, Renderer renderer, string shape)
@@ -45,19 +45,22 @@ namespace Orbiters.Toolkit.Editor.VRCFury
             if (shape == null) toggle.SetExclusiveOffState();
             else toggle.GetActions().AddBlendshape(shape, 100f, renderer);
             var added = host.GetComponents(VRChat.VrcFury.Component).FirstOrDefault(c => !before.Contains(c));
-            if (added != null) Icon(added);
+            if (added != null) DefaultIcon(added);
             return added;
         }
 
-        // Orbiters' default toggle icon (VRCFury's public API has none): set on the new component's model.
-        private static void Icon(Component toggle)
+        private void DefaultIcon(Component toggle) => Icon(toggle, null);
+
+        // VRCFury's public API sets no icon: set on the component's model.
+        public void Icon(Component toggle, Texture2D icon)
         {
-            var serialized = new SerializedObject(toggle);
+            if (toggle == null) return;
+            using var serialized = new SerializedObject(toggle);
             var enable = serialized.FindProperty("content.enableIcon");
-            var icon = serialized.FindProperty("content.icon.objRef");
-            if (enable == null || icon == null) return;
+            var picture = serialized.FindProperty("content.icon.objRef");
+            if (enable == null || picture == null) return;
             enable.boolValue = true;
-            icon.objectReferenceValue = VRChat.OrbitersMenuIcons.Toggle;
+            picture.objectReferenceValue = icon != null ? icon : VRChat.OrbitersMenuIcons.Toggle;
             serialized.ApplyModifiedPropertiesWithoutUndo();
         }
 

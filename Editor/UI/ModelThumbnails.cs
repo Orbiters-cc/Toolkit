@@ -67,6 +67,12 @@ namespace Orbiters.Toolkit.Editor
             return null;
         }
 
+        /// <summary>
+        /// A new picture of <paramref name="root"/> made now, neither kept nor queued (a menu icon saved as an asset): the
+        /// caller destroys it. Null when there is nothing to show.
+        /// </summary>
+        public static Texture2D Picture(GameObject root, bool transparent) => root == null ? null : Render(root, transparent);
+
         /// <summary>Whether the picture for <paramref name="key"/> could not be made (nothing to show, or an error):
         /// <see cref="Get(GameObject, string, bool)"/> then returns null for good, not while it is made.</summary>
         public static bool HasFailed(string key, bool transparent = false) =>
