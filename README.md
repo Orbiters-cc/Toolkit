@@ -1,6 +1,6 @@
 # Orbiters Toolkit
 
-## Unreleased
+## 0.4.5 — 2026-10-25
 
 - **Sign in without a code**: one **Sign in** button opens Orbiters in the browser, where **Connect** (after signing in
   with Discord or Telegram if needed) hands the tool its credential through a listener on this computer's loopback
