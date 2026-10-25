@@ -5,8 +5,8 @@ using UnityEngine;
 using UnityEngine.UIElements;
 
 /// <summary>
-/// The optional account connection of the Orbiters tools: one click on Discord or Telegram opens the browser, the person
-/// confirms on Orbiters, and the tool is connected. While waiting it shows the pairing code the page also shows.
+/// The optional account connection of the Orbiters tools: Sign in opens the browser, the person clicks Connect on Orbiters
+/// (signing in there with Discord or Telegram if needed), and the tool is connected.
 /// </summary>
 public sealed class OrbitersSignInElement : VisualElement
 {
@@ -30,8 +30,7 @@ public sealed class OrbitersSignInElement : VisualElement
         if (sheet) styleSheets.Add(sheet);
 
         buttons = new VisualElement(); buttons.AddToClassList("orb-signin__buttons"); Add(buttons);
-        buttons.Add(Provider("discord", "Login with Discord"));
-        buttons.Add(Provider("telegram", "Login with Telegram"));
+        buttons.Add(SignInButton());
 
         waiting = new VisualElement(); waiting.AddToClassList("orb-signin__waiting"); Add(waiting);
         var pulse = new VisualElement(); pulse.AddToClassList("orb-signin__pulse"); waiting.Add(pulse);
@@ -51,15 +50,14 @@ public sealed class OrbitersSignInElement : VisualElement
         RegisterCallback<DetachFromPanelEvent>(_ => Cancel());
     }
 
-    private Button Provider(string provider, string text)
+    private Button SignInButton()
     {
-        var button = new Button { text = text };
+        var button = new Button { text = "Sign in" };
         button.AddToClassList("orb-signin__provider");
-        button.AddToClassList("orb-signin__provider--" + provider);
         button.RegisterCallback<PointerDownEvent>(_ => button.AddToClassList("pressed"), TrickleDown.TrickleDown);
         button.RegisterCallback<PointerUpEvent>(_ => button.RemoveFromClassList("pressed"), TrickleDown.TrickleDown);
         button.RegisterCallback<PointerLeaveEvent>(_ => button.RemoveFromClassList("pressed"));
-        button.clicked += () => Start(provider);
+        button.clicked += Start;
         return button;
     }
 
@@ -70,7 +68,7 @@ public sealed class OrbitersSignInElement : VisualElement
         return button;
     }
 
-    private async void Start(string provider)
+    private async void Start()
     {
         Cancel();
         var source = login = new CancellationTokenSource();
@@ -80,10 +78,10 @@ public sealed class OrbitersSignInElement : VisualElement
         waitingLabel.text = "Opening your browser…";
         try
         {
-            await OrbitersBrowserLogin.LoginAsync(provider, client, (code, url) =>
+            await OrbitersBrowserLogin.LoginAsync(client, url =>
             {
                 lastUrl = url;
-                waitingLabel.text = string.IsNullOrEmpty(code) ? "Finish in your browser…" : $"Finish in your browser · code {code}";
+                waitingLabel.text = "Click Connect in your browser…";
             }, source.Token);
             if (source.IsCancellationRequested) return;
             connected?.Invoke();

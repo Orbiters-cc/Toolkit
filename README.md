@@ -1,5 +1,13 @@
 # Orbiters Toolkit
 
+## Unreleased
+
+- **Sign in without a code**: one **Sign in** button opens Orbiters in the browser, where **Connect** (after signing in
+  with Discord or Telegram if needed) hands the tool its credential through a listener on this computer's loopback
+  (`OrbitersBrowserLogin.Callback`: a port the system picks and a random path); the tool trades that one-time code,
+  with the secret only it holds, for its credential. No code to type, and a link someone else sends connects nothing.
+  Needs the Orbiters server's new sign-in; older Toolkit versions can no longer sign in once it is live.
+
 ## 0.4.4 — 2026-10-24
 
 - N4N0's Menu toggle has the last word on its owner's screen: turning it off closes the screen and clears

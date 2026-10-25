@@ -1,4 +1,4 @@
-/* Account connection of the Orbiters tools: two provider buttons, then a waiting row while the browser is open. */
+/* Account connection of the Orbiters tools: a Sign in button, then a waiting row while the browser is open. */
 
 .orb-signin {
     padding: 14px;
@@ -20,7 +20,8 @@
     margin: 0 4px;
     border-width: 0;
     border-radius: 17px;
-    color: #ffffff;
+    background-color: #00DA6D;
+    color: #0b0b0b;
     font-size: 12px;
     -unity-font-style: bold;
     transition-property: background-color, scale;
@@ -28,24 +29,12 @@
     transition-timing-function: ease-out, ease-out-back;
 }
 
+.orb-signin__provider:hover {
+    background-color: #1ee684;
+}
+
 .orb-signin__provider.pressed {
     scale: 0.96 0.96;
-}
-
-.orb-signin__provider--discord {
-    background-color: #5865F2;
-}
-
-.orb-signin__provider--discord:hover {
-    background-color: #6d78f5;
-}
-
-.orb-signin__provider--telegram {
-    background-color: #229ED9;
-}
-
-.orb-signin__provider--telegram:hover {
-    background-color: #3aaee4;
 }
 
 .orb-signin__waiting {
