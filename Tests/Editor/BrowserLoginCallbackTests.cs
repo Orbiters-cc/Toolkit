@@ -63,6 +63,17 @@ public sealed class BrowserLoginCallbackTests
         Assert.That(again.Result, Does.StartWith("HTTP/1.1 404"));
     }
 
+    // After a script reload the sign-in listens again where its link sends the browser.
+    [Test]
+    public void AListenerComesBackOnItsPortAndPath()
+    {
+        int port;
+        string path;
+        using (var first = OrbitersBrowserLogin.Callback.Start()) { port = first.Port; path = first.Path; }
+        using var again = OrbitersBrowserLogin.Callback.Start(port, path);
+        Assert.That((again.Port, again.Path), Is.EqualTo((port, path)));
+    }
+
     [UnityTest]
     public IEnumerator CancellingStopsTheWaitAndTheListener()
     {

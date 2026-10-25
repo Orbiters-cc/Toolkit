@@ -64,19 +64,24 @@ public static class OrbitersBrowserLogin
         private readonly TcpListener listener;
         private readonly TaskCompletionSource<Arrival> arrived = new TaskCompletionSource<Arrival>(TaskCreationOptions.RunContinuationsAsynchronously);
 
-        private Callback()
+        private Callback(int port, string path)
         {
-            listener = new TcpListener(IPAddress.Loopback, 0);
+            listener = new TcpListener(IPAddress.Loopback, port);
             listener.Start();
             Port = ((IPEndPoint)listener.LocalEndpoint).Port;
-            var bytes = new byte[24];
-            using (var random = RandomNumberGenerator.Create()) random.GetBytes(bytes);
-            Path = Convert.ToBase64String(bytes).TrimEnd('=').Replace('+', '-').Replace('/', '_');
+            if (path == null)
+            {
+                var bytes = new byte[24];
+                using (var random = RandomNumberGenerator.Create()) random.GetBytes(bytes);
+                path = Convert.ToBase64String(bytes).TrimEnd('=').Replace('+', '-').Replace('/', '_');
+            }
+            Path = path;
         }
 
-        internal static Callback Start()
+        /// <summary>A listener on a free port and a new path, or (after a script reload) again on the ones the link names.</summary>
+        internal static Callback Start(int port = 0, string path = null)
         {
-            var callback = new Callback();
+            var callback = new Callback(port, path);
             _ = callback.AcceptAsync();
             return callback;
         }
@@ -187,10 +192,76 @@ public static class OrbitersBrowserLogin
 
     public static readonly TimeSpan Lifetime = TimeSpan.FromMinutes(10);
 
+    /// <summary>
+    /// The sign-in waiting for the browser, kept through script reloads for this editor session (SessionState): after a
+    /// reload its listener comes back on the same port and path, so Connect clicked meanwhile still reaches the tool.
+    /// </summary>
+    [Serializable]
+    private sealed class Pending
+    {
+        public int port;
+        public string path, linkUrl, connectedUrl, exchangeToken;
+        public long until;
+        public bool development;
+    }
+
+    private const string PendingKey = "Orbiters.Toolkit.BrowserLogin.Pending";
+    private static CancellationTokenSource resumed;
+
+    /// <summary>The link of the sign-in that waits for the browser (one a script reload interrupted too), or null.</summary>
+    public static string WaitingLink => ReadPending()?.linkUrl;
+
+    /// <summary>The sign-in resumed after a script reload ended: null when it signed in, otherwise why it didn't.</summary>
+    public static event Action<Exception> ResumedEnded;
+
+    private static Pending ReadPending()
+    {
+        string json = UnityEditor.SessionState.GetString(PendingKey, "");
+        var pending = json.Length > 0 ? JsonUtility.FromJson<Pending>(json) : null;
+        return pending != null && pending.until > DateTime.UtcNow.Ticks ? pending : null;
+    }
+
+    private static void Remember(Pending pending) => UnityEditor.SessionState.SetString(PendingKey, pending == null ? "" : JsonUtility.ToJson(pending));
+
+    /// <summary>Stops the sign-in a script reload interrupted (one LoginAsync started stops with its token).</summary>
+    public static void CancelWaiting()
+    {
+        resumed?.Cancel();
+        Remember(null);
+    }
+
+    [UnityEditor.InitializeOnLoadMethod]
+    private static void ResumeAfterReload()
+    {
+        var pending = ReadPending();
+        if (pending == null) { Remember(null); return; }
+        Resume(pending, resumed = new CancellationTokenSource());
+    }
+
+    private static async void Resume(Pending pending, CancellationTokenSource source)
+    {
+        Exception failure = null;
+        try
+        {
+            Callback callback;
+            try { callback = Callback.Start(pending.port, pending.path); }
+            catch (SocketException) { throw new InvalidOperationException("The sign-in was interrupted. Click Sign in again."); }
+            using (callback) await FinishAsync(pending, callback, new Attempt(pending.development, source.Token), source.Token);
+        }
+        catch (Exception exception) { failure = exception; }
+        finally
+        {
+            if (resumed == source) resumed = null;
+            source.Dispose();
+        }
+        if (!(failure is OperationCanceledException)) ResumedEnded?.Invoke(failure);
+    }
+
     /// <param name="client">The tool asking, shown on the Connect page ("myavatar", "mcb"...).</param>
     /// <param name="opened">Receives the link once the browser is opened, to open it again.</param>
     public static async Task LoginAsync(string client, Action<string> opened, CancellationToken cancellation)
     {
+        CancelWaiting();
         var attempt = new Attempt(OrbitersEnvironment.IsDevelopment, cancellation);
         using var callback = Callback.Start();
         var link = await OrbitersApi.SendAsync<Link>(attempt.ApiUrl("editor-links"), null,
@@ -198,35 +269,54 @@ public static class OrbitersBrowserLogin
         attempt.ThrowIfStale();
         if (string.IsNullOrEmpty(link?.linkUrl) || string.IsNullOrEmpty(link.exchangeToken) || string.IsNullOrEmpty(link.connectedUrl))
             throw new InvalidOperationException("Orbiters did not return a sign-in link.");
+        var pending = new Pending
+        {
+            port = callback.Port, path = callback.Path, linkUrl = link.linkUrl, connectedUrl = link.connectedUrl, exchangeToken = link.exchangeToken,
+            until = (DateTime.UtcNow + Lifetime).Ticks, development = attempt.Development,
+        };
+        Remember(pending);
         Application.OpenURL(link.linkUrl);
         opened?.Invoke(link.linkUrl);
+        await FinishAsync(pending, callback, attempt, cancellation);
+    }
 
-        Arrival arrival;
-        using (var waiting = CancellationTokenSource.CreateLinkedTokenSource(cancellation))
+    // Waits for the browser until the link's end, trades its code for the credential and sends the browser on.
+    private static async Task FinishAsync(Pending pending, Callback callback, Attempt attempt, CancellationToken cancellation)
+    {
+        try
         {
-            waiting.CancelAfter(Lifetime);
-            try { arrival = await callback.WaitAsync(waiting.Token); }
-            catch (OperationCanceledException) when (!cancellation.IsCancellationRequested)
+            Arrival arrival;
+            using (var waiting = CancellationTokenSource.CreateLinkedTokenSource(cancellation))
             {
-                throw new TimeoutException("The sign-in took too long. Click Sign in again.");
+                waiting.CancelAfter(TimeSpan.FromTicks(Math.Max(0, pending.until - DateTime.UtcNow.Ticks)));
+                try { arrival = await callback.WaitAsync(waiting.Token); }
+                catch (OperationCanceledException) when (!cancellation.IsCancellationRequested)
+                {
+                    throw new TimeoutException("The sign-in took too long. Click Sign in again.");
+                }
+            }
+            using (arrival)
+            {
+                try
+                {
+                    attempt.ThrowIfStale();
+                    var auth = await OrbitersApi.SendAsync<AuthenticationService.AuthData>(attempt.ApiUrl("editor-links/exchange"), null,
+                        new { exchangeToken = pending.exchangeToken, code = arrival.Code }, cancellation);
+                    if (string.IsNullOrWhiteSpace(auth?.token)) throw new InvalidOperationException("Orbiters did not return an account.");
+                    attempt.Save(auth);
+                }
+                catch
+                {
+                    await arrival.SendBrowserToAsync(pending.connectedUrl + (pending.connectedUrl.Contains("?") ? "&" : "?") + "failed=1");
+                    throw;
+                }
+                await arrival.SendBrowserToAsync(pending.connectedUrl);
             }
         }
-        using (arrival)
+        finally
         {
-            try
-            {
-                attempt.ThrowIfStale();
-                var auth = await OrbitersApi.SendAsync<AuthenticationService.AuthData>(attempt.ApiUrl("editor-links/exchange"), null,
-                    new { exchangeToken = link.exchangeToken, code = arrival.Code }, cancellation);
-                if (string.IsNullOrWhiteSpace(auth?.token)) throw new InvalidOperationException("Orbiters did not return an account.");
-                attempt.Save(auth);
-            }
-            catch
-            {
-                await arrival.SendBrowserToAsync(link.connectedUrl + (link.connectedUrl.Contains("?") ? "&" : "?") + "failed=1");
-                throw;
-            }
-            await arrival.SendBrowserToAsync(link.connectedUrl);
+            // Only this sign-in's: a newer one may have replaced it meanwhile.
+            if (ReadPending()?.path == pending.path) Remember(null);
         }
     }
 }

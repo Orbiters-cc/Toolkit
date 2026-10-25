@@ -36,7 +36,7 @@ public sealed class OrbitersSignInElement : VisualElement
         var pulse = new VisualElement(); pulse.AddToClassList("orb-signin__pulse"); waiting.Add(pulse);
         waitingLabel = new Label(); waitingLabel.AddToClassList("orb-signin__waiting-label"); waiting.Add(waitingLabel);
         var reopen = Link("Open again", () => { if (!string.IsNullOrEmpty(lastUrl)) Application.OpenURL(lastUrl); });
-        var cancel = Link("Cancel", Cancel);
+        var cancel = Link("Cancel", CancelPressed);
         waiting.Add(reopen); waiting.Add(cancel);
         waiting.style.display = DisplayStyle.None;
         // A soft pulse shows the tool is still listening for the browser.
@@ -47,7 +47,28 @@ public sealed class OrbitersSignInElement : VisualElement
         Add(reasonLabel);
         error = new Label(); error.AddToClassList("orb-signin__error"); error.style.display = DisplayStyle.None; Add(error);
 
-        RegisterCallback<DetachFromPanelEvent>(_ => Cancel());
+        // A script reload detaches every panel: the sign-in waiting for the browser carries on through it.
+        RegisterCallback<DetachFromPanelEvent>(_ => { if (!reloading) Cancel(); OrbitersBrowserLogin.ResumedEnded -= ResumedEnded; });
+        // A sign-in a script reload interrupted carries on in the background: shown as waiting until it ends.
+        lastUrl = OrbitersBrowserLogin.WaitingLink;
+        if (lastUrl != null)
+        {
+            buttons.style.display = DisplayStyle.None;
+            waiting.style.display = DisplayStyle.Flex;
+            waitingLabel.text = "Click Connect in your browser…";
+            OrbitersBrowserLogin.ResumedEnded += ResumedEnded;
+        }
+    }
+
+    private void ResumedEnded(Exception failure)
+    {
+        OrbitersBrowserLogin.ResumedEnded -= ResumedEnded;
+        if (login != null) return;
+        buttons.style.display = DisplayStyle.Flex;
+        waiting.style.display = DisplayStyle.None;
+        if (failure == null) { connected?.Invoke(); return; }
+        error.text = failure is InvalidOperationException || failure is TimeoutException ? failure.Message : "Could not reach Orbiters. Check your connection and try again.";
+        error.style.display = DisplayStyle.Flex;
     }
 
     private Button SignInButton()
@@ -109,5 +130,20 @@ public sealed class OrbitersSignInElement : VisualElement
     {
         login?.Cancel();
     }
+
+    // Cancel while waiting: the sign-in started here, or one a script reload interrupted (it has no token here).
+    private void CancelPressed()
+    {
+        if (login != null) { login.Cancel(); return; }
+        OrbitersBrowserLogin.CancelWaiting();
+        OrbitersBrowserLogin.ResumedEnded -= ResumedEnded;
+        buttons.style.display = DisplayStyle.Flex;
+        waiting.style.display = DisplayStyle.None;
+    }
+
+    private static bool reloading;
+
+    [UnityEditor.InitializeOnLoadMethod]
+    private static void WatchReloads() => UnityEditor.AssemblyReloadEvents.beforeAssemblyReload += () => reloading = true;
 }
 #endif
