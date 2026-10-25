@@ -191,6 +191,8 @@ public sealed class AttachmentAnimationBuildTests
         var copy = Build();
         var expected = AnimationUtility.CalculateTransformPath(Sleeve(copy), copy.transform);
         AttachmentBuild.Finish(copy);
+        // The build's last step writes its data before the SDK saves the copy as a prefab.
+        Assert.True(new BuildCopyAssetsHook().OnPreprocessAvatar(copy));
         var path = folder + "/built.prefab";
         PrefabUtility.SaveAsPrefabAsset(copy, path);
         AssetDatabase.ImportAsset(AssetDatabase.GetAssetPath(Controller(copy)), ImportAssetOptions.ForceSynchronousImport | ImportAssetOptions.ForceUpdate);

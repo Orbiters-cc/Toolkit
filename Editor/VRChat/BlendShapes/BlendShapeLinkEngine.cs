@@ -56,7 +56,12 @@ namespace Orbiters.Toolkit.Editor.VRChat.BlendShapes
             var layersToCopyToFx = new Dictionary<string, (AnimatorController controller, int index, AnimatorControllerLayer layer)>();
             var changedControllers = new HashSet<AnimatorController>();
             int linksProcessed = 0, clipsWrapped = 0, statesRewritten = 0;
-
+            // The controllers' layers as they are now. While the links are applied the controllers are detached
+            // (ControllerEdits): each rewritten state or wrapped clip would otherwise rebuild its whole controller, and
+            // their own layers show an empty stand-in meanwhile. Masks cleared here are set once that is over.
+            var layersOf = controllers.ToDictionary(c => c, c => c.layers);
+            var masksCleared = new HashSet<AnimatorController>();
+            using (Animations.ControllerEdits.Batch(controllers))
             foreach (var link in links)
             {
                 bool linkChanged = false;
@@ -74,8 +79,7 @@ namespace Orbiters.Toolkit.Editor.VRChat.BlendShapes
                     var clipCache = new Dictionary<AnimationClip, Motion>();
                     var visitedMachines = new HashSet<AnimatorStateMachine>();
                     var visitedTrees = new HashSet<BlendTree>();
-                    var layers = controller.layers;
-                    bool layersChanged = false;
+                    var layers = layersOf[controller];
                     for (int i = 0; i < layers.Length; i++)
                     {
                         var layer = layers[i];
@@ -104,13 +108,11 @@ namespace Orbiters.Toolkit.Editor.VRChat.BlendShapes
                         {
                             Trace($"Clearing mask '{layer.avatarMask.name}' from layer '{layer.name}'.");
                             layer.avatarMask = null;
-                            layers[i] = layer;
-                            layersChanged = true;
+                            masksCleared.Add(controller);
                         }
                     }
 
                     if (!controllerChanged) continue;
-                    if (layersChanged) controller.layers = layers;
                     changedControllers.Add(controller);
                     EditorUtility.SetDirty(controller);
 
@@ -125,6 +127,8 @@ namespace Orbiters.Toolkit.Editor.VRChat.BlendShapes
                 }
                 if (linkChanged) linksProcessed++;
             }
+
+            foreach (var controller in masksCleared) controller.layers = layersOf[controller];
 
             if (layersToCopyToFx.Count > 0 && fxController != null)
             {

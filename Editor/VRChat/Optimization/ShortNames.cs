@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using Orbiters.Toolkit.Editor.Animations;
 using Orbiters.Toolkit.Editor.VRChat.Attachments;
 using Orbiters.Toolkit.Editor.VRChat.Parameters;
 using UnityEditor;
@@ -212,6 +213,14 @@ namespace Orbiters.Toolkit.Editor.VRChat.Optimization
         private static void RenameAll(List<AnimatorController> controllers, List<Object> owned, List<VRCPhysBoneBase> physBones, List<ContactReceiver> receivers,
             Func<string, string> rename)
         {
+            // Detached meanwhile: each renamed condition, state or clip would rebuild its whole controller (minutes on a big one).
+            using (ControllerEdits.Batch(controllers)) RenameAnimations(controllers, owned, rename);
+            foreach (var physBone in physBones) physBone.parameter = rename(physBone.parameter);
+            foreach (var receiver in receivers) receiver.parameter = rename(receiver.parameter);
+        }
+
+        private static void RenameAnimations(List<AnimatorController> controllers, List<Object> owned, Func<string, string> rename)
+        {
             foreach (var controller in controllers)
             {
                 var parameters = controller.parameters;
@@ -256,8 +265,6 @@ namespace Orbiters.Toolkit.Editor.VRChat.Optimization
                 }
                 EditorUtility.SetDirty(value);
             }
-            foreach (var physBone in physBones) physBone.parameter = rename(physBone.parameter);
-            foreach (var receiver in receivers) receiver.parameter = rename(receiver.parameter);
         }
 
         private static IEnumerable<string> MenuParameters(VRCExpressionsMenu menu)

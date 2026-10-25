@@ -117,15 +117,26 @@ namespace Orbiters.Toolkit.Editor.VRChat.Attachments
 
         /// <summary>
         /// Makes objects created for this build copy (meshes, materials) assets until the build is released, without
-        /// taking over the avatar's animations, then writes all of the copy's build data (objects kept earlier too).
-        /// The SDK saves the copy as a prefab: in-memory objects would be left out.
+        /// taking over the avatar's animations. The SDK saves the copy as a prefab: in-memory objects would be left out.
+        /// Nothing is written to the disk until <see cref="Save"/>, the build's last step.
         /// </summary>
         public static void Keep(GameObject avatar, IEnumerable<Object> values)
         {
             var created = values.ToList();
-            var build = created.Count > 0 ? For(avatar) : Builds.FirstOrDefault(b => b.root == avatar);
-            if (build == null) return;
+            if (created.Count == 0) return;
+            var build = For(avatar);
             foreach (var value in created) build.Persist(value);
+        }
+
+        /// <summary>
+        /// Writes all of the copy's build data (objects kept and animations copied by every step) once, at the end of the
+        /// build, before the SDK saves the copy as a prefab. Each write of a big controller is seconds (a text file and its
+        /// import), so the steps before only add to it.
+        /// </summary>
+        public static void Save(GameObject avatar)
+        {
+            var build = Builds.FirstOrDefault(b => b.root == avatar);
+            if (build == null) return;
             if (build.container != null) AssetDatabase.SaveAssetIfDirty(build.container);
             if (build.meshes != null) AssetDatabase.SaveAssetIfDirty(build.meshes);
         }
@@ -203,6 +214,12 @@ namespace Orbiters.Toolkit.Editor.VRChat.Attachments
             graphs.SelectMany(g => g.Copies.Values.Where(v => v != null).Select(v => (v, g.AnimatorRoot))).Distinct();
 
         /// <summary>
+        /// Many edits to the build's animations at once (clips, states, transitions, masks): the build's controllers are
+        /// detached while the returned scope lasts (<see cref="ControllerEdits.Batch"/>), so each edit doesn't rebuild them.
+        /// </summary>
+        public IDisposable Edits() => ControllerEdits.Batch(graphs.SelectMany(g => g.Copies.Values.OfType<AnimatorController>()).ToList());
+
+        /// <summary>
         /// Animations written before a tool moved these transforms keep animating them: bindings to each former path
         /// (avatar-relative, its own name included) and to its children's are rewritten to where they are now.
         /// </summary>
@@ -212,8 +229,7 @@ namespace Orbiters.Toolkit.Editor.VRChat.Attachments
             foreach (var graph in graphs)
                 foreach (var (target, formerPath) in moves)
                     if (target != null && !string.IsNullOrEmpty(formerPath)) graph.Alias(target, formerPath, root.transform);
-            foreach (var graph in graphs) graph.Rewrite(activationCopies);
-            if (container != null) AssetDatabase.SaveAssetIfDirty(container);
+            using (Edits()) foreach (var graph in graphs) graph.Rewrite(activationCopies);
         }
 
         private void Persist(Object value)
@@ -323,8 +339,7 @@ namespace Orbiters.Toolkit.Editor.VRChat.Attachments
                     pair.Key.ignoreTransforms.Add(frames[follower]);
                 }
             }
-            foreach (var graph in graphs) graph.Rewrite(activationCopies);
-            if (container != null) AssetDatabase.SaveAssetIfDirty(container);
+            using (Edits()) foreach (var graph in graphs) graph.Rewrite(activationCopies);
         }
 
         private void AddCopy(Transform originalTransform, Transform copy)
@@ -417,6 +432,27 @@ namespace Orbiters.Toolkit.Editor.VRChat.Attachments
                 if (!(source is RuntimeAnimatorController || source is AnimatorStateMachine || source is AnimatorState ||
                       source is AnimatorTransitionBase || source is StateMachineBehaviour || source is Motion || source is AvatarMask)) return source;
                 var template = source is AnimationClip originalClip && overrides.TryGetValue(originalClip, out var replacement) ? replacement : source;
+                // Already this build's own (VRCFury's working copies, this cache): changed where it is, only the project's
+                // assets below it copied. VRCFury's later steps keep using the controllers it made instead of copying them
+                // whole again, and a big avatar's controllers aren't copied twice.
+                if (template == source && Writable(source))
+                {
+                    Copies.Add(source, source);
+                    if (source is AnimatorController ownController)
+                    {
+                        OwnedControllers.Add(ownController);
+                        // Its state machines first, detached: each change to a state of a live controller rebuilds it.
+                        var layers = ownController.layers;
+                        using (ControllerEdits.Batch(new[] { ownController }))
+                            foreach (var layer in layers)
+                            {
+                                Clone(layer.stateMachine);
+                                Clone(layer.avatarMask);
+                            }
+                    }
+                    Remap(source, source);
+                    return source;
+                }
                 // Instantiate invokes Unity's special controller/state-machine deep-copy path, which asserts on
                 // strong native references. A fresh native object plus serialized data keeps ownership explicit.
                 var copy = template is ScriptableObject
@@ -426,25 +462,79 @@ namespace Orbiters.Toolkit.Editor.VRChat.Attachments
                 copy.name = source.name;
                 Copies.Add(source, copy);
                 owner.Persist(copy);
-                // Remap the entire serialized graph, including behaviours, synced layers, nested trees and overrides.
+                Remap(template, copy);
+                EditorUtility.SetDirty(copy);
+                return copy;
+            }
+
+            // Build data on the disk that a build step made for this copy: VRCFury's working copies and this cache.
+            // In-memory objects may be shared with the avatar in the scene: they are copied.
+            private static bool Writable(Object value)
+            {
+                string path = AssetDatabase.GetAssetPath(value).Replace('\\', '/');
+                return path.StartsWith(CacheFolder + "/", StringComparison.Ordinal) ||
+                       path.IndexOf("/com.vrcfury.temp/", StringComparison.OrdinalIgnoreCase) >= 0;
+            }
+
+            // Points the copy (or the build's own object, changed in place) at the copies of what its source refers to:
+            // the entire serialized graph, including behaviours, synced layers, nested trees and overrides.
+            private void Remap(Object template, Object copy)
+            {
+                // A clip's keys and events refer to no part of a graph (materials, sprites...), only its additive reference
+                // pose may: walking every key of every curve was most of the time a big controller took to copy.
+                if (template is AnimationClip clip && !RefersToGraph(clip))
+                {
+                    var settings = AnimationUtility.GetAnimationClipSettings(clip);
+                    var pose = settings.additiveReferencePoseClip;
+                    var mapped = pose != null ? (AnimationClip)Clone(pose) : null;
+                    if (mapped == pose) return;
+                    settings.additiveReferencePoseClip = mapped;
+                    AnimationUtility.SetAnimationClipSettings((AnimationClip)copy, settings);
+                    return;
+                }
+                bool inPlace = template == copy;
                 using (var originalData = new SerializedObject(template))
-                using (var serialized = new SerializedObject(copy))
+                using (var serialized = inPlace ? null : new SerializedObject(copy))
                 {
                     // Read references from the source. Unity may instantiate parts of a controller internally; walking
                     // those newly-created back-references would clone the same graph indefinitely.
+                    bool changed = false;
                     var property = originalData.GetIterator();
                     while (property.Next(true))
                         if (property.propertyType == SerializedPropertyType.ObjectReference && property.name != "m_Script")
                         {
                             var value = property.objectReferenceValue;
                             var mapped = Clone(value);
+                            if (inPlace)
+                            {
+                                if (mapped == value) continue;
+                                property.objectReferenceValue = mapped;
+                                changed = true;
+                                continue;
+                            }
                             var destination = serialized.FindProperty(property.propertyPath);
                             if (destination != null) destination.objectReferenceValue = mapped;
                         }
-                    serialized.ApplyModifiedPropertiesWithoutUndo();
+                    if (!inPlace) serialized.ApplyModifiedPropertiesWithoutUndo();
+                    else if (changed)
+                    {
+                        originalData.ApplyModifiedPropertiesWithoutUndo();
+                        EditorUtility.SetDirty(template);
+                    }
                 }
-                EditorUtility.SetDirty(copy);
-                return copy;
+            }
+
+            // Whether a clip's object curves or events hold a part of a graph (a controller, a motion...): rare, then walked whole.
+            private static bool RefersToGraph(AnimationClip clip)
+            {
+                bool Graph(Object value) => value is RuntimeAnimatorController || value is AnimatorStateMachine || value is AnimatorState ||
+                                            value is AnimatorTransitionBase || value is StateMachineBehaviour || value is Motion || value is AvatarMask;
+                foreach (var binding in AnimationUtility.GetObjectReferenceCurveBindings(clip))
+                    foreach (var key in AnimationUtility.GetObjectReferenceCurve(clip, binding))
+                        if (Graph(key.value)) return true;
+                foreach (var e in AnimationUtility.GetAnimationEvents(clip))
+                    if (Graph(e.objectReferenceParameter)) return true;
+                return false;
             }
 
             // A former path resolves to the moved transform, unless something else lives there now.

@@ -236,6 +236,7 @@ namespace Orbiters.Toolkit.Editor.VRChat.Optimization
         // The joining meshes' blendshape curves, onto the merged renderer under the shapes' names there.
         private static void MoveShapeAnimations(AttachmentAnimationBuild build, SkinnedMeshRenderer target, List<(Transform Source, Dictionary<string, string> Names)> shapes)
         {
+            using var edits = build.Edits();
             foreach (var (clip, animatorRoot) in build.Clips)
             {
                 if (!target.transform.IsChildOf(animatorRoot)) continue;

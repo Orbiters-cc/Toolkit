@@ -10,7 +10,7 @@ namespace Orbiters.Toolkit.Editor.VRChat.Attachments
     /// <summary>
     /// Last build step: meshes, materials and the textures they show that a build step created in memory (twist splits,
     /// followed accessories, resized texture copies...) become build data. The SDK saves the build copy as a prefab, which drops in-memory objects: the avatar would upload
-    /// without them (invisible renderers).
+    /// without them (invisible renderers). The build data of every step is written to the disk here, once.
     /// </summary>
     internal sealed class BuildCopyAssetsHook : IVRCSDKPreprocessAvatarCallback
     {
@@ -22,6 +22,8 @@ namespace Orbiters.Toolkit.Editor.VRChat.Attachments
             // Play mode keeps the copy in memory; nothing is saved.
             if (EditorApplication.isPlayingOrWillChangePlaymode) return true;
             AttachmentAnimationBuild.Keep(avatarRoot, InMemory(avatarRoot));
+            // The build data every step added to, written once.
+            AttachmentAnimationBuild.Save(avatarRoot);
             return true;
         }
 
