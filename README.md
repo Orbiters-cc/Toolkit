@@ -19,6 +19,20 @@
   bounds that rank the avatar "Very Poor". The rig's cameras and the kit draw on the wearer's client only (`IsLocal`).
   The six render textures count in VRChat's texture memory. N4N0 must be built again (a new gallery version) for
   avatars to get it; an avatar wearing Mixer's old kit should lose it.
+- **N4N0 screen version 7** (revision 9, options folder `Menu 14`): in VR each index finger points at N4N0's menu with
+  a beam and a dot the screen's own shader draws (`N4N0 Ray`). Two local contact senders per finger, its tip and a point
+  0.3 m along it, are found by four receivers each, and Orbiters - N4N0 solves the ray, then presses with the trigger or
+  a touch. Everyone else's index fingertips have four receivers of their own, so other players press by touching.
+  VRChat's raycasts of versions 4 to 6 never met their own avatar. The menu stays where it is in the world and glides
+  back before its owner's eyes only after 0.4 s out of their sight. Its handle is a pickup latched to the palm, as the
+  Hand screen's is. Its size is the synced `N4N0/Screen/Size`, which Orbiters - N4N0 sets. N4N0 floats lazier and
+  smoother.
+- **N4N0's link card is an object of its own** (`OrbInstaller.Card`): Drop puts the card out (synced `N4N0/Card/Out`)
+  in front of its owner, projected by N4N0's beam for 1.5 s. It then stays where it is in the world, apart from N4N0
+  and the menu. Anyone's pickup grab moves it (its owner's hand latches it, `N4N0/Card/HeldLeft`/`HeldRight`), and
+  grabbing it still copies its link. It draws with the screen's mesh and materials, with a memory of its own that
+  every client writes from the text channel's blocks past the screen's (pointer 252 clears it). The screen is never
+  the card any more: `N4N0/Screen/Drop` and pointer 253 are gone, and page 15 loses its countdown.
 
 ## 0.4.5 — 2026-10-25
 

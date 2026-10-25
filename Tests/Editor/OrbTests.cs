@@ -80,7 +80,7 @@ public class OrbTests
         Assert.IsTrue(parameters.parameters.Skip(expected.Count).All(p => p.name.StartsWith("N4N0/Screen/", StringComparison.Ordinal) || p.name.StartsWith("N4N0/Card/", StringComparison.Ordinal) ||
                                                                       p.name.StartsWith("N4N0/Capture/", StringComparison.Ordinal)),
             "then the screen's, the link card's and the capture kit's (OrbCaptureTests)");
-        Assert.AreEqual(1 + 8 + 1 + 8 + 8 * 8 + 3 + 8, parameters.CalcTotalCost(), "Synced bits: 1 + 8 + 1 + 8 + 8·N, and the screen's 3 + 8");
+        Assert.AreEqual(1 + 8 + 1 + 8 + 8 * 8 + 3 + 8 + 3, parameters.CalcTotalCost(), "Synced bits: 1 + 8 + 1 + 8 + 8·N, the screen's 3 + 8, the card's 3");
 
         // Global in the Full Controller, so VRCFury keeps the names OSC looks for; its own parameters are renamed as usual.
         var full = VrcFury.Features(prefab).Single(f => f.kind == "FullController").feature;
@@ -135,7 +135,7 @@ public class OrbTests
         if (VrcFury.Writer == null) Assert.Ignore("Requires the VRCFury integration.");
         OrbInstaller.CreatePrefab(folder, sync);
         var parameters = AssetDatabase.LoadAssetAtPath<VRCExpressionParameters>(folder + "/Parameters.asset");
-        Assert.AreEqual(1 + 8 + 1 + 8 + 8 * sync + 3 + 8, parameters.CalcTotalCost());
+        Assert.AreEqual(1 + 8 + 1 + 8 + 8 * sync + 3 + 8 + 3, parameters.CalcTotalCost());
         Assert.AreEqual(sync, parameters.parameters.Count(p => p.name.StartsWith(OrbInstaller.TextSyncPrefix, StringComparison.Ordinal)));
         var controller = AssetDatabase.LoadAssetAtPath<AnimatorController>(folder + "/N4N0.controller");
         var blocks = controller.layers.Single(l => l.name == "Text block").stateMachine.states.Count(s => s.state.name.StartsWith("Block "));
@@ -391,8 +391,8 @@ public class OrbTests
         Assert.AreEqual((OrbInstaller.ViewTag, true, false), (view.collisionTags.Single(), view.allowSelf, view.allowOthers), "The middle: in its owner's sight or not");
         var parameters = AssetDatabase.LoadAssetAtPath<VRCExpressionParameters>(folder + "/Parameters.asset");
         var screenParameters = parameters.parameters.Where(p => p.name.StartsWith("N4N0/Screen/", StringComparison.Ordinal)).ToList();
-        Assert.AreEqual(1 + 1 + 1 + 1 + 1 + OrbInstaller.ScreenLocalValues + 4 + 4 + 4 + 8 + 8 + 4 + 1, screenParameters.Count,
-            "Open, Replace, ThumbnailBytes, Version, the pointer, 16 values, 4 each for the eyes and the gaze, Placed, HeldLeft, HeldRight, Size, the fingertips' and aims' 8 each, everyone else's 4, Drop");
+        Assert.AreEqual(1 + 1 + 1 + 1 + 1 + OrbInstaller.ScreenLocalValues + 4 + 4 + 4 + 8 + 8 + 4, screenParameters.Count,
+            "Open, Replace, ThumbnailBytes, Version, the pointer, 16 values, 4 each for the eyes and the gaze, Placed, HeldLeft, HeldRight, Size, the fingertips' and aims' 8 each, everyone else's 4");
         CollectionAssert.AreEquivalent(new[] { OrbInstaller.ScreenPlaced, OrbInstaller.ScreenHeldLeft, OrbInstaller.ScreenHeldRight, OrbInstaller.ScreenSize },
             screenParameters.Where(p => p.networkSynced).Select(p => p.name), "Only where it is and its size are synced");
         var size = screenParameters.Single(p => p.name == OrbInstaller.ScreenSize);
@@ -518,71 +518,93 @@ public class OrbTests
         Assert.AreEqual(OrbInstaller.LookAwayTime, away.motion.averageDuration, 1e-3f, "Out of sight that long first");
     }
 
-    // The link card (Docs/orb.md, Link card): the screen held where it was dropped, for its owner from N4N0/Screen/Drop and for
-    // everyone else from pointer 253 until 254 closes it, its sender on meanwhile; every N4N0's hands feel cards, locally.
+    // The link card (Docs/orb.md, Link card; screen version 7): an object of its own, out while N4N0/Card/Out is on (for
+    // everyone: it is synced), frozen where it appeared, N4N0's beam projecting it a moment; anyone's pickup grab moves it;
+    // its memory comes from the text channel's pointers past the screen's on every client; every N4N0's hands feel it.
     [Test]
-    public void ADroppedLinkCardStaysWhereItIsAndHandsFeelIt()
+    public void TheLinkCardIsOutWhereItAppearsAndEveryClientWritesItsMemory()
     {
         if (VrcFury.Writer == null) Assert.Ignore("Requires the VRCFury integration.");
         var (root, screen) = PlayWithScreen();
-        var sender = root.transform.Find(OrbInstaller.CardSender).GetComponent<VRCContactSender>();
+        var orb = root.transform;
+        Assert.IsTrue(OrbInstaller.HasCard(orb));
+        var model = orb.Find(OrbInstaller.CardModel);
+        var card = model.GetComponent<SkinnedMeshRenderer>();
+        Assert.AreEqual(screen.sharedMesh, card.sharedMesh, "Drawn by the screen's mesh");
+        CollectionAssert.AreEqual(screen.sharedMaterials, card.sharedMaterials, "and its materials");
+        Assert.AreEqual(orb.Find(OrbInstaller.Emitter), card.bones[1], "N4N0's beam reaches it");
+        var sender = orb.Find(OrbInstaller.CardSender).GetComponent<VRCContactSender>();
         Assert.AreEqual((OrbInstaller.CardTag, false), (sender.collisionTags.Single(), sender.localOnly), "Everyone's hands feel the card");
-        Assert.IsFalse(sender.gameObject.activeSelf, "Off until a card is dropped");
+        var grab = orb.Find(OrbInstaller.CardGrabBase + "/Bone").GetComponent<VRCPhysBone>();
+        Assert.AreEqual((VRCPhysBoneBase.AdvancedBool.True, OrbInstaller.CardGrab), (grab.allowGrabbing, grab.parameter), "Anyone grabs it to move it");
         foreach (bool right in new[] { false, true })
         {
-            var receiver = root.transform.Find(OrbInstaller.CardHand(right)).GetComponent<VRCContactReceiver>();
+            var receiver = orb.Find(OrbInstaller.CardHand(right)).GetComponent<VRCContactReceiver>();
             Assert.AreEqual((OrbInstaller.CardTag, OrbInstaller.CardTouch(right)), (receiver.collisionTags.Single(), receiver.parameter));
             Assert.IsTrue(receiver.allowSelf && receiver.allowOthers && receiver.localOnly, "Its own card and others', on its owner's client only");
         }
         var parameters = AssetDatabase.LoadAssetAtPath<VRCExpressionParameters>(folder + "/Parameters.asset").parameters;
-        foreach (var name in new[] { OrbInstaller.ScreenDrop, OrbInstaller.CardTouch(false), OrbInstaller.CardTouch(true) })
-            Assert.IsFalse(parameters.Single(p => p.name == name).networkSynced, name + " is local");
-        var hold = screen.GetComponent<VRCParentConstraint>();
+        foreach (var name in new[] { OrbInstaller.CardOut, OrbInstaller.CardHeldLeft, OrbInstaller.CardHeldRight })
+            Assert.IsTrue(parameters.Single(p => p.name == name).networkSynced, name + " is synced");
+        foreach (bool right in new[] { false, true }) Assert.IsFalse(parameters.Single(p => p.name == OrbInstaller.CardTouch(right)).networkSynced);
+        Assert.IsFalse(parameters.Any(p => p.name == "N4N0/Screen/Drop"), "the screen is never the card any more");
 
-        // Its owner's: N4N0/Screen/Drop.
-        playable.SetBool("IsLocal", true);
-        playable.SetInteger(OrbInstaller.VRMode, 0);
-        playable.SetBool(OrbInstaller.ScreenOpen, true);
-        playable.SetBool(OrbInstaller.ScreenDrop, true);
-        Tick(3);
-        Assert.IsTrue(screen.gameObject.activeSelf && hold.FreezeToWorld && sender.gameObject.activeSelf, "Dropped: held where it is, felt");
-        playable.SetBool(OrbInstaller.ScreenDrop, false);
-        Tick(3);
-        Assert.IsFalse(hold.FreezeToWorld || sender.gameObject.activeSelf, "Picked up again: it follows its owner");
-        playable.SetBool(OrbInstaller.ScreenOpen, false);
-        Tick(3);
-        Assert.IsFalse(screen.gameObject.activeSelf);
-        // In VR without Replace the overlay shows the menu, but a dropped card shows on the screen, and the Menu toggle
-        // turned off meanwhile closes nothing.
-        playable.SetInteger(OrbInstaller.VRMode, 1);
-        playable.SetBool(OrbInstaller.Menu, true);
-        playable.SetBool(OrbInstaller.ScreenDrop, true);
-        Tick(3);
-        Assert.IsTrue(screen.gameObject.activeSelf && hold.FreezeToWorld, "The card shows in VR too");
-        playable.SetBool(OrbInstaller.Menu, false);
-        Tick(3);
-        Assert.IsTrue(screen.gameObject.activeSelf, "Menu off doesn't take the card away");
-        playable.SetBool(OrbInstaller.ScreenDrop, false);
-        Tick(3);
-        Assert.IsFalse(screen.gameObject.activeSelf, "Gone with the card");
-        playable.SetInteger(OrbInstaller.VRMode, 0);
-
-        // Everyone else's: pointer 253 holds it through the blocks that follow, until 254 closes it.
+        // Out, for anyone's client: shown, frozen where it appeared, N4N0's beam fading out.
+        var place = orb.Find(OrbInstaller.CardPlace).GetComponent<VRCParentConstraint>();
+        float Beam() { var block = new MaterialPropertyBlock(); card.GetPropertyBlock(block); return block.GetFloat("_Beam"); }
         playable.SetBool("IsLocal", false);
-        int first = OrbInstaller.ScreenPointers(8, 72).first;
-        playable.SetInteger(OrbInstaller.TextPointer, first);
+        Tick(2);
+        Assert.IsFalse(model.gameObject.activeSelf || grab.enabled, "Not out");
+        playable.SetBool(OrbInstaller.CardOut, true);
         Tick(3);
-        Assert.IsTrue(screen.gameObject.activeSelf);
-        Assert.IsFalse(hold.FreezeToWorld);
-        playable.SetInteger(OrbInstaller.TextPointer, OrbInstaller.PointerCardDropped);
+        Assert.IsTrue(model.gameObject.activeSelf && grab.enabled && place.FreezeToWorld, "Out where it appeared, and grabbable");
+        Assert.Greater(Beam(), .2f, "N4N0's beam projects it");
+        Tick(Mathf.CeilToInt(OrbInstaller.CardBeamTime / .02f) + 4);
+        Assert.AreEqual(0, Beam(), 1e-3f, "then it stands alone");
+        Assert.IsFalse(screen.gameObject.activeSelf, "The screen stays closed beside it");
+        // Someone's pickup: the place follows the grip (frozen a moment first), the grab base frozen; let go, it stays.
+        playable.SetBool(OrbInstaller.CardGrab + "_IsGrabbed", true);
         Tick(3);
-        Assert.IsTrue(hold.FreezeToWorld && sender.gameObject.activeSelf);
-        playable.SetInteger(OrbInstaller.TextPointer, first + 1);
+        Assert.AreEqual(1, place.Sources[OrbInstaller.CardOnGrip].Weight);
+        Assert.IsFalse(place.FreezeToWorld);
+        Assert.IsTrue(orb.Find(OrbInstaller.CardGrabBase).GetComponent<VRCParentConstraint>().FreezeToWorld);
+        playable.SetBool(OrbInstaller.CardGrab + "_IsGrabbed", false);
         Tick(3);
-        Assert.IsTrue(hold.FreezeToWorld, "Still where it was while its blocks arrive");
-        playable.SetInteger(OrbInstaller.TextPointer, OrbInstaller.PointerScreenClose);
+        Assert.IsTrue(place.FreezeToWorld, "Let go: it stays");
+
+        // Its memory, on every client (its owner's too): 252 clears it, a block's pointer writes its words.
+        int textSync = 8, thumbnailBytes = 72;
+        bool picture = OrbInstaller.CardPictureFits(textSync, thumbnailBytes);
+        Assert.IsTrue(picture, "8 values keep the card's picture");
+        var words = OrbInstaller.CardWords(thumbnailBytes, picture);
+        var (first, blocks) = OrbInstaller.CardPointers(textSync, thumbnailBytes, picture);
+        Assert.AreEqual(OrbInstaller.ScreenPointers(textSync, thumbnailBytes).first + OrbInstaller.ScreenPointers(textSync, thumbnailBytes).blocks, first, "Right past the screen's");
+        Assert.LessOrEqual(first + blocks, OrbInstaller.PointerCardClear);
+        var bytes = new byte[2 * words.Count];
+        for (int i = 0; i < bytes.Length; i++) { int v = (i * 29 + 7) % 256; bytes[i] = (byte)(v == 128 ? 129 : v); }
+        void Synced(int pointer, int from)
+        {
+            playable.SetInteger(OrbInstaller.TextPointer, pointer);
+            for (int i = 0; i < textSync; i++) playable.SetFloat(OrbInstaller.TextSync(i), SyncValue(from + i < bytes.Length ? bytes[from + i] : 0));
+            Tick(OrbInstaller.ValueLag + 4);
+        }
+        float Word(int k) { var block = new MaterialPropertyBlock(); card.GetPropertyBlock(block); return block.GetFloat("_W" + k); }
+        foreach (bool local in new[] { false, true })
+        {
+            playable.SetBool("IsLocal", local);
+            Synced(OrbInstaller.PointerCardClear, 0);
+            Assert.IsTrue(words.All(k => Word(k) == 0), "252 clears the card");
+            for (int b = 0; b < blocks; b++) Synced(first + b, b * textSync);
+            Synced(0, 0);
+            for (int j = 0; j < words.Count; j++)
+                Assert.AreEqual(bytes[2 * j] + 256 * bytes[2 * j + 1], Word(words[j]), .01f, (local ? "Its owner's" : "Everyone else's") + " card word " + j + " (_W" + words[j] + ")");
+        }
+        // The screen's own blocks never write the card.
+        Synced(OrbInstaller.ScreenPointers(textSync, thumbnailBytes).first, 0);
+        Assert.AreEqual(bytes[0] + 256 * bytes[1], Word(words[0]), .01f);
+        playable.SetBool(OrbInstaller.CardOut, false);
         Tick(3);
-        Assert.IsFalse(screen.gameObject.activeSelf || hold.FreezeToWorld || sender.gameObject.activeSelf, "254 closes the card");
+        Assert.IsFalse(model.gameObject.activeSelf, "Taken back");
     }
 
     [Test]
@@ -876,7 +898,7 @@ public class OrbTests
             (OrbInstaller.LightColor, VRCExpressionParameters.ValueType.Int, true, true, 0f),
             (OrbInstaller.LightLevel, VRCExpressionParameters.ValueType.Float, true, true, OrbInstaller.LightLevelDefault),
         }, own);
-        Assert.AreEqual(1 + 8 + 1 + 8 + 8 * 8 + 3 + 8 + 1 + 8 + 8, parameters.CalcTotalCost(), "17 synced bits more");
+        Assert.AreEqual(1 + 8 + 1 + 8 + 8 * 8 + 3 + 8 + 3 + 1 + 8 + 8, parameters.CalcTotalCost(), "17 synced bits more");
         Assert.IsTrue(VrcFury.IsGlobalParameter(VrcFury.Features(placed).Single(f => f.kind == "FullController").feature, OrbInstaller.LightColor));
         var orbMenu = AssetDatabase.LoadAssetAtPath<VRCExpressionsMenu>(shared + "/Menu.asset").controls.Single().subMenu;
         var lightMenu = orbMenu.controls.Single(c => c.name == "Light").subMenu;
@@ -1114,7 +1136,7 @@ public class OrbTests
         var phone = Merged(Built(avatar, mobile: true));
         List<(string, VRCExpressionParameters.ValueType)> Synced(List<VRCExpressionParameters.Parameter> list) =>
             list.Where(p => p.networkSynced).Select(p => (p.name, p.valueType)).ToList();
-        Assert.AreEqual(1 + 8 + 1 + 8 + 8 * 8 + 3 + 8 + 1 + 8 + 8, pc.Where(p => p.networkSynced).Sum(p => p.valueType == VRCExpressionParameters.ValueType.Bool ? 1 : 8), "N4N0 with 8 text slots and its light");
+        Assert.AreEqual(1 + 8 + 1 + 8 + 8 * 8 + 3 + 8 + 3 + 1 + 8 + 8, pc.Where(p => p.networkSynced).Sum(p => p.valueType == VRCExpressionParameters.ValueType.Bool ? 1 : 8), "N4N0 with 8 text slots and its light");
         CollectionAssert.AreEqual(Synced(pc), Synced(phone));
         // The PC N4N0's parameters come first and whole; the mobile build adds its version, local.
         CollectionAssert.AreEqual(pc.Select(p => p.name), phone.Take(pc.Count).Select(p => p.name));

@@ -258,6 +258,17 @@ namespace Orbiters.Toolkit.Editor.VRChat
             Undo.RecordObject(renderer, "N4N0 look");
             SetScreenMaterials(renderer, material, retro);
             PrefabUtility.RecordPrefabInstancePropertyModifications(renderer);
+            SetCardMaterials(orb, material, retro, "N4N0 look");
+        }
+
+        // The link card draws with the screen's materials: it follows its look and thumbnail size.
+        private static void SetCardMaterials(Transform orb, Material pages, bool retro, string undo)
+        {
+            var card = orb.Find(CardModel);
+            if (card == null || !card.TryGetComponent(out SkinnedMeshRenderer renderer)) return;
+            Undo.RecordObject(renderer, undo);
+            SetScreenMaterials(renderer, pages, retro);
+            PrefabUtility.RecordPrefabInstancePropertyModifications(renderer);
         }
 
         /// <summary>A screen from before the skinned one (revision 7): the N4N0 it belongs to must be updated as a whole.</summary>
@@ -466,7 +477,7 @@ namespace Orbiters.Toolkit.Editor.VRChat
                 receiver.collisionTags.Add(tag);
             }
             AddHandle(orb, screen.transform, folder);
-            AddCard(orb);
+            AddCard(orb, mesh, material);
             return screen.transform;
         }
 
@@ -484,6 +495,7 @@ namespace Orbiters.Toolkit.Editor.VRChat
             Undo.RecordObject(renderer, "N4N0 thumbnail size");
             SetScreenMaterials(renderer, material, retro);
             PrefabUtility.RecordPrefabInstancePropertyModifications(renderer);
+            SetCardMaterials(orb, material, retro, "N4N0 thumbnail size");
         }
 
         /// <summary>
@@ -506,7 +518,6 @@ namespace Orbiters.Toolkit.Editor.VRChat
         private static void ScreenController(AnimatorController controller, int textSync, List<VRCExpressionParameters.Parameter> parameters, bool replace, int thumbnailBytes)
         {
             controller.AddParameter(ScreenOpen, AnimatorControllerParameterType.Bool);
-            controller.AddParameter(ScreenDrop, AnimatorControllerParameterType.Bool);
             controller.AddParameter(new AnimatorControllerParameter { name = ScreenReplace, type = AnimatorControllerParameterType.Bool, defaultBool = replace });
             controller.AddParameter(new AnimatorControllerParameter { name = ScreenThumbnailBytes, type = AnimatorControllerParameterType.Int, defaultInt = thumbnailBytes });
             controller.AddParameter(new AnimatorControllerParameter { name = ScreenVersionParameter, type = AnimatorControllerParameterType.Int, defaultInt = ScreenVersion });
@@ -529,7 +540,7 @@ namespace Orbiters.Toolkit.Editor.VRChat
             GazeDotLayer(controller);
             PlacementController(controller, parameters);
             PointingController(controller, parameters);
-            CardController(controller, parameters);
+            CardController(controller, parameters, textSync, thumbnailBytes);
 
             parameters.Add(Parameter(ScreenOpen, synced: false));
             // Not saved: a new upload's option always holds.
@@ -618,7 +629,8 @@ namespace Orbiters.Toolkit.Editor.VRChat
         /// still (read from the text's late values: values VRChat applied before their pointer never reach the block before).
         /// The owner's local blocks need no lag: Orbiters - N4N0 never changes their pointer and values in one step.
         /// The owner's Menu toggle has the last word: turning it off closes their screen and clears
-        /// <see cref="ScreenOpen"/> (a parameter driver), whatever Orbiters - N4N0 last set it to.
+        /// <see cref="ScreenOpen"/> (a parameter driver), whatever Orbiters - N4N0 last set it to. (From version 7 the link
+        /// card is an object of its own: the screen is never the card.)
         /// </summary>
         private static void ScreenLayer(AnimatorController controller, int textSync, int thumbnailBytes)
         {
@@ -694,14 +706,8 @@ namespace Orbiters.Toolkit.Editor.VRChat
             var openByMenu = HeldPropRig.State(controller, machine, "Open by menu", tree);
             var closedByMenu = HeldPropRig.State(controller, machine, "Closed by menu", hidden);
             Drive(closedByMenu, (ScreenOpen, false));
-            // The owner's dropped link card (N4N0/Screen/Drop): shown whatever the mode, Replace and the Menu toggle say, and
-            // before anything else; ended, it closes, then opens again as they say.
-            var dropped = HeldPropRig.State(controller, machine, "Dropped", tree);
-            foreach (var state in new[] { closed, open, openByMenu, closedByMenu, dropped }) state.writeDefaultValues = true;
+            foreach (var state in new[] { closed, open, openByMenu, closedByMenu }) state.writeDefaultValues = true;
             machine.defaultState = closed;
-            foreach (var state in new[] { closed, open, openByMenu, closedByMenu })
-                Transition(state, dropped, ("IsLocal", AnimatorConditionMode.If, 0), (ScreenDrop, AnimatorConditionMode.If, 0));
-            Transition(dropped, closed, ("IsLocal", AnimatorConditionMode.If, 0), (ScreenDrop, AnimatorConditionMode.IfNot, 0));
             var (first, blocks) = ScreenPointers(textSync, thumbnailBytes);
             // The owner's opens at once when the Menu toggle is on (a blank screen then says the desktop does not answer)
             // or when the desktop opens it, in desktop mode or with Replace (in VR without it the overlay shows the menu).

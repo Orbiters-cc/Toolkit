@@ -174,7 +174,7 @@ namespace Orbiters.Toolkit.Editor.VRChat
             var found = FullController(orb, out var component) ?? throw new InvalidOperationException("This N4N0 has no VRCFury Full Controller: add it again.");
             // The controllers made here drive the screen of version 7 (its pointers, place and handle): an older N4N0 comes
             // whole from My Avatar's gallery instead.
-            if (!HasScreen(orb) || ScreenRenderer(orb) == null || !HasPointing(orb) || !HasPlacement(orb)) throw new InvalidOperationException(OlderScreen);
+            if (!HasScreen(orb) || ScreenRenderer(orb) == null || !HasPointing(orb) || !HasPlacement(orb) || !HasCard(orb)) throw new InvalidOperationException(OlderScreen);
             if (OptionsOf(orb) == (textSync, walkBoost, replace, thumbnailBytes, light) && ScreenDraws(orb, thumbnailBytes) && HasLight(orb) == light)
                 return;
             if (found.menuIndex < 0) throw new InvalidOperationException("This N4N0's menu was changed: add it again.");
