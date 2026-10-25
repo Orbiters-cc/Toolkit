@@ -1,5 +1,25 @@
 # Orbiters Toolkit
 
+## Unreleased
+
+- **N4N0's capture kit and camera rig** (`OrbInstaller.Capture`; Orbiters contracts 0.7.0, `Docs/rig-frames.md`,
+  N4N0's capture kit): what lets Orbiters - N4N0 record a VRChat world through VRChat's camera (3D pictures,
+  recordings) is part of N4N0 now, instead of Mixer's "Orbiters Capture Kit" with its own Action Menu toggles. N4N0
+  carries the rig (six square 90° cameras into 512² HDR render textures, and the renderer of their rig frames) and the
+  kit's renderer under `Capture`, beside `Shown` (hiding N4N0 leaves capture working); the kit's skinned helper mesh,
+  one triangle per humanoid bone, is made for the avatar's armature as the avatar is built for upload
+  (`OrbCaptureHook`, after the platform's N4N0 is kept and before VRCFury; its files in
+  `Assets/Orbiters/N4N0/Capture kit/<avatar>`), and phones' builds leave the capture part out. The contracts' shaders
+  are copied into N4N0's folder under their own names (`Hidden/Orbiters/N4N0 Capture Kit`, `… Capture Rig`), their
+  includes written into them. Orbiters - N4N0 drives them over OSC through local, unsynced, unsaved parameters (no
+  synced bits): `N4N0/Capture/Record` (N4N0 › Record in the Action Menu sets it too), `N4N0/Capture/Depth`,
+  `N4N0/Capture/Follow`, `N4N0/Capture/Rig`, `N4N0/Capture/RigX`, `RigY`, `RigZ`, `RigYaw`. While following, the rig
+  stands at VRChat's camera (a VRChat Parent Constraint: the world origin's source, whose offsets the animator sets, or
+  the hips'), and the kit's bounds, 4 m around the rig, go with it: the kit draws wherever the camera goes without
+  bounds that rank the avatar "Very Poor". The rig's cameras and the kit draw on the wearer's client only (`IsLocal`).
+  The six render textures count in VRChat's texture memory. N4N0 must be built again (a new gallery version) for
+  avatars to get it; an avatar wearing Mixer's old kit should lose it.
+
 ## 0.4.5 — 2026-10-25
 
 - **Sign in without a code**: one **Sign in** button opens Orbiters in the browser, where **Connect** (after signing in

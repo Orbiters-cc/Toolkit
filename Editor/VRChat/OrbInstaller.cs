@@ -191,6 +191,8 @@ namespace Orbiters.Toolkit.Editor.VRChat
             panel.gameObject.SetActive(false);
             // Quest's N4N0, which mobile builds keep instead (OrbInstaller.Mobile).
             AddMobile(root.transform, folder);
+            // The capture kit and camera rig Orbiters - N4N0 records with (OrbInstaller.Capture).
+            AddCapture(root.transform, folder);
         }
 
         /// <summary>

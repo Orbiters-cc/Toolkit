@@ -1,0 +1,161 @@
+// The capture kit on a VRChat avatar. In the frames VRChat's camera renders (never in your own view or in mirrors) it
+// draws the capture strip (the camera's pose), the skeleton band (the avatar's pose) and, about one frame in
+// _OrbitersDepthEvery, a depth frame instead. Only on the wearer's own client: _OrbitersLocal must be 1, which the
+// kit's animator layer sets from VRChat's IsLocal. Every other copy of the avatar (in other players' cameras, photos and
+// streams, where _VRChatCameraMode is theirs) keeps 0 and draws nothing, so the kit never covers their pictures with
+// strips or depth symbols. One skinned helper mesh carries it all (N4N0 builds it from the avatar as it is uploaded);
+// each triangle's uv0.x says what it draws:
+//   0..54  humanoid bone b: vertices at the bone's origin and along its local X and Y axes, skinned to the bone only
+//   64     the capture strip (and depth frames)
+//   65     the band's black reserved area: must come before the band's other triangles
+//   66     the band's pilot rows and header for copy uv0.y (0..2): vertex 0 at the hips' origin, skinned to the hips
+// Contracts: Docs/capture-strip.md, Docs/depth-frames.md, Docs/skeleton-band.md. Test: Rust~/tests/shaders.rs.
+Shader "Hidden/Orbiters/CaptureKit"
+{
+    Properties
+    {
+        _OrbitersBoneMask ("Bones present (four 16-bit words, high first)", Vector) = (0, 0, 0, 0)
+        _OrbitersAvatarId ("Avatar identity (16-bit)", Float) = 0
+        _OrbitersDepthEvery ("Depth frame about every N frames (0: none)", Float) = 0
+        [Toggle] _OrbitersOnlyInCamera ("Only in VRChat camera renders", Float) = 1
+        [Toggle] _OrbitersLocal ("On the wearer's own client (the kit's animator sets it from IsLocal)", Float) = 0
+        _OrbitersUseTimeOverride ("Use time override", Float) = 0
+        _OrbitersTimeOverride ("Time override", Float) = 0
+        _OrbitersSource ("Source (0 avatar, 1 simulator, 2 test)", Float) = 0
+    }
+    SubShader
+    {
+        Tags { "Queue" = "Overlay+100" "RenderType" = "Overlay" "IgnoreProjector" = "True" "DisableBatching" = "True" }
+        Pass
+        {
+            ZTest Always
+            ZWrite Off
+            Cull Off
+            CGPROGRAM
+            #pragma vertex vert
+            #pragma geometry geom
+            #pragma fragment frag
+            #pragma target 4.0
+            #include "UnityCG.cginc"
+            #include "OrbitersCapture.cginc"
+            #include "OrbitersSkeletonBand.cginc"
+
+            #define KIT_STRIP 64u
+            #define KIT_FILL 65u
+            #define KIT_HEADER 66u
+            // What a run of pixels shows: band cells (a sample's levels), the strip, or the strip and depth symbols.
+            #define RUN_CELLS 0u
+            #define RUN_STRIP 1u
+            #define RUN_DEPTH 2u
+
+            float4 _OrbitersBoneMask;
+            float _OrbitersAvatarId;
+            float _OrbitersOnlyInCamera;
+            float _OrbitersLocal;
+
+            struct appdata { float4 vertex : POSITION; float2 uv : TEXCOORD0; };
+            struct v2g { float3 world : TEXCOORD0; float2 uv : TEXCOORD1; };
+            // run: mode, sample value, first pixel column of the run (top-down pixels).
+            struct g2f { float4 pos : SV_POSITION; nointerpolation uint3 run : TEXCOORD0; };
+
+            v2g vert(appdata v)
+            {
+                v2g o;
+                o.world = mul(unity_ObjectToWorld, float4(v.vertex.xyz, 1.0)).xyz;
+                o.uv = v.uv;
+                return o;
+            }
+
+            // A rectangle of pixels (top-down, half-open) as a quad.
+            void EmitRun(inout TriangleStream<g2f> stream, uint mode, uint value, uint x, uint y, uint w, uint h)
+            {
+                float2 size = _ScreenParams.xy;
+                float x0 = x * 2.0 / size.x - 1.0, x1 = (x + w) * 2.0 / size.x - 1.0;
+                float y0 = (1.0 - y * 2.0 / size.y) * _ProjectionParams.x, y1 = (1.0 - (y + h) * 2.0 / size.y) * _ProjectionParams.x;
+                g2f o;
+                o.run = uint3(mode, value, x);
+                o.pos = float4(x0, y0, 0.5, 1.0);
+                stream.Append(o);
+                o.pos = float4(x1, y0, 0.5, 1.0);
+                stream.Append(o);
+                o.pos = float4(x0, y1, 0.5, 1.0);
+                stream.Append(o);
+                o.pos = float4(x1, y1, 0.5, 1.0);
+                stream.Append(o);
+                stream.RestartStrip();
+            }
+
+            [maxvertexcount(104)]
+            void geom(triangle v2g v[3], inout TriangleStream<g2f> stream)
+            {
+                // A remote copy of the avatar: nothing, in any render.
+                if (_OrbitersLocal < 0.5) return;
+                if (_OrbitersOnlyInCamera > 0.5 && (_VRChatCameraMode < 0.5 || _VRChatMirrorMode > 0.5)) return;
+                uint width = (uint)_ScreenParams.x, height = (uint)_ScreenParams.y;
+                uint kind = (uint)round(v[0].uv.x);
+                bool depthFrame = OrbitersKitDepthFrame();
+                if (kind == KIT_STRIP)
+                {
+                    OrbitersStripLayout s = OrbitersComputeStripLayout(width, height);
+                    if (depthFrame) EmitRun(stream, RUN_DEPTH, 0u, 0u, 0u, width, height);
+                    else if (s.valid) EmitRun(stream, RUN_STRIP, 0u, s.reserved.x, s.reserved.y, s.reserved.z - s.reserved.x, s.reserved.w - s.reserved.y);
+                    return;
+                }
+                // Depth frames keep the whole picture for depth.
+                OrbitersBandLayout l = OrbitersComputeBandLayout(width, height);
+                if (depthFrame || !l.valid) return;
+                uint time = asuint(OrbitersTime());
+                if (kind == KIT_FILL)
+                {
+                    EmitRun(stream, RUN_CELLS, 0u, l.x0 - l.cell, l.y0 - l.cell, l.perRow * l.tile + 2u * l.cell, height + l.cell - l.y0);
+                }
+                else if (kind == KIT_HEADER)
+                {
+                    uint copy = min((uint)round(v[0].uv.y), 2u);
+                    [unroll] for (uint t = 0u; t < ORBITERS_SKELETON_DATA_TILES; t++)
+                    {
+                        uint2 tile = OrbitersBandTileOrigin(l, copy * ORBITERS_SKELETON_DATA_TILES + t);
+                        EmitRun(stream, RUN_CELLS, ORBITERS_PILOT_SAMPLE, tile.x, tile.y, l.tile, l.cell);
+                    }
+                    uint4 mask = (uint4)_OrbitersBoneMask;
+                    uint avatar = (uint)_OrbitersAvatarId;
+                    float3 hips = v[0].world;
+                    uint crc = OrbitersHeaderCrc(time, hips, mask, avatar);
+                    [unroll] for (uint i = 0u; i < ORBITERS_SKELETON_HEADER; i++)
+                    {
+                        uint2 at = OrbitersBandSampleOrigin(l, i, copy);
+                        EmitRun(stream, RUN_CELLS, i == 15u ? crc : OrbitersHeaderSample(i, time, hips, mask, avatar), at.x, at.y, 8u * l.cell, l.cell);
+                    }
+                }
+                else if (kind < 55u)
+                {
+                    OrbitersBoneRecord r = OrbitersEncodeBone(kind, v[1].world - v[0].world, v[2].world - v[0].world, time & 0xFFFFu);
+                    if (!r.valid) return;
+                    [unroll] for (uint k = 0u; k < 3u; k++)
+                    {
+                        [unroll] for (uint j = 0u; j < ORBITERS_SKELETON_RECORD; j++)
+                        {
+                            uint2 at = OrbitersBandSampleOrigin(l, ORBITERS_SKELETON_HEADER + kind * ORBITERS_SKELETON_RECORD + j, k);
+                            EmitRun(stream, RUN_CELLS, OrbitersRecordSample(r, j), at.x, at.y, 8u * l.cell, l.cell);
+                        }
+                    }
+                }
+            }
+
+            float4 frag(g2f i) : SV_Target
+            {
+                uint width = (uint)_ScreenParams.x, height = (uint)_ScreenParams.y;
+                uint2 p = OrbitersTopDownPixel(i.pos);
+                if (i.run.x == RUN_CELLS)
+                    return float4(OrbitersLevelLinear(OrbitersRunLevel(p.x, i.run.z, max(3u, height / 720u), i.run.y)).xxx, 1.0);
+                bool depthFrame = i.run.x == RUN_DEPTH;
+                float3 c;
+                if (OrbitersStripPixel(p, width, height, depthFrame, c)) return float4(c, 1.0);
+                if (!depthFrame) discard;
+                return float4(OrbitersDepthPixel(p, width, height), 1.0);
+            }
+            ENDCG
+        }
+    }
+    Fallback Off
+}

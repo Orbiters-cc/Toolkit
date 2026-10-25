@@ -1,0 +1,198 @@
+// Orbiters skeleton band v1: GPU encoder (the capture kit's shader).
+// Contract: Docs/skeleton-band.md. CPU twins: Rust~/src/skeleton.rs (encoder and decoder), CSharp/SkeletonBand.cs.
+// Any change here must keep Rust~/tests/shaders.rs decoding.
+//
+// Include after UnityCG.cginc and OrbitersCapture.cginc. Needs shader model 4.0 or higher.
+
+#ifndef ORBITERS_SKELETON_BAND_INCLUDED
+#define ORBITERS_SKELETON_BAND_INCLUDED
+
+#define ORBITERS_SKELETON_MAGIC 0x4F53u
+#define ORBITERS_SKELETON_VERSION 1u
+#define ORBITERS_SKELETON_HEADER 16u
+#define ORBITERS_SKELETON_RECORD 5u
+#define ORBITERS_SKELETON_DATA_TILES 10u
+#define ORBITERS_SKELETON_BAND_TILES 30u
+// A sample whose eight cells show levels 0, 1, 2, 3, 0, 1, 2, 3: two of them make a tile's pilot row.
+#define ORBITERS_PILOT_SAMPLE 0x1B1Bu
+
+// CRC-16/CCITT-FALSE, four bits at a time.
+static const uint ORBITERS_CRC16_NIBBLE[16] =
+{
+    0x0000u, 0x1021u, 0x2042u, 0x3063u, 0x4084u, 0x50A5u, 0x60C6u, 0x70E7u,
+    0x8108u, 0x9129u, 0xA14Au, 0xB16Bu, 0xC18Cu, 0xD1ADu, 0xE1CEu, 0xF1EFu
+};
+
+uint OrbitersCrc16Byte(uint crc, uint value)
+{
+    crc = ((crc << 4) & 0xFFFFu) ^ ORBITERS_CRC16_NIBBLE[((crc >> 12) ^ (value >> 4)) & 15u];
+    crc = ((crc << 4) & 0xFFFFu) ^ ORBITERS_CRC16_NIBBLE[((crc >> 12) ^ value) & 15u];
+    return crc;
+}
+
+// A 16-bit sample as two big-endian bytes.
+uint OrbitersCrc16Sample(uint crc, uint sample)
+{
+    return OrbitersCrc16Byte(OrbitersCrc16Byte(crc, (sample >> 8) & 0xFFu), sample & 0xFFu);
+}
+
+struct OrbitersBandLayout
+{
+    bool valid;
+    uint width, height, cell, tile, perRow, rows, x0, y0;
+};
+
+OrbitersBandLayout OrbitersComputeBandLayout(uint width, uint height)
+{
+    OrbitersBandLayout l = (OrbitersBandLayout)0;
+    l.width = width;
+    l.height = height;
+    l.cell = max(3u, height / 720u);
+    l.tile = 16u * l.cell;
+    l.perRow = min(ORBITERS_SKELETON_BAND_TILES, width * 9u / 10u / l.tile);
+    l.rows = (ORBITERS_SKELETON_BAND_TILES + max(l.perRow, 1u) - 1u) / max(l.perRow, 1u);
+    uint used = l.cell + l.rows * l.tile;
+    l.valid = l.perRow >= ORBITERS_SKELETON_DATA_TILES && used + l.cell <= height;
+    l.x0 = (width - min(width, l.perRow * l.tile)) / 2u;
+    l.y0 = height - min(height, used);
+    return l;
+}
+
+// Top-left pixel (top-down) of band tile p (0..29): copy p / 10 of data tile p % 10.
+uint2 OrbitersBandTileOrigin(OrbitersBandLayout l, uint p)
+{
+    return uint2(l.x0 + (p % l.perRow) * l.tile, l.y0 + (p / l.perRow) * l.tile);
+}
+
+// Top-left pixel of sample s (0..290) of copy k: eight cells in a row of its data tile.
+uint2 OrbitersBandSampleOrigin(OrbitersBandLayout l, uint s, uint k)
+{
+    uint slot = s % 30u;
+    uint2 t = OrbitersBandTileOrigin(l, k * ORBITERS_SKELETON_DATA_TILES + s / 30u);
+    return uint2(t.x + (slot & 1u) * 8u * l.cell, t.y + (1u + slot / 2u) * l.cell);
+}
+
+// World rotation of an orthonormal basis (the bone's local X, Y, Z axes in world space), Unity's (x, y, z, w).
+float4 OrbitersQuaternionFromBasis(float3 x, float3 y, float3 z)
+{
+    float m00 = x.x, m10 = x.y, m20 = x.z;
+    float m01 = y.x, m11 = y.y, m21 = y.z;
+    float m02 = z.x, m12 = z.y, m22 = z.z;
+    float trace = m00 + m11 + m22;
+    float4 q;
+    if (trace > 0.0)
+    {
+        float s = sqrt(trace + 1.0) * 2.0;
+        q = float4((m21 - m12) / s, (m02 - m20) / s, (m10 - m01) / s, 0.25 * s);
+    }
+    else if (m00 > m11 && m00 > m22)
+    {
+        float s = sqrt(1.0 + m00 - m11 - m22) * 2.0;
+        q = float4(0.25 * s, (m01 + m10) / s, (m02 + m20) / s, (m21 - m12) / s);
+    }
+    else if (m11 > m22)
+    {
+        float s = sqrt(1.0 + m11 - m00 - m22) * 2.0;
+        q = float4((m01 + m10) / s, 0.25 * s, (m12 + m21) / s, (m02 - m20) / s);
+    }
+    else
+    {
+        float s = sqrt(1.0 + m22 - m00 - m11) * 2.0;
+        q = float4((m02 + m20) / s, (m12 + m21) / s, 0.25 * s, (m10 - m01) / s);
+    }
+    return normalize(q);
+}
+
+// Signed 16-bit round(v / (1/sqrt 2) * 32767) as a sample.
+uint OrbitersQuaternionComponent(float v)
+{
+    return (uint)(int)round(clamp(v * 46339.535, -32767.0, 32767.0)) & 0xFFFFu;
+}
+
+struct OrbitersBoneRecord
+{
+    bool valid;
+    uint s0, s1, s2, s3, s4;
+};
+
+// The record of bone b from the world vectors along its local X and Y axes (any length), or invalid when they are
+// degenerate. timeLow: the low half of the game time's float bits, which the record's CRC covers.
+OrbitersBoneRecord OrbitersEncodeBone(uint b, float3 alongX, float3 alongY, uint timeLow)
+{
+    OrbitersBoneRecord r = (OrbitersBoneRecord)0;
+    float lx = length(alongX);
+    float3 x = alongX / max(lx, 1e-20);
+    float3 yp = alongY - dot(alongY, x) * x;
+    float ly = length(yp);
+    r.valid = lx > 1e-6 && ly > 1e-6;
+    float3 y = yp / max(ly, 1e-20);
+    float4 q = OrbitersQuaternionFromBasis(x, y, cross(x, y));
+    // Smallest three: the largest component made positive, the other three kept. Components are read by static
+    // swizzles only (see OrbitersCameraToWorldBits).
+    float4 a = abs(q);
+    uint largest = 0u;
+    float m = a.x;
+    if (a.y > m) { largest = 1u; m = a.y; }
+    if (a.z > m) { largest = 2u; m = a.z; }
+    if (a.w > m) { largest = 3u; }
+    float big = largest == 0u ? q.x : (largest == 1u ? q.y : (largest == 2u ? q.z : q.w));
+    if (big < 0.0) q = -q;
+    float3 others = largest == 0u ? q.yzw : (largest == 1u ? q.xzw : (largest == 2u ? q.xyw : q.xyz));
+    r.s0 = (b << 8) | (largest << 6);
+    r.s1 = OrbitersQuaternionComponent(others.x);
+    r.s2 = OrbitersQuaternionComponent(others.y);
+    r.s3 = OrbitersQuaternionComponent(others.z);
+    uint crc = 0xFFFFu;
+    crc = OrbitersCrc16Sample(crc, r.s1);
+    crc = OrbitersCrc16Sample(crc, r.s2);
+    crc = OrbitersCrc16Sample(crc, r.s3);
+    crc = OrbitersCrc16Sample(crc, timeLow);
+    crc = OrbitersCrc16Sample(crc, r.s0);
+    r.s4 = crc;
+    return r;
+}
+
+uint OrbitersRecordSample(OrbitersBoneRecord r, uint j)
+{
+    return j == 0u ? r.s0 : (j == 1u ? r.s1 : (j == 2u ? r.s2 : (j == 3u ? r.s3 : r.s4)));
+}
+
+// Header sample i (0..15). time: the game time's float bits; hips: the hips' world position; mask: the present-bone
+// mask as four 16-bit words, high first; avatar: the kit's 16-bit avatar identity.
+uint OrbitersHeaderSample(uint i, uint time, float3 hips, uint4 mask, uint avatar)
+{
+    uint3 h = asuint(hips);
+    uint v = ORBITERS_SKELETON_MAGIC;
+    if (i == 1u) v = ORBITERS_SKELETON_VERSION;
+    else if (i == 2u) v = time >> 16;
+    else if (i == 3u) v = time & 0xFFFFu;
+    else if (i == 4u) v = h.x >> 16;
+    else if (i == 5u) v = h.x & 0xFFFFu;
+    else if (i == 6u) v = h.y >> 16;
+    else if (i == 7u) v = h.y & 0xFFFFu;
+    else if (i == 8u) v = h.z >> 16;
+    else if (i == 9u) v = h.z & 0xFFFFu;
+    else if (i == 10u) v = mask.x & 0xFFFFu;
+    else if (i == 11u) v = mask.y & 0xFFFFu;
+    else if (i == 12u) v = mask.z & 0xFFFFu;
+    else if (i == 13u) v = mask.w & 0xFFFFu;
+    else if (i == 14u) v = avatar & 0xFFFFu;
+    return v;
+}
+
+uint OrbitersHeaderCrc(uint time, float3 hips, uint4 mask, uint avatar)
+{
+    uint crc = 0xFFFFu;
+    [unroll] for (uint i = 0u; i < 15u; i++)
+        crc = OrbitersCrc16Sample(crc, OrbitersHeaderSample(i, time, hips, mask, avatar));
+    return crc;
+}
+
+// Level (0..3) of the cell under pixel x of a run of cells that starts at runX and shows sample value.
+uint OrbitersRunLevel(uint x, uint runX, uint cell, uint value)
+{
+    uint j = ((x - runX) / cell) & 7u;
+    return (value >> (14u - 2u * j)) & 3u;
+}
+
+#endif // ORBITERS_SKELETON_BAND_INCLUDED

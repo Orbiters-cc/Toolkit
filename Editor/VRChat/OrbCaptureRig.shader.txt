@@ -1,0 +1,259 @@
+// The capture rig's renderer on a VRChat avatar (Docs/rig-frames.md). It sits at the rig's origin, under the rig root
+// with no offset, so its object-to-world is the rig's pose; six square 90° cameras around it render the faces into
+// _OrbitersRigFace1..6. It draws on the wearer's own client only (_OrbitersLocal, set from IsLocal by the kit's
+// animator), in two kinds of render:
+//   - VRChat's camera renders, on rig frames (OrbitersRigFrame): the six faces under the strip, and the strip again with
+//     the rig's pose and kind 2 (it draws after the capture kit, over the kit's strip and skeleton band);
+//   - each face camera's own render (near plane ORBITERS_RIG_NEAR, square target): the face's stamp, the frame's time.
+// Its mesh: three triangles whose uv0.x says what they draw (0 the faces, 1 the strip, 2 the stamp), with bounds large
+// enough that the face cameras and VRChat's camera around the rig never cull it.
+// Contracts: Docs/rig-frames.md, Docs/capture-strip.md. Test: Rust~/tests/shaders.rs.
+Shader "Hidden/Orbiters/CaptureRig"
+{
+    Properties
+    {
+        _OrbitersRigFace1 ("+X face", 2D) = "black" {}
+        _OrbitersRigFace2 ("-X face", 2D) = "black" {}
+        _OrbitersRigFace3 ("+Y face", 2D) = "black" {}
+        _OrbitersRigFace4 ("-Y face", 2D) = "black" {}
+        _OrbitersRigFace5 ("+Z face", 2D) = "black" {}
+        _OrbitersRigFace6 ("-Z face", 2D) = "black" {}
+        _OrbitersDepthEvery ("Depth frame about every N frames (the kit's)", Float) = 0
+        [Toggle] _OrbitersLocal ("On the wearer's own client (the kit's animator sets it from IsLocal)", Float) = 0
+        _OrbitersUseTimeOverride ("Use time override", Float) = 0
+        _OrbitersTimeOverride ("Time override", Float) = 0
+        _OrbitersSource ("Source (0 avatar, 1 simulator, 2 test)", Float) = 0
+    }
+    SubShader
+    {
+        Tags { "Queue" = "Overlay+101" "RenderType" = "Overlay" "IgnoreProjector" = "True" "DisableBatching" = "True" }
+        Pass
+        {
+            ZTest Always
+            ZWrite Off
+            Cull Off
+            CGPROGRAM
+            #pragma vertex vert
+            #pragma geometry geom
+            #pragma fragment frag
+            #pragma target 4.0
+            #include "UnityCG.cginc"
+            #include "OrbitersCapture.cginc"
+
+            #define ORBITERS_RIG_NEAR 0.0479
+            #define ORBITERS_RIG_FAR 1000.0
+            #define ORBITERS_RIG_MIN_FACE 64u
+            #define ORBITERS_STAMP_DIVISOR 64u
+            #define ORBITERS_STAMP_BLOCKS 34u
+            #define PART_FACES 0u
+            #define PART_STRIP 1u
+            #define PART_STAMP 2u
+            #define RUN_FILL 0u
+            #define RUN_TILE 1u
+            #define RUN_STRIP 2u
+            #define RUN_STAMP 3u
+
+            Texture2D _OrbitersRigFace1;
+            Texture2D _OrbitersRigFace2;
+            Texture2D _OrbitersRigFace3;
+            Texture2D _OrbitersRigFace4;
+            Texture2D _OrbitersRigFace5;
+            Texture2D _OrbitersRigFace6;
+            SamplerState sampler_linear_clamp;
+            float _OrbitersLocal;
+
+            struct appdata { float4 vertex : POSITION; float2 uv : TEXCOORD0; };
+            struct v2g { float2 uv : TEXCOORD0; };
+            // run: mode, value (a tile's face number), first pixel column and row of the run (top-down pixels).
+            // w0..w5: the strip's 23 payload words (and the face side in w0.x for tiles).
+            struct g2f
+            {
+                float4 pos : SV_POSITION;
+                nointerpolation uint4 run : TEXCOORD0;
+                nointerpolation uint4 w0 : TEXCOORD1;
+                nointerpolation uint4 w1 : TEXCOORD2;
+                nointerpolation uint4 w2 : TEXCOORD3;
+                nointerpolation uint4 w3 : TEXCOORD4;
+                nointerpolation uint4 w4 : TEXCOORD5;
+                nointerpolation uint4 w5 : TEXCOORD6;
+            };
+
+            v2g vert(appdata v)
+            {
+                v2g o;
+                o.uv = v.uv;
+                return o;
+            }
+
+            // Faces under the strip (Docs/rig-frames.md): side, first tile's corner; side 0 when the frame has none.
+            uint3 OrbitersRigFaces(OrbitersStripLayout s, uint width, uint height)
+            {
+                uint top = s.reserved.w;
+                uint face = min((height - top) / 2u, width / 3u);
+                if (!s.valid || face < ORBITERS_RIG_MIN_FACE) return uint3(0u, 0u, 0u);
+                return uint3(face, (width - 3u * face) / 2u, top + (height - top - 2u * face) / 2u);
+            }
+
+            // The face tile t shows: -X, +Z, +X, -Z, +Y, -Y.
+            uint OrbitersRigTileFace(uint t)
+            {
+                return t == 0u ? 2u : (t == 1u ? 5u : (t == 2u ? 1u : (t == 3u ? 6u : (t == 4u ? 3u : 4u))));
+            }
+
+            void EmitRun(inout TriangleStream<g2f> stream, g2f o, uint x, uint y, uint w, uint h)
+            {
+                float2 size = _ScreenParams.xy;
+                float x0 = x * 2.0 / size.x - 1.0, x1 = (x + w) * 2.0 / size.x - 1.0;
+                float y0 = (1.0 - y * 2.0 / size.y) * _ProjectionParams.x, y1 = (1.0 - (y + h) * 2.0 / size.y) * _ProjectionParams.x;
+                o.pos = float4(x0, y0, 0.5, 1.0);
+                stream.Append(o);
+                o.pos = float4(x1, y0, 0.5, 1.0);
+                stream.Append(o);
+                o.pos = float4(x0, y1, 0.5, 1.0);
+                stream.Append(o);
+                o.pos = float4(x1, y1, 0.5, 1.0);
+                stream.Append(o);
+                stream.RestartStrip();
+            }
+
+            // The rig's camera-to-world word k (row-major 3x4) from the renderer's object-to-world: its axes made unit
+            // (an avatar's scale scales the rig), its position.
+            uint OrbitersRigPoseBits(uint k)
+            {
+                float3 right = normalize(float3(unity_ObjectToWorld[0].x, unity_ObjectToWorld[1].x, unity_ObjectToWorld[2].x));
+                float3 up = normalize(float3(unity_ObjectToWorld[0].y, unity_ObjectToWorld[1].y, unity_ObjectToWorld[2].y));
+                float3 forward = normalize(float3(unity_ObjectToWorld[0].z, unity_ObjectToWorld[1].z, unity_ObjectToWorld[2].z));
+                float4 r0 = float4(right.x, up.x, forward.x, unity_ObjectToWorld[0].w);
+                float4 r1 = float4(right.y, up.y, forward.y, unity_ObjectToWorld[1].w);
+                float4 r2 = float4(right.z, up.z, forward.z, unity_ObjectToWorld[2].w);
+                uint4 row = k < 4u ? asuint(r0) : (k < 8u ? asuint(r1) : asuint(r2));
+                uint c = k & 3u;
+                return c == 0u ? row.x : (c == 1u ? row.y : (c == 2u ? row.z : row.w));
+            }
+
+            uint OrbitersRigWord(uint i, uint width, uint height)
+            {
+                uint flags = 2u | ((uint)clamp(_VRChatCameraMode, 0.0, 7.0) << 2) | (((uint)_OrbitersSource & 15u) << 12);
+                uint word = ((width & 0xFFFFu) << 16) | (height & 0xFFFFu); // word 21
+                if (i == 0u) word = ORBITERS_WORD0;
+                else if (i == 1u) word = flags;
+                else if (i == 2u) word = asuint(OrbitersTime());
+                else if (i < 15u) word = OrbitersRigPoseBits(i - 3u);
+                else if (i < 17u) word = asuint(1.0);
+                else if (i < 19u) word = 0u;
+                else if (i == 19u) word = asuint(ORBITERS_RIG_NEAR);
+                else if (i == 20u) word = asuint(ORBITERS_RIG_FAR);
+                return word;
+            }
+
+            [maxvertexcount(28)]
+            void geom(triangle v2g v[3], inout TriangleStream<g2f> stream)
+            {
+                // A remote copy of the avatar: nothing, in any render.
+                if (_OrbitersLocal < 0.5) return;
+                uint width = (uint)_ScreenParams.x, height = (uint)_ScreenParams.y;
+                uint part = (uint)round(v[0].uv.x);
+                bool camera = _VRChatCameraMode > 0.5 && _VRChatMirrorMode < 0.5;
+                g2f o = (g2f)0;
+                if (part == PART_STAMP)
+                {
+                    // Only in a face camera's own render: its near plane and its square target say so.
+                    if (_VRChatCameraMode > 0.5 || _VRChatMirrorMode > 0.5 || abs(_ProjectionParams.y - ORBITERS_RIG_NEAR) > 1e-6 || width != height) return;
+                    o.run = uint4(RUN_STAMP, 0u, 0u, 0u);
+                    uint y = (height * (ORBITERS_STAMP_DIVISOR - 1u) + ORBITERS_STAMP_DIVISOR - 1u) / ORBITERS_STAMP_DIVISOR;
+                    EmitRun(stream, o, 0u, y, (width * ORBITERS_STAMP_BLOCKS + ORBITERS_STAMP_DIVISOR - 1u) / ORBITERS_STAMP_DIVISOR, height - y);
+                    return;
+                }
+                if (!camera || !OrbitersRigFrame()) return;
+                OrbitersStripLayout s = OrbitersComputeStripLayout(width, height);
+                uint3 f = OrbitersRigFaces(s, width, height);
+                if (f.x == 0u) return;
+                if (part == PART_FACES)
+                {
+                    o.run = uint4(RUN_FILL, 0u, 0u, s.reserved.w);
+                    EmitRun(stream, o, 0u, s.reserved.w, width, height - s.reserved.w);
+                    o.w0 = uint4(f.x, 0u, 0u, 0u);
+                    [unroll] for (uint t = 0u; t < 6u; t++)
+                    {
+                        uint2 at = uint2(f.y + (t % 3u) * f.x, f.z + (t / 3u) * f.x);
+                        o.run = uint4(RUN_TILE, OrbitersRigTileFace(t), at);
+                        EmitRun(stream, o, at.x, at.y, f.x, f.x);
+                    }
+                }
+                else if (part == PART_STRIP)
+                {
+                    uint w[24];
+                    uint crc = 0xFFFFFFFFu;
+                    [unroll] for (uint i = 0u; i < 22u; i++)
+                    {
+                        w[i] = OrbitersRigWord(i, width, height);
+                        crc = OrbitersCrcStep(crc, w[i] & 0xFFu);
+                        crc = OrbitersCrcStep(crc, (w[i] >> 8) & 0xFFu);
+                        crc = OrbitersCrcStep(crc, (w[i] >> 16) & 0xFFu);
+                        crc = OrbitersCrcStep(crc, w[i] >> 24);
+                    }
+                    w[22] = crc ^ 0xFFFFFFFFu;
+                    w[23] = 0u;
+                    o.run = uint4(RUN_STRIP, 0u, 0u, 0u);
+                    o.w0 = uint4(w[0], w[1], w[2], w[3]);
+                    o.w1 = uint4(w[4], w[5], w[6], w[7]);
+                    o.w2 = uint4(w[8], w[9], w[10], w[11]);
+                    o.w3 = uint4(w[12], w[13], w[14], w[15]);
+                    o.w4 = uint4(w[16], w[17], w[18], w[19]);
+                    o.w5 = uint4(w[20], w[21], w[22], w[23]);
+                    EmitRun(stream, o, s.reserved.x, s.reserved.y, s.reserved.z - s.reserved.x, s.reserved.w - s.reserved.y);
+                }
+            }
+
+            // Payload word k of a strip run, picked with integer selects.
+            uint OrbitersRunWord(g2f i, uint k)
+            {
+                uint4 q = k < 4u ? i.w0 : (k < 8u ? i.w1 : (k < 12u ? i.w2 : (k < 16u ? i.w3 : (k < 20u ? i.w4 : i.w5))));
+                uint c = k & 3u;
+                return c == 0u ? q.x : (c == 1u ? q.y : (c == 2u ? q.z : q.w));
+            }
+
+            float3 OrbitersRigFace(uint face, float2 uv)
+            {
+                float3 c;
+                if (face == 1u) c = _OrbitersRigFace1.SampleLevel(sampler_linear_clamp, uv, 0).rgb;
+                else if (face == 2u) c = _OrbitersRigFace2.SampleLevel(sampler_linear_clamp, uv, 0).rgb;
+                else if (face == 3u) c = _OrbitersRigFace3.SampleLevel(sampler_linear_clamp, uv, 0).rgb;
+                else if (face == 4u) c = _OrbitersRigFace4.SampleLevel(sampler_linear_clamp, uv, 0).rgb;
+                else if (face == 5u) c = _OrbitersRigFace5.SampleLevel(sampler_linear_clamp, uv, 0).rgb;
+                else c = _OrbitersRigFace6.SampleLevel(sampler_linear_clamp, uv, 0).rgb;
+                return c;
+            }
+
+            float4 frag(g2f i) : SV_Target
+            {
+                uint width = (uint)_ScreenParams.x, height = (uint)_ScreenParams.y;
+                uint2 p = OrbitersTopDownPixel(i.pos);
+                if (i.run.x == RUN_FILL) return float4(0.0, 0.0, 0.0, 1.0);
+                if (i.run.x == RUN_TILE)
+                {
+                    float side = (float)i.w0.x;
+                    float2 uv = float2((p.x - i.run.z + 0.5) / side, 1.0 - (p.y - i.run.w + 0.5) / side);
+                    return float4(OrbitersRigFace(i.run.y, uv), 1.0);
+                }
+                if (i.run.x == RUN_STAMP)
+                {
+                    uint block = p.x * ORBITERS_STAMP_DIVISOR / width;
+                    if (block >= ORBITERS_STAMP_BLOCKS || p.y * ORBITERS_STAMP_DIVISOR / height != ORBITERS_STAMP_DIVISOR - 1u) discard;
+                    bool on = block == 1u || (block >= 2u && ((asuint(OrbitersTime()) >> (31u - (block - 2u))) & 1u) != 0u);
+                    return float4((on ? ORBITERS_BIT_LEVEL : 0.0).xxx, 1.0);
+                }
+                OrbitersStripLayout l = OrbitersComputeStripLayout(width, height);
+                float3 c = 0;
+                uint bitIndex = 0u;
+                uint what = OrbitersStripBlock(p, l, c, bitIndex);
+                if (what == ORBITERS_STRIP_NONE) discard;
+                if (what == ORBITERS_STRIP_BIT)
+                    c = ((OrbitersRunWord(i, bitIndex / 32u) >> (31u - bitIndex % 32u)) & 1u) != 0u ? ORBITERS_BIT_LEVEL : 0.0;
+                return float4(c, 1.0);
+            }
+            ENDCG
+        }
+    }
+    Fallback Off
+}

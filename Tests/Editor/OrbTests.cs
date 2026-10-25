@@ -77,8 +77,9 @@ public class OrbTests
         var parameters = AssetDatabase.LoadAssetAtPath<VRCExpressionParameters>(folder + "/Parameters.asset");
         // The screen's parameters follow (TheScreensTouchPointsAndParametersAreLocal).
         CollectionAssert.AreEqual(expected, parameters.parameters.Take(expected.Count).Select(p => (p.name, p.valueType, p.networkSynced, p.saved, p.defaultValue)).ToList());
-        Assert.IsTrue(parameters.parameters.Skip(expected.Count).All(p => p.name.StartsWith("N4N0/Screen/", StringComparison.Ordinal) || p.name.StartsWith("N4N0/Card/", StringComparison.Ordinal)),
-            "then the screen's and the link card's");
+        Assert.IsTrue(parameters.parameters.Skip(expected.Count).All(p => p.name.StartsWith("N4N0/Screen/", StringComparison.Ordinal) || p.name.StartsWith("N4N0/Card/", StringComparison.Ordinal) ||
+                                                                      p.name.StartsWith("N4N0/Capture/", StringComparison.Ordinal)),
+            "then the screen's, the link card's and the capture kit's (OrbCaptureTests)");
         Assert.AreEqual(1 + 8 + 1 + 8 + 8 * 8 + 3 + 8, parameters.CalcTotalCost(), "Synced bits: 1 + 8 + 1 + 8 + 8·N, and the screen's 3 + 8");
 
         // Global in the Full Controller, so VRCFury keeps the names OSC looks for; its own parameters are renamed as usual.
@@ -101,6 +102,7 @@ public class OrbTests
                 ("Show N4N0", VRCExpressionsMenu.Control.ControlType.Toggle, "N4N0/Visible"), ("Menu", VRCExpressionsMenu.Control.ControlType.Toggle, "N4N0/Menu"),
                 ("Talk", VRCExpressionsMenu.Control.ControlType.Button, "N4N0/Talk"),
                 ("3D picture", VRCExpressionsMenu.Control.ControlType.Button, "N4N0/Photo3D"), ("Call", VRCExpressionsMenu.Control.ControlType.SubMenu, ""),
+                ("Record", VRCExpressionsMenu.Control.ControlType.Toggle, "N4N0/Capture/Record"),
             },
             menu.subMenu.controls.Select(c => (c.name, c.type, c.parameter.name)).ToArray());
 

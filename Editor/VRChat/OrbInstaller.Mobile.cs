@@ -173,6 +173,8 @@ namespace Orbiters.Toolkit.Editor.VRChat
                 if (PrefabUtility.IsPartOfAnyPrefab(orb)) continue;
                 var drop = orb.Find(mobile ? Shown : Mobile);
                 if (drop != null) Object.DestroyImmediate(drop.gameObject);
+                // Phones have neither avatar cameras nor custom shaders: no capture kit (OrbInstaller.Capture).
+                if (mobile) DropCapture(orb);
                 var keep = mobile ? orb.Find(Mobile) : null;
                 if (keep != null) keep.gameObject.SetActive(true);
                 KeepPlatformEntries(orb, mobile);
