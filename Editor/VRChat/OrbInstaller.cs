@@ -27,6 +27,7 @@ namespace Orbiters.Toolkit.Editor.VRChat
     /// menu's Talk button or touching it. The panel sits low and to N4N0's side of its owner's view and never in front of
     /// their face; seen from further away it grows away from the face. Native avatar components only, its two shaders and
     /// glyph atlas copied into its folder and no Orbiters script: <see cref="Bind"/> ties it to the avatar's head and eyes.
+    /// Quest and other phones show a mobile N4N0 instead (<see cref="Mobile"/>), which their builds keep.
     /// </summary>
     public static partial class OrbInstaller
     {
@@ -137,12 +138,7 @@ namespace Orbiters.Toolkit.Editor.VRChat
             // What N4N0 holds is no part of the chain.
             phys.ignoreTransforms = new List<Transform> { ball };
 
-            // The owner's hands touching N4N0 (N4N0/Touch, the owner's own and only on the owner's client).
-            var touch = Child(ball, "Touch").gameObject.AddComponent<VRCContactReceiver>();
-            touch.shapeType = ContactBase.ShapeType.Sphere; touch.radius = TouchRadius;
-            touch.allowSelf = true; touch.allowOthers = false; touch.localOnly = true;
-            touch.receiverType = ContactReceiver.ReceiverType.Constant; touch.parameter = Touch;
-            touch.collisionTags.Add("Hand"); touch.collisionTags.Add("Finger");
+            TouchReceiver(Child(ball, "Touch"));
 
             var shader = CopyShader(ShaderTemplate, folder + "/N4N0.shader");
             var body = Child(hop, "Body");
@@ -191,6 +187,8 @@ namespace Orbiters.Toolkit.Editor.VRChat
             // Its files in N4N0's folder, which a gallery package carries.
             AddScreen(root.transform, folder, thumbnailBytes);
             panel.gameObject.SetActive(false);
+            // Quest's N4N0, which mobile builds keep instead (OrbInstaller.Mobile).
+            AddMobile(root.transform, folder);
         }
 
         /// <summary>
@@ -243,6 +241,7 @@ namespace Orbiters.Toolkit.Editor.VRChat
             BindPointers(orb, avatar, animator, size);
             BindCardHands(orb, animator, size);
             FitLight(orb);
+            BindMobile(orb, avatar, bone, eyes, size);
             EditorUtility.SetDirty(follow); EditorUtility.SetDirty(level); EditorUtility.SetDirty(sight);
         }
 

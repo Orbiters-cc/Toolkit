@@ -20,6 +20,18 @@
 - **Screen version 5**: the seven-tile Home (with States), the States page and the link card's page, from
   Orbiters - N4N0's new pictures (16 page slices). Screen files revision 7, options files in `N4N0/Menu 12`. An N4N0
   built before this version must be updated as a whole (My Avatar) before its options change.
+- **N4N0 on Quest** (`OrbInstaller.Mobile`): every N4N0 built from now on carries a mobile N4N0 beside the PC one
+  (`Mobile`, off in the editor), and a build step before VRCFury (`OrbPlatformHook`) keeps it in Android and iOS builds
+  and the PC N4N0 in PC builds, which stay as before: one avatar uploads to both. The mobile N4N0 is one skinned orb
+  (384 triangles, one bone) with one `VRChat/Mobile/Toon Standard` material. Its face comes from `N4N0 faces.png`
+  (3 × 3 cells of 256², drawn from the orb shader's eyes; the animator moves the texture's offset with `N4N0/State`,
+  and Idle, Listening and Talking blink); it glows, bobs and hops as the PC N4N0 does, takes the Light option's colour
+  at its brightness (green while off, red while annoyed), follows the head without the tether (no PhysBone), looks at
+  its owner on their own client and ahead for everyone else, and its owner touches it (`N4N0/Touch`, local). A mobile
+  build drops the PC controller but keeps N4N0's parameters and menu in the same order, so synced parameters line up
+  between platforms, and adds `N4N0/Mobile/Version` (local, 1), which tells Orbiters - N4N0 that it drives the mobile
+  N4N0. On its own it is Excellent on Quest; it costs an avatar one material slot and one skinned mesh, no PhysBone and
+  no counted contact. No screen or text on phones yet.
 
 ## 0.4.4 — 2026-10-24
 

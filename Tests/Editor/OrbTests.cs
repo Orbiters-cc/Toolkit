@@ -947,6 +947,274 @@ public class OrbTests
         Assert.IsFalse(screen.gameObject.activeSelf, "Pointer 254 closes it");
     }
 
+    // ---- N4N0 on Quest (OrbInstaller.Mobile) ----
+
+    // A placed, fitted N4N0 on an avatar, with the Light option by default: the PC N4N0 then has all that phones remove.
+    private (Transform avatar, Transform orb) Placed(bool light = true)
+    {
+        var prefab = AssetDatabase.LoadAssetAtPath<GameObject>(OrbInstaller.CreatePrefab(folder));
+        var (avatar, _) = Humanoid(eyes: 1.4f);
+        var orb = ((GameObject)PrefabUtility.InstantiatePrefab(prefab, avatar)).transform;
+        AttachmentHooks.Prepare(orb.gameObject, avatar);
+        if (light) OrbInstaller.SetOptions(orb, 8, false, false, 72, light: true);
+        return (avatar, orb);
+    }
+
+    // What the SDK builds: a plain copy of the avatar, the platform's N4N0 kept.
+    private GameObject Built(Transform avatar, bool mobile)
+    {
+        var holder = new GameObject("Build copies");
+        SceneManager.MoveGameObjectToScene(holder, scene);
+        var copy = Object.Instantiate(avatar.gameObject, holder.transform);
+        OrbInstaller.KeepPlatformPart(copy, mobile);
+        return copy;
+    }
+
+    // The assets of a Full Controller's list entries (controllers or parameters), in their order.
+    private static List<T> Entries<T>(Component fullController, string list, string field) where T : Object
+    {
+        var entries = new SerializedObject(fullController).FindProperty("content." + list);
+        return Enumerable.Range(0, entries.arraySize).Select(i => entries.GetArrayElementAtIndex(i).FindPropertyRelative(field + ".objRef").objectReferenceValue as T).ToList();
+    }
+
+    // The expression parameters VRCFury merges from a built avatar's Full Controllers, in their order.
+    private static List<VRCExpressionParameters.Parameter> Merged(GameObject built) =>
+        VrcFury.Features(built).Where(f => f.kind == "FullController")
+            .SelectMany(f => Entries<VRCExpressionParameters>(f.component, "prms", "parameters")).SelectMany(p => p.parameters).ToList();
+
+    [Test]
+    public void AMobileBuildKeepsOnlyTheMobileN4N0()
+    {
+        if (VrcFury.Writer == null) Assert.Ignore("Requires the VRCFury integration.");
+        var (avatar, orb) = Placed();
+        Assert.IsTrue(OrbInstaller.HasMobile(orb) && OrbInstaller.HasLight(orb));
+        Assert.IsFalse(orb.Find(OrbInstaller.Mobile).gameObject.activeSelf, "Off in the editor, where the PC N4N0 shows");
+        var copy = Built(avatar, mobile: true);
+        var built = copy.transform.Find(orb.name);
+        Assert.IsNull(built.Find(OrbInstaller.Shown), "The PC N4N0 is gone");
+        Assert.IsTrue(built.Find(OrbInstaller.Mobile).gameObject.activeSelf, "The mobile one is on");
+
+        // What VRChat refuses or removes on phones: none of it.
+        Assert.IsEmpty(VRC.SDK3.Validation.AvatarValidation.FindIllegalShaders(copy), "Only VRChat's mobile shaders");
+        Assert.IsEmpty(copy.GetComponentsInChildren<Light>(true), "No light");
+        Assert.IsEmpty(copy.GetComponentsInChildren<Collider>(true), "No collider");
+        Assert.IsEmpty(copy.GetComponentsInChildren<IConstraint>(true), "No Unity constraint");
+        Assert.IsEmpty(copy.GetComponentsInChildren<Camera>(true));
+        Assert.IsEmpty(copy.GetComponentsInChildren<AudioSource>(true));
+        // And what costs a mobile rank: one skinned mesh, one material slot, a few hundred triangles, one bone, no PhysBone,
+        // no contact that counts.
+        var renderer = (SkinnedMeshRenderer)copy.GetComponentsInChildren<Renderer>(true).Single();
+        Assert.AreEqual(1, renderer.sharedMaterials.Length, "One material slot");
+        StringAssert.StartsWith("VRChat/Mobile/", renderer.sharedMaterial.shader.name);
+        Assert.AreEqual(OrbInstaller.MobileShader, renderer.sharedMaterial.shader.name);
+        Assert.Less(renderer.sharedMesh.triangles.Length / 3, 400, "Under 400 triangles");
+        Assert.AreEqual(1, renderer.bones.Length);
+        Assert.IsEmpty(copy.GetComponentsInChildren<VRCPhysBone>(true), "Quest's Excellent rank allows no PhysBone");
+        var receivers = copy.GetComponentsInChildren<VRCContactReceiver>(true);
+        Assert.AreEqual(OrbInstaller.Touch, receivers.Single().parameter, "Its owner touches it");
+        Assert.IsTrue(receivers.Single().localOnly && !receivers.Single().allowOthers, "Local: no contact counts in the rank");
+        Assert.IsEmpty(copy.GetComponentsInChildren<VRCContactSender>(true));
+        Assert.LessOrEqual(copy.GetComponentsInChildren<VRCConstraintBase>(true).Length, 2, "On the head, turned like the avatar");
+
+        // Its Full Controller: the mobile controller alone; the PC N4N0's parameters, then the mobile version; the same menu.
+        var full = built.GetComponents(VrcFury.Component).Single();
+        var controller = Entries<AnimatorController>(full, "controllers", "controller").Single();
+        Assert.AreEqual(folder + "/N4N0 mobile.controller", AssetDatabase.GetAssetPath(controller));
+        var placedFull = orb.GetComponents(VrcFury.Component).Single();
+        CollectionAssert.AreEqual(Entries<VRCExpressionParameters>(placedFull, "prms", "parameters"), Entries<VRCExpressionParameters>(full, "prms", "parameters"));
+        CollectionAssert.AreEqual(Entries<VRCExpressionsMenu>(placedFull, "menus", "menu"), Entries<VRCExpressionsMenu>(full, "menus", "menu"));
+        Assert.IsTrue(VrcFury.IsGlobalParameter(VrcFury.Content(full), OrbInstaller.MobileVersionParameter), "Orbiters - N4N0 finds it by its name");
+        Assert.IsTrue(OrbInstaller.FindAll(copy).Count() == 0, "Nothing of the PC N4N0 left to find");
+    }
+
+    [Test]
+    public void APcBuildKeepsOnlyThePcN4N0()
+    {
+        if (VrcFury.Writer == null) Assert.Ignore("Requires the VRCFury integration.");
+        var (avatar, orb) = Placed();
+        var copy = Built(avatar, mobile: false);
+        var built = copy.transform.Find(orb.name);
+        Assert.IsNull(built.Find(OrbInstaller.Mobile), "The mobile N4N0 is gone");
+        Assert.IsTrue(built.Find(OrbInstaller.Shown).gameObject.activeSelf);
+        Assert.IsTrue(OrbInstaller.HasLight(built) && OrbInstaller.HasScreen(built) && OrbInstaller.HasPointing(built), "The PC N4N0 whole");
+        Assert.IsFalse(copy.GetComponentsInChildren<Renderer>(true).Any(r => r.sharedMaterials.Any(m => m.shader.name.StartsWith("VRChat/Mobile/", StringComparison.Ordinal))));
+        // As before the mobile N4N0: the PC controller, parameters and menu only.
+        var full = built.GetComponents(VrcFury.Component).Single();
+        var placedFull = orb.GetComponents(VrcFury.Component).Single();
+        var controllers = Entries<AnimatorController>(full, "controllers", "controller");
+        Assert.AreEqual(Entries<AnimatorController>(placedFull, "controllers", "controller").First(), controllers.Single(), "The PC controller");
+        Assert.IsTrue(controllers.Single().parameters.Any(p => p.name == OrbInstaller.TextPointer));
+        Assert.AreEqual(Entries<VRCExpressionParameters>(placedFull, "prms", "parameters").First(), Entries<VRCExpressionParameters>(full, "prms", "parameters").Single());
+        Assert.IsFalse(Merged(copy).Any(p => p.name.StartsWith("N4N0/Mobile/", StringComparison.Ordinal)), "No mobile parameter on PC");
+    }
+
+    // VRChat matches synced parameters between an avatar's platforms by their place: N4N0's are the same, in the same order.
+    [Test]
+    public void BothBuildsSyncTheSameParametersInTheSameOrder()
+    {
+        if (VrcFury.Writer == null) Assert.Ignore("Requires the VRCFury integration.");
+        var (avatar, _) = Placed();
+        var pc = Merged(Built(avatar, mobile: false));
+        var phone = Merged(Built(avatar, mobile: true));
+        List<(string, VRCExpressionParameters.ValueType)> Synced(List<VRCExpressionParameters.Parameter> list) =>
+            list.Where(p => p.networkSynced).Select(p => (p.name, p.valueType)).ToList();
+        Assert.AreEqual(1 + 8 + 1 + 8 + 8 * 8 + 1 + 8 + 8, pc.Where(p => p.networkSynced).Sum(p => p.valueType == VRCExpressionParameters.ValueType.Bool ? 1 : 8), "N4N0 with 8 text slots and its light");
+        CollectionAssert.AreEqual(Synced(pc), Synced(phone));
+        // The PC N4N0's parameters come first and whole; the mobile build adds its version, local.
+        CollectionAssert.AreEqual(pc.Select(p => p.name), phone.Take(pc.Count).Select(p => p.name));
+        var version = phone.Skip(pc.Count).Single();
+        Assert.AreEqual((OrbInstaller.MobileVersionParameter, VRCExpressionParameters.ValueType.Int, false, false, (float)OrbInstaller.MobileVersion),
+            (version.name, version.valueType, version.networkSynced, version.saved, version.defaultValue));
+    }
+
+    // The mobile N4N0 played (its own controller): a face per state from the faces' picture, blinking, glowing, bobbing.
+    [Test]
+    public void TheMobileFacesFollowN4N0sState()
+    {
+        if (VrcFury.Writer == null) Assert.Ignore("Requires the VRCFury integration.");
+        var root = PlayMobile(AssetDatabase.LoadAssetAtPath<GameObject>(OrbInstaller.CreatePrefab(folder)));
+        var renderer = root.transform.Find(OrbInstaller.MobileFace).GetComponent<SkinnedMeshRenderer>();
+        var floating = root.transform.Find(OrbInstaller.MobileFloat);
+        MaterialPropertyBlock Block() { var block = new MaterialPropertyBlock(); renderer.GetPropertyBlock(block); return block; }
+        void Shows(int cell, string what)
+        {
+            foreach (var map in new[] { "_MainTex_ST", "_EmissionMap_ST" })
+            {
+                var st = Block().GetVector(map);
+                Assert.Less(Vector2.Distance(Vector2.one / 3, new Vector2(st.x, st.y)), 1e-4f, what + " " + map + " tiling: " + st);
+                Assert.Less(Vector2.Distance(OrbInstaller.CellOffset(cell), new Vector2(st.z, st.w)), 1e-4f, what + " " + map + ": " + st);
+            }
+        }
+        var faces = (Texture2D)renderer.sharedMaterial.GetTexture("_MainTex");
+        Assert.AreEqual(faces, renderer.sharedMaterial.GetTexture("_EmissionMap"), "The faces lit and glowing");
+        Assert.AreEqual((768, 768), (faces.width, faces.height), "3 × 3 cells of 256²");
+        Assert.Greater(faces.mipmapCount, 1);
+        Assert.AreEqual(folder + "/N4N0 faces.png", AssetDatabase.GetAssetPath(faces), "In N4N0's folder, which a package carries");
+
+        Tick(3);
+        Shows((int)OrbState.Idle, "Idle");
+        float idle = Block().GetFloat("_EmissionStrength");
+        for (int s = 1; s < OrbInstaller.Looks.Length; s++)
+        {
+            playable.SetInteger(OrbInstaller.State, s);
+            Tick(2);
+            Shows(s, ((OrbState)s).ToString() + ", at once");
+        }
+        playable.SetInteger(OrbInstaller.State, 42);
+        Tick(2);
+        Shows((int)OrbState.Idle, "Any other value shows as Idle");
+
+        // Idle blinks: 3.1 s in, its eyes shut for a moment.
+        playable.SetInteger(OrbInstaller.State, (int)OrbState.Happy);
+        Tick(2);
+        playable.SetInteger(OrbInstaller.State, (int)OrbState.Idle);
+        Tick(1);
+        Tick(157);
+        Shows(OrbInstaller.BlinkCell, "Blinking");
+        Tick(10);
+        Shows((int)OrbState.Idle, "Open again");
+
+        // Asleep it glows dimmer; listening, brighter with its owner's voice; surprised, it jumps.
+        playable.SetInteger(OrbInstaller.State, (int)OrbState.Sleeping);
+        Tick(2);
+        Assert.Less(Block().GetFloat("_EmissionStrength"), idle * .5f);
+        playable.SetInteger(OrbInstaller.State, (int)OrbState.Listening);
+        Tick(2);
+        float quiet = Block().GetFloat("_EmissionStrength");
+        playable.SetFloat("Voice", 1);
+        Tick(2);
+        Assert.Greater(Block().GetFloat("_EmissionStrength"), quiet * 1.4f, "Glowing up with its owner's voice");
+        playable.SetFloat("Voice", 0);
+        playable.SetInteger(OrbInstaller.State, (int)OrbState.Surprised);
+        float highest = 0;
+        for (int i = 0; i < 30; i++) { Tick(1); highest = Mathf.Max(highest, floating.localPosition.y); }
+        Assert.Greater(highest, .03f, "A short jump");
+        Tick(100);
+        Assert.Less(Mathf.Abs(floating.localPosition.y), .015f, "and back to bobbing");
+
+        // N4N0/Visible hides it; its owner sees it look at them, everyone else sees it look ahead.
+        var face = root.transform.Find(OrbInstaller.MobileFace);
+        Assert.Less(Quaternion.Angle(Quaternion.identity, face.localRotation), .01f, "Ahead for everyone else");
+        playable.SetBool("IsLocal", true);
+        Tick(2);
+        Assert.Less(Quaternion.Angle(OrbInstaller.OwnerFacing, face.localRotation), .01f, "At its owner on its owner's client");
+        playable.SetBool(OrbInstaller.Visible, false);
+        Tick(2);
+        Assert.IsFalse(root.transform.Find(OrbInstaller.MobileHead).gameObject.activeSelf);
+        playable.SetBool(OrbInstaller.Visible, true);
+        Tick(2);
+        Assert.IsTrue(root.transform.Find(OrbInstaller.MobileHead).gameObject.activeSelf);
+    }
+
+    // The mobile N4N0 takes the Light option's colour, brighter with its brightness, red while annoyed, green while off.
+    [Test]
+    public void TheMobileTintFollowsTheLightsColour()
+    {
+        if (VrcFury.Writer == null) Assert.Ignore("Requires the VRCFury integration.");
+        var root = PlayMobile(AssetDatabase.LoadAssetAtPath<GameObject>(OrbInstaller.CreatePrefab(folder)));
+        var renderer = root.transform.Find(OrbInstaller.MobileFace).GetComponent<SkinnedMeshRenderer>();
+        Color Get(string property) { var block = new MaterialPropertyBlock(); renderer.GetPropertyBlock(block); return block.GetColor(property); }
+        Tick(5);
+        foreach (var property in new[] { "_EmissionColor", "_Color", "_RimColor" })
+            Assert.IsTrue(Get(property).g > Get(property).r && Get(property).g > Get(property).b, "N4N0's green: " + property + " " + Get(property));
+        Assert.IsTrue(Get("_EmissionColor").g > Get("_EmissionColor").r + .3f, "Its glow fully green: " + Get("_EmissionColor"));
+
+        playable.SetInteger(OrbInstaller.LightColor, 3);
+        playable.SetFloat(OrbInstaller.LightLevel, 1);
+        playable.SetBool(OrbInstaller.Light, true);
+        Tick(20);
+        var bright = Get("_EmissionColor");
+        Assert.IsTrue(bright.r > bright.g + .2f && bright.b > bright.g, "Pink: " + bright);
+        Assert.IsTrue(Get("_RimColor").r > Get("_RimColor").g, "Its rim too");
+        playable.SetFloat(OrbInstaller.LightLevel, 0);
+        Tick(3);
+        Assert.Less(Get("_EmissionColor").b, bright.b * .8f, "Dimmer at a low brightness");
+        playable.SetInteger(OrbInstaller.LightColor, 5);
+        Tick(20);
+        Assert.IsTrue(Get("_EmissionColor").b > Get("_EmissionColor").r, "Blue: " + Get("_EmissionColor"));
+
+        playable.SetFloat(OrbInstaller.LightLevel, 1);
+        playable.SetInteger(OrbInstaller.State, (int)OrbState.Annoyed);
+        Tick(20);
+        Assert.IsTrue(Get("_EmissionColor").r > .5f && Get("_EmissionColor").r > Get("_EmissionColor").b * 1.5f, "Red while annoyed: " + Get("_EmissionColor"));
+        playable.SetInteger(OrbInstaller.State, (int)OrbState.Idle);
+        playable.SetBool(OrbInstaller.Light, false);
+        Tick(20);
+        Assert.IsTrue(Get("_EmissionColor").g > Get("_EmissionColor").r + .2f, "Green again: " + Get("_EmissionColor"));
+    }
+
+    [Test]
+    public void TheMobileN4N0FitsTheAvatarBesideThePcOne()
+    {
+        if (VrcFury.Writer == null) Assert.Ignore("Requires the VRCFury integration.");
+        var prefab = AssetDatabase.LoadAssetAtPath<GameObject>(OrbInstaller.CreatePrefab(folder));
+        var (avatar, head) = Humanoid(eyes: 1.2f);
+        var orb = ((GameObject)PrefabUtility.InstantiatePrefab(prefab, avatar)).transform;
+        AttachmentHooks.Prepare(orb.gameObject, avatar);
+        var frame = orb.Find(OrbInstaller.MobileHead);
+        Assert.AreEqual(head, frame.GetComponent<VRCPositionConstraint>().Sources[0].SourceTransform, "On the head bone");
+        Assert.AreEqual(avatar, frame.GetComponent<VRCRotationConstraint>().Sources[0].SourceTransform, "Turned like the avatar");
+        Assert.Less(Vector3.Distance(head.position, frame.position), 1e-4f);
+        Assert.AreEqual(1.2f / OrbInstaller.ReferenceEyes, frame.lossyScale.x, 1e-4f, "As large as the avatar's eyes are high");
+        var mobile = orb.Find(OrbInstaller.MobileOrb);
+        Assert.Less(Vector3.Distance(orb.Find(OrbInstaller.Tether + "/1/2").position, mobile.position), 1e-4f, "Where the PC N4N0 rests");
+        var eyes = avatar.TransformPoint(avatar.GetComponent<VRCAvatarDescriptor>().ViewPosition);
+        Assert.Less(Vector3.Angle(frame.rotation * OrbInstaller.OwnerFacing * Vector3.forward, eyes - mobile.position), .5f, "Turned to its owner, it looks at their eyes");
+        Assert.AreEqual(AttachmentKind.Configured, AttachmentPlanner.Analyze(orb.gameObject, avatar).Kind, "Still attached by its own constraints");
+
+        // The build step runs on every build before VRCFury and the Toolkit's attachments, hidden builds too, and never
+        // changes a prefab instance (only build copies).
+        var hook = new OrbPlatformHook();
+        Assert.Less(hook.callbackOrder, -10110);
+        var field = typeof(VRC.SDKBase.Editor.BuildPipeline.VRCBuildPipelineCallbacks).GetField("_preprocessAvatarCallbacks",
+            System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Public);
+        Assert.IsTrue(((IEnumerable<VRC.SDKBase.Editor.BuildPipeline.IVRCSDKPreprocessAvatarCallback>)field.GetValue(null)).Any(c => c is OrbPlatformHook), "Registered with the SDK");
+        Assert.IsFalse(HiddenAvatarBuild.LeftOut(typeof(OrbPlatformHook)), "My Avatar's checks see the platform's N4N0");
+        OrbInstaller.KeepPlatformPart(avatar.gameObject, mobile: true);
+        Assert.IsNotNull(orb.Find(OrbInstaller.Shown));
+        Assert.IsFalse(orb.Find(OrbInstaller.Mobile).gameObject.activeSelf);
+    }
+
     // ---- Helpers ----
 
     // The contract's float for glyph g, and the glyph the panel shows for a cell's value (the text shader's reading).
@@ -961,6 +1229,19 @@ public class OrbTests
         SceneManager.MoveGameObjectToScene(root, scene);
         graph = PlayableGraph.Create("N4N0 test");
         playable = AnimatorControllerPlayable.Create(graph, AssetDatabase.LoadAssetAtPath<AnimatorController>(folder + "/N4N0.controller"));
+        AnimationPlayableOutput.Create(graph, "N4N0", root.AddComponent<Animator>()).SetSourcePlayable(playable);
+        graph.SetTimeUpdateMode(DirectorUpdateMode.Manual); graph.Play();
+        return root;
+    }
+
+    // The prefab's mobile N4N0 turned on (as a mobile build does), playing its own controller.
+    private GameObject PlayMobile(GameObject prefab)
+    {
+        var root = Object.Instantiate(prefab);
+        SceneManager.MoveGameObjectToScene(root, scene);
+        root.transform.Find(OrbInstaller.Mobile).gameObject.SetActive(true);
+        graph = PlayableGraph.Create("N4N0 mobile test");
+        playable = AnimatorControllerPlayable.Create(graph, AssetDatabase.LoadAssetAtPath<AnimatorController>(folder + "/N4N0 mobile.controller"));
         AnimationPlayableOutput.Create(graph, "N4N0", root.AddComponent<Animator>()).SetSourcePlayable(playable);
         graph.SetTimeUpdateMode(DirectorUpdateMode.Manual); graph.Play();
         return root;
