@@ -60,9 +60,11 @@ namespace Orbiters.Toolkit.Editor.VRChat
         /// <summary>
         /// The screen's version (the avatar manifest's <c>orb.screen</c>, and <see cref="ScreenVersionParameter"/>'s default):
         /// 2 colour thumbnails, 3 the six-tile Home with the Music and Light pages, 4 pointing with rays from the fingertips
-        /// (<see cref="AddPointing"/>), 5 the seven-tile Home with the States page and the link card (<see cref="AddCard"/>).
+        /// (<see cref="AddPointing"/>), 5 the seven-tile Home with the States page and the link card (<see cref="AddCard"/>),
+        /// 6 the ten-tile Home (Tracking, Suggest features, the versions), New state, the keyboard for names and ideas,
+        /// Tracking, Suggest features and the world's video on the Music page; the screen held by a handle its owner grabs.
         /// </summary>
-        public const int ScreenVersion = 5;
+        public const int ScreenVersion = 6;
         /// <summary>
         /// Local, not saved, set by no menu: the screen's version (<see cref="ScreenVersion"/>), which Orbiters - N4N0 reads
         /// to know the pages the screen has. Screens before version 3 lack it.
@@ -75,11 +77,20 @@ namespace Orbiters.Toolkit.Editor.VRChat
         public const int ScreenLocalClear = 255;
         internal const string ScreenObject = Head + "/Screen";
         /// <summary>
-        /// The screen's swing: a PhysBone whose root, at the eyes, turns towards its one bone at the screen's middle (a root
-        /// may turn, not move); the screen is held to the root, so it swings around the eyes after the head and the
-        /// avatar's turns, and settles. Nobody can grab it and nothing collides with it.
+        /// The screen's swing: a PhysBone whose root, at the eyes, turns towards its one bone, the handle under the screen's
+        /// middle (a root may turn, not move); the screen is held to the root, so it swings around the eyes after the head
+        /// and the avatar's turns, and settles. Its owner alone grabs the handle: the screen goes where it is let go and
+        /// stays there (posed, until grabbed again); pulled out from the eyes the handle stretches the swing, and the screen
+        /// grows (<see cref="ScreenSwingStretch"/>), pushed in it shrinks. Nothing collides with it.
         /// </summary>
-        internal const string ScreenRig = Head + "/Screen swing", ScreenArm = ScreenRig + "/Arm";
+        internal const string ScreenRig = Head + "/Screen swing", ScreenArm = ScreenRig + "/Arm", ScreenHandle = ScreenArm + "/Handle";
+        /// <summary>The swing's PhysBone parameter: VRChat adds <c>_Stretch</c>, <c>_Squish</c>, <c>_IsGrabbed</c>, <c>_IsPosed</c>.</summary>
+        public const string ScreenSwing = "N4N0/Screen/Swing";
+        public const string ScreenSwingStretch = ScreenSwing + "_Stretch", ScreenSwingSquish = ScreenSwing + "_Squish";
+        // The handle under the screen (its middle), the grab's reach, how far the swing stretches and squishes, and the
+        // screen's size at either end.
+        internal static readonly Vector3 HandleFromScreen = new Vector3(0, -ScreenHeight / 2 - .045f, 0);
+        internal const float HandleRadius = .05f, SwingStretch = .6f, SwingSquish = .4f, LargestScreen = 1.8f, SmallestScreen = .6f;
         // The screen, 16:9, and where its middle sits from the eyes (right, up, forward): low and close enough to touch.
         internal const float ScreenWidth = .48f, ScreenHeight = .27f;
         // The mesh's margin past the screen's border, where its glow fades out (the shader's).
@@ -97,8 +108,9 @@ namespace Orbiters.Toolkit.Editor.VRChat
         // size its own files lack.
         internal const string ScreenFolder = "Assets/Orbiters/N4N0/Screen " + ScreenRevision;
         // The screen files' revision, the shader's OrbScreen tag: 5 draws the back as a card ("N4N0 menu, look at the other
-        // side"), 6 the retro look's own pages and live parts, 7 the projected look and N4N0's beam on a skinned screen.
-        internal const string ScreenRevision = "7";
+        // side"), 6 the retro look's own pages and live parts, 7 the projected look and N4N0's beam on a skinned screen,
+        // 8 the version 6 pages (22 of them).
+        internal const string ScreenRevision = "8";
         private const string ScreenShaderTemplate = "Packages/orbiters.toolkit/Editor/VRChat/OrbScreen.shader.txt";
         private const string BeamShaderTemplate = "Packages/orbiters.toolkit/Editor/VRChat/OrbBeam.shader.txt";
         // Drawn by Orbiters - N4N0 (`orbiters-desktop --orb-menu`) from the menu's layout: the page pictures (a slice per
@@ -107,7 +119,7 @@ namespace Orbiters.Toolkit.Editor.VRChat
         // The same pages in the retro look (`orbiters-desktop --orb-menu`'s "N4N0 screen pages retro.png").
         private const string ScreenPagesRetroTemplate = "Packages/orbiters.toolkit/Editor/VRChat/OrbScreenPagesRetro.png.bytes";
         private const string ScreenLayoutTemplate = "Packages/orbiters.toolkit/Editor/VRChat/OrbScreenLayout.png.bytes";
-        internal const int ScreenPageSlices = 16;
+        internal const int ScreenPageSlices = 23;
 
         public static string ScreenValue(int index) => ScreenValuePrefix + index;
         public static string ScreenTouch(bool right, int index) => ScreenTouchPrefix + (right ? "R" : "L") + index;
@@ -395,19 +407,36 @@ namespace Orbiters.Toolkit.Editor.VRChat
             if (head == null || panel == null || emitter == null) throw new InvalidOperationException("This N4N0 was modified: add it again.");
             var (mesh, material) = ScreenAssets(folder, thumbnailBytes);
 
-            // The swing: its root at the eyes, its bone at the screen's middle (PlaceScreen puts them there), simulated
-            // even while the screen is closed so it opens settled. Loose like N4N0's tether, but steadier: it lags, sways
-            // a little and settles, never further than 30° from straight ahead.
+            // The swing: its root at the eyes, its bone at the handle under the screen (PlaceScreen puts them there),
+            // simulated even while the screen is closed so it opens settled. Loose like N4N0's tether, but steadier: it
+            // lags, sways a little and settles; its owner moves it by the handle.
             var rig = Child(head, "Screen swing");
             Undo.RegisterCreatedObjectUndo(rig.gameObject, "N4N0 screen");
-            Child(rig, "Arm");
+            var arm = Child(rig, "Arm");
+            // The handle, a small bar where the arm ends (under the screen): what its owner grabs.
+            var handle = Child(arm, "Handle");
+            handle.localScale = new Vector3(.12f, .012f, .012f);
+            handle.gameObject.AddComponent<MeshFilter>().sharedMesh = orb.Find(Body).GetComponent<MeshFilter>().sharedMesh;
+            var handleRenderer = handle.gameObject.AddComponent<MeshRenderer>();
+            handleRenderer.sharedMaterial = PointerMaterial(folder, true);
+            Quiet(handleRenderer);
+            handle.gameObject.SetActive(false);
             var swing = rig.gameObject.AddComponent<VRCPhysBone>();
             swing.rootTransform = rig; swing.integrationType = VRCPhysBoneBase.IntegrationType.Simplified;
             swing.pull = .2f; swing.spring = .3f; swing.gravity = 0; swing.gravityFalloff = 0;
             swing.immobileType = VRCPhysBoneBase.ImmobileType.AllMotion; swing.immobile = .3f;
-            swing.limitType = VRCPhysBoneBase.LimitType.Angle; swing.maxAngleX = 30;
-            swing.radius = 0; swing.allowCollision = VRCPhysBoneBase.AdvancedBool.False;
-            swing.allowGrabbing = VRCPhysBoneBase.AdvancedBool.False; swing.allowPosing = VRCPhysBoneBase.AdvancedBool.False;
+            // Wide enough to put the screen anywhere in front, beside or above (grabbed); it never swings that far itself.
+            swing.limitType = VRCPhysBoneBase.LimitType.Angle; swing.maxAngleX = 80;
+            swing.allowCollision = VRCPhysBoneBase.AdvancedBool.False;
+            // Its owner grabs the handle (the arm's end) and the screen stays where it is let go; nobody else can.
+            swing.radius = HandleRadius;
+            swing.allowGrabbing = VRCPhysBoneBase.AdvancedBool.Other; swing.grabFilter = new VRCPhysBoneBase.PermissionFilter { allowSelf = true, allowOthers = false };
+            swing.allowPosing = VRCPhysBoneBase.AdvancedBool.Other; swing.poseFilter = new VRCPhysBoneBase.PermissionFilter { allowSelf = true, allowOthers = false };
+            swing.grabMovement = 1; swing.snapToHand = false;
+            swing.maxStretch = SwingStretch; swing.maxSquish = SwingSquish; swing.stretchMotion = 0;
+            swing.parameter = ScreenSwing;
+            // The handle's bar is no bone of the chain.
+            swing.ignoreTransforms = new List<Transform> { handle };
             // The arm is the chain's only bone: its end, a little further ahead.
             swing.endpointPosition = Vector3.forward * .05f;
 
@@ -452,7 +481,7 @@ namespace Orbiters.Toolkit.Editor.VRChat
                 receiver.collisionTags.Add(tag);
             }
             PlaceScreen(orb);
-            AddPointing(orb);
+            AddPointing(orb, folder);
             AddCard(orb);
             return screen.transform;
         }
@@ -496,7 +525,8 @@ namespace Orbiters.Toolkit.Editor.VRChat
             var hold = screen.GetComponent<VRCParentConstraint>();
             Undo.RecordObjects(new Object[] { screen, hold, rig, arm }, "Fit orb screen");
             rig.localPosition = eyes; rig.localRotation = Quaternion.identity;
-            arm.localPosition = ScreenFromEyes; arm.localRotation = Quaternion.identity;
+            // The arm ends at the handle, under the screen's middle.
+            arm.localPosition = ScreenFromEyes + HandleFromScreen; arm.localRotation = Quaternion.identity;
             screen.localPosition = eyes + ScreenFromEyes;
             screen.localRotation = Quaternion.identity;
             if (hold != null && hold.Sources.Count > 0)
@@ -543,6 +573,7 @@ namespace Orbiters.Toolkit.Editor.VRChat
             ScreenLocalBlocks(controller, thumbnailBytes);
             ScreenLayer(controller, textSync, thumbnailBytes);
             GazeDotLayer(controller);
+            ScreenSizeLayer(controller);
             PointingController(controller, parameters);
             CardController(controller, parameters);
 
@@ -557,6 +588,50 @@ namespace Orbiters.Toolkit.Editor.VRChat
             for (int i = 0; i < PointingTouchPoints; i++) parameters.Add(Parameter(ScreenTouch(hand == 1, i), synced: false, type: VRCExpressionParameters.ValueType.Float));
             for (int i = 0; i < ScreenTouchPoints.Length; i++) parameters.Add(Parameter(ScreenEye(i), synced: false, type: VRCExpressionParameters.ValueType.Float));
             for (int i = 0; i < ScreenTouchPoints.Length; i++) parameters.Add(Parameter(ScreenGaze(i), synced: false, type: VRCExpressionParameters.ValueType.Float));
+        }
+
+        /// <summary>
+        /// The screen's size from its swing: as large as made while its owner stretched the handle out (up to
+        /// <see cref="LargestScreen"/> times), as small as pushed in (down to <see cref="SmallestScreen"/>), and the handle shown
+        /// to its owner while the screen is open. VRChat sets the swing's parameters on every client, so everyone sees the
+        /// screen at its owner's size.
+        /// </summary>
+        private static void ScreenSizeLayer(AnimatorController controller)
+        {
+            controller.AddParameter(ScreenSwingStretch, AnimatorControllerParameterType.Float);
+            controller.AddParameter(ScreenSwingSquish, AnimatorControllerParameterType.Float);
+            var machine = Layer(controller, "Screen size");
+            var size = Hidden(new BlendTree { name = "Screen size", blendType = BlendTreeType.Direct });
+            AnimationClip Scale(string name, float scale)
+            {
+                var clip = Hidden(new AnimationClip { name = name });
+                foreach (var axis in new[] { "x", "y", "z" }) Curve(clip, ScreenObject, typeof(Transform), "m_LocalScale." + axis, scale);
+                return clip;
+            }
+            // 1 as it is, plus what the stretch adds, less what the squish takes (direct weights: 0 to 1 each).
+            size.children = new[]
+            {
+                new ChildMotion { motion = Scale("Screen size 1", 1), directBlendParameter = One, timeScale = 1 },
+                new ChildMotion { motion = Scale("Screen size more", LargestScreen - 1), directBlendParameter = ScreenSwingStretch, timeScale = 1 },
+                new ChildMotion { motion = Scale("Screen size less", SmallestScreen - 1), directBlendParameter = ScreenSwingSquish, timeScale = 1 },
+            };
+            var state = HeldPropRig.State(controller, machine, "Size", size);
+            state.writeDefaultValues = true;
+            machine.defaultState = state;
+
+            // The handle: its owner's, while the screen is open.
+            var handles = Layer(controller, "Screen handle");
+            var hidden = new AnimationClip { name = "Screen handle hidden" };
+            Curve(hidden, ScreenHandle, typeof(GameObject), "m_IsActive", 0);
+            var shown = new AnimationClip { name = "Screen handle shown" };
+            Curve(shown, ScreenHandle, typeof(GameObject), "m_IsActive", 1);
+            var off = HeldPropRig.State(controller, handles, "Off", hidden);
+            var on = HeldPropRig.State(controller, handles, "On", shown);
+            off.writeDefaultValues = true; on.writeDefaultValues = true;
+            handles.defaultState = off;
+            foreach (var trigger in new[] { ScreenOpen, Menu })
+                Transition(off, on, ("IsLocal", AnimatorConditionMode.If, 0), (trigger, AnimatorConditionMode.If, 0));
+            Transition(on, off, (ScreenOpen, AnimatorConditionMode.IfNot, 0), (Menu, AnimatorConditionMode.IfNot, 0));
         }
 
         /// <summary>

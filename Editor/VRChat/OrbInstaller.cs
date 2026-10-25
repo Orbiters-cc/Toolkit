@@ -168,7 +168,8 @@ namespace Orbiters.Toolkit.Editor.VRChat
             dot.localScale = Vector3.one * GazeDotRadius;
             dot.gameObject.AddComponent<MeshFilter>().sharedMesh = body.GetComponent<MeshFilter>().sharedMesh;
             var dotRenderer = dot.gameObject.AddComponent<MeshRenderer>();
-            dotRenderer.sharedMaterial = bodyRenderer.sharedMaterials[0];
+            // A plain dot, not N4N0's face.
+            dotRenderer.sharedMaterial = PointerMaterial(folder, false);
             Quiet(dotRenderer);
             dot.gameObject.SetActive(false);
 

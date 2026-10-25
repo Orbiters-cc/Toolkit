@@ -28,7 +28,7 @@ namespace Orbiters.Toolkit.Editor.VRChat
         // The controller, parameters and menu of each choice of options, shared by every N4N0 switched to it (they name no
         // object of their own: their curves follow paths below N4N0).
         // A new menu or parameters get a new folder: orbs switched earlier keep the files they use.
-        internal const string OptionsFolder = "Assets/Orbiters/N4N0/Menu 12/";
+        internal const string OptionsFolder = "Assets/Orbiters/N4N0/Menu 13/";
 
         [InitializeOnLoadMethod]
         private static void RegisterOrbOptions() => AttachmentHooks.RegisterOptions(root => FindAll(root).SelectMany(orb =>
@@ -183,7 +183,7 @@ namespace Orbiters.Toolkit.Editor.VRChat
             // A screen from before version 4 points with rays from now on, held to the avatar's fingertips.
             if (!HasPointing(orb))
             {
-                AddPointing(orb);
+                AddPointing(orb, ScreenFolder);
                 var avatar = orb.GetComponentInParent<VRC.SDK3.Avatars.Components.VRCAvatarDescriptor>();
                 var animator = avatar != null ? avatar.GetComponent<Animator>() : null;
                 var head = orb.Find(Head);

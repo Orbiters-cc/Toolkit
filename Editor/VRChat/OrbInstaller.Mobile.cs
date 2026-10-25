@@ -681,6 +681,8 @@ namespace Orbiters.Toolkit.Editor.VRChat
 
         public bool OnPreprocessAvatar(GameObject avatarRoot)
         {
+            // N4N0's version for the avatar manifest, while its gallery folder is still known.
+            OrbInstaller.NoteBuiltVersion(avatarRoot);
             OrbInstaller.KeepPlatformPart(avatarRoot, OrbInstaller.MobileTarget);
             return true;
         }

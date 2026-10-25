@@ -19,7 +19,7 @@ namespace Orbiters.Toolkit.Editor.VRChat
     public static partial class OrbInstaller
     {
         /// <summary>On (synced, not saved), its colour (an index of <see cref="LightColors"/>) and brightness (synced, saved).</summary>
-        public const string Light = "N4N0/Light", LightColor = "N4N0/Light/Color", LightLevel = "N4N0/Light/Level";
+        public const string Light = "N4N0/Light/On", LightColor = "N4N0/Light/Color", LightLevel = "N4N0/Light/Level";
         public const float LightLevelDefault = .6f;
         internal const string LightObject = Hop + "/Light";
         // How far the light reaches at ReferenceEyes (Bind scales it with the avatar), and its intensity at level 0 and 1.

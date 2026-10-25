@@ -411,8 +411,17 @@ public class OrbTests
         var screen = orb.Find(OrbInstaller.ScreenObject);
         var swing = rig.GetComponent<VRCPhysBone>();
         Assert.AreEqual(rig, swing.rootTransform);
-        Assert.AreEqual((VRCPhysBoneBase.AdvancedBool.False, VRCPhysBoneBase.AdvancedBool.False, VRCPhysBoneBase.AdvancedBool.False),
-            (swing.allowGrabbing, swing.allowCollision, swing.allowPosing), "Nobody grabs, poses or pushes it");
+        Assert.AreEqual((VRCPhysBoneBase.AdvancedBool.Other, VRCPhysBoneBase.AdvancedBool.False, VRCPhysBoneBase.AdvancedBool.Other),
+            (swing.allowGrabbing, swing.allowCollision, swing.allowPosing), "Its owner grabs and poses it; nothing pushes it");
+        Assert.AreEqual((true, false, true, false), (swing.grabFilter.allowSelf, swing.grabFilter.allowOthers, swing.poseFilter.allowSelf, swing.poseFilter.allowOthers),
+            "Nobody else grabs or poses it");
+        Assert.AreEqual(OrbInstaller.ScreenSwing, swing.parameter, "Its stretch sizes the screen");
+        Assert.Greater(swing.maxStretch, 0f);
+        var handle = orb.Find(OrbInstaller.ScreenHandle);
+        Assert.IsNotNull(handle, "The handle its owner grabs");
+        CollectionAssert.Contains(swing.ignoreTransforms, handle, "The handle's bar is no bone");
+        Assert.AreEqual("Orbiters/N4N0 Dot", handle.GetComponent<MeshRenderer>().sharedMaterial.shader.name);
+        Assert.AreEqual("Orbiters/N4N0 Dot", orb.Find(OrbInstaller.GazeDot).GetComponent<MeshRenderer>().sharedMaterial.shader.name, "A plain dot, not N4N0's face");
         Assert.AreEqual(0, swing.gravity, "It hangs straight ahead, not down");
         Assert.AreEqual(1, rig.childCount, "Its arm is the chain's only bone");
         Assert.AreNotEqual(Vector3.zero, swing.endpointPosition, "A lone bone needs its end");
@@ -812,7 +821,7 @@ public class OrbTests
 
         string shared = OrbInstaller.OptionsFolder + "Text slots 8 + light";
         var parameters = AssetDatabase.LoadAssetAtPath<VRCExpressionParameters>(shared + "/Parameters.asset");
-        var own = parameters.parameters.Where(p => p.name.StartsWith(OrbInstaller.Light, StringComparison.Ordinal))
+        var own = parameters.parameters.Where(p => p.name.StartsWith("N4N0/Light/", StringComparison.Ordinal))
             .Select(p => (p.name, p.valueType, p.networkSynced, p.saved, p.defaultValue)).ToList();
         CollectionAssert.AreEqual(new[]
         {
@@ -884,7 +893,7 @@ public class OrbTests
         var parameters = AssetDatabase.LoadAssetAtPath<VRCExpressionParameters>(OrbInstaller.OptionsFolder + "Text slots 8 + screen in VR/Parameters.asset");
         var version = parameters.parameters.Single(p => p.name == OrbInstaller.ScreenVersionParameter);
         Assert.AreEqual((VRCExpressionParameters.ValueType.Int, false, false, (float)OrbInstaller.ScreenVersion), (version.valueType, version.networkSynced, version.saved, version.defaultValue));
-        Assert.AreEqual(5, OrbInstaller.ScreenVersion);
+        Assert.AreEqual(6, OrbInstaller.ScreenVersion);
     }
 
     // The retro look is the screen's material alone: it stays through N4N0's other options, and goes back.

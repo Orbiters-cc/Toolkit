@@ -31,6 +31,8 @@ namespace Orbiters.Toolkit.Editor.VRChat.Manifest
         public int? OrbTextSync;
         /// <summary>The N4N0 prop's projected screen: its protocol's version (<see cref="OrbInstaller.ScreenVersion"/>), 0 without one.</summary>
         public int OrbScreen;
+        /// <summary>The N4N0 prop's own version (its release in My Avatar's gallery), when known.</summary>
+        public string OrbVersion;
 
         /// <summary>An expression parameter as uploaded. <see cref="Type"/>: "bool", "int" or "float".</summary>
         public sealed class Parameter
@@ -245,6 +247,7 @@ namespace Orbiters.Toolkit.Editor.VRChat.Manifest
                     json.WriteStartObject();
                     json.WritePropertyName("text_sync"); json.WriteValue(OrbTextSync.Value);
                     if (OrbScreen > 0) { json.WritePropertyName("screen"); json.WriteValue(OrbScreen); }
+                    if (!string.IsNullOrEmpty(OrbVersion)) { json.WritePropertyName("version"); json.WriteValue(OrbVersion); }
                     json.WriteEndObject();
                 }
                 json.WriteEndObject();

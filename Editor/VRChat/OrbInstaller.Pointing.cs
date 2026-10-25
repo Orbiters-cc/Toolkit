@@ -48,7 +48,7 @@ namespace Orbiters.Toolkit.Editor.VRChat
         /// face, three touch points per hand taking only that hand's bead, and a pointer per hand. Pointers wait for
         /// <see cref="Bind"/> to hold them to the fingertips. Nothing changes on a screen that has it all.
         /// </summary>
-        internal static void AddPointing(Transform orb)
+        internal static void AddPointing(Transform orb, string folder = ScreenFolder)
         {
             var screen = orb.Find(ScreenObject);
             var shown = orb.Find(Shown);
@@ -90,7 +90,9 @@ namespace Orbiters.Toolkit.Editor.VRChat
             pointers.transform.SetParent(shown, false);
             pointers.SetActive(false);
             var mesh = body.GetComponent<MeshFilter>().sharedMesh;
-            var material = body.GetComponent<MeshRenderer>().sharedMaterials[0];
+            // A plain dot where the ray meets the screen, and its beam: not N4N0's face.
+            var material = PointerMaterial(folder, false);
+            var beamMaterial = PointerMaterial(folder, true);
             foreach (bool right in Hands)
             {
                 var pointer = Child(pointers.transform, "Pointer " + (right ? "R" : "L"));
@@ -122,7 +124,7 @@ namespace Orbiters.Toolkit.Editor.VRChat
                 beam.localScale = new Vector3(BeamRadius, BeamRadius, 0);
                 beam.gameObject.AddComponent<MeshFilter>().sharedMesh = mesh;
                 var beamRenderer = beam.gameObject.AddComponent<MeshRenderer>();
-                beamRenderer.sharedMaterial = material;
+                beamRenderer.sharedMaterial = beamMaterial;
                 Quiet(beamRenderer);
                 beam.gameObject.SetActive(false);
             }
