@@ -1,6 +1,6 @@
 # Orbiters Toolkit
 
-## Unreleased
+## 0.4.6 — 2026-10-26
 
 - **N4N0's capture kit and camera rig** (`OrbInstaller.Capture`; Orbiters contracts 0.7.0, `Docs/rig-frames.md`,
   N4N0's capture kit): what lets Orbiters - N4N0 record a VRChat world through VRChat's camera (3D pictures,
@@ -33,6 +33,20 @@
   grabbing it still copies its link. It draws with the screen's mesh and materials, with a memory of its own that
   every client writes from the text channel's blocks past the screen's (pointer 252 clears it). The screen is never
   the card any more: `N4N0/Screen/Drop` and pointer 253 are gone, and page 15 loses its countdown.
+- **Toggles show the item's picture**: an accessory or piece of clothing whose creator gave it no menu toggle (no VRCFury
+  Toggle or Full Controller, no Modular Avatar menu) gets Toolkit's toggle with the item's own picture as its menu
+  icon, pictured once it is fitted with the renderer My Avatar's list and Mixer's Hierarchy use (transparent
+  background, `AttachmentIcons`, `Assets/Orbiters/Accessory Icons/<avatar>/<item>.png`, 128 px). Each install, update
+  or reinstall makes its picture; removing the item sweeps it. Items installed before keep the white dot until they
+  are installed again or updated.
+- **Faster avatar builds**: Unity rebuilds a whole animator controller whenever one of its states, transitions, masks or
+  clips changes, so edits to big controllers (VRCFury's FX) cost seconds each. `ControllerEdits.Batch` gives the
+  layers a stand-in state machine and no mask while edits run, then puts them back with one rebuild each, around the
+  build's path rewrites (`AttachmentAnimationBuild`), short names, merged meshes' shape curves, blendshape links and My
+  Avatar's texture swaps. The build changes the controllers VRCFury made for the build copy in place (so VRCFury's
+  parameter compressor no longer copies the whole FX), copies clips without walking every key, and writes its cache
+  once at the end. MasculineCanine's build steps went from 948 s to 113-213 s. New: `ControllerEdits`,
+  `AttachmentAnimationBuild.Save`/`Edits`, `AttachmentIcons`, `ModelThumbnails.Picture` and `VrcFury.IWriter.Icon`.
 
 ## 0.4.5 — 2026-10-25
 
