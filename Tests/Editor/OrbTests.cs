@@ -79,7 +79,7 @@ public class OrbTests
         CollectionAssert.AreEqual(expected, parameters.parameters.Take(expected.Count).Select(p => (p.name, p.valueType, p.networkSynced, p.saved, p.defaultValue)).ToList());
         Assert.IsTrue(parameters.parameters.Skip(expected.Count).All(p => p.name.StartsWith("N4N0/Screen/", StringComparison.Ordinal) || p.name.StartsWith("N4N0/Card/", StringComparison.Ordinal)),
             "then the screen's and the link card's");
-        Assert.AreEqual(1 + 8 + 1 + 8 + 8 * 8, parameters.CalcTotalCost(), "Synced bits: 1 + 8 + 1 + 8 + 8·N");
+        Assert.AreEqual(1 + 8 + 1 + 8 + 8 * 8 + 3 + 8, parameters.CalcTotalCost(), "Synced bits: 1 + 8 + 1 + 8 + 8·N, and the screen's 3 + 8");
 
         // Global in the Full Controller, so VRCFury keeps the names OSC looks for; its own parameters are renamed as usual.
         var full = VrcFury.Features(prefab).Single(f => f.kind == "FullController").feature;
@@ -133,7 +133,7 @@ public class OrbTests
         if (VrcFury.Writer == null) Assert.Ignore("Requires the VRCFury integration.");
         OrbInstaller.CreatePrefab(folder, sync);
         var parameters = AssetDatabase.LoadAssetAtPath<VRCExpressionParameters>(folder + "/Parameters.asset");
-        Assert.AreEqual(1 + 8 + 1 + 8 + 8 * sync, parameters.CalcTotalCost());
+        Assert.AreEqual(1 + 8 + 1 + 8 + 8 * sync + 3 + 8, parameters.CalcTotalCost());
         Assert.AreEqual(sync, parameters.parameters.Count(p => p.name.StartsWith(OrbInstaller.TextSyncPrefix, StringComparison.Ordinal)));
         var controller = AssetDatabase.LoadAssetAtPath<AnimatorController>(folder + "/N4N0.controller");
         var blocks = controller.layers.Single(l => l.name == "Text block").stateMachine.states.Count(s => s.state.name.StartsWith("Block "));
@@ -362,7 +362,7 @@ public class OrbTests
     }
 
     [Test]
-    public void TheScreensTouchPointsAndParametersAreLocal()
+    public void TheScreensReceiversAndParametersAreLocal()
     {
         if (VrcFury.Writer == null) Assert.Ignore("Requires the VRCFury integration.");
         var (root, screen) = PlayWithScreen();
@@ -370,86 +370,150 @@ public class OrbTests
         Assert.AreEqual(folder + "/N4N0 screen.mat", AssetDatabase.GetAssetPath(screen.sharedMaterial), "Its files in N4N0's folder, which a package carries");
         Assert.IsFalse(screen.gameObject.activeSelf, "Hidden until it opens");
         var receivers = screen.GetComponentsInChildren<VRCContactReceiver>(true);
-        Assert.AreEqual(6 + 4 + 4, receivers.Length, "Three touch points per hand's pointer, four each for the eyes and the gaze point");
-        foreach (var r in receivers)
+        foreach (var r in receivers) Assert.IsTrue(r.localOnly, r.parameter + ": local, nothing in the performance rank");
+        var proximity = receivers.Where(r => r.receiverType == VRC.Dynamics.ContactReceiver.ReceiverType.Proximity).ToList();
+        Assert.AreEqual(8 + 8 + 4 + 4 + 4, proximity.Count, "Four per hand for the fingertip and for the aim, four for everyone else's fingertips, four each for the eyes and the gaze point");
+        foreach (var r in proximity)
         {
-            Assert.IsTrue(r.localOnly && r.allowSelf && !r.allowOthers, "Local: the owner's own fingers only, nothing in the performance rank");
-            Assert.AreEqual(VRC.Dynamics.ContactReceiver.ReceiverType.Proximity, r.receiverType);
-            if (r.parameter.StartsWith(OrbInstaller.ScreenGazePrefix, StringComparison.Ordinal)) { Assert.AreEqual(OrbInstaller.GazeTag, r.collisionTags.Single()); continue; }
-            if (r.parameter.StartsWith(OrbInstaller.ScreenEyePrefix, StringComparison.Ordinal)) { Assert.AreEqual(OrbInstaller.EyeTag, r.collisionTags.Single()); continue; }
-            StringAssert.StartsWith(OrbInstaller.ScreenTouchPrefix, r.parameter);
-            Assert.AreEqual(OrbInstaller.PointerTag(r.parameter.Contains("/R")), r.collisionTags.Single());
+            var (tag, reach, self) =
+                r.parameter.StartsWith(OrbInstaller.ScreenTouchPrefix, StringComparison.Ordinal) ? (OrbInstaller.TipTag(r.parameter.Contains("/R")), OrbInstaller.PointingReach, true) :
+                r.parameter.StartsWith(OrbInstaller.ScreenAimPrefix, StringComparison.Ordinal) ? (OrbInstaller.AimTag(r.parameter.Contains("/R")), OrbInstaller.PointingReach, true) :
+                r.parameter.StartsWith(OrbInstaller.ScreenOthersPrefix, StringComparison.Ordinal) ? ("FingerIndex", OrbInstaller.ScreenTouchRadius, false) :
+                r.parameter.StartsWith(OrbInstaller.ScreenGazePrefix, StringComparison.Ordinal) ? (OrbInstaller.GazeTag, OrbInstaller.ScreenTouchRadius, true) :
+                (OrbInstaller.EyeTag, OrbInstaller.ScreenTouchRadius, true);
+            Assert.AreEqual((tag, reach, self, !self), (r.collisionTags.Single(), r.radius, r.allowSelf, r.allowOthers), r.parameter);
+            int point = r.parameter[r.parameter.Length - 1] - '0';
+            Assert.AreEqual(OrbInstaller.ScreenTouchPoints[point], r.transform.localPosition, r.parameter + " at its touch point");
         }
+        var view = receivers.Single(r => r.parameter == OrbInstaller.ScreenInView);
+        Assert.AreEqual((OrbInstaller.ViewTag, true, false), (view.collisionTags.Single(), view.allowSelf, view.allowOthers), "The middle: in its owner's sight or not");
         var parameters = AssetDatabase.LoadAssetAtPath<VRCExpressionParameters>(folder + "/Parameters.asset");
         var screenParameters = parameters.parameters.Where(p => p.name.StartsWith("N4N0/Screen/", StringComparison.Ordinal)).ToList();
-        Assert.AreEqual(1 + 1 + 1 + 1 + 1 + OrbInstaller.ScreenLocalValues + 6 + 8 + 4 + 1, screenParameters.Count,
-            "Open, Replace, ThumbnailBytes, Version, the pointer, 16 values, 6 touch points, 4 each for the eyes and the gaze, each ray's hit and ratio, Drop");
-        Assert.IsTrue(screenParameters.All(p => !p.networkSynced), "No synced bits");
+        Assert.AreEqual(1 + 1 + 1 + 1 + 1 + OrbInstaller.ScreenLocalValues + 4 + 4 + 4 + 8 + 8 + 4 + 1, screenParameters.Count,
+            "Open, Replace, ThumbnailBytes, Version, the pointer, 16 values, 4 each for the eyes and the gaze, Placed, HeldLeft, HeldRight, Size, the fingertips' and aims' 8 each, everyone else's 4, Drop");
+        CollectionAssert.AreEquivalent(new[] { OrbInstaller.ScreenPlaced, OrbInstaller.ScreenHeldLeft, OrbInstaller.ScreenHeldRight, OrbInstaller.ScreenSize },
+            screenParameters.Where(p => p.networkSynced).Select(p => p.name), "Only where it is and its size are synced");
+        var size = screenParameters.Single(p => p.name == OrbInstaller.ScreenSize);
+        Assert.AreEqual((VRCExpressionParameters.ValueType.Float, OrbInstaller.DefaultScreenSize), (size.valueType, size.defaultValue), "Its size 1 by default");
         var replace = screenParameters.Single(p => p.name == OrbInstaller.ScreenReplace);
         Assert.AreEqual((0f, false), (replace.defaultValue, replace.saved), "Off unless the card's option is on, and never saved: each upload's option holds");
         var thumbnails = screenParameters.Single(p => p.name == OrbInstaller.ScreenThumbnailBytes);
         Assert.AreEqual((72f, false, VRCExpressionParameters.ValueType.Int), (thumbnails.defaultValue, thumbnails.saved, thumbnails.valueType), "72 bytes unless the card says 128, never saved");
         var version = screenParameters.Single(p => p.name == OrbInstaller.ScreenVersionParameter);
         Assert.AreEqual(((float)OrbInstaller.ScreenVersion, false, VRCExpressionParameters.ValueType.Int), (version.defaultValue, version.saved, version.valueType),
-            "The screen says its version: Orbiters - N4N0 shows a version 3 screen the six-tile Home, and lets a version 4 one point with rays");
+            "The screen says its version: Orbiters - N4N0 knows its pages and how it points");
         Assert.AreEqual(OrbInstaller.ScreenShaderName(72), screen.sharedMaterial.shader.name);
         Assert.AreEqual(folder + "/N4N0 screen beam.mat", AssetDatabase.GetAssetPath(screen.sharedMaterials[1]), "N4N0's beam, in N4N0's folder too");
+        Assert.AreEqual(folder + "/N4N0 ray.mat", AssetDatabase.GetAssetPath(screen.sharedMaterials[2]), "and the fingertips' rays");
         var hold = screen.GetComponent<VRCParentConstraint>();
-        Assert.AreEqual(root.transform.Find(OrbInstaller.ScreenRig), hold.Sources[0].SourceTransform, "Held to its swing");
-        Assert.IsFalse(hold.FreezeToWorld, "It follows its owner, never frozen in the world");
+        Assert.AreEqual(root.transform.Find(OrbInstaller.ScreenGlide), hold.Sources[0].SourceTransform, "Held to its glide");
+        Assert.IsFalse(hold.FreezeToWorld, "Its place stays, not the screen itself");
     }
 
+    // Where the screen is (screen version 7): before the eyes until it is placed, then where it is in the world however its
+    // owner looks, gliding back before the eyes once it is no longer placed; a hand carries it from where it took it.
     [Test]
-    public void TheScreenSwingsAroundTheEyesAfterItsOwnerWithN4N0sBeam()
+    public void TheScreenStaysWhereItIsUntilItGlidesBackOrAHandCarriesIt()
     {
         if (VrcFury.Writer == null) Assert.Ignore("Requires the VRCFury integration.");
         var prefab = AssetDatabase.LoadAssetAtPath<GameObject>(OrbInstaller.CreatePrefab(folder));
-        var (avatar, _) = Humanoid(eyes: 1.4f);
+        var (avatar, head) = Humanoid(eyes: 1.4f);
         var orb = ((GameObject)PrefabUtility.InstantiatePrefab(prefab, avatar)).transform;
         AttachmentHooks.Prepare(orb.gameObject, avatar);
-        var rig = orb.Find(OrbInstaller.ScreenRig);
         var screen = orb.Find(OrbInstaller.ScreenObject);
-        var swing = rig.GetComponent<VRCPhysBone>();
-        Assert.AreEqual(rig, swing.rootTransform);
-        Assert.AreEqual((VRCPhysBoneBase.AdvancedBool.Other, VRCPhysBoneBase.AdvancedBool.False, VRCPhysBoneBase.AdvancedBool.Other),
-            (swing.allowGrabbing, swing.allowCollision, swing.allowPosing), "Its owner grabs and poses it; nothing pushes it");
-        Assert.AreEqual((true, false, true, false), (swing.grabFilter.allowSelf, swing.grabFilter.allowOthers, swing.poseFilter.allowSelf, swing.poseFilter.allowOthers),
-            "Nobody else grabs or poses it");
-        Assert.AreEqual(OrbInstaller.ScreenSwing, swing.parameter, "Its stretch sizes the screen");
-        Assert.Greater(swing.maxStretch, 0f);
-        var handle = orb.Find(OrbInstaller.ScreenHandle);
-        Assert.IsNotNull(handle, "The handle its owner grabs");
-        CollectionAssert.Contains(swing.ignoreTransforms, handle, "The handle's bar is no bone");
-        Assert.AreEqual("Orbiters/N4N0 Dot", handle.GetComponent<MeshRenderer>().sharedMaterial.shader.name);
-        Assert.AreEqual("Orbiters/N4N0 Dot", orb.Find(OrbInstaller.GazeDot).GetComponent<MeshRenderer>().sharedMaterial.shader.name, "A plain dot, not N4N0's face");
-        Assert.AreEqual(0, swing.gravity, "It hangs straight ahead, not down");
-        Assert.AreEqual(1, rig.childCount, "Its arm is the chain's only bone");
-        Assert.AreNotEqual(Vector3.zero, swing.endpointPosition, "A lone bone needs its end");
         var renderer = screen.GetComponent<SkinnedMeshRenderer>();
-        CollectionAssert.AreEqual(new[] { screen, orb.Find(OrbInstaller.Emitter) }, renderer.bones, "The beam's apex rides N4N0");
-        Assert.AreEqual("Orbiters/N4N0 Beam", renderer.sharedMaterials[1].shader.name);
-        Assert.AreEqual(2, renderer.sharedMesh.subMeshCount, "The page, then the beam");
-        // Shown, as the animator shows it when it opens: a hidden screen's constraint does not run.
-        screen.gameObject.SetActive(true);
+        CollectionAssert.AreEqual(new[] { screen, orb.Find(OrbInstaller.Emitter), orb.Find(OrbInstaller.Pointer(false)), orb.Find(OrbInstaller.Pointer(true)) }, renderer.bones,
+            "The beam's apex rides N4N0, the rays the fingertips");
+        Assert.AreEqual(("Orbiters/N4N0 Beam", "Orbiters/N4N0 Ray"), (renderer.sharedMaterials[1].shader.name, renderer.sharedMaterials[2].shader.name));
+        Assert.AreEqual(3, renderer.sharedMesh.subMeshCount, "The page, the beam, the rays");
+        var grab = orb.Find(OrbInstaller.ScreenHandle + "/Grab").GetComponent<VRCPhysBone>();
+        Assert.AreEqual((VRCPhysBoneBase.AdvancedBool.Other, true, false, OrbInstaller.ScreenGrab), (grab.allowGrabbing, grab.grabFilter.allowSelf, grab.grabFilter.allowOthers, grab.parameter),
+            "Only its owner grabs the handle");
+        Assert.AreEqual("Orbiters/N4N0 Dot", orb.Find(OrbInstaller.ScreenHandle + "/Bar").GetComponent<MeshRenderer>().sharedMaterial.shader.name);
+        var view = orb.Find(OrbInstaller.Gaze).GetComponentsInChildren<VRCContactSender>(true).Where(c => c.collisionTags.Contains(OrbInstaller.ViewTag)).ToList();
+        Assert.AreEqual(OrbInstaller.ViewDistances.Length, view.Count, "The view cone's spheres");
+        Assert.IsTrue(view.All(c => c.localOnly), "Local: nothing in the performance rank");
+
+        graph = PlayableGraph.Create("N4N0 placement test");
+        playable = AnimatorControllerPlayable.Create(graph, AssetDatabase.LoadAssetAtPath<AnimatorController>(folder + "/N4N0.controller"));
+        AnimationPlayableOutput.Create(graph, "N4N0", orb.gameObject.AddComponent<Animator>()).SetSourcePlayable(playable);
+        graph.SetTimeUpdateMode(DirectorUpdateMode.Manual); graph.Play();
+        playable.SetBool("IsLocal", true);
+        playable.SetInteger(OrbInstaller.VRMode, 0);
+        playable.SetBool(OrbInstaller.Menu, true);
         var solver = new ConstraintSolver();
+        void Step(int updates) { for (int i = 0; i < updates; i++) { graph.Evaluate(.02f); solver.Solve(); } }
+        float size = 1.4f / OrbInstaller.ReferenceEyes;
+        var eyesFromHead = Quaternion.Inverse(head.rotation) * (avatar.TransformPoint(avatar.GetComponent<VRCAvatarDescriptor>().ViewPosition) - head.position);
+        Vector3 Eyes() => head.position + head.rotation * eyesFromHead;
+        Vector3 Home() => Eyes() + head.rotation * Quaternion.Inverse(avatar.rotation) * (avatar.rotation * OrbInstaller.ScreenHomeFromEyes * size);
         try
         {
             solver.Track(orb.gameObject);
-            solver.Solve();
-            var eyes = avatar.TransformPoint(avatar.GetComponent<VRCAvatarDescriptor>().ViewPosition);
-            float size = 1.4f / OrbInstaller.ReferenceEyes;
-            Assert.Less(Vector3.Distance(eyes, rig.position), 1e-3f, "The swing turns around the eyes");
-            Assert.Less(Vector3.Distance(eyes + avatar.rotation * OrbInstaller.ScreenFromEyes * size, screen.position), 1e-3f, "Before the eyes at rest");
-            Assert.Less(Quaternion.Angle(avatar.rotation, screen.rotation), .01f, "Facing its owner");
-            // The PhysBone turns the root, lagging behind the head and the avatar's turns: the screen swings with it around
-            // the eyes, still facing them.
-            var lag = Quaternion.Euler(8, -20, 0);
-            rig.localRotation = lag;
-            solver.Solve();
-            Assert.Less(Vector3.Distance(eyes + avatar.rotation * lag * OrbInstaller.ScreenFromEyes * size, screen.position), 1e-3f);
-            Assert.Less(Quaternion.Angle(avatar.rotation * lag, screen.rotation), .01f);
+            Step(3);
+            Assert.IsTrue(screen.gameObject.activeSelf);
+            Assert.Less(Vector3.Distance(Home(), screen.position), 1e-3f, "Not placed: before the eyes");
+            Assert.Less(Vector3.Angle(Eyes() - screen.position, -screen.forward), .5f, "Facing them");
+            Assert.Less(Vector3.Angle(Vector3.ProjectOnPlane(Vector3.up, screen.forward), screen.up), .5f, "Upright: no roll, tipped back towards the eyes only");
+
+            // Placed: it stays where it is in the world while its owner looks around.
+            playable.SetBool(OrbInstaller.ScreenPlaced, true);
+            Step(3);
+            var there = screen.position;
+            head.rotation = avatar.rotation * Quaternion.Euler(10, 40, 0);
+            Step(3);
+            Assert.Less(Vector3.Distance(there, screen.position), 1e-3f, "Placed: where it was, the head turned");
+
+            // No longer placed: it glides back before the eyes (between the two halfway through), then follows them.
+            playable.SetBool(OrbInstaller.ScreenPlaced, false);
+            Step(1);
+            Step(Mathf.RoundToInt(OrbInstaller.GlideTime / .02f / 2) - 1);
+            float fromThere = Vector3.Distance(there, screen.position), toHome = Vector3.Distance(Home(), screen.position);
+            Assert.Greater(fromThere, .02f, "Gliding");
+            Assert.Greater(toHome, .02f, "not there yet");
+            Step(Mathf.RoundToInt(OrbInstaller.GlideTime / .02f) + 5);
+            Assert.Less(Vector3.Distance(Home(), screen.position), 1e-3f, "Back before the eyes");
+            head.rotation = avatar.rotation * Quaternion.Euler(-5, -20, 0);
+            Step(3);
+            Assert.Less(Vector3.Distance(Home(), screen.position), 1e-3f, "Following them while not placed");
+            playable.SetBool(OrbInstaller.ScreenPlaced, true);
+            Step(3);
+
+            // Held in the left hand: it rides the palm from where it was taken; let go, it stays.
+            var hand = avatar.GetComponent<Animator>().GetBoneTransform(HumanBodyBones.LeftHand);
+            var before = screen.position;
+            playable.SetBool(OrbInstaller.ScreenHeldLeft, true);
+            Step(3);
+            Assert.Less(Vector3.Distance(before, screen.position), 1e-3f, "Taken where it was");
+            var carry = orb.Find(OrbInstaller.ScreenGrip(false) + "/" + OrbInstaller.Carry);
+            var offset = carry.InverseTransformPoint(screen.position);
+            hand.position += new Vector3(.1f, .05f, -.05f);
+            Step(3);
+            Assert.Greater(Vector3.Distance(before, screen.position), .05f, "Carried");
+            Assert.Less(Vector3.Distance(offset, carry.InverseTransformPoint(screen.position)), 1e-3f, "From where it was taken, in the palm's carry frame");
+            var dropped = screen.position;
+            playable.SetBool(OrbInstaller.ScreenHeldLeft, false);
+            Step(3);
+            hand.position -= new Vector3(.1f, .05f, -.05f);
+            Step(3);
+            Assert.Less(Vector3.Distance(dropped, screen.position), 1e-3f, "Let go: it stays");
+
+            // Its size: 1 by default, the largest at 1.
+            Assert.AreEqual(size, screen.lossyScale.x, 1e-3f);
+            playable.SetFloat(OrbInstaller.ScreenSize, 1);
+            Step(2);
+            Assert.AreEqual(size * OrbInstaller.LargestScreen, screen.lossyScale.x, 1e-3f);
         }
         finally { solver.Release(); }
+
+        // Its owner's animator decides whether it stays (the drivers run in VRChat only): placed once in sight, no longer
+        // placed after a while out of sight, placed while held.
+        var stays = AssetDatabase.LoadAssetAtPath<AnimatorController>(folder + "/N4N0.controller").layers.Single(l => l.name == "Screen stays").stateMachine;
+        bool Drives(string state, bool value) => stays.states.Single(s => s.state.name == state).state.behaviours.OfType<VRCAvatarParameterDriver>()
+            .Any(d => d.localOnly && d.parameters.Any(x => x.name == OrbInstaller.ScreenPlaced && x.value == (value ? 1 : 0)));
+        Assert.IsTrue(Drives("Following", false) && Drives("Staying", true) && Drives("Holding", true));
+        var away = stays.states.Single(s => s.state.name == "Looking away").state;
+        Assert.AreEqual(OrbInstaller.LookAwayTime, away.motion.averageDuration, 1e-3f, "Out of sight that long first");
     }
 
     // The link card (Docs/orb.md, Link card): the screen held where it was dropped, for its owner from N4N0/Screen/Drop and for
@@ -689,10 +753,10 @@ public class OrbTests
         Assert.IsFalse(dot.activeSelf, "Nobody else sees it");
     }
 
-    // Pointing (Docs/orb.md, Pointing): a raycast from each index fingertip along the finger, as large as N4N0, at a
-    // solid box on the screen's face.
+    // Pointing (Docs/orb.md, Pointing, screen version 7): each index finger's pointer at its tip along the finger, as large as
+    // N4N0, with a sender at the fingertip and one further along the finger.
     [Test]
-    public void ItPointsFromTheIndexFingertipsAtASolidScreen()
+    public void ItPointsAlongTheIndexFingersWithTwoSendersEach()
     {
         if (VrcFury.Writer == null) Assert.Ignore("Requires the VRCFury integration.");
         var prefab = AssetDatabase.LoadAssetAtPath<GameObject>(OrbInstaller.CreatePrefab(folder));
@@ -700,6 +764,8 @@ public class OrbTests
         var orb = ((GameObject)PrefabUtility.InstantiatePrefab(prefab, avatar)).transform;
         AttachmentHooks.Prepare(orb.gameObject, avatar);
         var animator = avatar.GetComponent<Animator>();
+        float size = 1.2f / OrbInstaller.ReferenceEyes;
+        Assert.IsTrue(OrbInstaller.HasPointing(orb));
         foreach (bool right in new[] { false, true })
         {
             var pointer = orb.Find(OrbInstaller.Pointer(right));
@@ -709,60 +775,39 @@ public class OrbTests
             var tip = distal.position + (distal.position - middle.position) * .8f;
             Assert.Less(Vector3.Distance(tip, pointer.position), 1e-4f, "At the fingertip");
             Assert.Less(Vector3.Angle((tip - middle.position).normalized, pointer.forward), .1f, "Along the finger");
-            Assert.AreEqual(1.2f / OrbInstaller.ReferenceEyes, pointer.lossyScale.x, 1e-4f, "As large as N4N0");
-            var ray = pointer.GetComponent<VRC.SDK3.Avatars.Components.VRCRaycast>();
-            Assert.AreEqual((Vector3.forward, OrbInstaller.RayLength, true, OrbInstaller.Ray(right)), (ray.RaycastDirection, ray.Distance, ray.ApplyTransformScale, ray.Parameter));
-            Assert.AreEqual(VRC.SDK3.Avatars.Components.VRCRaycast.CollisionMode.HitWorldsAndPlayers, ray.RaycastCollisionMode);
-            Assert.AreEqual(pointer.Find("Bead"), ray.ResultTransform);
-            var sender = ray.ResultTransform.GetComponent<VRCContactSender>();
-            Assert.IsTrue(sender.localOnly);
-            Assert.AreEqual(OrbInstaller.PointerTag(right), sender.collisionTags.Single());
-            Assert.AreEqual(OrbInstaller.PointRadius / OrbInstaller.ReferenceEyes * 1.2f, sender.radius * sender.transform.lossyScale.x, 1e-6f, "A known, tiny contact");
+            Assert.AreEqual(size, pointer.lossyScale.x, 1e-4f, "As large as N4N0");
+            var sender = pointer.GetComponent<VRCContactSender>();
+            Assert.AreEqual((true, OrbInstaller.TipTag(right)), (sender.localOnly, sender.collisionTags.Single()), "The fingertip's");
+            Assert.AreEqual(OrbInstaller.PointRadius * size, sender.radius * sender.transform.lossyScale.x, 1e-6f, "A known, tiny contact");
+            var aim = pointer.Find("Aim").GetComponent<VRCContactSender>();
+            Assert.AreEqual((true, OrbInstaller.AimTag(right)), (aim.localOnly, aim.collisionTags.Single()), "The aim's");
+            Assert.Less(Vector3.Distance(tip + pointer.forward * OrbInstaller.AimDistance * size, aim.transform.position), 1e-4f, "Further along the finger");
         }
-        var surface = orb.Find(OrbInstaller.Surface).GetComponent<BoxCollider>();
-        Assert.IsFalse(surface.isTrigger, "VRChat's raycasts pass through triggers");
-        Assert.AreEqual(new Vector3(OrbInstaller.ScreenWidth, OrbInstaller.ScreenHeight, OrbInstaller.SurfaceDepth), surface.size);
-        Assert.IsFalse(surface.gameObject.activeSelf, "Only while the screen is open for its owner");
-        Assert.IsFalse(orb.Find(OrbInstaller.Pointers).gameObject.activeSelf);
+        Assert.IsFalse(orb.Find(OrbInstaller.Pointers).gameObject.activeSelf, "On in VR only");
     }
 
     [Test]
-    public void ThePointersShowForTheirOwnerInVrWhileTheScreenIsOpen()
+    public void ThePointersAndTheirRaysAreOnInVr()
     {
         if (VrcFury.Writer == null) Assert.Ignore("Requires the VRCFury integration.");
-        var (root, _) = PlayWithScreen(textSync: 8);
+        var (root, screen) = PlayWithScreen(textSync: 8);
         var pointers = root.transform.Find(OrbInstaller.Pointers).gameObject;
-        var surface = root.transform.Find(OrbInstaller.Surface).gameObject;
-        var bead = root.transform.Find(OrbInstaller.Pointer(true) + "/Bead").gameObject;
-        var beam = root.transform.Find(OrbInstaller.Pointer(true) + "/Beam");
+        float Rays() { var block = new MaterialPropertyBlock(); screen.GetPropertyBlock(block); return block.GetFloat("_Rays"); }
         playable.SetBool("IsLocal", true);
-        playable.SetInteger(OrbInstaller.VRMode, 1);
-        playable.SetBool(OrbInstaller.ScreenReplace, true);
-        Tick(3);
-        Assert.IsFalse(pointers.activeSelf || surface.activeSelf, "Menu closed");
-        playable.SetBool(OrbInstaller.Menu, true);
-        Tick(3);
-        Assert.IsTrue(pointers.activeSelf && surface.activeSelf, "In VR, the menu open on the screen");
-        Assert.IsFalse(bead.activeSelf, "The ray meets nothing yet");
-        playable.SetBool(OrbInstaller.RayHit(true), true);
-        playable.SetFloat(OrbInstaller.RayRatio(true), .5f);
-        Tick(3);
-        Assert.IsTrue(bead.activeSelf && beam.gameObject.activeSelf);
-        Assert.AreEqual(OrbInstaller.RayLength / 4, beam.localScale.z, 1e-4f, "The beam reaches the bead: half the ray, a needle centred on its half");
-        Assert.AreEqual(OrbInstaller.RayLength / 4, beam.localPosition.z, 1e-4f);
-        playable.SetBool(OrbInstaller.RayHit(true), false);
-        Tick(3);
-        Assert.IsFalse(bead.activeSelf || beam.gameObject.activeSelf);
         playable.SetInteger(OrbInstaller.VRMode, 0);
         Tick(3);
         Assert.IsFalse(pointers.activeSelf, "Desktop mode points by looking");
+        Assert.AreEqual(0, Rays());
         playable.SetInteger(OrbInstaller.VRMode, 1);
+        Tick(3);
+        Assert.IsTrue(pointers.activeSelf, "In VR the pointers follow the fingertips");
+        Assert.AreEqual(1, Rays(), "and the screen draws their rays");
         playable.SetBool("IsLocal", false);
-        playable.SetBool(OrbInstaller.Menu, false);
         Tick(3);
-        playable.SetBool(OrbInstaller.Menu, true);
+        Assert.IsTrue(pointers.activeSelf && Rays() > .5f, "Everyone sees the owner's rays on the screen (VRMode is synced)");
+        playable.SetInteger(OrbInstaller.VRMode, 0);
         Tick(3);
-        Assert.IsFalse(pointers.activeSelf || surface.activeSelf, "Nobody else has them");
+        Assert.IsFalse(pointers.activeSelf);
     }
 
     // VRCFury reverts every override of its components in a prefab instance when an upload starts (VRCFPrefabFixer): the
@@ -829,7 +874,7 @@ public class OrbTests
             (OrbInstaller.LightColor, VRCExpressionParameters.ValueType.Int, true, true, 0f),
             (OrbInstaller.LightLevel, VRCExpressionParameters.ValueType.Float, true, true, OrbInstaller.LightLevelDefault),
         }, own);
-        Assert.AreEqual(1 + 8 + 1 + 8 + 8 * 8 + 1 + 8 + 8, parameters.CalcTotalCost(), "17 synced bits more");
+        Assert.AreEqual(1 + 8 + 1 + 8 + 8 * 8 + 3 + 8 + 1 + 8 + 8, parameters.CalcTotalCost(), "17 synced bits more");
         Assert.IsTrue(VrcFury.IsGlobalParameter(VrcFury.Features(placed).Single(f => f.kind == "FullController").feature, OrbInstaller.LightColor));
         var orbMenu = AssetDatabase.LoadAssetAtPath<VRCExpressionsMenu>(shared + "/Menu.asset").controls.Single().subMenu;
         var lightMenu = orbMenu.controls.Single(c => c.name == "Light").subMenu;
@@ -893,7 +938,7 @@ public class OrbTests
         var parameters = AssetDatabase.LoadAssetAtPath<VRCExpressionParameters>(OrbInstaller.OptionsFolder + "Text slots 8 + screen in VR/Parameters.asset");
         var version = parameters.parameters.Single(p => p.name == OrbInstaller.ScreenVersionParameter);
         Assert.AreEqual((VRCExpressionParameters.ValueType.Int, false, false, (float)OrbInstaller.ScreenVersion), (version.valueType, version.networkSynced, version.saved, version.defaultValue));
-        Assert.AreEqual(6, OrbInstaller.ScreenVersion);
+        Assert.AreEqual(7, OrbInstaller.ScreenVersion);
     }
 
     // The retro look is the screen's material alone: it stays through N4N0's other options, and goes back.
@@ -1067,7 +1112,7 @@ public class OrbTests
         var phone = Merged(Built(avatar, mobile: true));
         List<(string, VRCExpressionParameters.ValueType)> Synced(List<VRCExpressionParameters.Parameter> list) =>
             list.Where(p => p.networkSynced).Select(p => (p.name, p.valueType)).ToList();
-        Assert.AreEqual(1 + 8 + 1 + 8 + 8 * 8 + 1 + 8 + 8, pc.Where(p => p.networkSynced).Sum(p => p.valueType == VRCExpressionParameters.ValueType.Bool ? 1 : 8), "N4N0 with 8 text slots and its light");
+        Assert.AreEqual(1 + 8 + 1 + 8 + 8 * 8 + 3 + 8 + 1 + 8 + 8, pc.Where(p => p.networkSynced).Sum(p => p.valueType == VRCExpressionParameters.ValueType.Bool ? 1 : 8), "N4N0 with 8 text slots and its light");
         CollectionAssert.AreEqual(Synced(pc), Synced(phone));
         // The PC N4N0's parameters come first and whole; the mobile build adds its version, local.
         CollectionAssert.AreEqual(pc.Select(p => p.name), phone.Take(pc.Count).Select(p => p.name));

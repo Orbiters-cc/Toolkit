@@ -28,7 +28,7 @@ namespace Orbiters.Toolkit.Editor.VRChat
         // The controller, parameters and menu of each choice of options, shared by every N4N0 switched to it (they name no
         // object of their own: their curves follow paths below N4N0).
         // A new menu or parameters get a new folder: orbs switched earlier keep the files they use.
-        internal const string OptionsFolder = "Assets/Orbiters/N4N0/Menu 13/";
+        internal const string OptionsFolder = "Assets/Orbiters/N4N0/Menu 14/";
 
         [InitializeOnLoadMethod]
         private static void RegisterOrbOptions() => AttachmentHooks.RegisterOptions(root => FindAll(root).SelectMany(orb =>
@@ -172,23 +172,13 @@ namespace Orbiters.Toolkit.Editor.VRChat
             if (!OfferedThumbnailBytes.Contains(thumbnailBytes)) throw new ArgumentOutOfRangeException(nameof(thumbnailBytes), "N4N0's thumbnails are 72 or 128 bytes.");
             if (!ScreenFits(textSync, thumbnailBytes)) throw new ArgumentException(thumbnailBytes + "-byte thumbnails need 8 text slots or more.", nameof(thumbnailBytes));
             var found = FullController(orb, out var component) ?? throw new InvalidOperationException("This N4N0 has no VRCFury Full Controller: add it again.");
-            if (OptionsOf(orb) == (textSync, walkBoost, replace, thumbnailBytes, light) && HasScreen(orb) && ScreenDraws(orb, thumbnailBytes) && HasLight(orb) == light &&
-                HasPointing(orb))
+            // The controllers made here drive the screen of version 7 (its pointers, place and handle): an older N4N0 comes
+            // whole from My Avatar's gallery instead.
+            if (!HasScreen(orb) || ScreenRenderer(orb) == null || !HasPointing(orb) || !HasPlacement(orb)) throw new InvalidOperationException(OlderScreen);
+            if (OptionsOf(orb) == (textSync, walkBoost, replace, thumbnailBytes, light) && ScreenDraws(orb, thumbnailBytes) && HasLight(orb) == light)
                 return;
             if (found.menuIndex < 0) throw new InvalidOperationException("This N4N0's menu was changed: add it again.");
-            // The controllers made here drive the skinned screen: an older N4N0's screen would stop showing anything.
-            if (HasScreen(orb) && ScreenRenderer(orb) == null) throw new InvalidOperationException(OlderScreen);
-            AddScreen(orb, ScreenFolder, thumbnailBytes);
             SetScreenThumbnails(orb, thumbnailBytes);
-            // A screen from before version 4 points with rays from now on, held to the avatar's fingertips.
-            if (!HasPointing(orb))
-            {
-                AddPointing(orb, ScreenFolder);
-                var avatar = orb.GetComponentInParent<VRC.SDK3.Avatars.Components.VRCAvatarDescriptor>();
-                var animator = avatar != null ? avatar.GetComponent<Animator>() : null;
-                var head = orb.Find(Head);
-                if (animator != null && animator.isHuman && head != null) BindPointers(orb, avatar.transform, animator, Mathf.Abs(head.lossyScale.x));
-            }
             SetLightObject(orb, light);
             var (controller, parameters, menu) = Shared(textSync, walkBoost, replace, thumbnailBytes, light);
             component = OwnComponent(component);

@@ -48,8 +48,8 @@ namespace Orbiters.Toolkit.Editor.VRChat
 
         // The layout is for an avatar whose eyes are 1.6 m up; Bind scales it with the avatar's eye height.
         internal const float ReferenceEyes = 1.6f;
-        // N4N0's radius; each of the tether's two links (N4N0 rests on its tip, above its root).
-        internal const float Radius = .045f, Link = .05f, TouchRadius = .07f;
+        // N4N0's radius; each of the tether's two links (N4N0 rests on its tip, above its root: longer links let it lag further).
+        internal const float Radius = .045f, Link = .07f, TouchRadius = .07f;
         // A cell of the panel (a glyph twice as tall as wide), the plate's margin around the text and the glow past it
         // (the text shader's Margin).
         internal const float CellWidth = .009f, CellHeight = .018f, PlatePad = .006f, PlateGlow = .004f;
@@ -115,7 +115,8 @@ namespace Orbiters.Toolkit.Editor.VRChat
             level.Sources.Add(new VRCConstraintSource(null, 1));
             level.IsActive = true; level.Locked = true;
 
-            // The tether's root stays with the head; its two links and N4N0 on their tip lag behind, overshoot and settle.
+            // The tether's root stays with the head; its two links and N4N0 on their tip lag behind and drift back, smoothly
+            // (a weak pull and a soft spring: it barely overshoots), whatever moves the head.
             var tether = Child(head, "Tether");
             var link = Child(tether, "1"); link.localPosition = Vector3.up * Link;
             var tip = Child(link, "2"); tip.localPosition = Vector3.up * Link;
@@ -127,8 +128,8 @@ namespace Orbiters.Toolkit.Editor.VRChat
 
             var phys = tether.gameObject.AddComponent<VRCPhysBone>();
             phys.rootTransform = tether; phys.integrationType = VRCPhysBoneBase.IntegrationType.Simplified;
-            phys.pull = .15f; phys.spring = .8f; phys.gravity = 0; phys.gravityFalloff = 0;
-            phys.immobileType = VRCPhysBoneBase.ImmobileType.AllMotion; phys.immobile = .2f;
+            phys.pull = .09f; phys.spring = .4f; phys.gravity = 0; phys.gravityFalloff = 0;
+            phys.immobileType = VRCPhysBoneBase.ImmobileType.AllMotion; phys.immobile = .05f;
             // Only the tip, where N4N0 is, can be grabbed; pulled, the tether stretches and springs back.
             phys.radius = Radius; phys.radiusCurve = AnimationCurve.Constant(0, .49f, 0);
             phys.radiusCurve.AddKey(new Keyframe(.5f, 1)); phys.radiusCurve.AddKey(new Keyframe(1, 1));
@@ -238,7 +239,7 @@ namespace Orbiters.Toolkit.Editor.VRChat
             gaze.SetPositionAndRotation(eyes, avatar.rotation);
             var turn = Quaternion.Inverse(bone.rotation);
             sight.Sources[0] = new VRCConstraintSource(bone, 1, turn * (gaze.position - bone.position), (turn * gaze.rotation).eulerAngles);
-            PlaceScreen(orb);
+            FitPlacement(orb, avatar, animator);
             BindPointers(orb, avatar, animator, size);
             BindCardHands(orb, animator, size);
             FitLight(orb);

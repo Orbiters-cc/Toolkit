@@ -5,7 +5,6 @@ using UnityEditor;
 using UnityEditor.Animations;
 using UnityEngine;
 using VRC.Dynamics;
-using VRC.SDK3.Avatars.Components;
 using VRC.SDK3.Avatars.ScriptableObjects;
 using VRC.SDK3.Dynamics.Constraint.Components;
 using VRC.SDK3.Dynamics.Contact.Components;
@@ -15,123 +14,98 @@ using Object = UnityEngine.Object;
 namespace Orbiters.Toolkit.Editor.VRChat
 {
     /// <summary>
-    /// Pointing at N4N0's screen (Orbiters contracts, Docs/orb.md, Pointing; screen version 4): a VRChat raycast from each
-    /// index fingertip, along the finger, meets a thin solid box on the screen's face. Its owner sees a beam from the
-    /// fingertip and a bead where the ray meets the screen at once (the avatar draws them), and the bead's contact on
-    /// three of the screen's touch points tells Orbiters - N4N0 exactly where it is; the fingertip coming within 2.1 cm
-    /// along the ray presses. Everything is on its owner's client only, in VR, while the screen is open: no synced bits,
-    /// and contacts, the box and the raycasts cost nothing for anyone else.
+    /// Pointing at N4N0's screen (Orbiters contracts, Docs/orb.md, Pointing; screen version 7). Each index finger carries a
+    /// pointer held to its tip along the finger, with two local contact senders: one at the fingertip, one further along
+    /// the finger (<see cref="AimDistance"/>). Four receivers per sender on the screen tell Orbiters - N4N0 where both are,
+    /// so it knows the ray the finger points along and where it meets the screen: hovered there, pressed with the trigger,
+    /// or by the fingertip touching the screen. The beam and its dot are drawn by the screen itself, from the pointers'
+    /// bones (OrbRay.shader.txt), at once and exactly. Everyone else's index fingertips (VRChat's FingerIndex contacts)
+    /// have four receivers of their own: a touch presses too. Everything is local to its owner's client: no synced bits,
+    /// nothing in the performance rank. VRChat's raycasts never meet their own avatar's colliders, which is why screens of
+    /// version 4 to 6 never showed their beam.
     /// </summary>
     public static partial class OrbInstaller
     {
-        /// <summary>Each hand's raycast parameter: VRChat adds <c>_Hit</c> and <c>_Ratio</c> (and <c>_Distance</c>).</summary>
-        public const string RayPrefix = "N4N0/Screen/Ray/";
-        /// <summary>The bead's contact tag, <c>N4N0PointerL</c> or <c>N4N0PointerR</c>: only that hand's touch points take it.</summary>
-        public const string PointerTagPrefix = "N4N0Pointer";
-        internal const string Pointers = Shown + "/Pointers", Surface = ScreenObject + "/Surface";
-        // The ray's reach, the bead's contact and look, the beam's thickness (at 1.6 m eye height: they scale with the avatar).
-        internal const float RayLength = .6f, PointRadius = .002f, BeadRadius = .0035f, BeamRadius = .0012f;
-        // The screen's touch points a hand's bead is found from (the first three: they lie in the screen's plane).
-        internal const int PointingTouchPoints = 3;
-        // The solid box the rays meet: the screen's face, this deep behind it.
-        internal const float SurfaceDepth = .002f;
+        /// <summary>Where the fingertip is: four receivers per hand, as <see cref="ScreenTouchPrefix"/> (<c>N4N0/Screen/Touch/L0</c> …).</summary>
+        public const string TipTagPrefix = "N4N0Tip";
+        /// <summary>Where the point further along the finger is: <c>N4N0/Screen/Aim/L0</c> … (tag <see cref="AimTagPrefix"/>).</summary>
+        public const string ScreenAimPrefix = "N4N0/Screen/Aim/", AimTagPrefix = "N4N0Aim";
+        /// <summary>Everyone else's index fingertip near the screen: <c>N4N0/Screen/Others0</c> … (VRChat's FingerIndex tag).</summary>
+        public const string ScreenOthersPrefix = "N4N0/Screen/Others", OthersTag = "FingerIndex";
+        internal const string Pointers = Shown + "/Pointers";
+        // The senders' radius, how far along the finger the aim sender is, and how far the owner's receivers reach (at
+        // 1.6 m eye height: they scale with the avatar; the receivers with the screen's size too).
+        internal const float PointRadius = .002f, AimDistance = .3f, PointingReach = 1.6f;
 
-        public static string Ray(bool right) => RayPrefix + (right ? "R" : "L");
-        public static string RayHit(bool right) => Ray(right) + "_Hit";
-        public static string RayRatio(bool right) => Ray(right) + "_Ratio";
-        public static string PointerTag(bool right) => PointerTagPrefix + (right ? "R" : "L");
+        public static string TipTag(bool right) => TipTagPrefix + (right ? "R" : "L");
+        public static string AimTag(bool right) => AimTagPrefix + (right ? "R" : "L");
+        public static string ScreenAim(bool right, int index) => ScreenAimPrefix + (right ? "R" : "L") + index;
+        public static string ScreenOthers(int index) => ScreenOthersPrefix + index;
         internal static string Pointer(bool right) => Pointers + "/Pointer " + (right ? "R" : "L");
         private static readonly bool[] Hands = { false, true };
 
         /// <summary>
-        /// Gives a placed orb's screen what pointing needs (with Undo), as a version 4 screen has it: the solid box on its
-        /// face, three touch points per hand taking only that hand's bead, and a pointer per hand. Pointers wait for
-        /// <see cref="Bind"/> to hold them to the fingertips. Nothing changes on a screen that has it all.
+        /// The pointers (under Shown, before the screen exists: the screen's renderer is bound to them): one per index
+        /// fingertip, with its tip and aim senders. <see cref="Bind"/> holds them to the fingertips.
         /// </summary>
-        internal static void AddPointing(Transform orb, string folder = ScreenFolder)
+        private static Transform[] AddPointers(Transform orb)
         {
-            var screen = orb.Find(ScreenObject);
             var shown = orb.Find(Shown);
-            var body = orb.Find(Body);
-            if (screen == null || shown == null || body == null) throw new InvalidOperationException("This N4N0 was modified: add it again.");
-            if (screen.Find("Surface") == null)
+            var pointers = Child(shown, "Pointers");
+            pointers.gameObject.SetActive(false);
+            return Hands.Select(right =>
             {
-                var surface = new GameObject("Surface");
-                Undo.RegisterCreatedObjectUndo(surface, "N4N0 pointing");
-                surface.transform.SetParent(screen, false);
-                surface.SetActive(false);
-                // Solid (VRChat's raycasts pass through triggers), authored on Default; only its owner's client has it,
-                // while the screen is open.
-                var box = surface.AddComponent<BoxCollider>();
-                box.size = new Vector3(ScreenWidth, ScreenHeight, SurfaceDepth);
-                box.center = new Vector3(0, 0, SurfaceDepth / 2);
-            }
-            // The hands' touch points: the first three of each, taking that hand's bead.
-            foreach (bool right in Hands)
-            for (int i = 0; i < ScreenTouchPoints.Length; i++)
-            {
-                var point = screen.Find("Touch " + (right ? "R" : "L") + i);
-                if (i >= PointingTouchPoints)
-                {
-                    if (point != null) Undo.DestroyObjectImmediate(point.gameObject);
-                    continue;
-                }
-                var receiver = point != null ? point.GetComponent<VRCContactReceiver>() : null;
-                if (receiver == null) continue;
-                if (receiver.collisionTags.Count == 1 && receiver.collisionTags[0] == PointerTag(right)) continue;
-                Undo.RecordObject(receiver, "N4N0 pointing");
-                receiver.collisionTags.Clear();
-                receiver.collisionTags.Add(PointerTag(right));
-                PrefabUtility.RecordPrefabInstancePropertyModifications(receiver);
-            }
-            if (orb.Find(Pointers) != null) return;
-            var pointers = new GameObject("Pointers");
-            Undo.RegisterCreatedObjectUndo(pointers, "N4N0 pointing");
-            pointers.transform.SetParent(shown, false);
-            pointers.SetActive(false);
-            var mesh = body.GetComponent<MeshFilter>().sharedMesh;
-            // A plain dot where the ray meets the screen, and its beam: not N4N0's face.
-            var material = PointerMaterial(folder, false);
-            var beamMaterial = PointerMaterial(folder, true);
-            foreach (bool right in Hands)
-            {
-                var pointer = Child(pointers.transform, "Pointer " + (right ? "R" : "L"));
-                // Held to the index fingertip, along the finger (sources set by Bind).
+                var pointer = Child(pointers, "Pointer " + (right ? "R" : "L"));
+                // Held to the index fingertip, its forward along the finger (sources set by Bind).
                 var hold = pointer.gameObject.AddComponent<VRCParentConstraint>();
                 hold.Sources.Add(new VRCConstraintSource(null, 1));
                 hold.IsActive = true; hold.Locked = true;
-                var bead = Child(pointer, "Bead");
-                var ray = pointer.gameObject.AddComponent<VRCRaycast>();
-                ray.RaycastDirection = Vector3.forward; ray.Distance = RayLength; ray.ApplyTransformScale = true;
-                // The box is authored on Default, which this mode tests; VRChat may move the avatar's objects to
-                // PlayerLocal, which it tests too.
-                ray.RaycastCollisionMode = VRCRaycast.CollisionMode.HitWorldsAndPlayers;
-                ray.ResultTransform = bead; ray.ApplyRotation = false;
-                ray.BehaviorOnMiss = VRCRaycast.MissBehavior.SnapToStart;
-                ray.Parameter = Ray(right);
-                // The bead: where the ray meets the screen, and its contact.
-                bead.localScale = Vector3.one * BeadRadius;
-                bead.gameObject.AddComponent<MeshFilter>().sharedMesh = mesh;
-                var beadRenderer = bead.gameObject.AddComponent<MeshRenderer>();
-                beadRenderer.sharedMaterial = material;
-                Quiet(beadRenderer);
-                var sender = bead.gameObject.AddComponent<VRCContactSender>();
-                sender.shapeType = ContactBase.ShapeType.Sphere; sender.radius = PointRadius / BeadRadius; sender.localOnly = true;
-                sender.collisionTags.Add(PointerTag(right));
-                bead.gameObject.SetActive(false);
-                // The beam: a needle from the fingertip to the bead (its length set from the ray's ratio).
-                var beam = Child(pointer, "Beam");
-                beam.localScale = new Vector3(BeamRadius, BeamRadius, 0);
-                beam.gameObject.AddComponent<MeshFilter>().sharedMesh = mesh;
-                var beamRenderer = beam.gameObject.AddComponent<MeshRenderer>();
-                beamRenderer.sharedMaterial = beamMaterial;
-                Quiet(beamRenderer);
-                beam.gameObject.SetActive(false);
-            }
+                Sender(pointer.gameObject, TipTag(right));
+                var aim = Child(pointer, "Aim");
+                aim.localPosition = Vector3.forward * AimDistance;
+                Sender(aim.gameObject, AimTag(right));
+                return pointer;
+            }).ToArray();
         }
 
-        /// <summary>Whether a placed orb's screen points with rays (has its pointers and its box).</summary>
-        internal static bool HasPointing(Transform orb) => orb != null && orb.Find(Pointers) != null && orb.Find(Surface) != null;
+        // A small local sphere: the receivers find its middle.
+        private static void Sender(GameObject at, string tag)
+        {
+            var sender = at.AddComponent<VRCContactSender>();
+            sender.shapeType = ContactBase.ShapeType.Sphere; sender.radius = PointRadius; sender.localOnly = true;
+            sender.collisionTags.Add(tag);
+        }
+
+        /// <summary>
+        /// The screen's receivers for pointing: four per sender of each hand (the fingertip's and the aim's), as far as
+        /// <see cref="PointingReach"/>, and four for everyone else's fingertips, at the screen's four touch points.
+        /// </summary>
+        private static void AddPointingReceivers(Transform screen)
+        {
+            foreach (bool right in Hands)
+            for (int i = 0; i < ScreenTouchPoints.Length; i++)
+            {
+                Receiver(screen, "Touch " + (right ? "R" : "L") + i, i, ScreenTouch(right, i), TipTag(right), PointingReach, self: true);
+                Receiver(screen, "Aim " + (right ? "R" : "L") + i, i, ScreenAim(right, i), AimTag(right), PointingReach, self: true);
+            }
+            for (int i = 0; i < ScreenTouchPoints.Length; i++)
+                Receiver(screen, "Others " + i, i, ScreenOthers(i), OthersTag, ScreenTouchRadius, self: false);
+        }
+
+        // A local proximity receiver at touch point `point`: its owner's own senders, or (not `self`) everyone else's.
+        private static void Receiver(Transform screen, string name, int point, string parameter, string tag, float radius, bool self)
+        {
+            var at = Child(screen, name);
+            at.localPosition = ScreenTouchPoints[point];
+            var receiver = at.gameObject.AddComponent<VRCContactReceiver>();
+            receiver.shapeType = ContactBase.ShapeType.Sphere; receiver.radius = radius;
+            receiver.allowSelf = self; receiver.allowOthers = !self; receiver.localOnly = true;
+            receiver.receiverType = ContactReceiver.ReceiverType.Proximity; receiver.parameter = parameter;
+            receiver.collisionTags.Add(tag);
+        }
+
+        /// <summary>Whether a placed orb points as screen version 7 does (its pointers have aim senders).</summary>
+        internal static bool HasPointing(Transform orb) => orb != null && Hands.All(right => orb.Find(Pointer(right) + "/Aim") != null);
 
         /// <summary>
         /// Holds a placed orb's pointers to <paramref name="animator"/>'s index fingertips, along the fingers, as large as
@@ -170,64 +144,29 @@ namespace Orbiters.Toolkit.Editor.VRChat
         }
 
         /// <summary>
-        /// The pointing layers and parameters of N4N0's controller: the pointers and the screen's box on while the
-        /// screen is open for its owner in VR, and each hand's bead and beam shown while its ray meets the screen.
+        /// The pointing layer and parameters of N4N0's controller: the pointers held to the fingertips and the screen's
+        /// rays drawn while its owner is in VR (VRChat syncs VRMode, so everyone sees the beams on the screen too); the
+        /// receivers' parameters, local.
         /// </summary>
         private static void PointingController(AnimatorController controller, List<VRCExpressionParameters.Parameter> parameters)
         {
-            foreach (bool right in Hands)
-            {
-                controller.AddParameter(RayHit(right), AnimatorControllerParameterType.Bool);
-                controller.AddParameter(RayRatio(right), AnimatorControllerParameterType.Float);
-            }
+            var names = Hands.SelectMany(right => Enumerable.Range(0, ScreenTouchPoints.Length).SelectMany(i => new[] { ScreenTouch(right, i), ScreenAim(right, i) }))
+                .Concat(Enumerable.Range(0, ScreenTouchPoints.Length).Select(ScreenOthers)).ToList();
+            foreach (var name in names) controller.AddParameter(name, AnimatorControllerParameterType.Float);
             var machine = Layer(controller, "Pointing");
             var hidden = new AnimationClip { name = "Pointing off" };
             Curve(hidden, Pointers, typeof(GameObject), "m_IsActive", 0);
-            Curve(hidden, Surface, typeof(GameObject), "m_IsActive", 0);
+            Curve(hidden, ScreenObject, typeof(SkinnedMeshRenderer), "material._Rays", 0);
             var shown = new AnimationClip { name = "Pointing on" };
             Curve(shown, Pointers, typeof(GameObject), "m_IsActive", 1);
-            Curve(shown, Surface, typeof(GameObject), "m_IsActive", 1);
+            Curve(shown, ScreenObject, typeof(SkinnedMeshRenderer), "material._Rays", 1);
             var off = HeldPropRig.State(controller, machine, "Off", hidden);
             var on = HeldPropRig.State(controller, machine, "On", shown);
             off.writeDefaultValues = true; on.writeDefaultValues = true;
             machine.defaultState = off;
-            // As the screen opens for its owner in VR (Replace on).
-            foreach (var trigger in new[] { ScreenOpen, Menu })
-                Transition(off, on, ("IsLocal", AnimatorConditionMode.If, 0), (trigger, AnimatorConditionMode.If, 0), (VRMode, AnimatorConditionMode.Greater, 0),
-                    (ScreenReplace, AnimatorConditionMode.If, 0));
-            Transition(on, off, (ScreenOpen, AnimatorConditionMode.IfNot, 0), (Menu, AnimatorConditionMode.IfNot, 0));
+            Transition(off, on, (VRMode, AnimatorConditionMode.Greater, 0));
             Transition(on, off, (VRMode, AnimatorConditionMode.Less, 1));
-
-            foreach (bool right in Hands)
-            {
-                string hand = right ? "R" : "L", path = Pointer(right);
-                var layer = Layer(controller, "Pointer " + hand);
-                var gone = new AnimationClip { name = "Pointer " + hand + " gone" };
-                Curve(gone, path + "/Bead", typeof(GameObject), "m_IsActive", 0);
-                Curve(gone, path + "/Beam", typeof(GameObject), "m_IsActive", 0);
-                // The beam from the fingertip to the bead: a needle along the ray, its length the ray's ratio of its reach.
-                var beam = Hidden(new BlendTree { name = "Pointer " + hand + " beam", blendType = BlendTreeType.Simple1D, blendParameter = RayRatio(right), useAutomaticThresholds = false });
-                foreach (float ratio in new[] { 0f, 1f })
-                {
-                    var clip = Hidden(new AnimationClip { name = "Pointer " + hand + " beam " + ratio });
-                    Curve(clip, path + "/Bead", typeof(GameObject), "m_IsActive", 1);
-                    Curve(clip, path + "/Beam", typeof(GameObject), "m_IsActive", 1);
-                    Curve(clip, path + "/Beam", typeof(Transform), "m_LocalScale.z", RayLength * ratio / 2);
-                    Curve(clip, path + "/Beam", typeof(Transform), "m_LocalPosition.z", RayLength * ratio / 2);
-                    beam.AddChild(clip, ratio);
-                }
-                var away = HeldPropRig.State(controller, layer, "Away", gone);
-                var meets = HeldPropRig.State(controller, layer, "Meets", beam);
-                away.writeDefaultValues = true; meets.writeDefaultValues = true;
-                layer.defaultState = away;
-                Transition(away, meets, (RayHit(right), AnimatorConditionMode.If, 0));
-                Transition(meets, away, (RayHit(right), AnimatorConditionMode.IfNot, 0));
-            }
-            foreach (bool right in Hands)
-            {
-                parameters.Add(Parameter(RayHit(right), synced: false));
-                parameters.Add(Parameter(RayRatio(right), synced: false, type: VRCExpressionParameters.ValueType.Float));
-            }
+            foreach (var name in names) parameters.Add(Parameter(name, synced: false, type: VRCExpressionParameters.ValueType.Float));
         }
     }
 }
