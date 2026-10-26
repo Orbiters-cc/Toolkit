@@ -17,13 +17,16 @@ namespace Orbiters.Toolkit.Editor.VRChat
     /// <summary>
     /// Where N4N0's screen is (screen version 7): it stays where it is in the world, as a dialog of a headset's own menus
     /// does, so its owner can look and point around it, and glides back in front of their eyes only once it has been out
-    /// of their sight for a moment (<see cref="LookAwayTime"/>). Its owner moves it by its handle, as the hand screen's:
-    /// grabbed, it rides the palm from where it was taken, turned towards the head; let go, it stays there.
+    /// of their sight for a moment (<see cref="LookAwayTime"/>). It glides to where their eyes looked when it set off, a
+    /// point that stays put in the world while it glides and after it arrives: never riding the head. Out of their sight
+    /// for a moment again, it glides again. Its owner moves it by its handle, as the hand screen's: grabbed, it rides the
+    /// palm from where it was taken, turned towards the head; let go, it stays there.
     /// <para>
     /// The screen is held to its glide (<see cref="ScreenGlide"/>), which follows its place (<see cref="ScreenPlace"/>) and,
-    /// while it glides back, blends over to its home before the eyes (<see cref="ScreenHome"/>, upright, facing them). The
-    /// place is frozen in the world while the screen stays (<see cref="ScreenPlaced"/>), follows the home while it does
-    /// not, and rides a palm's carry frame while a hand holds the handle (<see cref="ScreenHeldLeft"/>,
+    /// while it glides back, blends over to its target (<see cref="ScreenTarget"/>: its home before the eyes,
+    /// <see cref="ScreenHome"/>, upright and facing them, frozen in the world from the glide's start until it arrives).
+    /// The place is frozen in the world while the screen stays (<see cref="ScreenPlaced"/>) or waits to glide again, takes
+    /// the target's place as a glide ends, and rides a palm's carry frame while a hand holds the handle (<see cref="ScreenHeldLeft"/>,
     /// <see cref="ScreenHeldRight"/>; unfreezing measures where it is from that frame). Three synced bools say so, so
     /// everyone sees it where its owner does (a little later); the owner's animator alone decides them, from a local
     /// contact: the screen's middle within a cone of four spheres along the line of sight (<see cref="ScreenInView"/>).
@@ -48,15 +51,16 @@ namespace Orbiters.Toolkit.Editor.VRChat
         /// <summary>The view cone's contact tag: only the screen's middle takes it.</summary>
         public const string ViewTag = "N4N0View";
         internal const string ScreenHome = Gaze + "/Screen home", ScreenPlace = Shown + "/Screen place", ScreenGlide = Shown + "/Screen glide";
+        internal const string ScreenTarget = Shown + "/Screen target";
         internal const string ScreenGrips = Shown + "/Screen grips", ScreenHandle = ScreenObject + "/Handle", ScreenView = ScreenObject + "/View";
         internal const string Carry = "Carry";
         internal static string ScreenGrip(bool right) => ScreenGrips + "/" + (right ? "Right" : "Left") + " grip";
-        // The place's sources: its home, the left and right palms' carry frames.
-        internal const int PlaceHome = 0, PlaceLeft = 1, PlaceRight = 2;
+        // The place's sources: its target, the left and right palms' carry frames.
+        internal const int PlaceTarget = 0, PlaceLeft = 1, PlaceRight = 2;
         // The home from the eyes (right, up, forward, turned with the head: a little below where they look), the screen's
         // size at the ends of ScreenSize, how long it glides back, how long it may be out of sight first.
         internal static readonly Vector3 ScreenHomeFromEyes = new Vector3(0, -.06f, .45f);
-        internal const float LargestScreen = 1.8f, SmallestScreen = .6f, GlideTime = .45f, LookAwayTime = .4f;
+        internal const float LargestScreen = 1.8f, SmallestScreen = .6f, GlideTime = .5f, LookAwayTime = .4f;
         internal static readonly float DefaultScreenSize = (1 - SmallestScreen) / (LargestScreen - SmallestScreen);
         // The view cone: spheres along the line of sight, each as wide as this share of its distance (about 58°).
         internal static readonly float[] ViewDistances = { .35f, .7f, 1.2f, 2f };
@@ -97,18 +101,23 @@ namespace Orbiters.Toolkit.Editor.VRChat
                 aim.IsActive = true; aim.Locked = true;
                 return carry;
             }).ToArray();
-            // The place: unfreezing measures each source's offset where it is; the animator sets the home's back to 0.
+            // The target: the home, frozen where it was while the screen glides to it (unfrozen, the home again).
+            var target = Child(shown, "Screen target");
+            var aim = target.gameObject.AddComponent<VRCParentConstraint>();
+            aim.Sources.Add(new VRCConstraintSource(home, 1));
+            aim.IsActive = true; aim.Locked = true;
+            // The place: unfreezing measures each source's offset where it is; the animator sets the target's back to 0.
             var place = Child(shown, "Screen place");
             var hold = place.gameObject.AddComponent<VRCParentConstraint>();
-            hold.Sources.Add(new VRCConstraintSource(home, 1));
+            hold.Sources.Add(new VRCConstraintSource(target, 1));
             hold.Sources.Add(new VRCConstraintSource(carries[0], 0));
             hold.Sources.Add(new VRCConstraintSource(carries[1], 0));
             hold.IsActive = true; hold.Locked = true; hold.RebakeOffsetsWhenUnfrozen = true;
-            // The glide: the place, or the home while gliding back.
+            // The glide: the place, or the target while gliding back.
             var glide = Child(shown, "Screen glide");
             var blend = glide.gameObject.AddComponent<VRCParentConstraint>();
             blend.Sources.Add(new VRCConstraintSource(place, 1));
-            blend.Sources.Add(new VRCConstraintSource(home, 0));
+            blend.Sources.Add(new VRCConstraintSource(target, 0));
             blend.IsActive = true; blend.Locked = true;
             // The view cone, at the eyes along the line of sight: local senders that cost nothing in the performance rank.
             for (int i = 0; i < ViewDistances.Length; i++)
@@ -133,7 +142,8 @@ namespace Orbiters.Toolkit.Editor.VRChat
             handle.localPosition = HandleFromScreen;
             var bar = Child(handle, "Bar");
             bar.localScale = new Vector3(.12f, .012f, .012f);
-            bar.gameObject.AddComponent<MeshFilter>().sharedMesh = orb.Find(Body).GetComponent<MeshFilter>().sharedMesh;
+            // The desktop pointer dot's sphere, stretched.
+            bar.gameObject.AddComponent<MeshFilter>().sharedMesh = AssetDatabase.LoadAssetAtPath<Mesh>(folder + "/N4N0 mesh.asset");
             var barRenderer = bar.gameObject.AddComponent<MeshRenderer>();
             barRenderer.sharedMaterial = PointerMaterial(folder, true);
             Quiet(barRenderer);
@@ -152,7 +162,7 @@ namespace Orbiters.Toolkit.Editor.VRChat
         }
 
         /// <summary>Whether a placed orb's screen is placed as screen version 7's (its place, glide and handle).</summary>
-        internal static bool HasPlacement(Transform orb) => orb != null && orb.Find(ScreenPlace) != null && orb.Find(ScreenGlide) != null &&
+        internal static bool HasPlacement(Transform orb) => orb != null && orb.Find(ScreenPlace) != null && orb.Find(ScreenGlide) != null && orb.Find(ScreenTarget) != null &&
             orb.Find(ScreenHome) != null && orb.Find(ScreenHandle) != null && Hands.All(right => orb.Find(ScreenGrip(right) + "/" + Carry) != null);
 
         /// <summary>
@@ -167,11 +177,13 @@ namespace Orbiters.Toolkit.Editor.VRChat
             var gaze = orb.Find(Gaze);
             var place = orb.Find(ScreenPlace);
             var glide = orb.Find(ScreenGlide);
+            var target = orb.Find(ScreenTarget);
             var screen = orb.Find(ScreenObject);
-            Undo.RecordObjects(new Object[] { home, place, glide, screen }, "Fit orb screen");
+            Undo.RecordObjects(new Object[] { home, place, glide, target, screen }, "Fit orb screen");
             // As the aim constraint turns it: facing the eyes, upright.
             var toEyes = gaze.position - home.position;
             home.rotation = Quaternion.LookRotation(-toEyes, Vector3.up);
+            target.SetPositionAndRotation(home.position, home.rotation);
             place.SetPositionAndRotation(home.position, home.rotation);
             glide.SetPositionAndRotation(home.position, home.rotation);
             screen.SetPositionAndRotation(home.position, home.rotation);
@@ -210,37 +222,44 @@ namespace Orbiters.Toolkit.Editor.VRChat
         }
 
         /// <summary>
-        /// Where the screen is, on every client: following its home (not placed), frozen where it is (placed), gliding back
-        /// to its home (no longer placed: the glide blends from the place to the home, then the place catches up with the
-        /// home before the glide follows it again), or riding a palm (held: frozen for an update first, so unfreezing
-        /// measures where the screen is from that palm's carry frame).
+        /// Where the screen is, on every client: frozen where it is (placed); gliding back once no longer placed, from where
+        /// it stayed to its target (frozen at the glide's start where the eyes looked); arriving (the place takes the
+        /// target's), then placed, or waiting out of sight (frozen) for <see cref="LookAwayTime"/> before it glides again;
+        /// or riding a palm (held: frozen for an update first, so unfreezing measures where the screen is from that palm's
+        /// carry frame). It starts on its target.
         /// </summary>
         private static void PlaceLayer(AnimatorController controller)
         {
             var machine = Layer(controller, "Screen place");
-            var follow = HeldPropRig.State(controller, machine, "Home", PlaceClip("Screen home", false, PlaceHome, 1));
-            var placed = HeldPropRig.State(controller, machine, "Placed", PlaceClip("Screen placed", true, PlaceHome, 1));
+            var start = HeldPropRig.State(controller, machine, "Start", PlaceClip("Screen start", false, PlaceTarget, 1, .05f));
+            var placed = HeldPropRig.State(controller, machine, "Placed", PlaceClip("Screen placed", true, PlaceTarget, 1));
             var glide = HeldPropRig.State(controller, machine, "Glide", GlideClip());
-            var caught = HeldPropRig.State(controller, machine, "Glide end", PlaceClip("Screen glide end", false, PlaceHome, 0, .05f));
+            var arrive = HeldPropRig.State(controller, machine, "Arrive", PlaceClip("Screen arrive", false, PlaceTarget, 0, .05f, targetFrozen: true));
+            var waiting = HeldPropRig.State(controller, machine, "Waiting", PlaceClip("Screen waiting", true, PlaceTarget, 1, LookAwayTime));
             var catchLeft = HeldPropRig.State(controller, machine, "Left catch", PlaceClip("Screen left catch", true, PlaceLeft, 1));
             var catchRight = HeldPropRig.State(controller, machine, "Right catch", PlaceClip("Screen right catch", true, PlaceRight, 1));
             var left = HeldPropRig.State(controller, machine, "Left hand", PlaceClip("Screen left hand", false, PlaceLeft, 1));
             var right = HeldPropRig.State(controller, machine, "Right hand", PlaceClip("Screen right hand", false, PlaceRight, 1));
-            machine.defaultState = follow;
+            machine.defaultState = start;
             var heldLeft = (ScreenHeldLeft, AnimatorConditionMode.If, 0f);
             var heldRight = (ScreenHeldRight, AnimatorConditionMode.If, 0f);
             var notLeft = (ScreenHeldLeft, AnimatorConditionMode.IfNot, 0f);
             var notRight = (ScreenHeldRight, AnimatorConditionMode.IfNot, 0f);
-            foreach (var state in new[] { follow, placed, glide, caught })
+            var isPlaced = (ScreenPlaced, AnimatorConditionMode.If, 0f);
+            var notPlaced = (ScreenPlaced, AnimatorConditionMode.IfNot, 0f);
+            foreach (var state in new[] { start, placed, glide, arrive, waiting })
             {
                 Transition(state, catchLeft, heldLeft);
                 Transition(state, catchRight, heldRight, notLeft);
             }
-            Transition(follow, placed, (ScreenPlaced, AnimatorConditionMode.If, 0));
-            Transition(placed, glide, (ScreenPlaced, AnimatorConditionMode.IfNot, 0));
-            Exit(glide, caught);
-            Exit(caught, placed, (ScreenPlaced, AnimatorConditionMode.If, 0));
-            Exit(caught, follow, (ScreenPlaced, AnimatorConditionMode.IfNot, 0));
+            Exit(start, placed, isPlaced);
+            Exit(start, waiting, notPlaced);
+            Transition(placed, glide, notPlaced);
+            Exit(glide, arrive);
+            Exit(arrive, placed, isPlaced);
+            Exit(arrive, waiting, notPlaced);
+            Transition(waiting, placed, isPlaced);
+            Exit(waiting, glide, notPlaced);
             // The next update: frozen where it was taken, then riding the palm from there.
             Transition(catchLeft, left, heldLeft);
             Transition(catchRight, right, heldRight);
@@ -251,7 +270,7 @@ namespace Orbiters.Toolkit.Editor.VRChat
             Transition(right, placed, notLeft, notRight);
             Transition(left, catchRight, notLeft, heldRight);
             Transition(right, catchLeft, notRight, heldLeft);
-            foreach (var state in new[] { follow, placed, glide, caught, catchLeft, catchRight, left, right }) state.writeDefaultValues = true;
+            foreach (var state in new[] { start, placed, glide, arrive, waiting, catchLeft, catchRight, left, right }) state.writeDefaultValues = true;
         }
 
         // Leaves `from` once its clip has played once (and the conditions hold).
@@ -261,28 +280,30 @@ namespace Orbiters.Toolkit.Editor.VRChat
             transition.hasExitTime = true; transition.exitTime = 1;
         }
 
-        // The place frozen or not with one source weighed in (its home's offsets back to 0), and the glide on the place
-        // (`onPlace` 1) or on the home (0).
-        private static AnimationClip PlaceClip(string name, bool frozen, int source, float onPlace, float length = .2f)
+        // The place frozen or not with one source weighed in (its target's offsets back to 0), the glide on the place
+        // (`onPlace` 1) or on the target (0), the target frozen or on the home. Shorter than 0.2 s, it plays once.
+        private static AnimationClip PlaceClip(string name, bool frozen, int source, float onPlace, float length = .2f, bool targetFrozen = false)
         {
             var clip = new AnimationClip { name = name };
             void Set(string path, Type type, string property, float value) =>
                 AnimationUtility.SetEditorCurve(clip, EditorCurveBinding.FloatCurve(path, type, property), AnimationCurve.Constant(0, length, value));
             foreach (string offset in new[] { "ParentPositionOffset", "ParentRotationOffset" })
             foreach (string axis in new[] { "x", "y", "z" })
-                Set(ScreenPlace, typeof(VRCParentConstraint), "Sources.source" + PlaceHome + "." + offset + "." + axis, 0);
+                Set(ScreenPlace, typeof(VRCParentConstraint), "Sources.source" + PlaceTarget + "." + offset + "." + axis, 0);
             Set(ScreenPlace, typeof(VRCParentConstraint), "FreezeToWorld", frozen ? 1 : 0);
-            for (int s = PlaceHome; s <= PlaceRight; s++) Set(ScreenPlace, typeof(VRCParentConstraint), "Sources.source" + s + ".Weight", s == source ? 1 : 0);
+            for (int s = PlaceTarget; s <= PlaceRight; s++) Set(ScreenPlace, typeof(VRCParentConstraint), "Sources.source" + s + ".Weight", s == source ? 1 : 0);
             Set(ScreenGlide, typeof(VRCParentConstraint), "Sources.source0.Weight", onPlace);
             Set(ScreenGlide, typeof(VRCParentConstraint), "Sources.source1.Weight", 1 - onPlace);
-            if (length < .2f) Once(clip);
+            Set(ScreenTarget, typeof(VRCParentConstraint), "FreezeToWorld", targetFrozen ? 1 : 0);
+            if (length != .2f) Once(clip);
             return clip;
         }
 
-        // Gliding back: the place frozen where the screen stayed, the glide easing from it over to the home.
+        // Gliding back: the place frozen where the screen stayed, the target frozen where the eyes looked as it set off, the
+        // glide easing from the one over to the other.
         private static AnimationClip GlideClip()
         {
-            var clip = PlaceClip("Screen glide", true, PlaceHome, 1);
+            var clip = PlaceClip("Screen glide", true, PlaceTarget, 1, targetFrozen: true);
             var ease = AnimationCurve.EaseInOut(0, 1, GlideTime, 0);
             var rise = AnimationCurve.EaseInOut(0, 0, GlideTime, 1);
             AnimationUtility.SetEditorCurve(clip, EditorCurveBinding.FloatCurve(ScreenGlide, typeof(VRCParentConstraint), "Sources.source0.Weight"), ease);

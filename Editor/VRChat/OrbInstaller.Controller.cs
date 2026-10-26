@@ -27,39 +27,55 @@ namespace Orbiters.Toolkit.Editor.VRChat
         // How long a change of state takes to show (the eyes morph meanwhile).
         internal const float StateBlend = .18f;
 
-        /// <summary>How a state looks: the N4N0 shader's properties, the projector beam, and whether N4N0 hops.</summary>
+        /// <summary>
+        /// How a state looks: the model's expression (its blendshapes' weights, out of 100), whether its eyes blink now and
+        /// then and its mouth moves, its bob (1 for 1.1 cm at a 3.2 s pace; slow is 5.5 s) or Surprised's jump, the projector
+        /// beam, and anger (the Colour layer's red).
+        /// </summary>
         internal sealed class Look
         {
-            public float Glow = 1, Open = 1, Wide = 1, Curve, Lid, Tilt, LookX, LookY, Anger, Ring, Talk, Blink = 1, Bob = 1, Sleep, Beam;
-            public bool Hops;
+            public readonly Dictionary<string, float> Shapes = new Dictionary<string, float>();
+            public float Bob = 1, Beam, Anger, Loud;
+            public bool Blinks, Talks, Hops, Slow;
 
-            public IEnumerable<(string property, float value)> Values(float pulse) => new[]
+            /// <summary>A blendshape's weight, at <paramref name="pulse"/> 1 its owner's voice at its loudest (Listening's eyes widen up to <see cref="Loud"/>).</summary>
+            public float Weight(string shape, float pulse)
             {
-                ("_Glow", Glow), ("_Open", Open), ("_Wide", Wide), ("_Curve", Curve), ("_Lid", Lid), ("_Tilt", Tilt), ("_LookX", LookX),
-                ("_LookY", LookY), ("_Anger", Anger), ("_Pulse", pulse), ("_Ring", Ring), ("_Talk", Talk), ("_Blink", Blink), ("_Bob", Bob), ("_Sleep", Sleep),
-            };
+                Shapes.TryGetValue(shape, out float weight);
+                return shape == "Surprised" && Loud > 0 ? Mathf.Lerp(weight, Loud, pulse) : weight;
+            }
         }
 
         // Docs/orb.md's states, in their order.
         internal static readonly Look[] Looks =
         {
-            // Idle: a calm glow, a slow bob, a blink now and then.
-            new Look(),
-            // Listening: brighter, eyes wide, glowing up with its owner's voice.
-            new Look { Glow = 1.3f, Open = 1.18f, Wide = 1.08f, LookY = .02f, Bob = .6f },
-            // Thinking: narrowed eyes under flat lids looking up aside, a ring turning around it.
-            new Look { Glow = 1.05f, Open = .75f, Lid = .3f, LookX = .08f, LookY = .08f, Ring = 1, Blink = 0, Bob = .8f },
-            // Talking: the beam that projects the panel, a speaking shimmer.
-            new Look { Glow = 1.15f, LookY = -.03f, Talk = 1, Beam = 1 },
-            // Sleeping (its owner is away): dim, eyes closed into smiles, a slow low bob.
-            new Look { Glow = .38f, Open = 0, Curve = 1, LookY = -.04f, Blink = 0, Bob = .5f, Sleep = 1 },
-            // Happy: eyes as arches.
-            new Look { Glow = 1.2f, Open = 0, Wide = 1.08f, Curve = -1.3f, LookY = .02f, Blink = 0, Bob = 1.2f },
-            // Annoyed: eyes as flat slits, their inner ends low, a red tint.
-            new Look { Open = .28f, Wide = 1.1f, Tilt = .45f, Anger = 1, Blink = 0, Bob = .5f },
-            // Surprised: round wide eyes and a short jump.
-            new Look { Glow = 1.3f, Open = 1.1f, Wide = 1.45f, LookY = .03f, Blink = 0, Hops = true },
+            // Idle: calm, a slow bob, a blink now and then.
+            new Look { Blinks = true },
+            // Listening: eyes a little wider, more with its owner's voice.
+            new Look { Shapes = { ["Surprised"] = 20 }, Loud = 45, Blinks = true, Bob = .6f },
+            // Thinking: one eye raised, the mouth aside.
+            new Look { Shapes = { ["Thinking"] = 100 }, Bob = .8f },
+            // Talking: the mouth moving, the beam that projects the panel.
+            new Look { Talks = true, Blinks = true, Beam = 1 },
+            // Sleeping (its owner is away): flat lids, a slow low bob.
+            new Look { Shapes = { ["Sleeping"] = 100 }, Bob = .5f, Slow = true },
+            // Happy: flat smiling eyes and an open smile.
+            new Look { Shapes = { ["Happy"] = 100 }, Bob = 1.2f },
+            // Annoyed: brows down, a frown, a red tint.
+            new Look { Shapes = { ["Annoyed"] = 100 }, Anger = 1, Bob = .5f },
+            // Surprised: tall eyes, a round mouth and a short jump.
+            new Look { Shapes = { ["Surprised"] = 100 }, Hops = true },
         };
+
+        // The anger the PC State layer hands its Colour layer: an animated animator parameter, never an avatar one (the
+        // mobile N4N0's is MobileAnger, which tells its controller apart).
+        internal const string Anger = "N4N0/Anger";
+        // When the blinking states blink in their 9.6 s loop, and for how long.
+        private static readonly float[] Blinks = { 3.1f, 7.6f };
+        private const float BlinkLength = .1f;
+        // The patterns' glow in the Light option's colour: how dark and how bright its brightness makes it; annoyed red.
+        internal const float TintDim = .8f, TintBright = 1.2f;
+        private static readonly Color AngerRed = new Color(1, .1f, .07f);
 
         /// <param name="walkBoost">Adds the Walk boost radial (<see cref="WalkBoost"/>, local and saved): Orbiters - N4N0's walk boost.</param>
         /// <param name="replace">The projected screen shows N4N0's menu in VR too, instead of Orbiters - N4N0's SteamVR
@@ -82,8 +98,14 @@ namespace Orbiters.Toolkit.Editor.VRChat
             controller.AddParameter(TextVisible, AnimatorControllerParameterType.Bool);
             controller.AddParameter(TextPointer, AnimatorControllerParameterType.Int);
             for (int i = 0; i < textSync; i++) controller.AddParameter(TextSync(i), AnimatorControllerParameterType.Float);
-            // VRChat's: how loud its owner's voice is.
+            // VRChat's: how loud its owner's voice is, and whether this client is its owner's.
             controller.AddParameter("Voice", AnimatorControllerParameterType.Float);
+            controller.AddParameter("IsLocal", AnimatorControllerParameterType.Bool);
+            // The Light option's, which the Colour layer reads (an N4N0 without the option never sets them: white).
+            controller.AddParameter(Light, AnimatorControllerParameterType.Bool);
+            controller.AddParameter(LightColor, AnimatorControllerParameterType.Int);
+            controller.AddParameter(new AnimatorControllerParameter { name = LightLevel, type = AnimatorControllerParameterType.Float, defaultFloat = LightLevelDefault });
+            controller.AddParameter(Anger, AnimatorControllerParameterType.Float);
             controller.AddParameter(Block, AnimatorControllerParameterType.Float);
             for (int i = 0; i < textSync; i++) controller.AddParameter(Value(i), AnimatorControllerParameterType.Float);
             for (int stage = 1; stage <= ValueLag; stage++)
@@ -94,7 +116,9 @@ namespace Orbiters.Toolkit.Editor.VRChat
             if (walkBoost) controller.AddParameter(WalkBoost, AnimatorControllerParameterType.Float);
 
             Toggled(controller, controller.layers[0].stateMachine, Visible, Shown);
-            States(controller);
+            ModelStates(controller, "State", Body, Hop, Anger, beam: true);
+            TintLayer(controller, "Colour", Body, Anger);
+            FacingLayer(controller, "Facing", Body);
             Toggled(controller, Layer(controller, "Text visible"), TextVisible, Panel);
             Blocks(controller, textSync);
             Text(controller, textSync);
@@ -175,22 +199,25 @@ namespace Orbiters.Toolkit.Editor.VRChat
 
         // ---- What N4N0 is doing ----
 
-        // One state for each value of N4N0/State, reached from any other; each sets everything the layer animates, so states
-        // blend into one another and leave nothing behind (Write Defaults on or off).
-        private static void States(AnimatorController controller)
+        /// <summary>
+        /// One state for each value of N4N0/State, reached from any other and blending for <see cref="StateBlend"/>; each
+        /// sets everything the layer animates (the model at <paramref name="body"/>, floating on <paramref name="lift"/>, its
+        /// anger in <paramref name="anger"/>, and, with <paramref name="beam"/>, the panel's beam), so states blend into one
+        /// another and leave nothing behind (Write Defaults on or off). Listening widens its eyes with its owner's voice.
+        /// </summary>
+        private static void ModelStates(AnimatorController controller, string layer, string body, string lift, string anger, bool beam = false)
         {
-            var machine = Layer(controller, "State");
+            var machine = Layer(controller, layer);
             var states = new AnimatorState[Looks.Length];
             for (int s = 0; s < Looks.Length; s++)
             {
                 string name = ((OrbState)s).ToString();
-                Motion motion = Clip(name, Looks[s], 0);
-                // Listening glows up with its owner's voice.
-                if (s == (int)OrbState.Listening)
+                Motion motion = ModelClip(name, Looks[s], 0, body, lift, anger, beam);
+                if (Looks[s].Loud > 0)
                 {
                     var voice = new BlendTree { name = name, blendType = BlendTreeType.Simple1D, blendParameter = "Voice", useAutomaticThresholds = false };
                     voice.AddChild(motion, 0);
-                    voice.AddChild(Clip(name + " loud", Looks[s], 1), 1);
+                    voice.AddChild(ModelClip(name + " loud", Looks[s], 1, body, lift, anger, beam), 1);
                     motion = voice;
                 }
                 states[s] = HeldPropRig.State(controller, machine, name, motion);
@@ -202,20 +229,132 @@ namespace Orbiters.Toolkit.Editor.VRChat
             Enter(machine, states[0], (State, AnimatorConditionMode.Greater, Looks.Length - 1));
         }
 
-        private static AnimationClip Clip(string name, Look look, float pulse)
+        /// <summary>
+        /// A state's clip, looping whole bobs (three of 3.2 s, two of 5.5 s when slow): every blendshape's weight (the blinks
+        /// and the talking mouth moving in it), the bob or Surprised's jump (which plays once), the anger and the beam.
+        /// </summary>
+        private static AnimationClip ModelClip(string name, Look look, float pulse, string body, string lift, string anger, bool beam)
+        {
+            float period = look.Slow ? 5.5f : 3.2f, length = period * (look.Slow ? 2 : 3);
+            var clip = new AnimationClip { name = name };
+            foreach (var shape in ModelShapes)
+            {
+                string property = "blendShape." + shape;
+                if (shape == "Blink" && look.Blinks) SetCurve(clip, body, typeof(SkinnedMeshRenderer), property, Steps(length, 0, 100, Blinks));
+                else if (shape == "Talk" && look.Talks)
+                    SetCurve(clip, body, typeof(SkinnedMeshRenderer), property, Sampled(length, t => 100 * Mathf.Clamp01(.2f + .55f * Mathf.Sin(t * 17) + .35f * Mathf.Sin(t * 7.3f + 1))));
+                else Curve(clip, body, typeof(SkinnedMeshRenderer), property, look.Weight(shape, pulse));
+            }
+            Curve(clip, "", typeof(Animator), anger, look.Anger);
+            if (beam) Curve(clip, Panel, typeof(SkinnedMeshRenderer), "material._Beam", look.Beam);
+            // Up 3.5 cm and back down in 0.36 s, over the bob.
+            var jump = new AnimationCurve(new Keyframe(0, 0), new Keyframe(.14f, .035f), new Keyframe(.36f, 0), new Keyframe(.6f, 0));
+            float bob = .22f * look.Bob * Radius;
+            SetCurve(clip, lift, typeof(Transform), "m_LocalPosition.y",
+                Sampled(length, t => bob * Mathf.Sin(t * 2 * Mathf.PI / period) + (look.Hops && t <= .6f ? jump.Evaluate(t) : 0)));
+            foreach (char axis in "xz") Curve(clip, lift, typeof(Transform), "m_LocalPosition." + axis, 0);
+            var settings = AnimationUtility.GetAnimationClipSettings(clip);
+            settings.loopTime = !look.Hops;
+            AnimationUtility.SetAnimationClipSettings(clip, settings);
+            return clip;
+        }
+
+        /// <summary>
+        /// The patterns' glow (their emission, which the shell's material doesn't use): white while the light is off, else
+        /// the light's colour, darker or brighter with its brightness; red while annoyed (<paramref name="anger"/>). One state
+        /// per colour, as the Light layer's, each setting every colour the layer animates. Without the Light option its
+        /// parameters stay off: white.
+        /// </summary>
+        private static void TintLayer(AnimatorController controller, string layer, string body, string anger)
+        {
+            var machine = Layer(controller, layer);
+            var off = HeldPropRig.State(controller, machine, "Off", TintTree("N4N0", PatternColour, 1, body, anger));
+            machine.defaultState = off;
+            Enter(machine, off, (Light, AnimatorConditionMode.IfNot, 0));
+            for (int i = 0; i < LightColors.Count; i++)
+            {
+                var (name, color) = LightColors[i];
+                var level = new BlendTree { name = name, blendType = BlendTreeType.Simple1D, blendParameter = LightLevel, useAutomaticThresholds = false };
+                level.AddChild(TintTree(name + " dim", Color.Lerp(color, Color.white, .35f), TintDim, body, anger), 0);
+                level.AddChild(TintTree(name + " bright", Color.Lerp(color, Color.white, .35f), TintBright, body, anger), 1);
+                var state = HeldPropRig.State(controller, machine, name, level);
+                Enter(machine, state, (Light, AnimatorConditionMode.If, 0), (LightColor, AnimatorConditionMode.Equals, i));
+                // A colour past the last is the first.
+                if (i == 0) Enter(machine, state, (Light, AnimatorConditionMode.If, 0), (LightColor, AnimatorConditionMode.Greater, LightColors.Count - 1));
+            }
+        }
+
+        // A glow and its annoyed red, by anger.
+        private static BlendTree TintTree(string name, Color colour, float brightness, string body, string anger)
+        {
+            var tree = new BlendTree { name = name, blendType = BlendTreeType.Simple1D, blendParameter = anger, useAutomaticThresholds = false };
+            tree.AddChild(TintClip(name, colour * brightness, body), 0);
+            tree.AddChild(TintClip(name + " annoyed", Color.Lerp(colour, AngerRed, .9f) * brightness, body), 1);
+            return tree;
+        }
+
+        private static AnimationClip TintClip(string name, Color glow, string body)
         {
             var clip = new AnimationClip { name = name };
-            foreach (var (property, value) in look.Values(pulse)) Curve(clip, Body, typeof(MeshRenderer), "material." + property, value);
-            Curve(clip, Panel, typeof(SkinnedMeshRenderer), "material._Beam", look.Beam);
-            foreach (char axis in "xz") Curve(clip, Hop, typeof(Transform), "m_LocalPosition." + axis, 0);
-            if (!look.Hops) Curve(clip, Hop, typeof(Transform), "m_LocalPosition.y", 0);
-            else
-            {
-                // Up 3.5 cm and back down in 0.36 s, then still.
-                var jump = new AnimationCurve(new Keyframe(0, 0), new Keyframe(.14f, .035f), new Keyframe(.36f, 0), new Keyframe(.6f, 0));
-                AnimationUtility.SetEditorCurve(clip, EditorCurveBinding.FloatCurve(Hop, typeof(Transform), "m_LocalPosition.y"), jump);
-            }
+            Curve(clip, body, typeof(SkinnedMeshRenderer), "material._EmissionColor.r", glow.r);
+            Curve(clip, body, typeof(SkinnedMeshRenderer), "material._EmissionColor.g", glow.g);
+            Curve(clip, body, typeof(SkinnedMeshRenderer), "material._EmissionColor.b", glow.b);
+            Curve(clip, body, typeof(SkinnedMeshRenderer), "material._EmissionColor.a", 1);
             return clip;
+        }
+
+        /// <summary>
+        /// The face (the object at <paramref name="path"/>) looks ahead, at whoever is in front; on its owner's client, at
+        /// its owner's eyes.
+        /// </summary>
+        private static void FacingLayer(AnimatorController controller, string layer, string path)
+        {
+            var machine = Layer(controller, layer);
+            AnimationClip Turned(string name, Quaternion turn)
+            {
+                var clip = new AnimationClip { name = name };
+                Curve(clip, path, typeof(Transform), "m_LocalRotation.x", turn.x);
+                Curve(clip, path, typeof(Transform), "m_LocalRotation.y", turn.y);
+                Curve(clip, path, typeof(Transform), "m_LocalRotation.z", turn.z);
+                Curve(clip, path, typeof(Transform), "m_LocalRotation.w", turn.w);
+                return clip;
+            }
+            var ahead = HeldPropRig.State(controller, machine, "Ahead", Turned("Face ahead", Quaternion.identity));
+            var owner = HeldPropRig.State(controller, machine, "At its owner", Turned("Face its owner", OwnerFacing));
+            machine.defaultState = ahead;
+            Transition(ahead, owner, ("IsLocal", AnimatorConditionMode.If, 0));
+            Transition(owner, ahead, ("IsLocal", AnimatorConditionMode.IfNot, 0));
+        }
+
+        private static void SetCurve(AnimationClip clip, string path, Type type, string property, AnimationCurve curve) =>
+            AnimationUtility.SetEditorCurve(clip, EditorCurveBinding.FloatCurve(path, type, property), curve);
+
+        // A value that holds, then jumps to `shut` for BlinkLength at each blink, and back.
+        private static AnimationCurve Steps(float length, float open, float shut, IEnumerable<float> blinks)
+        {
+            var keys = new List<Keyframe> { new Keyframe(0, open) };
+            foreach (float t in blinks) { keys.Add(new Keyframe(t, shut)); keys.Add(new Keyframe(t + BlinkLength, open)); }
+            keys.Add(new Keyframe(length, open));
+            var curve = new AnimationCurve(keys.ToArray());
+            for (int i = 0; i < curve.length; i++)
+            {
+                AnimationUtility.SetKeyLeftTangentMode(curve, i, AnimationUtility.TangentMode.Constant);
+                AnimationUtility.SetKeyRightTangentMode(curve, i, AnimationUtility.TangentMode.Constant);
+            }
+            return curve;
+        }
+
+        // A value over `length`, sampled 30 times a second, straight between samples.
+        private static AnimationCurve Sampled(float length, Func<float, float> value)
+        {
+            int count = Mathf.CeilToInt(length * 30);
+            var curve = new AnimationCurve(Enumerable.Range(0, count + 1).Select(i => { float t = Mathf.Min(length, i / 30f); return new Keyframe(t, value(t)); }).ToArray());
+            for (int i = 0; i < curve.length; i++)
+            {
+                AnimationUtility.SetKeyLeftTangentMode(curve, i, AnimationUtility.TangentMode.Linear);
+                AnimationUtility.SetKeyRightTangentMode(curve, i, AnimationUtility.TangentMode.Linear);
+            }
+            return curve;
         }
 
         // A transition from any state (not to itself) that blends for StateBlend.

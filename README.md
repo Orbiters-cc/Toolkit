@@ -1,5 +1,30 @@
 # Orbiters Toolkit
 
+## Unreleased
+
+- **N4N0's new look** (`OrbInstaller.Model`): a black sphere with white patterns, its face on the front (two wide eyes
+  wrapping round its sides and a small mouth) and the N4N0 mark under a triangle's three corners on the back. Its
+  expressions are the model's blendshapes (Surprised, Annoyed, Happy, Thinking, Sleeping, Blink, Talk), which N4N0's
+  states set: it blinks now and then, its mouth moves while it talks, its eyes widen with its owner's voice while it
+  listens; everyone sees it face ahead, its owner sees it turn to them. One VRChat/Mobile/Standard Lite material (two
+  4 × 4 pictures: a dark shell, white patterns that glow alone), the same mesh and material for the phone N4N0, about
+  1,600 triangles; the Light option tints the patterns' glow, annoyed turns it red. The shader-drawn orb and the
+  phones' face picture are gone.
+- **Customizable parts** (`ItemParts`): a creator's `<Prefab>.parts.json` beside the prefab names parts others may make
+  variants of (values on materials, a model, texts), each limited to the files the creator allows (pictures, one FBX,
+  JSON; never scripts); variants are checked, applied in place with Undo, kept on the item and through gallery updates
+  (see Orbiters' documentation, "Customizable parts and variants"). N4N0 has three: its menu theme, its model and its
+  language (English, French, Spanish, Portuguese, Japanese), its menu pages drawn by Orbiters - N4N0 for the item's
+  theme and language. The card's Look option is gone: Customize › Menu theme replaces it.
+- **N4N0's pointers ride the hands**: each pointer is held to the hand bone where the index fingertip is with the
+  finger straight, so curling the index to pull a trigger no longer moves it.
+- **N4N0's menu glides back lazily**: out of sight for 0.4 s, it glides (0.5 s) to where its owner looked as it set
+  off, a point that stays put in the world, and stays there; out of sight a moment more, it glides again. It never
+  rides the head any more.
+- **Out of recordings and 3D pictures**: while N4N0's capture kit records (`N4N0/Capture/Record`), its owner's client
+  hides N4N0's screen, handle, link card, text panel and desktop dot, and shows them again after, the menu left open.
+- N4N0's options folder is `Menu 15`, its screen revision 10.
+
 ## 0.4.6 — 2026-10-26
 
 - **N4N0's capture kit and camera rig** (`OrbInstaller.Capture`; Orbiters contracts 0.7.0, `Docs/rig-frames.md`,

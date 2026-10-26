@@ -14,8 +14,9 @@ using Object = UnityEngine.Object;
 namespace Orbiters.Toolkit.Editor.VRChat
 {
     /// <summary>
-    /// Pointing at N4N0's screen (Orbiters contracts, Docs/orb.md, Pointing; screen version 7). Each index finger carries a
-    /// pointer held to its tip along the finger, with two local contact senders: one at the fingertip, one further along
+    /// Pointing at N4N0's screen (Orbiters contracts, Docs/orb.md, Pointing; screen version 7). Each hand carries a pointer
+    /// where its index fingertip is with the finger straight, along the finger (held to the hand, so curling the finger to
+    /// pull a trigger moves nothing), with two local contact senders: one at the fingertip, one further along
     /// the finger (<see cref="AimDistance"/>). Four receivers per sender on the screen tell Orbiters - N4N0 where both are,
     /// so it knows the ray the finger points along and where it meets the screen: hovered there, pressed with the trigger,
     /// or by the fingertip touching the screen. The beam and its dot are drawn by the screen itself, from the pointers'
@@ -108,8 +109,9 @@ namespace Orbiters.Toolkit.Editor.VRChat
         internal static bool HasPointing(Transform orb) => orb != null && Hands.All(right => orb.Find(Pointer(right) + "/Aim") != null);
 
         /// <summary>
-        /// Holds a placed orb's pointers to <paramref name="animator"/>'s index fingertips, along the fingers, as large as
-        /// N4N0 (<paramref name="size"/>). An avatar without index fingers has no pointer for that hand.
+        /// Holds a placed orb's pointers to <paramref name="animator"/>'s hands where the index fingertips are as the avatar
+        /// stands (fingers straight), along the fingers, as large as N4N0 (<paramref name="size"/>): pulling a trigger curls
+        /// the index but leaves the pointer where it aims. An avatar without index fingers has no pointer for that hand.
         /// </summary>
         private static void BindPointers(Transform orb, Transform avatar, Animator animator, float size)
         {
@@ -120,6 +122,7 @@ namespace Orbiters.Toolkit.Editor.VRChat
                 if (hold == null || hold.Sources.Count < 1) continue;
                 var distal = animator.GetBoneTransform(right ? HumanBodyBones.RightIndexDistal : HumanBodyBones.LeftIndexDistal);
                 var middle = animator.GetBoneTransform(right ? HumanBodyBones.RightIndexIntermediate : HumanBodyBones.LeftIndexIntermediate);
+                var hand = animator.GetBoneTransform(right ? HumanBodyBones.RightHand : HumanBodyBones.LeftHand) ?? distal;
                 Undo.RecordObjects(new Object[] { pointer, hold }, "Fit orb pointers");
                 if (distal == null || middle == null)
                 {
@@ -136,9 +139,9 @@ namespace Orbiters.Toolkit.Editor.VRChat
                 pointer.SetPositionAndRotation(tip, Quaternion.LookRotation(along, up));
                 float parent = pointer.parent != null ? Mathf.Abs(pointer.parent.lossyScale.x) : 1;
                 pointer.localScale = Vector3.one * (size / Mathf.Max(parent, 1e-4f));
-                // Offsets in the finger bone's axes, unscaled.
-                var turn = Quaternion.Inverse(distal.rotation);
-                hold.Sources[0] = new VRCConstraintSource(distal, 1, turn * (pointer.position - distal.position), (turn * pointer.rotation).eulerAngles);
+                // Offsets in the hand bone's axes, unscaled.
+                var turn = Quaternion.Inverse(hand.rotation);
+                hold.Sources[0] = new VRCConstraintSource(hand, 1, turn * (pointer.position - hand.position), (turn * pointer.rotation).eulerAngles);
                 EditorUtility.SetDirty(hold);
             }
         }

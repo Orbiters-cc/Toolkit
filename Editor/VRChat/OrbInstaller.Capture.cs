@@ -447,6 +447,14 @@ namespace Orbiters.Toolkit.Editor.VRChat
         /// (<see cref="CaptureFollow"/>); placed by them (a direct blend tree of one linear 1D tree per value, Write Defaults
         /// on). Every state sets all its layer animates, so any Write Defaults leave nothing behind.
         /// </summary>
+        // What recordings and 3D pictures must not show, and their renderers: N4N0's screen (with its rays), its handle, the
+        // link card, the text panel and the desktop gaze dot.
+        internal static readonly (string path, Type type)[] CaptureHidden =
+        {
+            (ScreenObject, typeof(SkinnedMeshRenderer)), (ScreenHandle + "/Bar", typeof(MeshRenderer)), (CardModel, typeof(SkinnedMeshRenderer)),
+            (Panel, typeof(SkinnedMeshRenderer)), (GazeDot, typeof(MeshRenderer)),
+        };
+
         private static void CaptureController(AnimatorController controller, List<VRCExpressionParameters.Parameter> parameters, List<VRCExpressionsMenu.Control> controls)
         {
             foreach (string name in new[] { CaptureRecord, CaptureDepth, CaptureFollow, CaptureRig }) controller.AddParameter(name, AnimatorControllerParameterType.Bool);
@@ -504,6 +512,22 @@ namespace Orbiters.Toolkit.Editor.VRChat
             Transition(rigOff, rigOn, (CaptureRig, AnimatorConditionMode.If, 0), ("IsLocal", AnimatorConditionMode.If, 0));
             Transition(rigOn, rigOff, (CaptureRig, AnimatorConditionMode.IfNot, 0));
             Transition(rigOn, rigOff, ("IsLocal", AnimatorConditionMode.IfNot, 0));
+
+            // Out of recordings and 3D pictures: N4N0's screen (its rays too), handle, link card, text panel and desktop dot,
+            // hidden on the wearer's client while the kit records and shown again after, as they were (their objects' own
+            // layers untouched: nothing closes the menu).
+            var hide = Layer(controller, "Capture hide");
+            AnimatorState HideState(string name, bool hidden)
+            {
+                var clip = new AnimationClip { name = "Capture " + name.ToLowerInvariant() };
+                foreach (var (path, type) in CaptureHidden) Curve(clip, path, type, "m_Enabled", hidden ? 0 : 1);
+                return HeldPropRig.State(controller, hide, name, clip);
+            }
+            var shownForCapture = HideState("Shown", false);
+            var hiddenForCapture = HideState("Hidden", true);
+            hide.defaultState = shownForCapture;
+            Transition(shownForCapture, hiddenForCapture, (CaptureRecord, AnimatorConditionMode.If, 0));
+            Transition(hiddenForCapture, shownForCapture, (CaptureRecord, AnimatorConditionMode.IfNot, 0));
 
             // Following the camera (the world origin's source) or resting at the hips (the second source).
             var follow = Layer(controller, "Capture follow");

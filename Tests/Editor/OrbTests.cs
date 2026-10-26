@@ -120,7 +120,10 @@ public class OrbTests
         var screen = panel.GetComponent<SkinnedMeshRenderer>();
         CollectionAssert.AreEqual(new[] { panel, root.Find(OrbInstaller.Emitter) }, screen.bones, "The beam reaches from N4N0 to the panel");
         Assert.IsTrue(screen.sharedMaterials.All(m => m.shader.name == "Orbiters/N4N0 Text" && m.shader.isSupported));
-        Assert.AreEqual("Orbiters/N4N0", root.Find(OrbInstaller.Body).GetComponent<MeshRenderer>().sharedMaterial.shader.name);
+        var model = root.Find(OrbInstaller.Body).GetComponent<SkinnedMeshRenderer>();
+        Assert.AreEqual(OrbInstaller.ModelShader, model.sharedMaterials.Single().shader.name, "N4N0's model in VRChat's mobile Standard Lite, one material");
+        CollectionAssert.AreEqual(OrbInstaller.ModelShapes, Enumerable.Range(0, model.sharedMesh.blendShapeCount).Select(model.sharedMesh.GetBlendShapeName).ToArray());
+        Assert.AreEqual(folder + "/N4N0 model.asset", AssetDatabase.GetAssetPath(model.sharedMesh), "In N4N0's folder, which a package carries");
         var atlas = (Texture2D)screen.sharedMaterials[0].GetTexture("_MainTex");
         Assert.AreEqual(folder + "/N4N0 text.png", AssetDatabase.GetAssetPath(atlas));
         Assert.AreEqual(2048, Mathf.Max(atlas.width, atlas.height), "Imported at most 2048 on its longest side");
@@ -220,52 +223,136 @@ public class OrbTests
         if (VrcFury.Writer == null) Assert.Ignore("Requires the VRCFury integration.");
         var prefab = AssetDatabase.LoadAssetAtPath<GameObject>(OrbInstaller.CreatePrefab(folder));
         var root = Play(prefab);
-        var body = root.transform.Find(OrbInstaller.Body).GetComponent<MeshRenderer>();
+        var model = root.transform.Find(OrbInstaller.Body).GetComponent<SkinnedMeshRenderer>();
         var screen = root.transform.Find(OrbInstaller.Panel).GetComponent<SkinnedMeshRenderer>();
         var hop = root.transform.Find(OrbInstaller.Hop);
-        float Look(string property) { var block = new MaterialPropertyBlock(); body.GetPropertyBlock(block); return block.GetFloat(property); }
+        float Shape(string name) => model.GetBlendShapeWeight(model.sharedMesh.GetBlendShapeIndex(name));
         float Beam() { var block = new MaterialPropertyBlock(); screen.GetPropertyBlock(block); return block.GetFloat("_Beam"); }
-        // Every property the state sets, as its look says (the ends of the transition).
+        float Anger() => playable.GetFloat(OrbInstaller.Anger);
+        // Every blendshape the state holds, as its look says (the ends of the transition), its beam and anger.
         void Show(OrbState state)
         {
             playable.SetInteger(OrbInstaller.State, (int)state); Tick(20);
             var look = OrbInstaller.Looks[Mathf.Clamp((int)state, 0, 7) == (int)state ? (int)state : 0];
-            foreach (var (property, value) in look.Values(look == OrbInstaller.Looks[(int)OrbState.Listening] ? playable.GetFloat("Voice") : 0))
-                Assert.AreEqual(value, Look(property), 1e-4f, state + " " + property);
-            Assert.AreEqual(look.Beam, Beam(), 1e-4f);
+            foreach (var shape in OrbInstaller.ModelShapes)
+                if (!(shape == "Blink" && look.Blinks) && !(shape == "Talk" && look.Talks))
+                    Assert.AreEqual(look.Weight(shape, playable.GetFloat("Voice")), Shape(shape), .01f, state + " " + shape);
+            Assert.AreEqual((look.Beam, look.Anger), (Beam(), Anger()));
         }
         playable.SetBool(OrbInstaller.TextVisible, true);
 
         Tick(5);
-        Assert.AreEqual((1f, 0f, 0f, 0f), (Look("_Open"), Look("_Ring"), Look("_Anger"), Beam()), "Idle");
+        Assert.IsTrue(OrbInstaller.ModelShapes.All(s => Shape(s) == 0) && Anger() == 0 && Beam() == 0, "Idle: N4N0's Normal face");
         Show(OrbState.Listening);
-        Assert.Greater(Look("_Glow"), 1.2f); Assert.Greater(Look("_Open"), 1.1f);
+        Assert.AreEqual(20, Shape("Surprised"), .01f);
         playable.SetFloat("Voice", 1); Tick(3);
-        Assert.AreEqual(1, Look("_Pulse"), 1e-4f, "Glowing up with its owner's voice");
+        Assert.AreEqual(45, Shape("Surprised"), .5f, "Its eyes widen with its owner's voice");
         playable.SetFloat("Voice", 0);
         Show(OrbState.Thinking);
-        Assert.AreEqual(1, Look("_Ring"), 1e-4f); Assert.Greater(Look("_Lid"), .2f); Assert.Less(Look("_Open"), .8f); Assert.Greater(Look("_LookY"), .05f);
+        Assert.AreEqual(100, Shape("Thinking"), .01f);
         Show(OrbState.Talking);
-        Assert.AreEqual((1f, 1f, 0f), (Beam(), Look("_Talk"), Look("_Ring")), "The beam projects the panel");
+        Assert.AreEqual(1, Beam(), 1e-4f, "The beam projects the panel");
+        float least = 100, most = 0;
+        for (int i = 0; i < 40; i++) { Tick(1); least = Mathf.Min(least, Shape("Talk")); most = Mathf.Max(most, Shape("Talk")); }
+        Assert.Greater(most - least, 40, "Its mouth moves while it talks");
         Show(OrbState.Sleeping);
-        Assert.Less(Look("_Glow"), .5f); Assert.AreEqual(0, Look("_Open")); Assert.Greater(Look("_Curve"), 0, "Closed eyes"); Assert.AreEqual(0, Beam());
+        Assert.AreEqual(100, Shape("Sleeping"), .01f);
         Show(OrbState.Happy);
-        Assert.AreEqual(0, Look("_Open")); Assert.Less(Look("_Curve"), 0, "Arches");
+        Assert.AreEqual(100, Shape("Happy"), .01f);
         Show(OrbState.Annoyed);
-        Assert.AreEqual(1, Look("_Anger"), 1e-4f); Assert.Greater(Look("_Tilt"), .2f); Assert.Less(Look("_Open"), .4f);
+        Assert.AreEqual((100f, 1f), (Mathf.Round(Shape("Annoyed")), Anger()), "Brows down, and red");
         playable.SetInteger(OrbInstaller.State, (int)OrbState.Surprised);
         float highest = 0;
         for (int i = 0; i < 30; i++) { Tick(1); highest = Mathf.Max(highest, hop.localPosition.y); }
         Assert.Greater(highest, .02f, "A short jump");
-        Assert.AreEqual(0, hop.localPosition.y, 1e-4f, "and back down");
-        Assert.Greater(Look("_Open"), 1.05f); Assert.Greater(Look("_Wide"), 1.4f);
+        Assert.Less(Mathf.Abs(hop.localPosition.y), .011f, "and back down to its bob");
+        Assert.AreEqual(100, Shape("Surprised"), .01f);
         Show((OrbState)42);
-        Assert.AreEqual((1f, 0f, 0f, 1f), (Look("_Open"), Look("_Anger"), Beam(), Look("_Glow")), "Any other value shows as idle");
+        Assert.IsTrue(OrbInstaller.ModelShapes.All(s => s == "Blink" || Shape(s) == 0) && Anger() == 0 && Beam() == 0, "Any other value shows as idle");
+
+        // Idle blinks: 3.1 s in, its eyes shut for a moment.
+        playable.SetInteger(OrbInstaller.State, (int)OrbState.Happy); Tick(20);
+        playable.SetInteger(OrbInstaller.State, (int)OrbState.Idle);
+        Tick(1); Tick(157);
+        Assert.AreEqual(100, Shape("Blink"), .01f, "Blinking");
+        Tick(10);
+        Assert.AreEqual(0, Shape("Blink"), .01f, "Open again");
+
+        // Its owner sees it look at them, everyone else sees it look ahead.
+        var body = root.transform.Find(OrbInstaller.Body);
+        Assert.Less(Quaternion.Angle(Quaternion.identity, body.localRotation), .01f, "Ahead for everyone else");
+        playable.SetBool("IsLocal", true); Tick(2);
+        Assert.Less(Quaternion.Angle(OrbInstaller.OwnerFacing, body.localRotation), .01f, "At its owner on its owner's client");
 
         playable.SetBool(OrbInstaller.Visible, false); Tick(3);
         Assert.IsFalse(root.transform.Find(OrbInstaller.Shown).gameObject.activeSelf, "N4N0/Visible off hides N4N0 and its panel");
         playable.SetBool(OrbInstaller.Visible, true); Tick(3);
         Assert.IsTrue(root.transform.Find(OrbInstaller.Shown).gameObject.activeSelf);
+    }
+
+    // A recording or a 3D picture (N4N0/Capture/Record, local) hides N4N0's screen, handle, link card, text panel and desktop
+    // dot on its owner's client, and shows them again after, the menu left open.
+    [Test]
+    public void RecordingHidesTheScreenAndTheCardOutOfThePicture()
+    {
+        if (VrcFury.Writer == null) Assert.Ignore("Requires the VRCFury integration.");
+        var root = Play(AssetDatabase.LoadAssetAtPath<GameObject>(OrbInstaller.CreatePrefab(folder)));
+        var renderers = OrbInstaller.CaptureHidden.Select(h => root.transform.Find(h.path).GetComponent(h.type) as Renderer).ToList();
+        Assert.IsTrue(renderers.All(r => r != null), "Every one is there");
+        playable.SetBool("IsLocal", true);
+        playable.SetBool(OrbInstaller.Menu, true);
+        Tick(5);
+        Assert.IsTrue(renderers.All(r => r.enabled), "Shown");
+        playable.SetBool(OrbInstaller.CaptureRecord, true);
+        Tick(3);
+        Assert.IsTrue(renderers.All(r => !r.enabled), "Hidden while recording");
+        Assert.IsTrue(playable.GetBool(OrbInstaller.Menu), "The menu stays open");
+        playable.SetBool(OrbInstaller.CaptureRecord, false);
+        Tick(3);
+        Assert.IsTrue(renderers.All(r => r.enabled), "Shown again after");
+    }
+
+    // The model (OrbInstaller.Model): a sphere with the face's strokes and the back's mark floating above it, every
+    // expression's triangles facing out, the back still while the face changes, light enough for phones.
+    [Test]
+    public void TheModelsFaceBendsIntoEveryExpression()
+    {
+        var mesh = AssetDatabase.LoadAssetAtPath<Mesh>(folder + "/N4N0 model.asset");
+        if (mesh == null)
+        {
+            OrbInstaller.CreatePrefab(folder);
+            mesh = AssetDatabase.LoadAssetAtPath<Mesh>(folder + "/N4N0 model.asset");
+        }
+        Assert.Less(mesh.triangles.Length / 3, 2500, "Light enough for phones");
+        Assert.AreEqual(1, mesh.subMeshCount, "One material slot");
+        var vertices = mesh.vertices;
+        var uvs = mesh.uv;
+        var triangles = mesh.triangles;
+        // The shell's points take their colour on the pictures' left half, the patterns' on their right.
+        var shell = triangles.Where(i => uvs[i].x == OrbInstaller.ShellU).ToArray();
+        var patterns = triangles.Where(i => uvs[i].x == OrbInstaller.PatternU).ToArray();
+        Assert.AreEqual(triangles.Length, shell.Length + patterns.Length);
+        Assert.IsTrue(shell.All(i => Mathf.Abs(vertices[i].magnitude - 1) < 1e-4f), "The shell is the unit sphere");
+        var moved = new HashSet<int>();
+        foreach (var shape in OrbInstaller.ModelShapes)
+        {
+            var deltas = new Vector3[vertices.Length];
+            mesh.GetBlendShapeFrameVertices(mesh.GetBlendShapeIndex(shape), 0, deltas, null, null);
+            for (int i = 0; i < vertices.Length; i++) if (deltas[i].sqrMagnitude > 1e-10f) moved.Add(i);
+            var bent = vertices.Select((v, i) => v + deltas[i]).ToArray();
+            Assert.IsTrue(patterns.All(i => bent[i].magnitude > 1.01f && bent[i].magnitude < 1.02f), shape + ": the patterns float above the shell");
+            int inward = 0;
+            for (int t = 0; t < triangles.Length; t += 3)
+            {
+                if (uvs[triangles[t]].x != OrbInstaller.PatternU) continue;
+                Vector3 a = bent[triangles[t]], b = bent[triangles[t + 1]], c = bent[triangles[t + 2]];
+                var cross = Vector3.Cross(b - a, c - a);
+                if (cross.sqrMagnitude > 1e-12f && Vector3.Dot(cross, a + b + c) < 0) inward++;
+            }
+            Assert.AreEqual(0, inward, shape + ": every triangle faces out");
+        }
+        Assert.IsTrue(moved.All(i => vertices[i].z > -.2f), "Only the face moves: the back's mark stays");
+        Assert.IsTrue(patterns.Any(i => vertices[i].z < -.8f), "The back carries the mark");
     }
 
     [Test]
@@ -466,7 +553,7 @@ public class OrbTests
             Step(3);
             Assert.Less(Vector3.Distance(there, screen.position), 1e-3f, "Placed: where it was, the head turned");
 
-            // No longer placed: it glides back before the eyes (between the two halfway through), then follows them.
+            // No longer placed: it glides back to where the eyes looked as it set off (between the two halfway through).
             playable.SetBool(OrbInstaller.ScreenPlaced, false);
             Step(1);
             Step(Mathf.RoundToInt(OrbInstaller.GlideTime / .02f / 2) - 1);
@@ -475,9 +562,13 @@ public class OrbTests
             Assert.Greater(toHome, .02f, "not there yet");
             Step(Mathf.RoundToInt(OrbInstaller.GlideTime / .02f) + 5);
             Assert.Less(Vector3.Distance(Home(), screen.position), 1e-3f, "Back before the eyes");
+            // There it stays, never riding the head; out of sight a moment more, it glides again to where they look.
+            var arrived = screen.position;
             head.rotation = avatar.rotation * Quaternion.Euler(-5, -20, 0);
             Step(3);
-            Assert.Less(Vector3.Distance(Home(), screen.position), 1e-3f, "Following them while not placed");
+            Assert.Less(Vector3.Distance(arrived, screen.position), 1e-3f, "Staying where it arrived, the head turned");
+            Step(Mathf.RoundToInt(OrbInstaller.LookAwayTime / .02f) + Mathf.RoundToInt(OrbInstaller.GlideTime / .02f) + 10);
+            Assert.Less(Vector3.Distance(Home(), screen.position), 1e-3f, "Glided again before the eyes");
             playable.SetBool(OrbInstaller.ScreenPlaced, true);
             Step(3);
 
@@ -795,9 +886,12 @@ public class OrbTests
             var pointer = orb.Find(OrbInstaller.Pointer(right));
             var distal = animator.GetBoneTransform(right ? HumanBodyBones.RightIndexDistal : HumanBodyBones.LeftIndexDistal);
             var middle = animator.GetBoneTransform(right ? HumanBodyBones.RightIndexIntermediate : HumanBodyBones.LeftIndexIntermediate);
-            Assert.AreEqual(distal, pointer.GetComponent<VRCParentConstraint>().Sources[0].SourceTransform, "Held to the last finger bone");
+            var hand = animator.GetBoneTransform(right ? HumanBodyBones.RightHand : HumanBodyBones.LeftHand);
+            var source = pointer.GetComponent<VRCParentConstraint>().Sources[0];
+            Assert.AreEqual(hand, source.SourceTransform, "Held to the hand: curling the index to pull a trigger moves nothing");
             var tip = distal.position + (distal.position - middle.position) * .8f;
             Assert.Less(Vector3.Distance(tip, pointer.position), 1e-4f, "At the fingertip");
+            Assert.Less(Vector3.Distance(hand.position + hand.rotation * source.ParentPositionOffset, pointer.position), 1e-4f, "where the straight finger's tip is, from the hand");
             Assert.Less(Vector3.Angle((tip - middle.position).normalized, pointer.forward), .1f, "Along the finger");
             Assert.AreEqual(size, pointer.lossyScale.x, 1e-4f, "As large as N4N0");
             var sender = pointer.GetComponent<VRCContactSender>();
@@ -908,7 +1002,7 @@ public class OrbTests
         CollectionAssert.AreEqual(Enumerable.Range(0, 8).Select(i => (float)i).ToArray(), colours.Select(c => c.value).ToArray());
         Assert.IsTrue(colours.All(c => c.parameter.name == OrbInstaller.LightColor));
 
-        // Played: pink at full brightness, then off; N4N0 is pink while lit, green again after.
+        // Played: pink at full brightness, then off; N4N0's patterns glow pink while lit, white again after.
         var root = Object.Instantiate(placed);
         SceneManager.MoveGameObjectToScene(root, scene);
         graph = PlayableGraph.Create("N4N0 light test");
@@ -916,8 +1010,8 @@ public class OrbTests
         AnimationPlayableOutput.Create(graph, "N4N0", root.AddComponent<Animator>()).SetSourcePlayable(playable);
         graph.SetTimeUpdateMode(DirectorUpdateMode.Manual); graph.Play();
         var played = root.transform.Find(OrbInstaller.LightObject).GetComponent<Light>();
-        var body = root.transform.Find(OrbInstaller.Body).GetComponent<MeshRenderer>();
-        Color OrbColour() { var block = new MaterialPropertyBlock(); body.GetPropertyBlock(block); return block.GetColor("_Color"); }
+        var body = root.transform.Find(OrbInstaller.Body).GetComponent<SkinnedMeshRenderer>();
+        Color OrbColour() { var block = new MaterialPropertyBlock(); body.GetPropertyBlock(block); return block.GetColor("_EmissionColor"); }
         Tick(5);
         Assert.IsFalse(played.gameObject.activeSelf);
         playable.SetInteger(OrbInstaller.LightColor, 3);
@@ -928,11 +1022,11 @@ public class OrbTests
         Assert.AreEqual(OrbInstaller.LightColors[3].color.r, played.color.r, .01f);
         Assert.AreEqual(OrbInstaller.LightColors[3].color.g, played.color.g, .01f);
         Assert.AreEqual(OrbInstaller.LightBright, played.intensity, .01f);
-        Assert.IsTrue(OrbColour().r > .9f && OrbColour().g < .6f, "N4N0 is pink: " + OrbColour());
+        Assert.IsTrue(OrbColour().r > .9f && OrbColour().r > OrbColour().g + .15f, "N4N0 glows pink: " + OrbColour());
         playable.SetBool(OrbInstaller.Light, false);
         Tick(20);
         Assert.IsFalse(played.gameObject.activeSelf);
-        Assert.IsTrue(OrbColour().r < .1f && OrbColour().g > .5f, "Green again: " + OrbColour());
+        Assert.IsTrue(Mathf.Abs(OrbColour().r - 1) < .01f && Mathf.Abs(OrbColour().g - 1) < .01f && Mathf.Abs(OrbColour().b - 1) < .01f, "White again: " + OrbColour());
 
         OrbInstaller.SetOptions(placed.transform, 8, false, false, 72, light: false);
         Assert.IsFalse(OrbInstaller.HasLight(placed.transform));
@@ -962,7 +1056,7 @@ public class OrbTests
         var parameters = AssetDatabase.LoadAssetAtPath<VRCExpressionParameters>(OrbInstaller.OptionsFolder + "Text slots 8 + screen in VR/Parameters.asset");
         var version = parameters.parameters.Single(p => p.name == OrbInstaller.ScreenVersionParameter);
         Assert.AreEqual((VRCExpressionParameters.ValueType.Int, false, false, (float)OrbInstaller.ScreenVersion), (version.valueType, version.networkSynced, version.saved, version.defaultValue));
-        Assert.AreEqual(7, OrbInstaller.ScreenVersion);
+        Assert.AreEqual(8, OrbInstaller.ScreenVersion);
     }
 
     // The retro look is the screen's material alone: it stays through N4N0's other options, and goes back.
@@ -1079,14 +1173,14 @@ public class OrbTests
         Assert.IsEmpty(copy.GetComponentsInChildren<IConstraint>(true), "No Unity constraint");
         Assert.IsEmpty(copy.GetComponentsInChildren<Camera>(true));
         Assert.IsEmpty(copy.GetComponentsInChildren<AudioSource>(true));
-        // And what costs a mobile rank: one skinned mesh, one material slot, a few hundred triangles, one bone, no PhysBone,
+        // And what costs a mobile rank: one skinned mesh, one material slot, under 2,500 triangles, no bone, no PhysBone,
         // no contact that counts.
         var renderer = (SkinnedMeshRenderer)copy.GetComponentsInChildren<Renderer>(true).Single();
         Assert.AreEqual(1, renderer.sharedMaterials.Length, "One material slot");
         StringAssert.StartsWith("VRChat/Mobile/", renderer.sharedMaterial.shader.name);
-        Assert.AreEqual(OrbInstaller.MobileShader, renderer.sharedMaterial.shader.name);
-        Assert.Less(renderer.sharedMesh.triangles.Length / 3, 400, "Under 400 triangles");
-        Assert.AreEqual(1, renderer.bones.Length);
+        Assert.AreEqual(OrbInstaller.ModelShader, renderer.sharedMaterial.shader.name);
+        Assert.Less(renderer.sharedMesh.triangles.Length / 3, 2500, "Under 2,500 triangles");
+        Assert.AreEqual(0, renderer.bones.Length, "No bone: its blendshapes move it");
         Assert.IsEmpty(copy.GetComponentsInChildren<VRCPhysBone>(true), "Quest's Excellent rank allows no PhysBone");
         var receivers = copy.GetComponentsInChildren<VRCContactReceiver>(true);
         Assert.AreEqual(OrbInstaller.Touch, receivers.Single().parameter, "Its owner touches it");
@@ -1115,7 +1209,7 @@ public class OrbTests
         Assert.IsNull(built.Find(OrbInstaller.Mobile), "The mobile N4N0 is gone");
         Assert.IsTrue(built.Find(OrbInstaller.Shown).gameObject.activeSelf);
         Assert.IsTrue(OrbInstaller.HasLight(built) && OrbInstaller.HasScreen(built) && OrbInstaller.HasPointing(built), "The PC N4N0 whole");
-        Assert.IsFalse(copy.GetComponentsInChildren<Renderer>(true).Any(r => r.sharedMaterials.Any(m => m.shader.name.StartsWith("VRChat/Mobile/", StringComparison.Ordinal))));
+        Assert.AreEqual(1, copy.GetComponentsInChildren<SkinnedMeshRenderer>(true).Count(r => r.sharedMesh != null && r.sharedMesh.name == "N4N0 model"), "One N4N0 model: the PC one");
         // As before the mobile N4N0: the PC controller, parameters and menu only.
         var full = built.GetComponents(VrcFury.Component).Single();
         var placedFull = orb.GetComponents(VrcFury.Component).Single();
@@ -1145,63 +1239,49 @@ public class OrbTests
             (version.name, version.valueType, version.networkSynced, version.saved, version.defaultValue));
     }
 
-    // The mobile N4N0 played (its own controller): a face per state from the faces' picture, blinking, glowing, bobbing.
+    // The mobile N4N0 played (its own controller): the PC N4N0's model and expressions, blinking, bobbing, jumping.
     [Test]
-    public void TheMobileFacesFollowN4N0sState()
+    public void TheMobileN4N0ShowsThePcOnesExpressions()
     {
         if (VrcFury.Writer == null) Assert.Ignore("Requires the VRCFury integration.");
         var root = PlayMobile(AssetDatabase.LoadAssetAtPath<GameObject>(OrbInstaller.CreatePrefab(folder)));
-        var renderer = root.transform.Find(OrbInstaller.MobileFace).GetComponent<SkinnedMeshRenderer>();
+        var model = root.transform.Find(OrbInstaller.MobileBody).GetComponent<SkinnedMeshRenderer>();
+        var pc = root.transform.Find(OrbInstaller.Body).GetComponent<SkinnedMeshRenderer>();
+        Assert.AreEqual(pc.sharedMesh, model.sharedMesh, "The PC N4N0's model");
+        CollectionAssert.AreEqual(pc.sharedMaterials, model.sharedMaterials, "in its material, which phones show");
+        Assert.AreEqual(OrbInstaller.Radius, model.transform.localScale.x, 1e-6f);
         var floating = root.transform.Find(OrbInstaller.MobileFloat);
-        MaterialPropertyBlock Block() { var block = new MaterialPropertyBlock(); renderer.GetPropertyBlock(block); return block; }
-        void Shows(int cell, string what)
-        {
-            foreach (var map in new[] { "_MainTex_ST", "_EmissionMap_ST" })
-            {
-                var st = Block().GetVector(map);
-                Assert.Less(Vector2.Distance(Vector2.one / 3, new Vector2(st.x, st.y)), 1e-4f, what + " " + map + " tiling: " + st);
-                Assert.Less(Vector2.Distance(OrbInstaller.CellOffset(cell), new Vector2(st.z, st.w)), 1e-4f, what + " " + map + ": " + st);
-            }
-        }
-        var faces = (Texture2D)renderer.sharedMaterial.GetTexture("_MainTex");
-        Assert.AreEqual(faces, renderer.sharedMaterial.GetTexture("_EmissionMap"), "The faces lit and glowing");
-        Assert.AreEqual((768, 768), (faces.width, faces.height), "3 × 3 cells of 256²");
-        Assert.Greater(faces.mipmapCount, 1);
-        Assert.AreEqual(folder + "/N4N0 faces.png", AssetDatabase.GetAssetPath(faces), "In N4N0's folder, which a package carries");
+        float Shape(string name) => model.GetBlendShapeWeight(model.sharedMesh.GetBlendShapeIndex(name));
 
         Tick(3);
-        Shows((int)OrbState.Idle, "Idle");
-        float idle = Block().GetFloat("_EmissionStrength");
-        for (int s = 1; s < OrbInstaller.Looks.Length; s++)
+        Assert.IsTrue(OrbInstaller.ModelShapes.All(s => Shape(s) == 0), "Idle: the Normal face");
+        foreach (var (state, shape) in new[] { (OrbState.Thinking, "Thinking"), (OrbState.Sleeping, "Sleeping"), (OrbState.Happy, "Happy"), (OrbState.Annoyed, "Annoyed") })
         {
-            playable.SetInteger(OrbInstaller.State, s);
-            Tick(2);
-            Shows(s, ((OrbState)s).ToString() + ", at once");
+            playable.SetInteger(OrbInstaller.State, (int)state);
+            Tick(20);
+            Assert.AreEqual(100, Shape(shape), .01f, state.ToString());
         }
+        Assert.AreEqual(1, playable.GetFloat(OrbInstaller.MobileAnger), 1e-4f, "Annoyed, it turns red");
         playable.SetInteger(OrbInstaller.State, 42);
-        Tick(2);
-        Shows((int)OrbState.Idle, "Any other value shows as Idle");
+        Tick(20);
+        Assert.IsTrue(OrbInstaller.ModelShapes.All(s => s == "Blink" || Shape(s) == 0), "Any other value shows as Idle");
 
         // Idle blinks: 3.1 s in, its eyes shut for a moment.
         playable.SetInteger(OrbInstaller.State, (int)OrbState.Happy);
-        Tick(2);
+        Tick(20);
         playable.SetInteger(OrbInstaller.State, (int)OrbState.Idle);
-        Tick(1);
-        Tick(157);
-        Shows(OrbInstaller.BlinkCell, "Blinking");
+        Tick(1); Tick(157);
+        Assert.AreEqual(100, Shape("Blink"), .01f, "Blinking");
         Tick(10);
-        Shows((int)OrbState.Idle, "Open again");
+        Assert.AreEqual(0, Shape("Blink"), .01f, "Open again");
 
-        // Asleep it glows dimmer; listening, brighter with its owner's voice; surprised, it jumps.
-        playable.SetInteger(OrbInstaller.State, (int)OrbState.Sleeping);
-        Tick(2);
-        Assert.Less(Block().GetFloat("_EmissionStrength"), idle * .5f);
+        // Listening, its eyes widen with its owner's voice; surprised, it jumps.
         playable.SetInteger(OrbInstaller.State, (int)OrbState.Listening);
-        Tick(2);
-        float quiet = Block().GetFloat("_EmissionStrength");
+        Tick(20);
+        float quiet = Shape("Surprised");
         playable.SetFloat("Voice", 1);
-        Tick(2);
-        Assert.Greater(Block().GetFloat("_EmissionStrength"), quiet * 1.4f, "Glowing up with its owner's voice");
+        Tick(3);
+        Assert.Greater(Shape("Surprised"), quiet + 20, "Wider with its owner's voice");
         playable.SetFloat("Voice", 0);
         playable.SetInteger(OrbInstaller.State, (int)OrbState.Surprised);
         float highest = 0;
@@ -1224,41 +1304,39 @@ public class OrbTests
         Assert.IsTrue(root.transform.Find(OrbInstaller.MobileHead).gameObject.activeSelf);
     }
 
-    // The mobile N4N0 takes the Light option's colour, brighter with its brightness, red while annoyed, green while off.
+    // The mobile N4N0's patterns take the Light option's colour, brighter with its brightness, red while annoyed, white
+    // while off.
     [Test]
     public void TheMobileTintFollowsTheLightsColour()
     {
         if (VrcFury.Writer == null) Assert.Ignore("Requires the VRCFury integration.");
         var root = PlayMobile(AssetDatabase.LoadAssetAtPath<GameObject>(OrbInstaller.CreatePrefab(folder)));
-        var renderer = root.transform.Find(OrbInstaller.MobileFace).GetComponent<SkinnedMeshRenderer>();
-        Color Get(string property) { var block = new MaterialPropertyBlock(); renderer.GetPropertyBlock(block); return block.GetColor(property); }
+        var renderer = root.transform.Find(OrbInstaller.MobileBody).GetComponent<SkinnedMeshRenderer>();
+        Color Glow() { var block = new MaterialPropertyBlock(); renderer.GetPropertyBlock(block); return block.GetColor("_EmissionColor"); }
         Tick(5);
-        foreach (var property in new[] { "_EmissionColor", "_Color", "_RimColor" })
-            Assert.IsTrue(Get(property).g > Get(property).r && Get(property).g > Get(property).b, "N4N0's green: " + property + " " + Get(property));
-        Assert.IsTrue(Get("_EmissionColor").g > Get("_EmissionColor").r + .3f, "Its glow fully green: " + Get("_EmissionColor"));
+        Assert.IsTrue(Glow().r > .99f && Glow().g > .99f && Glow().b > .99f, "White: " + Glow());
 
         playable.SetInteger(OrbInstaller.LightColor, 3);
         playable.SetFloat(OrbInstaller.LightLevel, 1);
         playable.SetBool(OrbInstaller.Light, true);
         Tick(20);
-        var bright = Get("_EmissionColor");
-        Assert.IsTrue(bright.r > bright.g + .2f && bright.b > bright.g, "Pink: " + bright);
-        Assert.IsTrue(Get("_RimColor").r > Get("_RimColor").g, "Its rim too");
+        var bright = Glow();
+        Assert.IsTrue(bright.r > bright.g + .15f && bright.b > bright.g, "Pink: " + bright);
         playable.SetFloat(OrbInstaller.LightLevel, 0);
         Tick(3);
-        Assert.Less(Get("_EmissionColor").b, bright.b * .8f, "Dimmer at a low brightness");
+        Assert.Less(Glow().b, bright.b * .8f, "Dimmer at a low brightness");
         playable.SetInteger(OrbInstaller.LightColor, 5);
         Tick(20);
-        Assert.IsTrue(Get("_EmissionColor").b > Get("_EmissionColor").r, "Blue: " + Get("_EmissionColor"));
+        Assert.IsTrue(Glow().b > Glow().r, "Blue: " + Glow());
 
         playable.SetFloat(OrbInstaller.LightLevel, 1);
         playable.SetInteger(OrbInstaller.State, (int)OrbState.Annoyed);
         Tick(20);
-        Assert.IsTrue(Get("_EmissionColor").r > .5f && Get("_EmissionColor").r > Get("_EmissionColor").b * 1.5f, "Red while annoyed: " + Get("_EmissionColor"));
+        Assert.IsTrue(Glow().r > .5f && Glow().r > Glow().b * 1.5f, "Red while annoyed: " + Glow());
         playable.SetInteger(OrbInstaller.State, (int)OrbState.Idle);
         playable.SetBool(OrbInstaller.Light, false);
         Tick(20);
-        Assert.IsTrue(Get("_EmissionColor").g > Get("_EmissionColor").r + .2f, "Green again: " + Get("_EmissionColor"));
+        Assert.IsTrue(Glow().r > .99f && Glow().g > .99f && Glow().b > .99f, "White again: " + Glow());
     }
 
     [Test]

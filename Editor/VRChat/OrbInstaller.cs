@@ -19,10 +19,10 @@ namespace Orbiters.Toolkit.Editor.VRChat
     public enum OrbState { Idle, Listening, Thinking, Talking, Sleeping, Happy, Annoyed, Surprised }
 
     /// <summary>
-    /// N4N0, the Orbiters companion (Orbiters contracts, Docs/orb.md): a small glowing orb with eyes that floats beside its
+    /// N4N0, the Orbiters companion (Orbiters contracts, Docs/orb.md): a black sphere with a white face (OrbInstaller.Model) that floats beside its
     /// owner's head, lazily and with a spring (a PhysBone chain anyone can grab and let spring back), and the text panel it
     /// projects in front of its owner, which everyone around reads. Orbiters - N4N0 drives it over OSC through global
-    /// parameters: what N4N0 is doing (<see cref="State"/>: its eyes, glow, a ring, the projector beam) and the panel's text,
+    /// parameters: what N4N0 is doing (<see cref="State"/>: its expression, the projector beam) and the panel's text,
     /// a block of cells at a time (KillFrenzy Avatar Text's protocol under N4N0's names). Its owner talks to it by holding the
     /// menu's Talk button or touching it. The panel sits low and to N4N0's side of its owner's view and never in front of
     /// their face; seen from further away it grows away from the face. Native avatar components only, its two shaders and
@@ -61,7 +61,6 @@ namespace Orbiters.Toolkit.Editor.VRChat
         // Until Bind: the head bone 1.51 m up, the eyes 9 cm above it and 7 cm before it.
         private static readonly Vector3 DefaultHead = new Vector3(0, 1.51f, 0), DefaultEyes = new Vector3(0, .09f, .07f);
 
-        private const string ShaderTemplate = "Packages/orbiters.toolkit/Editor/VRChat/Orb.shader.txt";
         private const string TextShaderTemplate = "Packages/orbiters.toolkit/Editor/VRChat/OrbText.shader.txt";
         // Drawn by the contracts' Tools~/OrbTextAtlas from the glyph table: 2048 × 4096, 16 × 16 tiles of 128 × 256.
         private const string AtlasTemplate = "Packages/orbiters.toolkit/Editor/VRChat/OrbText.png.bytes";
@@ -141,13 +140,12 @@ namespace Orbiters.Toolkit.Editor.VRChat
 
             TouchReceiver(Child(ball, "Touch"));
 
-            var shader = CopyShader(ShaderTemplate, folder + "/N4N0.shader");
+            // N4N0's model (OrbInstaller.Model), the same on phones; the animator turns it ahead, or to its owner on their
+            // own client, and sets its expressions.
+            var model = ModelMesh(folder);
+            var material = ModelMaterial(folder);
             var body = Child(hop, "Body");
-            body.localScale = Vector3.one * Radius;
-            body.gameObject.AddComponent<MeshFilter>().sharedMesh = OrbMesh(folder);
-            var bodyRenderer = body.gameObject.AddComponent<MeshRenderer>();
-            bodyRenderer.sharedMaterials = new[] { OrbMaterial(folder, shader, "N4N0 core", false), OrbMaterial(folder, shader, "N4N0 glow", true) };
-            Quiet(bodyRenderer);
+            AddModel(body, model, material);
 
             // Desktop mode's pointer (the screen's eye and gaze receivers find it): the owner's eyes and a point on their
             // line of sight, held to the head bone (sources set by Bind), two local contacts that cost nothing in VRChat's
@@ -167,7 +165,7 @@ namespace Orbiters.Toolkit.Editor.VRChat
             }
             var dot = Child(point, "Dot");
             dot.localScale = Vector3.one * GazeDotRadius;
-            dot.gameObject.AddComponent<MeshFilter>().sharedMesh = body.GetComponent<MeshFilter>().sharedMesh;
+            dot.gameObject.AddComponent<MeshFilter>().sharedMesh = OrbMesh(folder);
             var dotRenderer = dot.gameObject.AddComponent<MeshRenderer>();
             // A plain dot, not N4N0's face.
             dotRenderer.sharedMaterial = PointerMaterial(folder, false);
@@ -190,7 +188,7 @@ namespace Orbiters.Toolkit.Editor.VRChat
             AddScreen(root.transform, folder, thumbnailBytes);
             panel.gameObject.SetActive(false);
             // Quest's N4N0, which mobile builds keep instead (OrbInstaller.Mobile).
-            AddMobile(root.transform, folder);
+            AddMobile(root.transform, folder, model, material);
             // The capture kit and camera rig Orbiters - N4N0 records with (OrbInstaller.Capture).
             AddCapture(root.transform, folder);
             AddParts(root.transform, folder);
@@ -260,23 +258,6 @@ namespace Orbiters.Toolkit.Editor.VRChat
 
         // ---- Assets ----
 
-        private static Material OrbMaterial(string folder, Shader shader, string name, bool halo)
-        {
-            var material = new Material(shader) { name = name };
-            material.SetColor("_Color", Colour);
-            material.SetFloat("_Halo", halo ? 1 : 0);
-            if (halo)
-            {
-                material.SetFloat("_DstBlend", (float)BlendMode.One); material.SetFloat("_ZWrite", 0);
-                material.renderQueue = (int)RenderQueue.Transparent;
-                material.SetOverrideTag("RenderType", "Transparent");
-                // Viewers who hide custom shaders would see a solid ball where the halo is.
-                material.SetOverrideTag("VRCFallback", "Hidden");
-            }
-            AssetDatabase.CreateAsset(material, folder + "/" + name + ".mat");
-            return material;
-        }
-
         private static Material TextMaterial(string folder, Shader shader, string name, Texture atlas, bool beam)
         {
             var material = new Material(shader) { name = name };
@@ -308,7 +289,7 @@ namespace Orbiters.Toolkit.Editor.VRChat
             return AssetDatabase.LoadAssetAtPath<Texture2D>(path);
         }
 
-        // The core (a unit sphere) and its halo (1.7 times as wide), one submesh each.
+        // The desktop pointer's dot: a unit sphere (and a wider one its material leaves undrawn).
         private static Mesh OrbMesh(string folder)
         {
             var vertices = new List<Vector3>();

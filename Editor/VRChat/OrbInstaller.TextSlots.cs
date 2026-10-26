@@ -28,7 +28,7 @@ namespace Orbiters.Toolkit.Editor.VRChat
         // The controller, parameters and menu of each choice of options, shared by every N4N0 switched to it (they name no
         // object of their own: their curves follow paths below N4N0).
         // A new menu or parameters get a new folder: orbs switched earlier keep the files they use.
-        internal const string OptionsFolder = "Assets/Orbiters/N4N0/Menu 14/";
+        internal const string OptionsFolder = "Assets/Orbiters/N4N0/Menu 15/";
 
         [InitializeOnLoadMethod]
         private static void RegisterOrbOptions() => AttachmentHooks.RegisterOptions(root => FindAll(root).SelectMany(orb =>
@@ -90,17 +90,6 @@ namespace Orbiters.Toolkit.Editor.VRChat
                         int bytes = OfferedThumbnailBytes[index];
                         SetOptions(target, ScreenFits(now.textSync, bytes) ? now.textSync : DefaultTextSync, now.walkBoost, now.replace, bytes, now.light);
                     },
-                },
-                new AttachmentOption
-                {
-                    Label = "Look",
-                    Tooltip = "How N4N0's screen looks in VRChat: Orbiters' own, or a green phosphor terminal on which text arriving a block " +
-                              "at a time reads as typed out. Orbiters - N4N0's overlay has its own Look. No synced bits.",
-                    Choices = new[] { "Modern", "Retro" },
-                    ChoiceTooltips = new[] { "Orbiters' own look", "A green phosphor terminal, as on an old computer" },
-                    ChoicePictures = LookPictures(),
-                    Current = RetroOf(orb) ? 1 : 0,
-                    Choose = index => SetLook(target, index == 1),
                 },
                 new AttachmentOption
                 {

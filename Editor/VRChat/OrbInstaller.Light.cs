@@ -82,18 +82,13 @@ namespace Orbiters.Toolkit.Editor.VRChat
         /// <summary>
         /// The light's parameters, its layer and the N4N0 › Light submenu: on, a brightness radial and the colours. One state
         /// per colour, its brightness a blend of a dim and a bright clip; each state sets everything the layer animates (the
-        /// light's object, colour and intensity, N4N0's colour), off included, so any Write Defaults leave nothing behind.
+        /// light's object, colour and intensity), off included, so any Write Defaults leave nothing behind.
         /// </summary>
         private static void LightController(AnimatorController controller, string folder, List<VRCExpressionParameters.Parameter> parameters, List<VRCExpressionsMenu.Control> controls)
         {
-            controller.AddParameter(Light, AnimatorControllerParameterType.Bool);
-            controller.AddParameter(LightColor, AnimatorControllerParameterType.Int);
-            controller.AddParameter(new AnimatorControllerParameter { name = LightLevel, type = AnimatorControllerParameterType.Float, defaultFloat = LightLevelDefault });
-
             var machine = Layer(controller, "Light");
             var off = new AnimationClip { name = "Light off" };
             Curve(off, LightObject, typeof(GameObject), "m_IsActive", 0);
-            OrbColour(off, Colour);
             var dark = HeldPropRig.State(controller, machine, "Off", off);
             machine.defaultState = dark;
             Enter(machine, dark, (Light, AnimatorConditionMode.IfNot, 0));
@@ -134,7 +129,7 @@ namespace Orbiters.Toolkit.Editor.VRChat
             controls.Add(light);
         }
 
-        // The light on, in a colour at an intensity; N4N0 takes the colour.
+        // The light on, in a colour at an intensity (N4N0's patterns take the colour in the Colour layer).
         private static AnimationClip LightClip(string name, Color color, float intensity)
         {
             var clip = new AnimationClip { name = name };
@@ -144,17 +139,8 @@ namespace Orbiters.Toolkit.Editor.VRChat
             Curve(clip, LightObject, typeof(UnityEngine.Light), "m_Color.b", color.b);
             Curve(clip, LightObject, typeof(UnityEngine.Light), "m_Color.a", 1);
             Curve(clip, LightObject, typeof(UnityEngine.Light), "m_Intensity", intensity);
-            OrbColour(clip, color);
             return clip;
         }
 
-        // N4N0's colour (its core and halo): no other layer animates it.
-        private static void OrbColour(AnimationClip clip, Color color)
-        {
-            Curve(clip, Body, typeof(MeshRenderer), "material._Color.r", color.r);
-            Curve(clip, Body, typeof(MeshRenderer), "material._Color.g", color.g);
-            Curve(clip, Body, typeof(MeshRenderer), "material._Color.b", color.b);
-            Curve(clip, Body, typeof(MeshRenderer), "material._Color.a", 1);
-        }
     }
 }
