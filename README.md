@@ -1,7 +1,12 @@
 # Orbiters Toolkit
 
-## Unreleased
+## 0.4.8 — 2026-10-26
 
+- **Pictures at the mesh's own scale**: skinned meshes scaled on their object (N4N0's ball) were pictured 1/scale too
+  large, so Mixer's Hierarchy showed an avatar root as N4N0's sphere; ReFit's relevance and bounds measure bone-less
+  renderers at their scale too.
+- **Never refit**: `OrbitersAttachment.neverRefit` (from the creator's gallery setup, or the Inspector) and props the
+  Toolkit fits itself (N4N0, the drawing pen, the hand screen) never get a fit question (`FitCheck.NeverRefit`).
 - **Stay there** (N4N0 › Light › Stay there, `N4N0/Light/Stay`, one synced bit, not saved): N4N0 and its light stay
   where they are in the world, a steady light, until it is turned off. N4N0 hangs from a stay frame under the head
   (`Head/Stay`, a VRC Parent Constraint on the head that the light's animator layer freezes to the world).
