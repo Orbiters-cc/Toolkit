@@ -78,8 +78,8 @@ public class OrbTests
         // The screen's parameters follow (TheScreensTouchPointsAndParametersAreLocal).
         CollectionAssert.AreEqual(expected, parameters.parameters.Take(expected.Count).Select(p => (p.name, p.valueType, p.networkSynced, p.saved, p.defaultValue)).ToList());
         Assert.IsTrue(parameters.parameters.Skip(expected.Count).All(p => p.name.StartsWith("N4N0/Screen/", StringComparison.Ordinal) || p.name.StartsWith("N4N0/Card/", StringComparison.Ordinal) ||
-                                                                      p.name.StartsWith("N4N0/Capture/", StringComparison.Ordinal)),
-            "then the screen's, the link card's and the capture kit's (OrbCaptureTests)");
+                                                                      p.name.StartsWith("N4N0/Capture/", StringComparison.Ordinal) || p.name.StartsWith("N4N0/Picture/", StringComparison.Ordinal)),
+            "then the screen's, the link card's, the capture kit's (OrbCaptureTests) and the full pictures' (OrbPictureTests)");
         Assert.AreEqual(1 + 8 + 1 + 8 + 8 * 8 + 3 + 8 + 3, parameters.CalcTotalCost(), "Synced bits: 1 + 8 + 1 + 8 + 8·N, the screen's 3 + 8, the card's 3");
 
         // Global in the Full Controller, so VRCFury keeps the names OSC looks for; its own parameters are renamed as usual.

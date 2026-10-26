@@ -33,12 +33,13 @@ Shader "Orbiters/N4N0 Screen"
         _Plate ("Projected plate", Color) = (0.008, 0.03, 0.02, 0.82)
         _Edge ("Projected edge", Color) = (0, 0.855, 0.427, 1)
         _Glow ("Projected glow", Range(0, 2)) = 1
+        [HideInInspector] _Pictures ("Full pictures (CRT B)", 2D) = "black" {}
 //@PROPERTIES
     }
     SubShader
     {
         // OrbScreen: the files' revision (OrbInstaller.ScreenRevision); a screen of an older one is swapped for these.
-        Tags { "Queue" = "Transparent" "RenderType" = "Transparent" "IgnoreProjector" = "True" "VRCFallback" = "Hidden" "OrbScreen" = "10" }
+        Tags { "Queue" = "Transparent" "RenderType" = "Transparent" "IgnoreProjector" = "True" "VRCFallback" = "Hidden" "OrbScreen" = "11" }
         Cull Off
         ZWrite Off
         Blend SrcAlpha OneMinusSrcAlpha
@@ -125,6 +126,21 @@ Shader "Orbiters/N4N0 Screen"
             bool Bit(int at, int index) { return ((Byte(at + index / 7) >> (index % 7)) & 1) == 1; }
 
 //@THUMBNAIL
+
+            // Full pictures (Docs/orb-picture.md): CRT B's pictures, signatures and heartbeat (the contracts' include).
+//@PICTURES
+
+            // The full picture a thumbnail place shows instead of its thumbnail, or -1: its slot (results 0 to 4, the music's
+            // art 5, the card's picture 6) holds the picture whose signature is the thumbnail's first 8 bytes, CRT B is alive,
+            // and a screen pixel spans under 2 of its texels (smaller, the smooth thumbnail looks better).
+            int FullPicture(int page, int t, int layers, float width, float pixel, bool alive)
+            {
+                int slot = page == 11 ? 5 : (page == 15 ? 6 : t);
+                if (!alive || layers <= 0 || PictureTexelsPerPixel(slot, width, pixel) >= 2) return -1;
+                int at = PicturesStart + t * PictureBytes;
+                uint4 a = uint4(Byte(at), Byte(at + 1), Byte(at + 2), Byte(at + 3)), b = uint4(Byte(at + 4), Byte(at + 5), Byte(at + 6), Byte(at + 7));
+                return PictureFor(slot, a, b) ? slot : -1;
+            }
 
             // A texel of the layout table, its bytes (the table's rows run from page 0 at the top of its picture).
             int4 Texel(int column, int page) { return (int4)round(_Layout.Load(int3(column, LayoutRows - 1 - page, 0)) * 255); }
@@ -357,11 +373,14 @@ Shader "Orbiters/N4N0 Screen"
                     colour = lerp(colour, ink, coverage);
                 }
 
-                // Thumbnails (results): colour pictures, the layers received so far summed at this point of the picture.
+                // Thumbnails (results): colour pictures, the layers received so far summed at this point of the picture; the
+                // full picture instead once it arrived.
+                bool alive = PicturesAlive();
                 [loop] for (int t = 0; t < head.z; t++)
                 {
                     float4 r = float4(Texel(TablePictures + t, page)) * 4;
                     int layers = Byte(Layers + t);
+                    int full = FullPicture(page, t, layers, r.z, pixel, alive);
                     if (retro)
                     {
                         // The music page's art place is part of its picture until the art came.
@@ -374,7 +393,9 @@ Shader "Orbiters/N4N0 Screen"
                         {
                             float2 f = saturate((p - r.xy) / r.zw) * Dots;
                             float2 cell = min(floor(f), Dots - 1);
-                            int level = DotStep(Thumbnail(PicturesStart + t * PictureBytes, (cell + .5) / Dots, layers).x, cell);
+                            float light = full >= 0 ? dot(PictureColour(full, (cell + .5) / Dots), float3(.299, .587, .114))
+                                : Thumbnail(PicturesStart + t * PictureBytes, (cell + .5) / Dots, layers).x;
+                            int level = DotStep(light, cell);
                             shade = level == 3 ? _Hot.rgb : level == 2 ? _Accent.rgb : level == 1 ? _Dim.rgb : _Card.rgb;
                             // A dark gap between dots once they are large enough to show one.
                             float2 inCell = f - cell;
@@ -390,7 +411,8 @@ Shader "Orbiters/N4N0 Screen"
                     fixed3 shade = _Placeholder.rgb;
                     if (layers > 0)
                     {
-                        shade = YccToRgb(Thumbnail(PicturesStart + t * PictureBytes, saturate((p - r.xy) / r.zw), layers));
+                        float2 inPicture = saturate((p - r.xy) / r.zw);
+                        shade = full >= 0 ? PictureColour(full, inPicture) : YccToRgb(Thumbnail(PicturesStart + t * PictureBytes, inPicture, layers));
                         #ifndef UNITY_COLORSPACE_GAMMA
                         shade = GammaToLinearSpace(shade);
                         #endif

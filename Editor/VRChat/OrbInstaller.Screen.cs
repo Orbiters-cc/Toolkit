@@ -67,8 +67,9 @@ namespace Orbiters.Toolkit.Editor.VRChat
         /// 7 points along each index finger with contacts (the screen draws the rays), presses with the trigger or a touch,
         /// everyone else's fingertips press too; the screen stays where it is until it is out of its owner's sight
         /// (<see cref="AddPlacement"/>), its handle carries it in a palm, its size is <see cref="ScreenSize"/>.
+        /// 8 shows the pictures at full size once they arrived (<see cref="AddPictures"/>).
         /// </summary>
-        public const int ScreenVersion = 7;
+        public const int ScreenVersion = 8;
         /// <summary>
         /// Local, not saved, set by no menu: the screen's version (<see cref="ScreenVersion"/>), which Orbiters - N4N0 reads
         /// to know the pages the screen has. Screens before version 3 lack it.
@@ -99,8 +100,8 @@ namespace Orbiters.Toolkit.Editor.VRChat
         // The screen files' revision, the shader's OrbScreen tag: 5 draws the back as a card ("N4N0 menu, look at the other
         // side"), 6 the retro look's own pages and live parts, 7 the projected look and N4N0's beam on a skinned screen,
         // 8 the version 6 pages (22 of them), 9 the rays from the fingertips (a third part, bound to the pointers), 10 the
-        // projection's glow as a property (_Glow, a menu theme's screen glow).
-        internal const string ScreenRevision = "10";
+        // projection's glow as a property (_Glow, a menu theme's screen glow), 11 the full pictures (_Pictures, CRT B).
+        internal const string ScreenRevision = "11";
         private const string ScreenShaderTemplate = "Packages/orbiters.toolkit/Editor/VRChat/OrbScreen.shader.txt";
         private const string BeamShaderTemplate = "Packages/orbiters.toolkit/Editor/VRChat/OrbBeam.shader.txt";
         private const string RayShaderTemplate = "Packages/orbiters.toolkit/Editor/VRChat/OrbRay.shader.txt";
@@ -298,6 +299,7 @@ namespace Orbiters.Toolkit.Editor.VRChat
                 material.SetTexture("_Pages", pages);
                 material.SetTexture("_Layout", layout);
                 material.SetTexture("_MainTex", glyphs);
+                material.SetTexture(PicturesProperty, PicturesTexture(folder));
                 material.renderQueue = (int)RenderQueue.Transparent;
                 AssetDatabase.DeleteAsset(materialPath);
                 AssetDatabase.CreateAsset(material, materialPath);
@@ -335,7 +337,7 @@ namespace Orbiters.Toolkit.Editor.VRChat
             string defines = $"            #define SCREEN_WORDS {ScreenWords(thumbnailBytes)}\n            #define THUMBNAIL_BYTES {thumbnailBytes}";
             string text = template.text.Replace("Shader \"Orbiters/N4N0 Screen\"", "Shader \"" + ScreenShaderName(thumbnailBytes) + "\"")
                 .Replace("//@PROPERTIES", properties.ToString().TrimEnd()).Replace("//@BUFFER", buffer.ToString().TrimEnd()).Replace("//@SUM", sum.ToString())
-                .Replace("//@DEFINES", defines).Replace("//@THUMBNAIL", ThumbnailDecoder(thumbnailBytes));
+                .Replace("//@DEFINES", defines).Replace("//@THUMBNAIL", ThumbnailDecoder(thumbnailBytes)).Replace("//@PICTURES", PictureScreenCode());
             System.IO.File.WriteAllText(path, text);
             AssetDatabase.ImportAsset(path, ImportAssetOptions.ForceSynchronousImport);
             var shader = AssetDatabase.LoadAssetAtPath<Shader>(path);
@@ -480,6 +482,7 @@ namespace Orbiters.Toolkit.Editor.VRChat
             }
             AddHandle(orb, screen.transform, folder);
             AddCard(orb, mesh, material);
+            AddPictures(orb, folder);
             return screen.transform;
         }
 
@@ -546,6 +549,7 @@ namespace Orbiters.Toolkit.Editor.VRChat
             PlacementController(controller, parameters);
             PointingController(controller, parameters);
             CardController(controller, parameters, textSync, thumbnailBytes);
+            PictureController(controller, parameters, textSync, thumbnailBytes);
 
             parameters.Add(Parameter(ScreenOpen, synced: false));
             // Not saved: a new upload's option always holds.

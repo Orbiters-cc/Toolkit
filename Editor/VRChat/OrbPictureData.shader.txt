@@ -1,0 +1,26 @@
+// N4N0's full pictures, CRT A (Orbiters contracts, Docs/orb-picture.md): finds its wearer's slot in the last frame's grab,
+// checks the chunks there and keeps their bytes in each picture's stream, checks each stream's layers, and decodes one
+// picture at a time into its workspace (the 5/3 wavelet's coefficients and levels), which CRT B copies. 512 × 256
+// RGBAFloat, double buffered, updated every frame. OrbInstaller writes this file with the include written in.
+Shader "Orbiters/N4N0 Picture Data"
+{
+    Properties
+    {
+        [HideInInspector] _PictureSeed ("Key seed", Float) = 0
+    }
+    SubShader
+    {
+        Lighting Off Blend One Zero ZTest Always ZWrite Off Cull Off
+        Pass
+        {
+            CGPROGRAM
+            #pragma vertex CustomRenderTextureVertexShader
+            #pragma fragment PictureDataFrag
+            #pragma target 4.5
+            #include "UnityCustomRenderTexture.cginc"
+            #define PICTURE_DATA
+            #include "OrbitersPicture.cginc"
+            ENDCG
+        }
+    }
+}

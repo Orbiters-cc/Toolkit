@@ -1,0 +1,968 @@
+// Orbiters contracts: N4N0's full pictures (Docs/orb-picture.md), the HLSL shared by the bridge, the two Custom Render
+// Textures and N4N0's screen. Rust orb::picture is the reference: the CRTs decode a stream into exactly its planes.
+//
+// Define one of these before including it:
+//   PICTURE_BRIDGE  the bridge's write and restore passes (the chunks as pixels in a slot of the frame); reads CRT A's key
+//                   from _PictureData
+//   PICTURE_DATA    CRT A (with UnityCustomRenderTexture.cginc): chunks from the grab into streams, layer checks, decoding
+//   PICTURE_SHOW    CRT B (with UnityCustomRenderTexture.cginc): decoded pictures as sRGB, signatures, heartbeat; reads A
+//                   from _PictureData
+//   PICTURE_SCREEN  the screen's lookups in CRT B (_Pictures)
+// Every texture of these is read at texel centres with point filtering (the CRTs' filter mode is Point).
+#ifndef ORBITERS_PICTURE_INCLUDED
+#define ORBITERS_PICTURE_INCLUDED
+
+// Integer division by constants is what the layout is made of: FXC's advice to use uints there is noise.
+#pragma warning (disable : 3556)
+
+// ---- The formats (Rust orb::picture) ----
+
+#define PIC_FORMAT 1
+#define PIC_LEVELS 5
+#define PIC_LAYERS 3
+#define PIC_HEADER 32
+#define PIC_BANDS 48
+#define PIC_BIG_TILE 32
+#define PIC_SMALL_TILE 8
+
+static const uint PicStepFraction[16] = { 4096, 4277, 4467, 4664, 4871, 5087, 5312, 5547, 5793, 6049, 6317, 6597, 6889, 7194, 7512, 7845 };
+// [chroma][level - 1][orientation]: 4096 / the band's synthesis norm (chroma 1.8 times coarser).
+static const uint PicWeights[40] = {
+    0, 3945, 3945, 5698, 0, 2573, 2573, 4443, 0, 1403, 1403, 2583, 0, 718, 718, 1346, 192, 361, 361, 680,
+    0, 7101, 7101, 10257, 0, 4631, 4631, 7997, 0, 2525, 2525, 4649, 0, 1293, 1293, 2423, 345, 650, 650, 1225 };
+
+int PicWidth(int size) { return size == 0 ? 128 : 256; }
+int PicHeight(int size) { return size == 0 ? 72 : 144; }
+int PicCapacity(int size) { return size == 0 ? 2048 : 4096; }
+// Slots 0 to 4 small (the results), 5 and 6 large (the music's art, the link card's picture), 7 reserved (-1).
+int PicSlotSize(int slot) { return slot < 5 ? 0 : (slot < 7 ? 1 : -1); }
+
+// A level's LL dimensions (rows, columns): each level halves, rounded up.
+int2 PicDims(int size, int level)
+{
+    int n = (1 << level) - 1;
+    return int2((PicHeight(size) + n) >> level, (PicWidth(size) + n) >> level);
+}
+
+struct PicBand { int level, orient, channel, y0, x0, h, w, layer; };
+
+// Band b in stream order (Rust bands): 0-2 the LL band (Y, Cb, Cr), then levels 5 to 1, each horizontal, vertical,
+// diagonal, each in Y, Cb, Cr. Layer 1 holds bands 0-29, 2 bands 30-38, 3 bands 39-47.
+PicBand PicBandOf(int size, int b)
+{
+    PicBand band = (PicBand)0;
+    bool ll = b < 3;
+    int r = max(b - 3, 0);
+    band.level = ll ? PIC_LEVELS : PIC_LEVELS - r / 9;
+    band.orient = ll ? 0 : (r % 9) / 3 + 1;
+    band.channel = ll ? b : r % 3;
+    int2 outer = PicDims(size, band.level - 1), inner = PicDims(size, band.level);
+    band.y0 = band.orient <= 1 ? 0 : inner.x;
+    band.x0 = (band.orient == 0 || band.orient == 2) ? 0 : inner.y;
+    band.h = band.orient <= 1 ? inner.x : outer.x - inner.x;
+    band.w = (band.orient == 0 || band.orient == 2) ? inner.y : outer.y - inner.y;
+    band.layer = band.level >= 3 ? 1 : (band.level == 2 ? 2 : 3);
+    return band;
+}
+
+int PicLayerFirstBand(int layer) { return layer == 1 ? 0 : (layer == 2 ? 30 : 39); }
+int PicLayerBands(int layer) { return layer == 1 ? 30 : 9; }
+
+// The band (of `channel`) holding plane position (x, y): its level is one past the levels whose LL holds it.
+int PicBandAt(int size, int x, int y, int channel)
+{
+    int inside = 0;
+    [unroll] for (int l = 1; l <= PIC_LEVELS; l++)
+    {
+        int2 d = PicDims(size, l);
+        inside += (y < d.x && x < d.y) ? 1 : 0;
+    }
+    int level = inside + 1;
+    int2 inner = PicDims(size, min(level, PIC_LEVELS));
+    int orient = y < inner.x ? 1 : (x < inner.y ? 2 : 3);
+    return inside == PIC_LEVELS ? channel : 3 + (PIC_LEVELS - level) * 9 + (orient - 1) * 3 + channel;
+}
+
+// A band's step at quality q, in 1/16.
+uint PicStep16(uint q, PicBand band)
+{
+    uint w = PicWeights[(band.channel > 0 ? 20 : 0) + (band.level - 1) * 4 + band.orient];
+    uint s = max((PicStepFraction[q & 15] * w) >> (26 - (q >> 4)), 1u);
+    if (band.orient == 0) s = min(s, band.channel > 0 ? 96u : 64u);
+    return s;
+}
+
+int PicDequantize(int q, uint step, bool ll)
+{
+    if (q == 0) return 0;
+    uint a = min((uint)abs(q), 4095u);
+    uint r = ll ? 0 : (step * 2) >> 4;
+    int v = (int)((a * step + r) >> 4);
+    return q < 0 ? -v : v;
+}
+
+int PicUnzigzag(uint m) { return (m & 1) == 0 ? (int)(m >> 1) : -(int)((m + 1) >> 1); }
+
+// ---- Hashes and checks ----
+
+uint PicFmix(uint h)
+{
+    h ^= h >> 16; h *= 0x85ebca6bu; h ^= h >> 13; h *= 0xc2b2ae35u; h ^= h >> 16;
+    return h;
+}
+uint PicMix(uint a, uint b) { return PicFmix(((a << 8) | b) ^ 0x9e3779b9u); }
+uint PicMask(uint salt, uint j) { return salt == 0 ? 0u : (PicFmix((salt << 16) | j) & 255u); }
+// FNV-1a, step by step: the chunk check's state after eating byte b.
+uint PicFnv(uint h, uint b) { return (h ^ (b & 255u)) * 16777619u; }
+uint PicCheckStart(uint lane, uint slot, uint start, uint salt)
+{
+    uint h = 0x811c9dc5u;
+    h = PicFnv(h, lane); h = PicFnv(h, slot); h = PicFnv(h, start); h = PicFnv(h, start >> 8); h = PicFnv(h, salt);
+    return h;
+}
+
+// ---- The bridge's slot in the frame ----
+// Eight slots of 32 × 4 pixels along the bottom edge (8 pixels in, 40 apart), the wearer's chosen by its key. Pixel 0,
+// 1: the marker; 2, 3: the key (16 bits); then the bytes, two 4-bit nibbles each (low first), three nibbles a pixel
+// (n / 15 in red, green, blue): byte 0 the synced gate (0: no picture chunk; else 1 + the pointer's offset, + 64 with
+// 16 text values), bytes 1-16 the synced values, 17-80 the local values.
+#define PIC_SLOT_W 32
+#define PIC_SLOT_H 4
+#define PIC_SLOT_BYTES 81
+int PicSlotOf(uint key) { return (int)(((key * 7919u) >> 3) & 7u); }
+int2 PicSlotOrigin(int slot) { return int2(8 + slot * (PIC_SLOT_W + 8), 8); }
+
+// ---- CRT A's layout (512 × 256 texels) ----
+#define PIC_A_W 512
+#define PIC_A_H 256
+// The coefficient plane at (0, 0) and each level's reconstruction (its output, PicDims(size, level - 1)).
+#define PIC_RECON1 int2(256, 0)
+#define PIC_RECON2 int2(0, 144)
+#define PIC_RECON3 int2(128, 144)
+#define PIC_RECON4 int2(192, 144)
+#define PIC_RECON5 int2(224, 144)
+// Streams: 4 bytes a texel (each byte + 256 × its tag), rows 216 to 224.
+#define PIC_STREAM_ROW 216
+// Groups of 32 stream texels (count and hash for each layer), slot states, ports, key and job.
+#define PIC_GROUP_ROW 225
+#define PIC_SLOT_ROW 226
+#define PIC_PORT_ROW 227
+#define PIC_MISC_ROW 228
+// The job's tables: big-tile flags' popcounts (row 229), small-tile flags' (230-232), bands and layers (233), the unary
+// section's block counts (234) and per-word zero counts (235-240).
+#define PIC_L1_ROW 229
+#define PIC_L2_ROW 230
+#define PIC_BAND_ROW 233
+#define PIC_BLOCK_ROW 234
+#define PIC_ZERO_ROW 235
+// A job's frames before it delivers, and how long it holds its result for CRT B.
+#define PIC_JOB_FRAMES 18
+#define PIC_JOB_HOLD 12
+
+int PicStreamFirst(int slot) { return slot < 5 ? slot * 512 : (slot == 5 ? 2560 : 3584); }
+int PicStreamTexels(int slot) { return slot < 5 ? 512 : 1024; }
+int PicGroupFirst(int slot) { return slot < 5 ? slot * 16 : (slot == 5 ? 80 : 112); }
+int PicGroups(int slot) { return slot < 5 ? 16 : 32; }
+
+// ---- CRT B's layout (512 × 290 RGBA8) ----
+#define PIC_B_W 512
+#define PIC_B_H 290
+#define PIC_B_STATE_ROW 289
+// Where slot s's picture is in B.
+int2 PicPlaneAt(int slot)
+{
+    if (slot == 5) return int2(0, 0);
+    if (slot == 6) return int2(256, 0);
+    if (slot == 4) return int2(0, 216);
+    return int2(128 * slot, 144);
+}
+// The heartbeat: _Time.y in 1/64 s, 24 bits.
+uint PicClock() { return ((uint)(_Time.y * 64)) & 0xFFFFFFu; }
+
+#if defined(PICTURE_DATA) || defined(PICTURE_SHOW) || defined(PICTURE_BRIDGE)
+#ifdef PICTURE_DATA
+#define PIC_A_TEXTURE _SelfTexture2D
+#else
+sampler2D _PictureData;
+#define PIC_A_TEXTURE _PictureData
+#endif
+float4 PicA(int x, int y) { return tex2Dlod(PIC_A_TEXTURE, float4((x + .5) / PIC_A_W, (y + .5) / PIC_A_H, 0, 0)); }
+uint PicKey() { return (uint)PicA(0, PIC_MISC_ROW).x; }
+// The job: x = state × 64 + layers × 8 + slot (state 0 idle, 1 decoding, 2 done), y its picture's tag, z its frames, w
+// the slot to look at next.
+float4 PicJob() { return PicA(1, PIC_MISC_ROW); }
+#endif
+
+// ======== The bridge ========
+#ifdef PICTURE_BRIDGE
+
+// Every chunk value in one array over its properties (each in a register of its own), as the animator sets them.
+CBUFFER_START(PictureValues)
+float _PictureValue[PIC_SLOT_BYTES] : packoffset(c0);
+//@PICTURE_VALUES
+CBUFFER_END
+
+// Every value property used (never added: the gate is never negative), so the compiler strips none of them and Unity
+// sets each one (it sets only properties the compiled shader lists).
+float PicValuesUsed()
+{
+    return 0
+//@PICTURE_SUM
+    ;
+}
+
+float4 PicBridgeClip(float2 uv)
+{
+    uint key = PicKey();
+    float2 px = PicSlotOrigin(PicSlotOf(key)) + uv * float2(PIC_SLOT_W, PIC_SLOT_H);
+    // No key yet: nothing drawn.
+    return key == 0 ? float4(2, 2, .5, 1) : float4(px / _ScreenParams.xy * 2 - 1, .5, 1);
+}
+
+// The slot's pixel under `pos`, -1 outside it.
+int PicBridgeIndex(float2 pos)
+{
+    int2 o = PicSlotOrigin(PicSlotOf(PicKey()));
+    int x = (int)pos.x - o.x, y = (int)(_ScreenParams.y - pos.y) - o.y;
+    if (x < 0 || x >= PIC_SLOT_W || y < 0 || y >= PIC_SLOT_H) return -1;
+    return y * PIC_SLOT_W + x;
+}
+
+uint PicBridgeByte(int j)
+{
+    if (j >= PIC_SLOT_BYTES) return 0;
+    float v = _PictureValue[j];
+    if (j == 0) return (uint)clamp(round(v), 0, 255);
+    int b = (int)round(clamp(v, -1, 1) * 127);
+    return (uint)(b < 0 ? b + 256 : b);
+}
+
+float4 PicBridgeWrite(float2 pos)
+{
+    int index = PicBridgeIndex(pos);
+    if (index < 0) discard;
+    uint key = PicKey();
+    uint3 n;
+    if (index == 0) n = uint3(10, 5, 12);
+    else if (index == 1) n = uint3(3, 9, 6);
+    else if (index == 2) n = uint3(key & 15, (key >> 4) & 15, (key >> 8) & 15);
+    else if (index == 3) n = uint3((key >> 12) & 15, 0, 0);
+    else
+    {
+        int nib = (index - 4) * 3;
+        [unroll] for (int c = 0; c < 3; c++, nib++) n[c] = (PicBridgeByte(nib >> 1) >> ((nib & 1) * 4)) & 15;
+    }
+    float4 colour = float4(n / 15.0, 1);
+    if (_PictureValue[0] < -1) colour.r += PicValuesUsed();
+    return colour;
+}
+
+#endif
+
+// ======== CRT A ========
+#ifdef PICTURE_DATA
+
+Texture2D _N4N0PictureGrab;
+float _PictureSeed;
+
+// ---- Reading the bridge's slot from the grab (rows from the bottom or the top, linear or gamma) ----
+
+float3 PicGrab(int2 p) { return _N4N0PictureGrab.Load(int3(p, 0)).rgb; }
+uint3 PicNibbles(float3 c, int mode) { return (uint3)round(saturate((mode & 2) ? LinearToGammaSpace(c) : c) * 15); }
+
+// How this frame's grab holds the slot (-1: not found).
+int PicGrabMode()
+{
+    uint w, h;
+    _N4N0PictureGrab.GetDimensions(w, h);
+    uint key = PicKey();
+    if (key == 0 || h < 64) return -1;
+    int2 o = PicSlotOrigin(PicSlotOf(key));
+    int mode = -1;
+    [unroll] for (int m = 0; m < 4; m++)
+    {
+        int r0 = (m & 1) ? o.y : (int)h - 1 - o.y;
+        uint3 a = PicNibbles(PicGrab(int2(o.x, r0)), m), b = PicNibbles(PicGrab(int2(o.x + 1, r0)), m);
+        uint3 k0 = PicNibbles(PicGrab(int2(o.x + 2, r0)), m), k1 = PicNibbles(PicGrab(int2(o.x + 3, r0)), m);
+        uint read = k0.x | k0.y << 4 | k0.z << 8 | k1.x << 12;
+        if (mode < 0 && all(a == uint3(10, 5, 12)) && all(b == uint3(3, 9, 6)) && read == key) mode = m;
+    }
+    return mode;
+}
+
+// Byte j of the slot (see the bridge).
+uint PicSlotByte(int j, int mode)
+{
+    uint w, h;
+    _N4N0PictureGrab.GetDimensions(w, h);
+    int2 o = PicSlotOrigin(PicSlotOf(PicKey()));
+    uint value = 0;
+    int nib = 2 * j;
+    [unroll] for (int part = 0; part < 2; part++, nib++)
+    {
+        int p = 4 + nib / 3, px = o.x + p % PIC_SLOT_W, py = p / PIC_SLOT_W;
+        int row = (mode & 1) ? o.y + py : (int)h - 1 - o.y - py;
+        value |= PicNibbles(PicGrab(int2(px, row)), mode)[nib % 3] << (4 * part);
+    }
+    return value;
+}
+
+// ---- Ports: this frame's chunks, checked (row 227) ----
+// Synced: texel 0 (valid, slot, start, length), 1-4 the payload (4 bytes each). Local: texel 8 the same, 9-23 the payload.
+
+float4 PicPortTexel(int x)
+{
+    int mode = PicGrabMode();
+    if (mode < 0) return 0;
+    if (x <= 4)
+    {
+        uint gate = PicSlotByte(0, mode);
+        if (gate == 0 || gate > 128) return 0;
+        uint a = (gate - 1) & 63;
+        uint sync = (gate - 1) >= 64 ? 16 : 8;
+        uint slot = a >> 3;
+        uint b0 = PicSlotByte(1, mode);
+        uint chunk = (a & 7) | ((b0 & 63) << 3);
+        uint salt = b0 >> 6;
+        uint n = sync - 2;
+        uint start = chunk * n;
+        if (x == 0)
+        {
+            if (slot >= 7) return 0;
+            uint h = PicCheckStart(sync, slot, start, salt);
+            [loop] for (uint j = 0; j < 14; j++) if (j < n) h = PicFnv(h, PicSlotByte(2 + j, mode) ^ PicMask(salt, j));
+            bool ok = (PicFmix(h) & 255u) == PicSlotByte(1 + sync - 1, mode);
+            return ok ? float4(1, slot, start, n) : 0;
+        }
+        uint4 bytes = 0;
+        [unroll] for (int c = 0; c < 4; c++)
+        {
+            uint j = (x - 1) * 4 + c;
+            if (j < n) bytes[c] = PicSlotByte(2 + j, mode) ^ PicMask(salt, j);
+        }
+        return float4(bytes);
+    }
+    if (x >= 8 && x <= 23)
+    {
+        uint b0 = PicSlotByte(17, mode);
+        uint slot = b0 & 7, salt = b0 >> 3;
+        if (x == 8)
+        {
+            if (b0 >= 128 || slot >= 7) return 0;
+            uint start = (PicSlotByte(18, mode) ^ PicMask(salt, 0)) | ((PicSlotByte(19, mode) ^ PicMask(salt, 1)) << 8);
+            uint h = PicCheckStart(64, slot, start, salt);
+            [loop] for (uint j = 0; j < 59; j++) h = PicFnv(h, PicSlotByte(20 + j, mode) ^ PicMask(salt, 2 + j));
+            uint check = PicSlotByte(79, mode) | (PicSlotByte(80, mode) << 8);
+            return (PicFmix(h) & 0xFFFFu) == check ? float4(1, slot, start, 59) : 0;
+        }
+        uint4 bytes = 0;
+        [unroll] for (int c = 0; c < 4; c++)
+        {
+            uint j = (x - 9) * 4 + c;
+            if (j < 59) bytes[c] = PicSlotByte(20 + j, mode) ^ PicMask(salt, 2 + j);
+        }
+        return float4(bytes);
+    }
+    return 0;
+}
+
+// ---- Streams (rows 216-224) ----
+
+float4 PicStreamTexel(int index) { return PicA(index & 511, PIC_STREAM_ROW + (index >> 9)); }
+// Word w of a slot's stream, and whether all its bytes were kept under `tag` (the header's: 1).
+uint PicWord(int slot, int w)
+{
+    uint4 b = (uint4)PicStreamTexel(PicStreamFirst(slot) + clamp(w, 0, PicStreamTexels(slot) - 1)) & 255u;
+    return b.x | b.y << 8 | b.z << 16 | b.w << 24;
+}
+// n bits (n ≤ 24) from bit `bit` of the section starting at word `first`.
+uint PicBits(int slot, int first, uint bit, uint n)
+{
+    if (n == 0) return 0;
+    uint w = bit >> 5, s = bit & 31;
+    uint v = PicWord(slot, first + (int)w) >> s;
+    if (s + n > 32) v |= PicWord(slot, first + (int)w + 1) << (32 - s);
+    return v & ((1u << n) - 1u);
+}
+
+// A slot's state (row 226, texel slot × 8 + i).
+float4 PicState(int slot, int i) { return PicA(slot * 8 + i, PIC_SLOT_ROW); }
+uint PicTag(int slot) { return (uint)PicState(slot, 5).z; }
+
+// Byte `c` of a stream texel as the chunks of this frame's ports leave it.
+float PicStreamByte(int slot, int t, int c, float prev, uint tag)
+{
+    float next = prev;
+    int a = 4 * t + c;
+    [unroll] for (int lane = 0; lane < 2; lane++)
+    {
+        int x0 = lane == 0 ? 0 : 8;
+        float4 port = PicA(x0, PIC_PORT_ROW);
+        int start = (int)port.z, n = (int)port.w;
+        if (port.x > .5 && (int)port.y == slot && a >= start && a < start + n)
+        {
+            int j = a - start;
+            uint b = (uint)PicA(x0 + 1 + j / 4, PIC_PORT_ROW)[j & 3];
+            // A chunk carrying header bytes leaves its data unattached (1): it may bring a new header, which adopts them.
+            next = b + 256 * (start < PIC_HEADER ? 1 : tag);
+        }
+    }
+    return next;
+}
+
+float4 PicStreamUpdate(int2 p, float4 prev)
+{
+    int index = (p.y - PIC_STREAM_ROW) * 512 + p.x;
+    if (index >= 4608) return prev;
+    int slot = index < 2560 ? index / 512 : (index < 3584 ? 5 : 6);
+    int t = index - PicStreamFirst(slot);
+    uint tag = max(PicTag(slot), 1u);
+    return float4(PicStreamByte(slot, t, 0, prev.x, tag), PicStreamByte(slot, t, 1, prev.y, tag), PicStreamByte(slot, t, 2, prev.z, tag),
+        PicStreamByte(slot, t, 3, prev.w, tag));
+}
+
+// ---- Groups (row 225): x = 3 × group + layer; (received bytes of the layer under the slot's tag, hash low 16, high 16) ----
+
+int PicGroupSlot(int group) { return group < 80 ? group / 16 : (group < 112 ? 5 : 6); }
+
+float4 PicGroupUpdate(int x)
+{
+    int group = x / 3, layer = x % 3;
+    if (group >= 144) return 0;
+    int slot = PicGroupSlot(group);
+    int g = group - PicGroupFirst(slot);
+    float4 ends = PicState(slot, 1);
+    int start = layer == 0 ? PIC_HEADER : (int)ends[max(layer - 1, 0)], end = (int)ends[layer];
+    uint tag = PicTag(slot);
+    uint count = 0, hash = 0;
+    if (tag >= 2 && end > start)
+    {
+        [loop] for (int i = 0; i < 32; i++)
+        {
+            int t = g * 32 + i;
+            int a0 = 4 * t;
+            if (a0 + 4 <= start || a0 >= end) continue;
+            uint4 v = (uint4)PicStreamTexel(PicStreamFirst(slot) + t);
+            [unroll] for (int c = 0; c < 4; c++)
+            {
+                int a = a0 + c;
+                if (a >= start && a < end && ((v[c] >> 8) == tag || (v[c] >> 8) == 1))
+                {
+                    count++;
+                    hash += PicMix((uint)a, v[c] & 255u);
+                }
+            }
+        }
+    }
+    return float4(count, hash & 0xFFFFu, hash >> 16, 0);
+}
+
+// ---- Slot states (row 226, x = slot × 8 + i) ----
+// 0 (header valid, q, size, layers in the header), 1 (layer ends 1, 2, 3, -), 2 and 3 the signature's bytes, 4 (hash 1
+// low, high, hash 2 low, high), 5 (hash 3 low, high, tag, header hash), 6 (valid layers, -, -, -), 7 the job's last
+// delivery (tag, layers, -, -).
+
+float4 PicSlotUpdate(int x, float4 prev)
+{
+    int slot = x / 8, i = x % 8;
+    if (slot >= 7) return 0;
+    int size = PicSlotSize(slot);
+    uint b[32];
+    bool all = true;
+    [unroll] for (int t = 0; t < 8; t++)
+    {
+        uint4 v = (uint4)PicStreamTexel(PicStreamFirst(slot) + t);
+        [unroll] for (int c = 0; c < 4; c++) { b[4 * t + c] = v[c] & 255u; all = all && v[c] >= 256; }
+    }
+    uint h = 0;
+    [unroll] for (int a = 0; a < 30; a++) h += PicMix((uint)a, b[a]);
+    uint headerHash = (h ^ (h >> 16)) & 0xFFFFu;
+    bool valid = all && b[0] == PIC_FORMAT && (int)b[1] == size && headerHash == (b[30] | b[31] << 8);
+    uint ends[3];
+    uint layers = 0;
+    [unroll] for (int j = 0; j < 3; j++)
+    {
+        ends[j] = b[4 + 2 * j] | b[5 + 2 * j] << 8;
+        uint start = j == 0 ? PIC_HEADER : ends[max(j - 1, 0)];
+        if (layers == (uint)j && ends[j] > start && (ends[j] & 3) == 0 && (start & 3) == 0 && ends[j] <= (uint)PicCapacity(size)) layers = j + 1;
+    }
+    if (!valid) layers = 0;
+    if (i == 0) return float4(valid, b[2], size, layers);
+    if (i == 1) return valid ? float4(ends[0], ends[1], ends[2], 0) : 0;
+    if (i == 2) return float4(b[10], b[11], b[12], b[13]);
+    if (i == 3) return float4(b[14], b[15], b[16], b[17]);
+    if (i == 4) return float4(b[18] | b[19] << 8, b[20] | b[21] << 8, b[22] | b[23] << 8, b[24] | b[25] << 8);
+    if (i == 5) return float4(b[26] | b[27] << 8, b[28] | b[29] << 8, valid ? (headerHash & 63) + 2 : 0, headerHash);
+    if (i == 6)
+    {
+        // Layers whole under this tag and hashing right (the groups' sums of the last frame).
+        float4 e = PicState(slot, 1), hs = PicState(slot, 4), h3 = PicState(slot, 5);
+        uint ok = 0;
+        [loop] for (int j = 0; j < 3; j++)
+        {
+            if ((uint)j >= layers || ok != (uint)j) continue;
+            uint start = j == 0 ? PIC_HEADER : (uint)e[max(j - 1, 0)], end = (uint)e[j];
+            uint count = 0, sum = 0;
+            [loop] for (int g = 0; g < 32; g++)
+            {
+                if (g >= PicGroups(slot)) continue;
+                float4 v = PicA(3 * (PicGroupFirst(slot) + g) + j, PIC_GROUP_ROW);
+                count += (uint)v.x;
+                sum += (uint)v.y | ((uint)v.z << 16);
+            }
+            uint want = j == 0 ? ((uint)hs.x | (uint)hs.y << 16) : (j == 1 ? ((uint)hs.z | (uint)hs.w << 16) : ((uint)h3.x | (uint)h3.y << 16));
+            if (count == end - start && sum == want && (uint)h3.z == ((headerHash & 63) + 2)) ok = j + 1;
+        }
+        return float4(valid ? ok : 0, 0, 0, 0);
+    }
+    // i == 7: the last delivery, as the job says it (CRT B copies the job while it holds).
+    float4 job = PicJob();
+    uint state = (uint)job.x >> 6, jobSlot = (uint)job.x & 7, jobLayers = ((uint)job.x >> 3) & 7;
+    if (state == 2 && jobSlot == (uint)slot) return float4(job.y, jobLayers, 0, 0);
+    return prev;
+}
+
+// ---- Key and job (row 228) ----
+
+float4 PicMiscUpdate(int x, float4 prev)
+{
+    if (x == 0)
+    {
+        if (prev.x >= 1) return prev;
+        uint seed = asuint(_Time.y) ^ (asuint(_PictureSeed) * 2654435761u) ^ asuint(_SinTime.w);
+        return float4(1 + PicFmix(seed) % 65535u, 0, 0, 0);
+    }
+    if (x != 1) return 0;
+    uint state = (uint)prev.x >> 6, slot = (uint)prev.x & 7, layers = ((uint)prev.x >> 3) & 7;
+    uint frames = (uint)prev.z, next = (uint)prev.w;
+    if (state == 1)
+    {
+        frames++;
+        if (frames < PIC_JOB_FRAMES) return float4(prev.x, prev.y, frames, next);
+        // Delivered only when its layers are still whole and right under the same header.
+        bool still = (uint)PicState(slot, 5).z == (uint)prev.y && (uint)PicState(slot, 6).x >= layers;
+        return still ? float4(2 * 64 + layers * 8 + slot, prev.y, frames, next) : float4(0, 0, 0, next);
+    }
+    if (state == 2)
+    {
+        frames++;
+        if (frames < PIC_JOB_FRAMES + PIC_JOB_HOLD) return float4(prev.x, prev.y, frames, next);
+        return float4(0, 0, 0, next);
+    }
+    // Idle: the next slot (in turn) with more whole layers, or another picture, than it delivered.
+    [loop] for (int k = 0; k < 7; k++)
+    {
+        uint s = (next + k) % 7;
+        uint tag = (uint)PicState(s, 5).z, valid = (uint)PicState(s, 6).x;
+        float4 done = PicState(s, 7);
+        if (tag >= 2 && valid >= 1 && ((uint)done.x != tag || valid > (uint)done.y))
+            return float4(64 + valid * 8 + s, tag, 0, (s + 1) % 7);
+    }
+    return float4(0, 0, 0, next);
+}
+
+// ---- The job's tables ----
+// Layer infos (row 233, x = 96 + 4 × layer + i, layer from 0): 0 (descriptor words, big-flag start, big-flag bits,
+// big-flag words), 1 (small-flag start, small-flag bits, small-flag words, remainder start), 2 (remainder bits,
+// remainder words, unary start, unary words), 3 (-, layer start word, layer end word, -). Starts in words from the
+// stream's first. Bands (row 233, x = 32 × layer + band in layer, and one past the layer's last band for its totals):
+// (descriptor + 32 × first big flag, small flags set before the band, first coded index, first remainder bit).
+// Every heavy function below has one call site: FXC inlines everything, and copies of these made it compile for minutes.
+
+int PicJobSlot() { return (int)((uint)PicJob().x & 7); }
+int PicJobLayers() { return (int)(((uint)PicJob().x >> 3) & 7); }
+// The workspace computes only while the job decodes; done, it holds still for CRT B (chunks arriving meanwhile change
+// nothing it shows).
+bool PicJobOn() { return ((uint)PicJob().x >> 6) == 1; }
+
+float4 PicLayerInfo(int layer, int i) { return PicA(96 + 4 * layer + i, PIC_BAND_ROW); }
+float4 PicBandInfo(int layer, int b) { return PicA(32 * layer + b, PIC_BAND_ROW); }
+uint PicDescriptor(int slot, int layer, int b) { return PicBits(slot, (int)PicLayerInfo(layer, 3).y, (uint)b * 5, 5); }
+// A band's big-tile flags (tiles mode only).
+int PicBigFlags(PicBand band, uint descriptor) { return (band.orient != 0 && descriptor >= 9) ? band.h * ((band.w + 31) / 32) : 0; }
+uint PicBandK(PicBand band, uint descriptor) { return band.orient == 0 ? (descriptor & 7) : (descriptor >= 9 ? (descriptor - 9) & 7 : (descriptor >= 1 ? descriptor - 1 : 0)); }
+
+// Inclusive popcounts of the big-flag words (row 229, x = 128 × layer + word) and small-flag words (row 230 + layer).
+uint PicFlagCount(int layer, bool small, int w)
+{
+    if (w < 0) return 0;
+    return (uint)(small ? PicA(min(w, 511), PIC_L2_ROW + layer).x : PicA(128 * layer + min(w, 127), PIC_L1_ROW).x);
+}
+// Set flags before bit `bit` of the big (or small) flag section of a layer.
+uint PicRank(int slot, int layer, bool small, uint bit)
+{
+    int first = small ? (int)PicLayerInfo(layer, 1).x : (int)PicLayerInfo(layer, 0).y;
+    uint w = bit >> 5;
+    return PicFlagCount(layer, small, (int)w - 1) + countbits(PicWord(slot, first + (int)w) & ((1u << (bit & 31)) - 1u));
+}
+bool PicFlag(int slot, int first, uint bit) { return ((PicWord(slot, first + (int)(bit >> 5)) >> (bit & 31)) & 1u) != 0; }
+
+// The band table's texel for band b of a layer (b = the layer's band count: its totals): what the bands before it hold.
+float4 PicBandUpdate(int slot, int size, int layer, int b)
+{
+    int nb = PicLayerBands(layer + 1), fb = PicLayerFirstBand(layer + 1);
+    uint big = 0, coded = 0, rem = 0;
+    [loop] for (int k = 0; k < 30; k++)
+    {
+        if (k >= b) break;
+        PicBand band = PicBandOf(size, fb + k);
+        uint d = PicDescriptor(slot, layer, k);
+        uint bigs = (uint)PicBigFlags(band, d);
+        uint n = (uint)(band.h * band.w);
+        if (band.orient != 0 && d == 0) n = 0;
+        else if (band.orient != 0 && d >= 9)
+        {
+            // Four ranks, one loop: the band's set big flags, then its set small flags.
+            uint r[4];
+            [loop] for (int i = 0; i < 4; i++)
+            {
+                bool small = i >= 2;
+                uint bit = i == 0 ? big : (i == 1 ? big + bigs : (i == 2 ? 4 * r[0] : 4 * r[1]));
+                r[i] = PicRank(slot, layer, small, bit);
+            }
+            n = 8 * (r[3] - r[2]);
+        }
+        coded += n;
+        rem += n * PicBandK(band, d);
+        big += bigs;
+    }
+    uint d = b < nb ? PicDescriptor(slot, layer, b) : 0;
+    uint smallBefore = 0;
+    [loop] for (int i = 0; i < 2; i++) smallBefore = PicRank(slot, layer, i == 1, i == 0 ? big : 4 * smallBefore);
+    return float4(d + 32 * big, smallBefore, coded, rem);
+}
+
+float4 PicTableUpdate(int2 p, float4 prev)
+{
+    if (!PicJobOn()) return prev;
+    int slot = PicJobSlot(), size = PicSlotSize(slot);
+    if (size < 0) return prev;
+    float4 ends = PicState(slot, 1);
+    if (p.y == PIC_BAND_ROW && p.x >= 96 && p.x < 108)
+    {
+        int layer = (p.x - 96) / 4, i = (p.x - 96) % 4;
+        int startWord = (layer == 0 ? PIC_HEADER : (int)ends[max(layer - 1, 0)]) / 4, endWord = (int)ends[layer] / 4;
+        int nb = PicLayerBands(layer + 1), fb = PicLayerFirstBand(layer + 1);
+        int descWords = (nb * 5 + 31) / 32;
+        float4 li0 = PicLayerInfo(layer, 0), li1 = PicLayerInfo(layer, 1);
+        float4 totals = PicBandInfo(layer, nb);
+        float4 result = float4(0, startWord, endWord, 0);
+        if (i == 0)
+        {
+            uint bits = 0;
+            [loop] for (int b = 0; b < 30; b++)
+                if (b < nb) bits += (uint)PicBigFlags(PicBandOf(size, fb + b), PicDescriptor(slot, layer, b));
+            result = float4(descWords, startWord + descWords, bits, (bits + 31) / 32);
+        }
+        else if (i == 1)
+        {
+            uint smallBits = 4 * PicFlagCount(layer, false, (int)li0.w - 1);
+            int smallStart = (int)li0.y + (int)li0.w;
+            int smallWords = (int)((smallBits + 31) / 32);
+            result = float4(smallStart, smallBits, smallWords, smallStart + smallWords);
+        }
+        else if (i == 2)
+        {
+            uint remBits = (uint)totals.w;
+            int remWords = (int)((remBits + 31) / 32);
+            int unaryStart = (int)li1.w + remWords;
+            result = float4(remBits, remWords, unaryStart, max(endWord - unaryStart, 0));
+        }
+        return result;
+    }
+    if (p.y == PIC_BAND_ROW && p.x < 96)
+    {
+        int layer = p.x / 32, b = p.x % 32;
+        if (b > PicLayerBands(layer + 1)) return 0;
+        return PicBandUpdate(slot, size, layer, b);
+    }
+    // Popcounts of flag words, and zeros of unary words (per block of 32, then each word's inclusive count).
+    int layer = 0, w = 0, first = 0, words = 0, mode = -1;
+    if (p.y == PIC_L1_ROW && p.x < 384) { layer = p.x / 128; w = p.x % 128; float4 li0 = PicLayerInfo(layer, 0); first = (int)li0.y; words = (int)li0.w; mode = 0; }
+    else if (p.y >= PIC_L2_ROW && p.y < PIC_L2_ROW + 3) { layer = p.y - PIC_L2_ROW; w = p.x; float4 li1 = PicLayerInfo(layer, 1); first = (int)li1.x; words = (int)li1.z; mode = 0; }
+    else if (p.y == PIC_BLOCK_ROW && p.x < 192) { layer = p.x / 64; w = p.x % 64; float4 li2 = PicLayerInfo(layer, 2); first = (int)li2.z; words = (int)li2.w; mode = 1; }
+    else if (p.y >= PIC_ZERO_ROW && p.y < PIC_ZERO_ROW + 6) { layer = (p.y - PIC_ZERO_ROW) / 2; w = ((p.y - PIC_ZERO_ROW) % 2) * 512 + p.x; float4 li2 = PicLayerInfo(layer, 2); first = (int)li2.z; words = (int)li2.w; mode = 2; }
+    if (mode < 0) return prev;
+    if (mode != 1 && w >= words) return 0;
+    uint count = 0;
+    // Big and small flags: set bits of words 0..w. Unary blocks: zeros of the block's 32 words. Unary words: the blocks
+    // before, then the zeros of its block's words up to it.
+    int from = mode == 0 ? 0 : (mode == 1 ? 32 * w : 32 * (w / 32));
+    int to = mode == 0 ? w : (mode == 1 ? min(32 * w + 31, words - 1) : w);
+    if (mode == 2) [loop] for (int b = 0; b < 32; b++) { if (b >= w / 32) break; count += (uint)PicA(64 * layer + b, PIC_BLOCK_ROW).x; }
+    [loop] for (int k = 0; k < 512; k++)
+    {
+        int ww = from + k;
+        if (ww > to) break;
+        uint bits = countbits(PicWord(slot, first + ww));
+        count += mode == 0 ? bits : 32 - bits;
+    }
+    return float4(count, 0, 0, 0);
+}
+
+// Inclusive zero count of unary word w of a layer.
+uint PicZeros(int layer, int w) { return w < 0 ? 0u : (uint)PicA(w & 511, PIC_ZERO_ROW + 2 * layer + (w >> 9)).x; }
+
+// Where the i-th zero (from 0) of a layer's unary section is, in bits.
+uint PicSelectZero(int slot, int layer, uint i)
+{
+    float4 li2 = PicLayerInfo(layer, 2);
+    int words = (int)li2.w;
+    int lo = 0, hi = max(words - 1, 0);
+    [loop] for (int it = 0; it < 11; it++)
+    {
+        if (lo >= hi) break;
+        int mid = (lo + hi) >> 1;
+        if (PicZeros(layer, mid) > i) hi = mid; else lo = mid + 1;
+    }
+    uint j = i - PicZeros(layer, lo - 1);
+    uint x = ~PicWord(slot, (int)li2.z + lo);
+    [loop] for (uint n = 0; n < 32; n++) { if (n >= j) break; x &= x - 1u; }
+    return 32u * (uint)lo + firstbitlow(x);
+}
+
+// The coded value (the LL band's: its DPCM residual) of `channel` at plane position (x, y) of the job's picture.
+int PicCoded(int slot, int size, int x, int y, int channel)
+{
+    int b = PicBandAt(size, x, y, channel);
+    PicBand band = PicBandOf(size, b);
+    int layer = band.layer - 1;
+    float4 info = PicBandInfo(layer, b - PicLayerFirstBand(band.layer));
+    uint d = (uint)info.x & 31u, bigFirst = (uint)info.x >> 5;
+    uint k = PicBandK(band, d);
+    int r = y - band.y0, c = x - band.x0;
+    float4 li0 = PicLayerInfo(layer, 0), li1 = PicLayerInfo(layer, 1);
+    bool zero = band.layer > PicJobLayers() || (band.orient != 0 && d == 0);
+    uint index = (uint)(r * band.w + c);
+    if (!zero && band.orient != 0 && d >= 9)
+    {
+        uint bit = bigFirst + (uint)(r * ((band.w + 31) / 32) + c / 32);
+        uint small = 0;
+        if (!PicFlag(slot, (int)li0.y, bit)) zero = true;
+        else
+        {
+            small = 4 * PicRank(slot, layer, false, bit) + (uint)((c % 32) / 8);
+            if (!PicFlag(slot, (int)li1.x, small)) zero = true;
+            else index = 8 * (PicRank(slot, layer, true, small) - (uint)info.y) + (uint)(c % 8);
+        }
+    }
+    if (zero) return 0;
+    uint g = (uint)info.z + index;
+    uint rem = PicBits(slot, (int)li1.w, (uint)info.w + index * k, k);
+    // The ends of codes g - 1 and g in the unary section (one select, run twice).
+    uint ends[2] = { 0, 0 };
+    [loop] for (int e = 0; e < 2; e++)
+    {
+        if (e == 0 && g == 0) continue;
+        ends[e] = PicSelectZero(slot, layer, g - 1 + (uint)e) + (e == 0 ? 1u : 0u);
+    }
+    return PicUnzigzag(((ends[1] - ends[0]) << k) | rem);
+}
+
+// ---- Workspace planes ----
+
+float4 PicCoefUpdate(int2 p, float4 prev)
+{
+    if (!PicJobOn()) return prev;
+    int slot = PicJobSlot(), size = PicSlotSize(slot);
+    if (size < 0 || p.x >= PicWidth(size) || p.y >= PicHeight(size)) return 0;
+    uint q = (uint)PicState(slot, 0).y;
+    int2 ll = PicDims(size, PIC_LEVELS);
+    bool isLL = p.y < ll.x && p.x < ll.y;
+    // The LL band's DPCM: the first column's residuals down to its row, then its row's (Rust ll_residuals).
+    int terms = isLL ? p.y + 1 + p.x : 1;
+    int3 sum = 0;
+    [loop] for (int t = 0; t < 16; t++)
+    {
+        if (t >= terms) break;
+        int2 at = !isLL ? p : (t <= p.y ? int2(0, t) : int2(t - p.y, p.y));
+        [loop] for (int ch = 0; ch < 3; ch++) sum += PicCoded(slot, size, at.x, at.y, ch) * int3(ch == 0, ch == 1, ch == 2);
+    }
+    int3 v;
+    [unroll] for (int ch = 0; ch < 3; ch++)
+    {
+        PicBand band = PicBandOf(size, PicBandAt(size, p.x, p.y, ch));
+        v[ch] = PicDequantize(sum[ch], PicStep16(q, band), band.orient == 0);
+    }
+    return float4(v, 0);
+}
+
+// The 5/3 inverse's symmetric index into a band of n samples.
+int PicMirrorHigh(int i, int n) { return i < 0 ? -i - 1 : (i >= n ? 2 * n - 1 - i : i); }
+// The next even sample's index of a signal of n samples past 2k (whole-sample symmetric).
+int PicNextEven(int k, int n) { return 2 * k + 2 < n ? 2 * k + 2 : 2 * (n - 1) - (2 * k + 2); }
+
+// The 5/3 inverse at position i of a signal of n samples from its low (nl) and high halves, given the up to six samples
+// it needs: low k, high k - 1, high k (even i) and low m, high m - 1, high m for the next even sample (odd i).
+int3 PicInverse(int i, int3 s[6])
+{
+    int3 even = s[0] - ((s[1] + s[2] + 2) >> 2);
+    if ((i & 1) == 0) return even;
+    int3 next = s[3] - ((s[4] + s[5] + 2) >> 2);
+    return s[2] + ((even + next) >> 1);
+}
+// Which samples of the halves position i needs: (index into the low half, or -1 - index into the high half).
+int PicNeeded(int i, int j, int nl, int nh, int n)
+{
+    int k = i >> 1, m = PicNextEven(k, n) >> 1;
+    int idx = j == 0 ? k : (j == 1 ? k - 1 : (j == 2 ? k : (j == 3 ? m : (j == 4 ? m - 1 : m))));
+    bool low = j == 0 || j == 3;
+    return low ? min(idx, nl - 1) : -1 - PicMirrorHigh(idx, nh);
+}
+
+// The level's output at p: the columns' inverse (rows of LL or the horizontal band over the vertical or diagonal one),
+// then the rows' (low columns then high).
+float4 PicReconUpdate(int level, int2 p, float4 prev)
+{
+    if (!PicJobOn()) return prev;
+    int slot = PicJobSlot(), size = PicSlotSize(slot);
+    if (size < 0) return prev;
+    int2 outer = PicDims(size, level - 1), inner = PicDims(size, level);
+    if (p.y >= outer.x || p.x >= outer.y) return 0;
+    int2 low = level == 5 ? int2(0, 0) : (level == 4 ? PIC_RECON5 : (level == 3 ? PIC_RECON4 : (level == 2 ? PIC_RECON3 : PIC_RECON2)));
+    int3 rows[6];
+    // Six columns' worth (the row inverse's needs), each from six samples of its column (the column inverse's needs).
+    [loop] for (int j = 0; j < 6; j++)
+    {
+        int need = PicNeeded(p.x, j, inner.y, outer.y - inner.y, outer.y);
+        int c = need >= 0 ? need : inner.y - 1 - need;
+        int3 col[6];
+        [loop] for (int jj = 0; jj < 6; jj++)
+        {
+            int at = PicNeeded(p.y, jj, inner.x, outer.x - inner.x, outer.x);
+            int row = at >= 0 ? at : inner.x - 1 - at;
+            bool fromLow = at >= 0 && c < inner.y;
+            int2 t = fromLow ? low + int2(c, row) : int2(c, row);
+            col[jj] = (int3)PicA(t.x, t.y).xyz;
+        }
+        rows[j] = PicInverse(p.y, col);
+    }
+    return float4(PicInverse(p.x, rows), 0);
+}
+
+float4 PictureDataFrag(v2f_customrendertexture IN) : SV_Target
+{
+    int2 p = int2(IN.globalTexcoord.xy * float2(PIC_A_W, PIC_A_H));
+    float4 prev = PicA(p.x, p.y);
+    if (p.y < 144 && p.x < 256) return PicCoefUpdate(p, prev);
+    if (p.y < PIC_STREAM_ROW)
+    {
+        // The levels' reconstructions: one call, its level and place picked here.
+        int level = p.y < 144 ? 1 : (p.x < 128 ? 2 : (p.x < 192 ? 3 : (p.x < 224 ? 4 : (p.x < 240 ? 5 : 0))));
+        if (level == 0) return 0;
+        int2 at = level == 1 ? PIC_RECON1 : (level == 2 ? PIC_RECON2 : (level == 3 ? PIC_RECON3 : (level == 4 ? PIC_RECON4 : PIC_RECON5)));
+        return PicReconUpdate(level, p - at, prev);
+    }
+    if (p.y < PIC_GROUP_ROW) return PicStreamUpdate(p, prev);
+    if (p.y == PIC_GROUP_ROW) return PicGroupUpdate(p.x);
+    if (p.y == PIC_SLOT_ROW) return PicSlotUpdate(p.x, prev);
+    if (p.y == PIC_PORT_ROW) return PicPortTexel(p.x);
+    if (p.y == PIC_MISC_ROW) return PicMiscUpdate(p.x, prev);
+    if (p.y <= PIC_ZERO_ROW + 5) return PicTableUpdate(p, prev);
+    return 0;
+}
+
+#endif
+
+// ======== CRT B ========
+#ifdef PICTURE_SHOW
+
+float4 PicB(int x, int y) { return tex2Dlod(_SelfTexture2D, float4((x + .5) / PIC_B_W, (y + .5) / PIC_B_H, 0, 0)); }
+uint4 PicBBytes(int x, int y) { return (uint4)round(PicB(x, y) * 255); }
+
+// sRGB values of decoded YCbCr samples (JPEG's matrix).
+float3 PicRgb(int3 ycc)
+{
+    float y = ycc.x / 255.0, cb = ycc.y / 255.0, cr = ycc.z / 255.0;
+    float r = y + 1.402 * cr, b = y + 1.772 * cb;
+    float g = (y - .299 * r - .114 * b) / .587;
+    return saturate(float3(r, g, b));
+}
+
+// B's slot states (row 289, x = slot × 8 + i): 0 (shown, layers, size, -), 1 and 2 the signature, 3 (tag, -, -, -); the
+// heartbeat at x 511 (the clock's three bytes, 1).
+float4 PictureShowFrag(v2f_customrendertexture IN) : SV_Target
+{
+    int2 p = int2(IN.globalTexcoord.xy * float2(PIC_B_W, PIC_B_H));
+    float4 prev = PicB(p.x, p.y);
+    float4 job = PicJob();
+    uint state = (uint)job.x >> 6, jobSlot = (uint)job.x & 7, layers = ((uint)job.x >> 3) & 7, tag = (uint)job.y;
+    if (p.y == PIC_B_STATE_ROW)
+    {
+        if (p.x == 511)
+        {
+            uint t = PicClock();
+            return float4(t & 255u, (t >> 8) & 255u, (t >> 16) & 255u, 255) / 255.0;
+        }
+        int slot = p.x / 8, i = p.x % 8;
+        if (slot >= 7 || i >= 4) return 0;
+        uint4 s0 = PicBBytes(slot * 8, PIC_B_STATE_ROW), s3 = PicBBytes(slot * 8 + 3, PIC_B_STATE_ROW);
+        bool take = state == 2 && jobSlot == (uint)slot && (s0.x == 0 || s3.x != tag || s0.y < layers);
+        if (!take) return prev;
+        if (i == 0) return float4(1, layers, PicSlotSize(slot), 0) / 255.0;
+        if (i == 1) return PicA(slot * 8 + 2, PIC_SLOT_ROW) / 255.0;
+        if (i == 2) return PicA(slot * 8 + 3, PIC_SLOT_ROW) / 255.0;
+        return float4(tag, 0, 0, 0) / 255.0;
+    }
+    // A picture's texel: copied from A's last reconstruction while a finished job for its slot holds and B has not got it.
+    int slot = -1;
+    [unroll] for (int s = 0; s < 7; s++)
+    {
+        int2 at = PicPlaneAt(s);
+        int size = PicSlotSize(s);
+        if (p.x >= at.x && p.y >= at.y && p.x < at.x + PicWidth(size) && p.y < at.y + PicHeight(size)) slot = s;
+    }
+    if (slot < 0 || state != 2 || jobSlot != (uint)slot) return prev;
+    uint4 s0 = PicBBytes(slot * 8, PIC_B_STATE_ROW), s3 = PicBBytes(slot * 8 + 3, PIC_B_STATE_ROW);
+    if (!(s0.x == 0 || s3.x != tag || s0.y < layers)) return prev;
+    int2 at = p - PicPlaneAt(slot);
+    return float4(PicRgb((int3)PicA(PIC_RECON1.x + at.x, PIC_RECON1.y + at.y).xyz), 1);
+}
+
+#endif
+
+// ======== The screen ========
+#ifdef PICTURE_SCREEN
+
+sampler2D _Pictures;
+
+float4 PicShown(int x, int y) { return tex2Dlod(_Pictures, float4((x + .5) / PIC_B_W, (y + .5) / PIC_B_H, 0, 0)); }
+uint4 PicShownBytes(int x, int y) { return (uint4)round(PicShown(x, y) * 255); }
+
+// CRT B updated within the last half second (it freezes, by VRChat's reports, after an avatar switch).
+bool PicturesAlive()
+{
+    uint4 h = PicShownBytes(511, PIC_B_STATE_ROW);
+    uint t = h.x | h.y << 8 | h.z << 16;
+    return h.w == 255 && ((PicClock() - t) & 0xFFFFFFu) < 32u;
+}
+
+// The slot's picture is shown, and its signature is `signature` (the placeholder thumbnail's first 8 bytes).
+bool PictureFor(int slot, uint4 signature0, uint4 signature1)
+{
+    uint4 s0 = PicShownBytes(slot * 8, PIC_B_STATE_ROW);
+    return s0.x == 1 && all(PicShownBytes(slot * 8 + 1, PIC_B_STATE_ROW) == signature0) && all(PicShownBytes(slot * 8 + 2, PIC_B_STATE_ROW) == signature1);
+}
+
+// The slot's picture at uv (0 to 1, from its top left), bilinear: sRGB values.
+float3 PictureColour(int slot, float2 uv)
+{
+    int size = PicSlotSize(slot);
+    int2 at = PicPlaneAt(slot), dim = int2(PicWidth(size), PicHeight(size));
+    float2 f = saturate(uv) * dim - .5;
+    int2 i = (int2)floor(f);
+    float2 t = f - i;
+    int2 a = clamp(i, 0, dim - 1), b = clamp(i + 1, 0, dim - 1);
+    float3 c00 = PicShown(at.x + a.x, at.y + a.y).rgb, c10 = PicShown(at.x + b.x, at.y + a.y).rgb;
+    float3 c01 = PicShown(at.x + a.x, at.y + b.y).rgb, c11 = PicShown(at.x + b.x, at.y + b.y).rgb;
+    return lerp(lerp(c00, c10, t.x), lerp(c01, c11, t.x), t.y);
+}
+
+// How many of the slot's picture texels a screen pixel spans, its place `width` page pixels wide and a screen pixel
+// `pixel` page pixels (no gradient here: callers measure `pixel` outside their loops). Past 2 the placeholder, smooth,
+// looks better.
+float PictureTexelsPerPixel(int slot, float width, float pixel) { return pixel * PicWidth(PicSlotSize(slot)) / max(width, 1); }
+
+#endif
+
+#endif

@@ -1,0 +1,56 @@
+// N4N0's full pictures, the bridge's second pass (Orbiters contracts, Docs/orb-picture.md): grabs the frame with every
+// wearer's slot in it (the global texture CRT A reads at its next update), then draws back what was under this wearer's
+// slot from the first pass's grab (stereo instanced: from its eye's slice), so nothing of the slot is seen.
+// OrbInstaller writes this file with the include written in.
+Shader "Orbiters/N4N0 Picture Bridge Restore"
+{
+    Properties
+    {
+        [HideInInspector] _PictureData ("Picture data (CRT A)", 2D) = "black" {}
+    }
+    SubShader
+    {
+        Tags { "Queue" = "Overlay+11" "RenderType" = "Overlay" "IgnoreProjector" = "True" "DisableBatching" = "True" "VRCFallback" = "Hidden" "PreviewType" = "Plane" }
+        GrabPass { "_N4N0PictureGrab" }
+        Pass
+        {
+            ZTest Always ZWrite Off Cull Off Blend Off
+            CGPROGRAM
+            #pragma vertex vert
+            #pragma fragment frag
+            #pragma target 4.5
+            #pragma multi_compile_instancing
+            #include "UnityCG.cginc"
+            #define PICTURE_BRIDGE
+            #include "OrbitersPicture.cginc"
+            #if defined(UNITY_STEREO_INSTANCING_ENABLED) || defined(UNITY_STEREO_MULTIVIEW_ENABLED)
+            Texture2DArray _N4N0PictureOriginal;
+            #define PIC_ORIGINAL(p) _N4N0PictureOriginal.Load(int4(p, unity_StereoEyeIndex, 0))
+            #else
+            Texture2D _N4N0PictureOriginal;
+            #define PIC_ORIGINAL(p) _N4N0PictureOriginal.Load(int3(p, 0))
+            #endif
+
+            struct appdata { float4 vertex : POSITION; float2 uv : TEXCOORD0; UNITY_VERTEX_INPUT_INSTANCE_ID };
+            struct v2f { float4 pos : SV_Position; UNITY_VERTEX_OUTPUT_STEREO };
+
+            v2f vert(appdata v)
+            {
+                v2f o;
+                UNITY_SETUP_INSTANCE_ID(v);
+                UNITY_INITIALIZE_OUTPUT(v2f, o);
+                UNITY_INITIALIZE_VERTEX_OUTPUT_STEREO(o);
+                o.pos = PicBridgeClip(v.uv);
+                return o;
+            }
+
+            float4 frag(v2f i) : SV_Target
+            {
+                UNITY_SETUP_STEREO_EYE_INDEX_POST_VERTEX(i);
+                if (PicBridgeIndex(i.pos.xy) < 0) discard;
+                return PIC_ORIGINAL((int2)i.pos.xy);
+            }
+            ENDCG
+        }
+    }
+}

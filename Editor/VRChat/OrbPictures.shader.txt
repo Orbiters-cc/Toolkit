@@ -1,0 +1,25 @@
+// N4N0's full pictures, CRT B (Orbiters contracts, Docs/orb-picture.md): the decoded pictures as sRGB (five 128 × 72 and
+// two 256 × 144), each slot's signature and layers, and a heartbeat the screen checks; it copies CRT A's finished jobs.
+// 512 × 290 RGBA8, double buffered, updated every frame. OrbInstaller writes this file with the include written in.
+Shader "Orbiters/N4N0 Pictures"
+{
+    Properties
+    {
+        [HideInInspector] _PictureData ("Picture data (CRT A)", 2D) = "black" {}
+    }
+    SubShader
+    {
+        Lighting Off Blend One Zero ZTest Always ZWrite Off Cull Off
+        Pass
+        {
+            CGPROGRAM
+            #pragma vertex CustomRenderTextureVertexShader
+            #pragma fragment PictureShowFrag
+            #pragma target 4.5
+            #include "UnityCustomRenderTexture.cginc"
+            #define PICTURE_SHOW
+            #include "OrbitersPicture.cginc"
+            ENDCG
+        }
+    }
+}

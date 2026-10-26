@@ -23,7 +23,21 @@
   rides the head any more.
 - **Out of recordings and 3D pictures**: while N4N0's capture kit records (`N4N0/Capture/Record`), its owner's client
   hides N4N0's screen, handle, link card, text panel and desktop dot, and shows them again after, the menu left open.
-- N4N0's options folder is `Menu 15`, its screen revision 10.
+- **N4N0's full pictures** (screen version 8; Orbiters contracts, `Docs/orb-picture.md`): the screen shows the
+  pictures Orbiters - N4N0 sends at the size of their place (the results' thumbnails at 128 × 72, the music's art and
+  the link card's picture at 256 × 144) over the small thumbnails they belong to, for everyone once they arrived: the
+  owner's first, through 64 local float parameters over OSC (`N4N0/Picture/Value0` to `Value63` and
+  `N4N0/Picture/Send`, unsynced and unsaved: no synced bit), everyone else's through the text channel (pointers 188 to
+  251, with 8 or 16 text slots; with 4 they reach their owner only). N4N0 carries a bridge renderer under its head
+  (`Head/Pictures`, on only while chunks flow: it writes them into a keyed slot of the frame, a GrabPass before and
+  after) and two Custom Render Textures in its screen folder: CRT A (512 × 256) keeps each picture's stream and decodes
+  one picture at a time, CRT B (512 × 290) keeps the decoded pictures with their signatures and a heartbeat. Their
+  shaders are written from the contracts' `OrbitersPicture.cginc`, every chunk value in a register of its own
+  (`OrbPicturesHook` gives the bridge the screen's own folder before each upload). A picture shows only over the
+  thumbnail whose first 8 bytes it carries, while CRT B is alive, and while a screen pixel spans under two of its
+  texels; the thumbnail shows otherwise. Tests: `OrbPictureTests` (a contracts vector's chunks through the bridge and
+  both CRTs' shaders into CRT B, pixel for pixel).
+- N4N0's options folder is `Menu 15`, its screen revision 11.
 
 ## 0.4.6 — 2026-10-26
 
