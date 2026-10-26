@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading.Tasks;
 using UnityEngine;
 
 namespace Orbiters.Toolkit.Editor.VRChat.Attachments
@@ -46,12 +47,28 @@ namespace Orbiters.Toolkit.Editor.VRChat.Attachments
         public static List<AttachmentOption> Options(GameObject placed) =>
             placed == null ? new List<AttachmentOption>() : OptionSources.SelectMany(source => source(placed) ?? Enumerable.Empty<AttachmentOption>()).ToList();
 
+        private static readonly List<Func<GameObject, GameObject, Task>> Carries = new List<Func<GameObject, GameObject, Task>>();
+
+        /// <param name="carry">
+        /// What else an update of a placed item takes over from its older copy (the variants of its customizable parts);
+        /// it may finish later (a renderer's pictures), the older copy gone by then.
+        /// </param>
+        public static void RegisterCarry(Func<GameObject, GameObject, Task> carry)
+        {
+            if (carry != null && !Carries.Contains(carry)) Carries.Add(carry);
+        }
+
         /// <summary>
         /// Sets <paramref name="to"/>'s options as <paramref name="from"/>'s are, matched by label and choice (an update
-        /// placed in place of an older copy keeps its settings).
+        /// placed in place of an older copy keeps its settings), and what registered carries take over (its parts' variants).
         /// </summary>
         public static void CarryOptions(GameObject from, GameObject to)
         {
+            foreach (var carry in Carries)
+            {
+                try { _ = carry(from, to); }
+                catch (Exception e) { Debug.LogWarning("[Orbiters] " + (to != null ? to.name : "The item") + " was updated without some of its earlier choices: " + e.Message); }
+            }
             var before = Options(from);
             foreach (var option in Options(to))
             {

@@ -1,0 +1,22 @@
+{
+  "schema": 1,
+  "style": "retro",
+  "colors": {
+    "accent": "#2BE36A",
+    "background": "#020A04",
+    "surface": "#05180B",
+    "text": "#7DFFA6",
+    "muted": "#2FB85E",
+    "green": "#2BE36A",
+    "red": "#FF4D3D",
+    "blue": "#2BE36A",
+    "violet": "#2BE36A",
+    "cyan": "#2BE36A",
+    "amber": "#2BE36A"
+  },
+  "screen": {
+    "tint": "#020805D1",
+    "edge": "#00DA6D",
+    "glow": 1
+  }
+}

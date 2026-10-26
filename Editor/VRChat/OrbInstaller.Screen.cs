@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
+using Orbiters.Toolkit.Editor.VRChat.Attachments;
 using UnityEditor;
 using UnityEditor.Animations;
 using UnityEngine;
@@ -97,8 +98,9 @@ namespace Orbiters.Toolkit.Editor.VRChat
         internal const string ScreenFolder = "Assets/Orbiters/N4N0/Screen " + ScreenRevision;
         // The screen files' revision, the shader's OrbScreen tag: 5 draws the back as a card ("N4N0 menu, look at the other
         // side"), 6 the retro look's own pages and live parts, 7 the projected look and N4N0's beam on a skinned screen,
-        // 8 the version 6 pages (22 of them), 9 the rays from the fingertips (a third part, bound to the pointers).
-        internal const string ScreenRevision = "9";
+        // 8 the version 6 pages (22 of them), 9 the rays from the fingertips (a third part, bound to the pointers), 10 the
+        // projection's glow as a property (_Glow, a menu theme's screen glow).
+        internal const string ScreenRevision = "10";
         private const string ScreenShaderTemplate = "Packages/orbiters.toolkit/Editor/VRChat/OrbScreen.shader.txt";
         private const string BeamShaderTemplate = "Packages/orbiters.toolkit/Editor/VRChat/OrbBeam.shader.txt";
         private const string RayShaderTemplate = "Packages/orbiters.toolkit/Editor/VRChat/OrbRay.shader.txt";
@@ -491,11 +493,14 @@ namespace Orbiters.Toolkit.Editor.VRChat
             if (renderer == null) return;
             if (ScreenCurrent(renderer.sharedMaterial, thumbnailBytes)) return;
             bool retro = RetroOf(orb);
+            // A menu theme or language drawn for this screen: drawn again for the new files.
+            var drawn = ItemParts.Of(orb.gameObject).Where(p => p.Part.renderer == MenuRenderer && p.Current != null && p.Current.Recorded).Select(p => p.Current).ToList();
             var (_, material) = ScreenAssets(ScreenFolder, thumbnailBytes, retro);
             Undo.RecordObject(renderer, "N4N0 thumbnail size");
             SetScreenMaterials(renderer, material, retro);
             PrefabUtility.RecordPrefabInstancePropertyModifications(renderer);
             SetCardMaterials(orb, material, retro, "N4N0 thumbnail size");
+            DrawPartsAgain(orb, drawn);
         }
 
         /// <summary>
