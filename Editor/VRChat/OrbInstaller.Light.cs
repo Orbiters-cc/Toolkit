@@ -5,6 +5,7 @@ using UnityEditor;
 using UnityEditor.Animations;
 using UnityEngine;
 using VRC.SDK3.Avatars.ScriptableObjects;
+using VRC.SDK3.Dynamics.Constraint.Components;
 using static Orbiters.Toolkit.Editor.VRChat.HeldPropRig;
 using Object = UnityEngine.Object;
 
@@ -13,13 +14,16 @@ namespace Orbiters.Toolkit.Editor.VRChat
     /// <summary>
     /// N4N0's light (Orbiters contracts' Docs/orb.md, the Light option on N4N0's card): N4N0 becomes a light, for a
     /// dark world or a photo. A point light under N4N0, without shadows, lit in one of eight colours at a brightness
-    /// from 0 to 1; N4N0 takes the light's colour. Everyone around sees it (17 synced bits). Orbiters - N4N0 sets it
-    /// from N4N0's menu, and N4N0 › Light in the expressions menu does too.
+    /// from 0 to 1; N4N0's patterns take the light's colour. Stay there leaves N4N0 (and its light) where it is in the
+    /// world, a steady light, until turned off. Everyone around sees it (18 synced bits). Orbiters - N4N0 sets it from
+    /// N4N0's menu, and N4N0 › Light in the expressions menu does too.
     /// </summary>
     public static partial class OrbInstaller
     {
         /// <summary>On (synced, not saved), its colour (an index of <see cref="LightColors"/>) and brightness (synced, saved).</summary>
         public const string Light = "N4N0/Light/On", LightColor = "N4N0/Light/Color", LightLevel = "N4N0/Light/Level";
+        /// <summary>Synced, not saved: N4N0 stays where it is in the world (N4N0 › Light › Stay there) instead of following.</summary>
+        public const string LightStay = "N4N0/Light/Stay";
         public const float LightLevelDefault = .6f;
         internal const string LightObject = Hop + "/Light";
         // How far the light reaches at ReferenceEyes (Bind scales it with the avatar), and its intensity at level 0 and 1.
@@ -107,6 +111,22 @@ namespace Orbiters.Toolkit.Editor.VRChat
             parameters.Add(Parameter(Light));
             parameters.Add(Parameter(LightColor, type: VRCExpressionParameters.ValueType.Int, saved: true));
             parameters.Add(Parameter(LightLevel, type: VRCExpressionParameters.ValueType.Float, saved: true, defaultValue: LightLevelDefault));
+            parameters.Add(Parameter(LightStay));
+
+            // Stay there: N4N0's stay frame frozen in the world (each client where it sees N4N0 then), following again after.
+            controller.AddParameter(LightStay, AnimatorControllerParameterType.Bool);
+            var stays = Layer(controller, "Light stay");
+            AnimationClip Frozen(string name, bool on)
+            {
+                var clip = new AnimationClip { name = name };
+                Curve(clip, StayFrame, typeof(VRCParentConstraint), "FreezeToWorld", on ? 1 : 0);
+                return clip;
+            }
+            var following = HeldPropRig.State(controller, stays, "Following", Frozen("N4N0 following", false));
+            var staying = HeldPropRig.State(controller, stays, "Staying", Frozen("N4N0 staying", true));
+            stays.defaultState = following;
+            Transition(following, staying, (LightStay, AnimatorConditionMode.If, 0));
+            Transition(staying, following, (LightStay, AnimatorConditionMode.IfNot, 0));
 
             var colours = ScriptableObject.CreateInstance<VRCExpressionsMenu>();
             colours.controls = LightColors.Select((c, i) =>
@@ -122,7 +142,11 @@ namespace Orbiters.Toolkit.Editor.VRChat
             var brightness = Control("Brightness", VRCExpressionsMenu.Control.ControlType.RadialPuppet, "");
             brightness.subParameters = new[] { new VRCExpressionsMenu.Control.Parameter { name = LightLevel } };
             var menu = ScriptableObject.CreateInstance<VRCExpressionsMenu>();
-            menu.controls = new List<VRCExpressionsMenu.Control> { Control("Light", VRCExpressionsMenu.Control.ControlType.Toggle, Light), brightness, colourMenu };
+            menu.controls = new List<VRCExpressionsMenu.Control>
+            {
+                Control("Light", VRCExpressionsMenu.Control.ControlType.Toggle, Light), brightness, colourMenu,
+                Control("Stay there", VRCExpressionsMenu.Control.ControlType.Toggle, LightStay),
+            };
             AssetDatabase.CreateAsset(menu, AssetDatabase.GenerateUniqueAssetPath(folder + "/N4N0 light menu.asset"));
             var light = Control("Light", VRCExpressionsMenu.Control.ControlType.SubMenu, "");
             light.subMenu = menu;

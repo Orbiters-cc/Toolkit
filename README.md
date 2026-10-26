@@ -1,5 +1,28 @@
 # Orbiters Toolkit
 
+## Unreleased
+
+- **Stay there** (N4N0 › Light › Stay there, `N4N0/Light/Stay`, one synced bit, not saved): N4N0 and its light stay
+  where they are in the world, a steady light, until it is turned off. N4N0 hangs from a stay frame under the head
+  (`Head/Stay`, a VRC Parent Constraint on the head that the light's animator layer freezes to the world).
+- **N4N0 stays upright**: a VRC Rotation Constraint turns N4N0 with its stay frame, whatever way the swinging tether
+  tilts its tip, so it no longer nods as its owner walks.
+- **Expressions without clipping**: each expression has in-between frames at 25, 50 and 75 % that follow the sphere a
+  little above it, and N4N0's states change one expression at a time (each state has an intro: the old expression
+  blends out, then the new one ramps in), so the face's patterns never cut through the ball on their way. Listening no
+  longer blinks.
+- **N4N0's folder icon**: the N4N0 folder in the expressions menu shows the N4N0 mark in its aqua-to-lime gradient
+  (`N4N0 icon.png` in N4N0's folder).
+- **Screen version 9**: the Music page's timeline (16 segments lit to where the track is; tap or drag along it to move
+  in the track) and Take back card on the Results and Music pages while the link card is out (Orbiters - N4N0 0.3.2);
+  the screen's back shows N4N0's face logo. N4N0's language files have the new text (`card.takeBack`).
+- **Full pictures' diagnostics**: with Orbiters - N4N0's N4N0 › Testing › Picture diagnostics on, the screen (which
+  also reads CRT A now) frames each picture in the colour of why it shows what it shows and draws the textures' state
+  in a row of cells at its bottom left (contracts `Docs/orb-picture.md`, Diagnostics). A picture shows once CRT B ran:
+  B's heartbeat is no longer compared with the screen's clock (Custom Render Texture updates and cameras need not share
+  `_Time`).
+- N4N0's options folder is `Menu 16`, its screen revision 13.
+
 ## 0.4.7 — 2026-10-26
 
 - **VRCFury 1.1434**: VRCFury now builds controllers that reuse the avatar's own clips, blend trees and masks where it
@@ -40,13 +63,10 @@
   one picture at a time, CRT B (512 × 290) keeps the decoded pictures with their signatures and a heartbeat. Their
   shaders are written from the contracts' `OrbitersPicture.cginc`, every chunk value in a register of its own
   (`OrbPicturesHook` gives the bridge the screen's own folder before each upload). A picture shows only over the
-  thumbnail whose first 8 bytes it carries, once CRT B ran, and while a screen pixel spans under two of its texels; the
-  thumbnail shows otherwise. Diagnostics (screen revision 12, which also reads CRT A): with Orbiters - N4N0's N4N0 ›
-  Testing › Picture diagnostics on, the screen frames each picture in the colour of why it shows what it shows and draws
-  the textures' state in a row of cells at its bottom left (contracts `Docs/orb-picture.md`, Diagnostics). Tests:
-  `OrbPictureTests` (a contracts vector's chunks through the bridge and both CRTs' shaders into CRT B, pixel for pixel;
-  the screen's material with both textures).
-- N4N0's options folder is `Menu 15`, its screen revision 12.
+  thumbnail whose first 8 bytes it carries, while CRT B is alive, and while a screen pixel spans under two of its
+  texels; the thumbnail shows otherwise. Tests: `OrbPictureTests` (a contracts vector's chunks through the bridge and
+  both CRTs' shaders into CRT B, pixel for pixel).
+- N4N0's options folder is `Menu 15`, its screen revision 11.
 
 ## 0.4.6 — 2026-10-26
 

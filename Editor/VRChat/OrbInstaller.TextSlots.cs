@@ -28,7 +28,7 @@ namespace Orbiters.Toolkit.Editor.VRChat
         // The controller, parameters and menu of each choice of options, shared by every N4N0 switched to it (they name no
         // object of their own: their curves follow paths below N4N0).
         // A new menu or parameters get a new folder: orbs switched earlier keep the files they use.
-        internal const string OptionsFolder = "Assets/Orbiters/N4N0/Menu 15/";
+        internal const string OptionsFolder = "Assets/Orbiters/N4N0/Menu 16/";
 
         [InitializeOnLoadMethod]
         private static void RegisterOrbOptions() => AttachmentHooks.RegisterOptions(root => FindAll(root).SelectMany(orb =>
@@ -95,7 +95,7 @@ namespace Orbiters.Toolkit.Editor.VRChat
                 {
                     Label = "Light",
                     Tooltip = "N4N0 can become a light, for a dark world or a photo: on or off, eight colours and a brightness, from N4N0's menu " +
-                              "or N4N0 › Light in your menu. Everyone around sees it. Costs 17 synced bits, and any light makes the avatar's PC " +
+                              "or N4N0 › Light in your menu, where Stay there leaves it as a steady light. Everyone around sees it. Costs 18 synced bits, and any light makes the avatar's PC " +
                               "performance rank Poor (Quest leaves it out).",
                     IsToggle = true,
                     Choices = new[] { "Off", "On" },

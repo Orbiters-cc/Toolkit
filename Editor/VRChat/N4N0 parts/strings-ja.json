@@ -59,6 +59,7 @@
     "states.default": "既定",
     "card.grabToCopy": "つかんでリンクをコピー",
     "card.anyoneCanTake": "近くでN4N0を持っている人なら誰でも取れます",
+    "card.takeBack": "カードを回収",
     "newState.title": "新しい状態",
     "newState.name": "名前",
     "newState.options": "オプション",

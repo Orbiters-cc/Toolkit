@@ -59,6 +59,7 @@
     "states.default": "Par défaut",
     "card.grabToCopy": "Attrape pour copier le lien",
     "card.anyoneCanTake": "Toute personne proche avec N4N0 peut la prendre",
+    "card.takeBack": "Reprendre la carte",
     "newState.title": "Nouvel état",
     "newState.name": "Nom",
     "newState.options": "Options",

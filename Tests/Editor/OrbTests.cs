@@ -124,6 +124,10 @@ public class OrbTests
         Assert.AreEqual(OrbInstaller.ModelShader, model.sharedMaterials.Single().shader.name, "N4N0's model in VRChat's mobile Standard Lite, one material");
         CollectionAssert.AreEqual(OrbInstaller.ModelShapes, Enumerable.Range(0, model.sharedMesh.blendShapeCount).Select(model.sharedMesh.GetBlendShapeName).ToArray());
         Assert.AreEqual(folder + "/N4N0 model.asset", AssetDatabase.GetAssetPath(model.sharedMesh), "In N4N0's folder, which a package carries");
+        var upright = root.Find(OrbInstaller.Hop).GetComponent<VRCRotationConstraint>();
+        Assert.AreEqual(root.Find(OrbInstaller.StayFrame), upright.Sources.Single().SourceTransform, "Upright and turned like the avatar, however the tether swings");
+        var folderIcon = AssetDatabase.LoadAssetAtPath<VRCExpressionsMenu>(folder + "/Menu.asset").controls.Single().icon;
+        Assert.AreEqual(folder + "/N4N0 icon.png", AssetDatabase.GetAssetPath(folderIcon), "N4N0's folder shows the N4N0 mark");
         var atlas = (Texture2D)screen.sharedMaterials[0].GetTexture("_MainTex");
         Assert.AreEqual(folder + "/N4N0 text.png", AssetDatabase.GetAssetPath(atlas));
         Assert.AreEqual(2048, Mathf.Max(atlas.width, atlas.height), "Imported at most 2048 on its longest side");
@@ -273,7 +277,7 @@ public class OrbTests
         // Idle blinks: 3.1 s in, its eyes shut for a moment.
         playable.SetInteger(OrbInstaller.State, (int)OrbState.Happy); Tick(20);
         playable.SetInteger(OrbInstaller.State, (int)OrbState.Idle);
-        Tick(1); Tick(157);
+        Tick(1); Tick(167);
         Assert.AreEqual(100, Shape("Blink"), .01f, "Blinking");
         Tick(10);
         Assert.AreEqual(0, Shape("Blink"), .01f, "Open again");
@@ -336,8 +340,16 @@ public class OrbTests
         var moved = new HashSet<int>();
         foreach (var shape in OrbInstaller.ModelShapes)
         {
+            int index = mesh.GetBlendShapeIndex(shape), frames = mesh.GetBlendShapeFrameCount(index);
+            Assert.AreEqual(4, frames, shape + ": its in-betweens at 25, 50 and 75 %, then the expression");
             var deltas = new Vector3[vertices.Length];
-            mesh.GetBlendShapeFrameVertices(mesh.GetBlendShapeIndex(shape), 0, deltas, null, null);
+            // The in-betweens follow the sphere, a little above it: the face never cuts through the ball on its way.
+            for (int f = 0; f + 1 < frames; f++)
+            {
+                mesh.GetBlendShapeFrameVertices(index, f, deltas, null, null);
+                Assert.IsTrue(patterns.All(i => (vertices[i] + deltas[i]).magnitude > 1.01f && (vertices[i] + deltas[i]).magnitude < 1.03f), shape + " frame " + f + ": above the shell");
+            }
+            mesh.GetBlendShapeFrameVertices(index, frames - 1, deltas, null, null);
             for (int i = 0; i < vertices.Length; i++) if (deltas[i].sqrMagnitude > 1e-10f) moved.Add(i);
             var bent = vertices.Select((v, i) => v + deltas[i]).ToArray();
             Assert.IsTrue(patterns.All(i => bent[i].magnitude > 1.01f && bent[i].magnitude < 1.02f), shape + ": the patterns float above the shell");
@@ -991,12 +1003,13 @@ public class OrbTests
             (OrbInstaller.Light, VRCExpressionParameters.ValueType.Bool, true, false, 0f),
             (OrbInstaller.LightColor, VRCExpressionParameters.ValueType.Int, true, true, 0f),
             (OrbInstaller.LightLevel, VRCExpressionParameters.ValueType.Float, true, true, OrbInstaller.LightLevelDefault),
+            (OrbInstaller.LightStay, VRCExpressionParameters.ValueType.Bool, true, false, 0f),
         }, own);
-        Assert.AreEqual(1 + 8 + 1 + 8 + 8 * 8 + 3 + 8 + 3 + 1 + 8 + 8, parameters.CalcTotalCost(), "17 synced bits more");
+        Assert.AreEqual(1 + 8 + 1 + 8 + 8 * 8 + 3 + 8 + 3 + 1 + 8 + 8 + 1, parameters.CalcTotalCost(), "18 synced bits more");
         Assert.IsTrue(VrcFury.IsGlobalParameter(VrcFury.Features(placed).Single(f => f.kind == "FullController").feature, OrbInstaller.LightColor));
         var orbMenu = AssetDatabase.LoadAssetAtPath<VRCExpressionsMenu>(shared + "/Menu.asset").controls.Single().subMenu;
         var lightMenu = orbMenu.controls.Single(c => c.name == "Light").subMenu;
-        CollectionAssert.AreEqual(new[] { "Light", "Brightness", "Colour" }, lightMenu.controls.Select(c => c.name).ToArray());
+        CollectionAssert.AreEqual(new[] { "Light", "Brightness", "Colour", "Stay there" }, lightMenu.controls.Select(c => c.name).ToArray());
         Assert.AreEqual(OrbInstaller.LightLevel, lightMenu.controls[1].subParameters.Single().name);
         var colours = lightMenu.controls[2].subMenu.controls;
         CollectionAssert.AreEqual(Enumerable.Range(0, 8).Select(i => (float)i).ToArray(), colours.Select(c => c.value).ToArray());
@@ -1023,6 +1036,15 @@ public class OrbTests
         Assert.AreEqual(OrbInstaller.LightColors[3].color.g, played.color.g, .01f);
         Assert.AreEqual(OrbInstaller.LightBright, played.intensity, .01f);
         Assert.IsTrue(OrbColour().r > .9f && OrbColour().r > OrbColour().g + .15f, "N4N0 glows pink: " + OrbColour());
+        // Stay there: N4N0 stays where it is in the world, then follows again.
+        var anchor = root.transform.Find(OrbInstaller.StayFrame).GetComponent<VRCParentConstraint>();
+        Assert.IsFalse(anchor.FreezeToWorld);
+        playable.SetBool(OrbInstaller.LightStay, true);
+        Tick(3);
+        Assert.IsTrue(anchor.FreezeToWorld, "Staying there");
+        playable.SetBool(OrbInstaller.LightStay, false);
+        Tick(3);
+        Assert.IsFalse(anchor.FreezeToWorld, "Following again");
         playable.SetBool(OrbInstaller.Light, false);
         Tick(20);
         Assert.IsFalse(played.gameObject.activeSelf);
@@ -1056,7 +1078,7 @@ public class OrbTests
         var parameters = AssetDatabase.LoadAssetAtPath<VRCExpressionParameters>(OrbInstaller.OptionsFolder + "Text slots 8 + screen in VR/Parameters.asset");
         var version = parameters.parameters.Single(p => p.name == OrbInstaller.ScreenVersionParameter);
         Assert.AreEqual((VRCExpressionParameters.ValueType.Int, false, false, (float)OrbInstaller.ScreenVersion), (version.valueType, version.networkSynced, version.saved, version.defaultValue));
-        Assert.AreEqual(8, OrbInstaller.ScreenVersion);
+        Assert.AreEqual(9, OrbInstaller.ScreenVersion);
     }
 
     // The retro look is the screen's material alone: it stays through N4N0's other options, and goes back.
@@ -1230,7 +1252,7 @@ public class OrbTests
         var phone = Merged(Built(avatar, mobile: true));
         List<(string, VRCExpressionParameters.ValueType)> Synced(List<VRCExpressionParameters.Parameter> list) =>
             list.Where(p => p.networkSynced).Select(p => (p.name, p.valueType)).ToList();
-        Assert.AreEqual(1 + 8 + 1 + 8 + 8 * 8 + 3 + 8 + 3 + 1 + 8 + 8, pc.Where(p => p.networkSynced).Sum(p => p.valueType == VRCExpressionParameters.ValueType.Bool ? 1 : 8), "N4N0 with 8 text slots and its light");
+        Assert.AreEqual(1 + 8 + 1 + 8 + 8 * 8 + 3 + 8 + 3 + 1 + 8 + 8 + 1, pc.Where(p => p.networkSynced).Sum(p => p.valueType == VRCExpressionParameters.ValueType.Bool ? 1 : 8), "N4N0 with 8 text slots and its light");
         CollectionAssert.AreEqual(Synced(pc), Synced(phone));
         // The PC N4N0's parameters come first and whole; the mobile build adds its version, local.
         CollectionAssert.AreEqual(pc.Select(p => p.name), phone.Take(pc.Count).Select(p => p.name));
@@ -1270,7 +1292,7 @@ public class OrbTests
         playable.SetInteger(OrbInstaller.State, (int)OrbState.Happy);
         Tick(20);
         playable.SetInteger(OrbInstaller.State, (int)OrbState.Idle);
-        Tick(1); Tick(157);
+        Tick(1); Tick(167);
         Assert.AreEqual(100, Shape("Blink"), .01f, "Blinking");
         Tick(10);
         Assert.AreEqual(0, Shape("Blink"), .01f, "Open again");

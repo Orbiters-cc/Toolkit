@@ -42,7 +42,7 @@ namespace Orbiters.Toolkit.Editor.VRChat
         /// <summary>The numbers of text sync values N4N0 may have.</summary>
         public static readonly IReadOnlyList<int> TextSyncCounts = new[] { 4, 8, 16 };
 
-        internal const string Shown = "Shown", Head = Shown + "/Head", Tether = Head + "/Tether", Ball = Tether + "/1/2/Ball";
+        internal const string Shown = "Shown", Head = Shown + "/Head", StayFrame = Head + "/Stay", Tether = StayFrame + "/Tether", Ball = Tether + "/1/2/Ball";
         internal const string Hop = Ball + "/Hop", Body = Hop + "/Body", Emitter = Hop + "/Emitter", Toucher = Ball + "/Touch", Panel = Head + "/Panel";
         internal static readonly Color Colour = new Color(0, 218 / 255f, 109 / 255f);
 
@@ -114,13 +114,24 @@ namespace Orbiters.Toolkit.Editor.VRChat
             level.Sources.Add(new VRCConstraintSource(null, 1));
             level.IsActive = true; level.Locked = true;
 
-            // The tether's root stays with the head; its two links and N4N0 on their tip lag behind and drift back, smoothly
+            // Where N4N0 hangs: with the head, or where it is in the world while it stays there (N4N0 › Light › Stay there
+            // freezes it).
+            var stay = Child(head, "Stay");
+            var anchor = stay.gameObject.AddComponent<VRCParentConstraint>();
+            anchor.Sources.Add(new VRCConstraintSource(head, 1));
+            anchor.IsActive = true; anchor.Locked = true;
+            // The tether's root stays with it; its two links and N4N0 on their tip lag behind and drift back, smoothly
             // (a weak pull and a soft spring: it barely overshoots), whatever moves the head.
-            var tether = Child(head, "Tether");
+            var tether = Child(stay, "Tether");
             var link = Child(tether, "1"); link.localPosition = Vector3.up * Link;
             var tip = Child(link, "2"); tip.localPosition = Vector3.up * Link;
             var ball = Child(tip, "Ball");
             var hop = Child(ball, "Hop");
+            // Upright and turned like the avatar, however the swinging tether tilts its tip: N4N0 never nods as its owner
+            // walks.
+            var upright = hop.gameObject.AddComponent<VRCRotationConstraint>();
+            upright.Sources.Add(new VRCConstraintSource(stay, 1));
+            upright.IsActive = true; upright.Locked = true;
             var emitter = Child(hop, "Emitter");
             var panel = Child(head, "Panel");
             Layout(tether, panel, DefaultEyes);

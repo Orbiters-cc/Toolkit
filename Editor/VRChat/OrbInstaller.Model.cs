@@ -321,6 +321,20 @@ namespace Orbiters.Toolkit.Editor.VRChat
 
         // ---- The mesh and its materials ----
 
+        // The weights of each expression's frames, and how far its in-betweens rise over the sphere (a share of each
+        // point's sag between where it starts and where it ends: enough that the chords between frames stay outside).
+        private static readonly float[] InBetweenWeights = { 25, 50, 75, 100 };
+        private const float InBetweenLift = .1f;
+
+        // A point of the face part of the way (t) from `from` to `to`: along the sphere, lifted by its sag in the middle.
+        private static Vector3 InBetween(Vector3 from, Vector3 to, float t)
+        {
+            if (t >= 1) return to;
+            float radius = from.magnitude, angle = Vector3.Angle(from, to) * Mathf.Deg2Rad;
+            float sag = 1 - Mathf.Cos(angle / 2);
+            return Vector3.Slerp(from.normalized, to.normalized, t).normalized * radius * (1 + InBetweenLift * sag * 4 * t * (1 - t));
+        }
+
         /// <summary>N4N0's model mesh, made once in <paramref name="folder"/> ("N4N0 model.asset").</summary>
         internal static Mesh ModelMesh(string folder)
         {
@@ -407,16 +421,21 @@ namespace Orbiters.Toolkit.Editor.VRChat
             // White vertex colours: Standard Lite multiplies its colour by them (its keyword that would not draws wrong).
             mesh.SetColors(Enumerable.Repeat(Color.white, vertices.Count).ToList());
             mesh.SetTriangles(shell.Concat(patterns).ToList(), 0);
+            // Each expression in four frames: a straight move from the normal face to it would cut through the ball, so
+            // its in-betweens follow the sphere (and rise a little, InBetweenLift of each point's sag, over the chords
+            // between them). The states change one expression at a time (ModelStates), so the frames' paths are all.
             foreach (var shape in ModelShapes)
+            foreach (float weight in InBetweenWeights)
             {
                 var deltas = new Vector3[vertices.Count];
                 var normals = new Vector3[vertices.Count];
                 for (int i = faceStart; i < faceEnd; i++)
                 {
-                    deltas[i] = shapes[shape][i - faceStart];
-                    normals[i] = (vertices[i] + deltas[i]).normalized - vertices[i].normalized;
+                    var target = InBetween(vertices[i], vertices[i] + shapes[shape][i - faceStart], weight / 100);
+                    deltas[i] = target - vertices[i];
+                    normals[i] = target.normalized - vertices[i].normalized;
                 }
-                mesh.AddBlendShapeFrame(shape, 100, deltas, normals, null);
+                mesh.AddBlendShapeFrame(shape, weight, deltas, normals, null);
             }
             mesh.RecalculateTangents();
             mesh.bounds = new Bounds(Vector3.zero, Vector3.one * 2 * PatternLift);

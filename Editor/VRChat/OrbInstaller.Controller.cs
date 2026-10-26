@@ -51,8 +51,8 @@ namespace Orbiters.Toolkit.Editor.VRChat
         {
             // Idle: calm, a slow bob, a blink now and then.
             new Look { Blinks = true },
-            // Listening: eyes a little wider, more with its owner's voice.
-            new Look { Shapes = { ["Surprised"] = 20 }, Loud = 45, Blinks = true, Bob = .6f },
+            // Listening: eyes a little wider, more with its owner's voice (no blink: one expression at a time).
+            new Look { Shapes = { ["Surprised"] = 20 }, Loud = 45, Bob = .6f },
             // Thinking: one eye raised, the mouth aside.
             new Look { Shapes = { ["Thinking"] = 100 }, Bob = .8f },
             // Talking: the mouth moving, the beam that projects the panel.
@@ -160,7 +160,23 @@ namespace Orbiters.Toolkit.Editor.VRChat
             }
             if (light) LightController(controller, folder, parameters, controls);
             CaptureController(controller, parameters, controls);
-            Install(root, folder, controller, MenuPath, "N4N0 menu", controls, parameters.ToArray(), parameters.Select(p => p.name));
+            Install(root, folder, controller, MenuPath, "N4N0 menu", controls, parameters.ToArray(), parameters.Select(p => p.name), MenuIcon(folder));
+        }
+
+        // N4N0's own icon on its folder in the expressions menu: the N4N0 mark, aqua to lime (256 px).
+        private const string MenuIconTemplate = "Packages/orbiters.toolkit/Editor/VRChat/OrbMenuIcon.png.bytes";
+
+        private static Texture2D MenuIcon(string folder)
+        {
+            string path = folder + "/N4N0 icon.png";
+            CopyFile(MenuIconTemplate, path);
+            var importer = (TextureImporter)AssetImporter.GetAtPath(path);
+            importer.textureType = TextureImporterType.Default; importer.sRGBTexture = true;
+            importer.alphaSource = TextureImporterAlphaSource.FromInput; importer.alphaIsTransparency = true;
+            importer.mipmapEnabled = false; importer.maxTextureSize = 256; importer.wrapMode = TextureWrapMode.Clamp;
+            importer.textureCompression = TextureImporterCompression.Compressed;
+            importer.SaveAndReimport();
+            return AssetDatabase.LoadAssetAtPath<Texture2D>(path);
         }
 
         /// <summary>
@@ -200,14 +216,18 @@ namespace Orbiters.Toolkit.Editor.VRChat
         // ---- What N4N0 is doing ----
 
         /// <summary>
-        /// One state for each value of N4N0/State, reached from any other and blending for <see cref="StateBlend"/>; each
-        /// sets everything the layer animates (the model at <paramref name="body"/>, floating on <paramref name="lift"/>, its
-        /// anger in <paramref name="anger"/>, and, with <paramref name="beam"/>, the panel's beam), so states blend into one
-        /// another and leave nothing behind (Write Defaults on or off). Listening widens its eyes with its owner's voice.
+        /// One state for each value of N4N0/State (any other value is Idle), each entered through its intro: for half of
+        /// <see cref="StateBlend"/> the old expression blends out while the intro holds the normal face, then the new one
+        /// ramps in. One expression moves at a time, along its in-between frames (OrbInstaller.Model), so the face never
+        /// cuts through the ball. Every state sets everything the layer animates (the model at <paramref name="body"/>,
+        /// floating on <paramref name="lift"/>, its anger in <paramref name="anger"/>, and, with <paramref name="beam"/>,
+        /// the panel's beam), so nothing is left behind (Write Defaults on or off). Listening widens its eyes with its
+        /// owner's voice.
         /// </summary>
         private static void ModelStates(AnimatorController controller, string layer, string body, string lift, string anger, bool beam = false)
         {
             var machine = Layer(controller, layer);
+            var intros = new AnimatorState[Looks.Length];
             var states = new AnimatorState[Looks.Length];
             for (int s = 0; s < Looks.Length; s++)
             {
@@ -221,12 +241,56 @@ namespace Orbiters.Toolkit.Editor.VRChat
                     motion = voice;
                 }
                 states[s] = HeldPropRig.State(controller, machine, name, motion);
-                if (s > 0) Enter(machine, states[s], (State, AnimatorConditionMode.Equals, s));
+                intros[s] = HeldPropRig.State(controller, machine, name + " in", IntroClip(name + " in", Looks[s], body, lift, anger, beam));
+                Exit(intros[s], states[s]);
             }
             machine.defaultState = states[0];
-            // Idle for 0 and for any value that is no state.
-            Enter(machine, states[0], (State, AnimatorConditionMode.Less, 1));
-            Enter(machine, states[0], (State, AnimatorConditionMode.Greater, Looks.Length - 1));
+            // From any other state or intro into a state's intro (Idle's for 0 and for any value that is no state).
+            for (int to = 0; to < Looks.Length; to++)
+            for (int from = 0; from < Looks.Length; from++)
+            {
+                if (from == to) continue;
+                foreach (var source in new[] { intros[from], states[from] })
+                {
+                    if (to > 0) Into(source, intros[to], (State, AnimatorConditionMode.Equals, to));
+                    else
+                    {
+                        Into(source, intros[0], (State, AnimatorConditionMode.Less, 1));
+                        Into(source, intros[0], (State, AnimatorConditionMode.Greater, Looks.Length - 1));
+                    }
+                }
+            }
+        }
+
+        // Into a state's intro, blending for its first half.
+        private static void Into(AnimatorState from, AnimatorState to, params (string name, AnimatorConditionMode mode, float value)[] conditions)
+        {
+            var transition = Transition(from, to, conditions);
+            transition.hasFixedDuration = true; transition.duration = StateBlend / 2;
+        }
+
+        // A state's intro (StateBlend long, played once): the normal face for its first half, then the state's expression
+        // ramping in (no blink, no talking mouth yet); the float still, the anger and the beam as the state has them.
+        private static AnimationClip IntroClip(string name, Look look, string body, string lift, string anger, bool beam)
+        {
+            var clip = new AnimationClip { name = name };
+            void Hold(string path, Type type, string property, float value) => SetCurve(clip, path, type, property, AnimationCurve.Constant(0, StateBlend, value));
+            foreach (var shape in ModelShapes)
+            {
+                float weight = shape == "Blink" || shape == "Talk" ? 0 : look.Weight(shape, 0);
+                var ramp = new AnimationCurve(new Keyframe(0, 0), new Keyframe(StateBlend / 2, 0), new Keyframe(StateBlend, weight));
+                for (int i = 0; i < ramp.length; i++)
+                {
+                    AnimationUtility.SetKeyLeftTangentMode(ramp, i, AnimationUtility.TangentMode.Linear);
+                    AnimationUtility.SetKeyRightTangentMode(ramp, i, AnimationUtility.TangentMode.Linear);
+                }
+                SetCurve(clip, body, typeof(SkinnedMeshRenderer), "blendShape." + shape, ramp);
+            }
+            Hold("", typeof(Animator), anger, look.Anger);
+            if (beam) Hold(Panel, typeof(SkinnedMeshRenderer), "material._Beam", look.Beam);
+            foreach (char axis in "xyz") Hold(lift, typeof(Transform), "m_LocalPosition." + axis, 0);
+            Once(clip);
+            return clip;
         }
 
         /// <summary>

@@ -67,9 +67,10 @@ namespace Orbiters.Toolkit.Editor.VRChat
         /// 7 points along each index finger with contacts (the screen draws the rays), presses with the trigger or a touch,
         /// everyone else's fingertips press too; the screen stays where it is until it is out of its owner's sight
         /// (<see cref="AddPlacement"/>), its handle carries it in a palm, its size is <see cref="ScreenSize"/>.
-        /// 8 shows the pictures at full size once they arrived (<see cref="AddPictures"/>).
+        /// 8 shows the pictures at full size once they arrived (<see cref="AddPictures"/>). 9 the Music page's timeline (tap or
+        /// drag along it to move in the track) and Take back card on the Results and Music pages.
         /// </summary>
-        public const int ScreenVersion = 8;
+        public const int ScreenVersion = 9;
         /// <summary>
         /// Local, not saved, set by no menu: the screen's version (<see cref="ScreenVersion"/>), which Orbiters - N4N0 reads
         /// to know the pages the screen has. Screens before version 3 lack it.
@@ -101,8 +102,9 @@ namespace Orbiters.Toolkit.Editor.VRChat
         // side"), 6 the retro look's own pages and live parts, 7 the projected look and N4N0's beam on a skinned screen,
         // 8 the version 6 pages (22 of them), 9 the rays from the fingertips (a third part, bound to the pointers), 10 the
         // projection's glow as a property (_Glow, a menu theme's screen glow), 11 the full pictures (_Pictures, CRT B), 12
-        // their diagnostics (_PictureData, CRT A) and B's heartbeat no longer compared with the screen's clock.
-        internal const string ScreenRevision = "12";
+        // their diagnostics (_PictureData, CRT A) and B's heartbeat no longer compared with the screen's clock, 13 the
+        // version 9 pages (the Music timeline, Take back card).
+        internal const string ScreenRevision = "13";
         private const string ScreenShaderTemplate = "Packages/orbiters.toolkit/Editor/VRChat/OrbScreen.shader.txt";
         private const string BeamShaderTemplate = "Packages/orbiters.toolkit/Editor/VRChat/OrbBeam.shader.txt";
         private const string RayShaderTemplate = "Packages/orbiters.toolkit/Editor/VRChat/OrbRay.shader.txt";

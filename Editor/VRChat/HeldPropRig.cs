@@ -435,7 +435,8 @@ namespace Orbiters.Toolkit.Editor.VRChat
         /// taken name gets a number. <paramref name="globalParameters"/> keep their names in the avatar (OSC apps set them).
         /// </summary>
         internal static void Install(GameObject root, string folder, AnimatorController controller, string menuPath, string subMenuName,
-            List<VRCExpressionsMenu.Control> controls, VRCExpressionParameters.Parameter[] parameters, IEnumerable<string> globalParameters = null)
+            List<VRCExpressionsMenu.Control> controls, VRCExpressionParameters.Parameter[] parameters, IEnumerable<string> globalParameters = null,
+            Texture2D icon = null)
         {
             var asset = ScriptableObject.CreateInstance<VRCExpressionParameters>();
             asset.parameters = parameters;
@@ -445,7 +446,7 @@ namespace Orbiters.Toolkit.Editor.VRChat
             AssetDatabase.CreateAsset(sub, AssetDatabase.GenerateUniqueAssetPath(folder + "/" + subMenuName + ".asset"));
             var menu = ScriptableObject.CreateInstance<VRCExpressionsMenu>();
             menu.controls = new List<VRCExpressionsMenu.Control>
-            { new VRCExpressionsMenu.Control { name = menuPath, type = VRCExpressionsMenu.Control.ControlType.SubMenu, subMenu = sub, icon = OrbitersMenuIcons.Submenu } };
+            { new VRCExpressionsMenu.Control { name = menuPath, type = VRCExpressionsMenu.Control.ControlType.SubMenu, subMenu = sub, icon = icon != null ? icon : OrbitersMenuIcons.Submenu } };
             AssetDatabase.CreateAsset(menu, AssetDatabase.GenerateUniqueAssetPath(folder + "/Menu.asset"));
             VrcFury.Writer.FullController(root, controller, menu, asset, globalParameters);
         }
