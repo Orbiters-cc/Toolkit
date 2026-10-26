@@ -1,7 +1,13 @@
 # Orbiters Toolkit
 
-## Unreleased
+## 0.4.7 — 2026-10-26
 
+- **VRCFury 1.1434**: VRCFury now builds controllers that reuse the avatar's own clips, blend trees and masks where it
+  changed nothing; a build step right after it (`VrcFuryBuiltAnimations`, order -9999) copies them into its
+  controllers, so the build steps after it (blendshape links, face tracking, ReFit, MCB) never edit project assets.
+  Hidden builds run each VRCFury step inside its build context (`VrcFury.BuildContext`, `VrcFury.RunMain` for direct
+  callers), and Armature Link targets fall back to related bones and resolve offsets from the avatar root as VRCFury
+  does. Needs VRCFury 1.1434 or later where VRCFury is installed.
 - **N4N0's new look** (`OrbInstaller.Model`): a black sphere with white patterns, its face on the front (two wide eyes
   wrapping round its sides and a small mouth) and the N4N0 mark under a triangle's three corners on the back. Its
   expressions are the model's blendshapes (Surprised, Annoyed, Happy, Thinking, Sleeping, Blink, Talk), which N4N0's
