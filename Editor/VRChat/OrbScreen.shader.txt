@@ -34,12 +34,13 @@ Shader "Orbiters/N4N0 Screen"
         _Edge ("Projected edge", Color) = (0, 0.855, 0.427, 1)
         _Glow ("Projected glow", Range(0, 2)) = 1
         [HideInInspector] _Pictures ("Full pictures (CRT B)", 2D) = "black" {}
+        [HideInInspector] _PictureData ("Picture data (CRT A, for the diagnostics)", 2D) = "black" {}
 //@PROPERTIES
     }
     SubShader
     {
         // OrbScreen: the files' revision (OrbInstaller.ScreenRevision); a screen of an older one is swapped for these.
-        Tags { "Queue" = "Transparent" "RenderType" = "Transparent" "IgnoreProjector" = "True" "VRCFallback" = "Hidden" "OrbScreen" = "11" }
+        Tags { "Queue" = "Transparent" "RenderType" = "Transparent" "IgnoreProjector" = "True" "VRCFallback" = "Hidden" "OrbScreen" = "12" }
         Cull Off
         ZWrite Off
         Blend SrcAlpha OneMinusSrcAlpha
@@ -130,16 +131,19 @@ Shader "Orbiters/N4N0 Screen"
             // Full pictures (Docs/orb-picture.md): CRT B's pictures, signatures and heartbeat (the contracts' include).
 //@PICTURES
 
-            // The full picture a thumbnail place shows instead of its thumbnail, or -1: its slot (results 0 to 4, the music's
-            // art 5, the card's picture 6) holds the picture whose signature is the thumbnail's first 8 bytes, CRT B is alive,
-            // and a screen pixel spans under 2 of its texels (smaller, the smooth thumbnail looks better).
+            // The full picture a thumbnail place shows instead of its thumbnail: its slot (results 0 to 4, the music's art 5,
+            // the card's picture 6) when it holds the picture whose signature is the thumbnail's first 8 bytes, CRT B ran and
+            // a screen pixel spans under 2 of its texels (smaller, the smooth thumbnail looks better); else why not (negative,
+            // PictureWhyColour): -1 B never ran or no thumbnail yet, -2 too small, -3 another picture, -4 none.
             int FullPicture(int page, int t, int layers, float width, float pixel, bool alive)
             {
                 int slot = page == 11 ? 5 : (page == 15 ? 6 : t);
-                if (!alive || layers <= 0 || PictureTexelsPerPixel(slot, width, pixel) >= 2) return -1;
+                if (!alive || layers <= 0) return -1;
+                if (PictureTexelsPerPixel(slot, width, pixel) >= 2) return -2;
                 int at = PicturesStart + t * PictureBytes;
                 uint4 a = uint4(Byte(at), Byte(at + 1), Byte(at + 2), Byte(at + 3)), b = uint4(Byte(at + 4), Byte(at + 5), Byte(at + 6), Byte(at + 7));
-                return PictureFor(slot, a, b) ? slot : -1;
+                int match = PictureMatch(slot, a, b);
+                return match == 1 ? slot : (match == 0 ? -3 : -4);
             }
 
             // A texel of the layout table, its bytes (the table's rows run from page 0 at the top of its picture).
@@ -376,11 +380,15 @@ Shader "Orbiters/N4N0 Screen"
                 // Thumbnails (results): colour pictures, the layers received so far summed at this point of the picture; the
                 // full picture instead once it arrived.
                 bool alive = PicturesAlive();
+                // The full pictures' diagnostics (the flags' bit 3, Orbiters - N4N0's Picture diagnostics): each place framed
+                // in the colour of why it shows what it shows, and the CRTs' state in a row at the bottom left.
+                bool diagnostics = (Byte(1) & 8) != 0;
                 [loop] for (int t = 0; t < head.z; t++)
                 {
                     float4 r = float4(Texel(TablePictures + t, page)) * 4;
                     int layers = Byte(Layers + t);
                     int full = FullPicture(page, t, layers, r.z, pixel, alive);
+                    if (diagnostics) colour = lerp(colour, PictureWhyColour(full), saturate(1.5 - abs(RoundedDistance(p, r, 10) - 3)));
                     if (retro)
                     {
                         // The music page's art place is part of its picture until the art came.
@@ -430,6 +438,11 @@ Shader "Orbiters/N4N0 Screen"
                 // Retro: the pressed element lit, what is on it dark.
                 if (retro && pressedAt.z > 0)
                     colour = lerp(colour, _Accent.rgb + _Card.rgb - colour, Cover(Chamfer(p, pressedAt, pressedCut), pixel));
+                if (diagnostics)
+                {
+                    float4 d = PictureDiagnostics(p);
+                    colour = lerp(colour, d.rgb, d.a);
+                }
                 return fixed4(colour, alpha);
             }
             ENDCG

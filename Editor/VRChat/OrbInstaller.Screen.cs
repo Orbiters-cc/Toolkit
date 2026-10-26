@@ -100,8 +100,9 @@ namespace Orbiters.Toolkit.Editor.VRChat
         // The screen files' revision, the shader's OrbScreen tag: 5 draws the back as a card ("N4N0 menu, look at the other
         // side"), 6 the retro look's own pages and live parts, 7 the projected look and N4N0's beam on a skinned screen,
         // 8 the version 6 pages (22 of them), 9 the rays from the fingertips (a third part, bound to the pointers), 10 the
-        // projection's glow as a property (_Glow, a menu theme's screen glow), 11 the full pictures (_Pictures, CRT B).
-        internal const string ScreenRevision = "11";
+        // projection's glow as a property (_Glow, a menu theme's screen glow), 11 the full pictures (_Pictures, CRT B), 12
+        // their diagnostics (_PictureData, CRT A) and B's heartbeat no longer compared with the screen's clock.
+        internal const string ScreenRevision = "12";
         private const string ScreenShaderTemplate = "Packages/orbiters.toolkit/Editor/VRChat/OrbScreen.shader.txt";
         private const string BeamShaderTemplate = "Packages/orbiters.toolkit/Editor/VRChat/OrbBeam.shader.txt";
         private const string RayShaderTemplate = "Packages/orbiters.toolkit/Editor/VRChat/OrbRay.shader.txt";
@@ -299,7 +300,7 @@ namespace Orbiters.Toolkit.Editor.VRChat
                 material.SetTexture("_Pages", pages);
                 material.SetTexture("_Layout", layout);
                 material.SetTexture("_MainTex", glyphs);
-                material.SetTexture(PicturesProperty, PicturesTexture(folder));
+                SetPictureTextures(material, folder);
                 material.renderQueue = (int)RenderQueue.Transparent;
                 AssetDatabase.DeleteAsset(materialPath);
                 AssetDatabase.CreateAsset(material, materialPath);

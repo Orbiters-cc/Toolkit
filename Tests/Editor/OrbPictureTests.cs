@@ -110,6 +110,18 @@ public class OrbPictureTests
     }
 
     [Test]
+    public void AScreenMaterialShowsItsFoldersPicturesAndReadsItsDataForTheDiagnostics()
+    {
+        ShaderUtil.allowAsyncCompilation = false;
+        var (_, material) = OrbInstaller.ScreenAssets(folder, 128);
+        var (data, pictures, _, _, _) = OrbInstaller.PictureAssets(folder);
+        Assert.AreEqual(pictures, material.GetTexture(OrbInstaller.PicturesProperty), "B, which it shows");
+        Assert.AreEqual(data, material.GetTexture(OrbInstaller.PictureDataProperty), "A, which its diagnostics read");
+        Assert.IsFalse(ShaderUtil.ShaderHasError(material.shader), "the screen with its diagnostics compiles");
+        Assert.AreEqual(OrbInstaller.ScreenRevision, material.GetTag("OrbScreen", false));
+    }
+
+    [Test]
     public void AVectorPicturesLocalChunksBecomeItsPictureInCrtB()
     {
         ShaderUtil.allowAsyncCompilation = false;

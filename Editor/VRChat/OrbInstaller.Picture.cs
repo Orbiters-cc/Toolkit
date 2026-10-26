@@ -50,7 +50,7 @@ namespace Orbiters.Toolkit.Editor.VRChat
         internal const string PictureDataFile = "N4N0 picture data", PicturesFile = "N4N0 pictures", PictureBridgeFile = "N4N0 picture bridge";
         /// <summary>The screen material's texture property holding CRT B.</summary>
         internal const string PicturesProperty = "_Pictures";
-        private const string PictureDataProperty = "_PictureData";
+        internal const string PictureDataProperty = "_PictureData";
         // The textures' sizes (contracts Docs/orb-picture.md, CRT A and CRT B).
         internal const int PictureDataWidth = 512, PictureDataHeight = 256, PicturesWidth = 512, PicturesHeight = 290;
 
@@ -105,6 +105,14 @@ namespace Orbiters.Toolkit.Editor.VRChat
 
         /// <summary>CRT B of a screen folder (the screen's and the card's materials sample it).</summary>
         internal static Texture PicturesTexture(string folder) => PictureAssets(folder).pictures;
+
+        /// <summary>A screen material's CRTs: B, which it shows, and A, which its diagnostics read.</summary>
+        internal static void SetPictureTextures(Material material, string folder)
+        {
+            var (data, pictures, _, _, _) = PictureAssets(folder);
+            material.SetTexture(PicturesProperty, pictures);
+            if (material.HasProperty(PictureDataProperty)) material.SetTexture(PictureDataProperty, data);
+        }
 
         // A double-buffered texture updated every frame, point filtered, black at load, with its shader written in the folder.
         private static CustomRenderTexture PictureTexture(string folder, string name, string template, string shaderName, int width, int height, RenderTextureFormat format,
@@ -250,9 +258,22 @@ namespace Orbiters.Toolkit.Editor.VRChat
                 if (part == null || !part.TryGetComponent(out SkinnedMeshRenderer renderer)) continue;
                 foreach (var material in renderer.sharedMaterials)
                 {
-                    if (material == null || !material.HasProperty(PicturesProperty) || material.GetTexture(PicturesProperty) != null) continue;
-                    material.SetTexture(PicturesProperty, pictures);
-                    EditorUtility.SetDirty(material);
+                    if (material == null || !material.HasProperty(PicturesProperty)) continue;
+                    bool changed = false;
+                    if (material.GetTexture(PicturesProperty) == null)
+                    {
+                        material.SetTexture(PicturesProperty, pictures);
+                        changed = true;
+                    }
+                    // The diagnostics read the A of the B it shows.
+                    var shown = material.GetTexture(PicturesProperty) as CustomRenderTexture;
+                    var data = shown != null && shown.material != null && shown.material.HasProperty(PictureDataProperty) ? shown.material.GetTexture(PictureDataProperty) : null;
+                    if (material.HasProperty(PictureDataProperty) && data != null && material.GetTexture(PictureDataProperty) != data)
+                    {
+                        material.SetTexture(PictureDataProperty, data);
+                        changed = true;
+                    }
+                    if (changed) EditorUtility.SetDirty(material);
                 }
             }
             if (existing != null)

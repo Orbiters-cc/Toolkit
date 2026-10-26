@@ -40,10 +40,13 @@
   one picture at a time, CRT B (512 × 290) keeps the decoded pictures with their signatures and a heartbeat. Their
   shaders are written from the contracts' `OrbitersPicture.cginc`, every chunk value in a register of its own
   (`OrbPicturesHook` gives the bridge the screen's own folder before each upload). A picture shows only over the
-  thumbnail whose first 8 bytes it carries, while CRT B is alive, and while a screen pixel spans under two of its
-  texels; the thumbnail shows otherwise. Tests: `OrbPictureTests` (a contracts vector's chunks through the bridge and
-  both CRTs' shaders into CRT B, pixel for pixel).
-- N4N0's options folder is `Menu 15`, its screen revision 11.
+  thumbnail whose first 8 bytes it carries, once CRT B ran, and while a screen pixel spans under two of its texels; the
+  thumbnail shows otherwise. Diagnostics (screen revision 12, which also reads CRT A): with Orbiters - N4N0's N4N0 ›
+  Testing › Picture diagnostics on, the screen frames each picture in the colour of why it shows what it shows and draws
+  the textures' state in a row of cells at its bottom left (contracts `Docs/orb-picture.md`, Diagnostics). Tests:
+  `OrbPictureTests` (a contracts vector's chunks through the bridge and both CRTs' shaders into CRT B, pixel for pixel;
+  the screen's material with both textures).
+- N4N0's options folder is `Menu 15`, its screen revision 12.
 
 ## 0.4.6 — 2026-10-26
 
