@@ -4,7 +4,9 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using NUnit.Framework;
+using Orbiters.Toolkit.Editor;
 using Orbiters.Toolkit.Editor.Refit;
+using Orbiters.Toolkit.Editor.VRChat.Attachments;
 using Orbiters.Toolkit.Editor.VRChat.Refit;
 using Orbiters.Toolkit.VRChat;
 using UnityEngine;
@@ -129,6 +131,51 @@ public sealed class FitCheckTests
         var expected = bone.localToWorldMatrix * renderer.sharedMesh.bindposes[0];
         for (int i = 0; i < points.Length; i++)
             Assert.That(Vector3.Distance(points[i], expected.MultiplyPoint3x4(renderer.sharedMesh.vertices[i])), Is.LessThan(0.0001f));
+    }
+
+    // A ball moved by its blendshapes only (N4N0's: a mesh of radius 1 on an object scaled to 5 cm) bakes its mesh as it
+    // stands: its points are where it shows, 5 cm across, not a 2 m ball around the avatar's head.
+    [Test]
+    public void SkinnedRelevancePointsOfARendererWithoutBonesApplyItsScale()
+    {
+        var ball = Item("Ball", new Vector3(20.4f, 0, 0));
+        var renderer = ball.GetComponentInChildren<SkinnedMeshRenderer>();
+        renderer.transform.localScale = Vector3.one * 0.05f;
+        avatar.transform.SetPositionAndRotation(new Vector3(2, 3, -1), Quaternion.Euler(10, 30, 5));
+        var points = RefitRelevance.WorldPoints(renderer);
+        for (int i = 0; i < points.Length; i++)
+            Assert.That(Vector3.Distance(points[i], renderer.localToWorldMatrix.MultiplyPoint3x4(renderer.sharedMesh.vertices[i])), Is.LessThan(0.0001f));
+        Assert.That(SkinnedMeshBounds.PosedByBones(renderer), Is.False);
+    }
+
+    // Not worn on the body (the creator's gallery setup or the user said so): never asked about, even lying on the arms.
+    [UnityTest]
+    public IEnumerator ItemsNotWornOnTheBodyAreLeftAlone()
+    {
+        var bot = Item("Floating bot", new Vector3(1.02f, 0, 0));
+        bot.AddComponent<OrbitersAttachment>().neverRefit = true;
+        Assert.That(FitCheck.NeverRefit(bot), Is.True);
+        var suggestion = Check(bot, State(canFit: true));
+        yield return Wait(suggestion);
+        Assert.That(suggestion.Result.Advice, Is.EqualTo(FitAdvice.None));
+        Assert.That(suggestion.Result.Missing, Is.Empty);
+    }
+
+    // A prop this Toolkit fits to any avatar itself (N4N0, the drawing pen, the hand screen) is no clothing: its hidden
+    // screen may lie on the chest at rest without a fit question.
+    private static readonly System.Func<GameObject, bool> ClaimsTestProp = root => root != null && root.transform.Find(PropMarker) != null;
+    private const string PropMarker = "FitCheckTests prop marker";
+
+    [UnityTest]
+    public IEnumerator PropsTheToolkitFitsItselfAreLeftAlone()
+    {
+        AttachmentHooks.Register(null, ClaimsTestProp);
+        var prop = Item("Prop", new Vector3(1.02f, 0, 0));
+        new GameObject(PropMarker).transform.SetParent(prop.transform, false);
+        Assert.That(FitCheck.NeverRefit(prop), Is.True);
+        var suggestion = Check(prop, State(canFit: true));
+        yield return Wait(suggestion);
+        Assert.That(suggestion.Result.Advice, Is.EqualTo(FitAdvice.None));
     }
 
     [UnityTest]

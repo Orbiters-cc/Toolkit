@@ -18,12 +18,18 @@ namespace Orbiters.Toolkit.Editor
         }
 
         /// <summary>
-        /// Maps vertices from <see cref="SkinnedMeshRenderer.BakeMesh(Mesh)"/> to world space. The bake leaves out the
-        /// renderer's own scale, so only its position and rotation apply; with the full matrix a scaled mesh (hair or
-        /// accessories imported at another scale) would be measured many times too large or too small.
+        /// Maps vertices from <see cref="SkinnedMeshRenderer.BakeMesh(Mesh)"/> to world space. A bake posed by bones leaves
+        /// out the renderer's own scale, so only its position and rotation apply; with the full matrix a scaled mesh (hair or
+        /// accessories imported at another scale) would be measured many times too large or too small. A renderer its bones do
+        /// not pose (none, or a mesh without bind poses: moved by its blendshapes only, like N4N0's ball) bakes its mesh as it
+        /// stands, in its own space: the full matrix applies.
         /// </summary>
         public static Matrix4x4 BakedToWorld(SkinnedMeshRenderer renderer) =>
-            Matrix4x4.TRS(renderer.transform.position, renderer.transform.rotation, Vector3.one);
+            PosedByBones(renderer) ? Matrix4x4.TRS(renderer.transform.position, renderer.transform.rotation, Vector3.one) : renderer.transform.localToWorldMatrix;
+
+        /// <summary>Whether <see cref="SkinnedMeshRenderer.BakeMesh(Mesh)"/> poses the mesh by the renderer's bones.</summary>
+        public static bool PosedByBones(SkinnedMeshRenderer renderer) =>
+            renderer != null && renderer.sharedMesh != null && renderer.bones.Length > 0 && renderer.sharedMesh.bindposes.Length > 0;
 
         /// <summary>Same, from vertices the caller already baked with <see cref="SkinnedMeshRenderer.BakeMesh(Mesh)"/>.</summary>
         public static void Refresh(SkinnedMeshRenderer renderer, Vector3[] bakedVertices)

@@ -38,14 +38,28 @@ namespace Orbiters.Toolkit.Editor.VRChat.Refit
 
     /// <summary>
     /// Whether an item put on an avatar with a known custom base needs anything: only the item's skinned meshes close to skin
-    /// a custom blendshape moves count; rigid pieces and far away items are left alone, without asking.
+    /// a custom blendshape moves count; rigid pieces, far away items and items not worn on the body (<see cref="NeverRefit"/>)
+    /// are left alone, without asking.
     /// </summary>
     public static class FitCheck
     {
+        /// <summary>
+        /// An item no tool refits: marked as not worn on the body (<see cref="OrbitersAttachment.neverRefit"/>: the creator's
+        /// gallery setup or the user said so), or a prop this Toolkit fits to any avatar itself (N4N0, the drawing pen, the
+        /// hand screen: <see cref="Attachments.AttachmentHooks.Fits"/>). Its meshes may lie on the skin at rest (N4N0's
+        /// hidden screen) without being clothing.
+        /// </summary>
+        public static bool NeverRefit(GameObject item)
+        {
+            if (item == null) return false;
+            var attachment = item.GetComponentInParent<OrbitersAttachment>(true);
+            return attachment != null && attachment.neverRefit || Attachments.AttachmentHooks.Fits(item);
+        }
+
         public static async Task<FitSuggestion> CheckAsync(GameObject item, CustomBaseState state, CancellationToken cancellation)
         {
             var suggestion = new FitSuggestion { Base = state?.Info };
-            if (item == null || state == null || !state.Known) return suggestion;
+            if (item == null || state == null || !state.Known || NeverRefit(item)) return suggestion;
             var info = state.Info;
             var meshes = RefitCandidates.Meshes(item, info.Body);
             if (meshes.Count == 0) return suggestion;

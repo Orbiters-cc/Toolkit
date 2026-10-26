@@ -38,6 +38,9 @@ namespace Orbiters.Toolkit.VRChat
         [Tooltip("A small accessory on the skin (a piercing, a stud): it moves with the skin under it, blended between the bones moving the skin there " +
                  "and with the body's blendshapes, instead of one bone. Applied to the build copy with a VRChat Parent Constraint.")]
         public bool stickToSkin;
+        [Tooltip("Not worn on the body (it floats beside the avatar, is held or stands apart): no tool offers to refit it to the avatar's " +
+                 "custom base. Set when installed from the gallery (its creator's \"Never refit\", or a prop the Toolkit fits itself), or here.")]
+        public bool neverRefit;
         public SkinnedMeshRenderer body;
         [HideInInspector] public string source, variant;
         /// <summary>A short clean name to show for it (AI suggested, e.g. "Glowsticks for Ultipaw"); empty: its object's name.</summary>

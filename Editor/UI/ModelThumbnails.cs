@@ -22,8 +22,8 @@ namespace Orbiters.Toolkit.Editor
         /// <summary>The background of every picture (dark grey), for frames that should blend with it.</summary>
         public static readonly Color Background = new Color32(33, 33, 35, 255);
 
-        // Changes when pictures are made differently, so older ones are made again.
-        private const string Version = "6";
+        // Changes when pictures are made differently, so older ones are made again (7: skinned meshes at their scale).
+        private const string Version = "7";
         private static readonly string Folder = Path.Combine("Library", "Orbiters", "Thumbnails");
         private static readonly Dictionary<string, Texture2D> Made = new Dictionary<string, Texture2D>();
         private static readonly Dictionary<string, GameObject> Queue = new Dictionary<string, GameObject>();
@@ -184,8 +184,9 @@ namespace Orbiters.Toolkit.Editor
                         if (filter != null && filter.sharedMesh != null) mesh = filter.sharedMesh;
                     }
                     if (mesh == null || mesh.vertexCount == 0) continue;
-                    // A baked mesh already has the renderer's scale.
-                    var matrix = renderer is SkinnedMeshRenderer ? Matrix4x4.TRS(renderer.transform.position, renderer.transform.rotation, Vector3.one) : renderer.localToWorldMatrix;
+                    // Baked with the renderer's scale, a skinned mesh is in the renderer's own space, as a mesh filter's is:
+                    // a ball of radius 1 scaled to 5 cm (N4N0's, moved by its blendshapes only) stays 5 cm beside the avatar.
+                    var matrix = renderer.localToWorldMatrix;
                     parts.Add(new Part { Mesh = mesh, Matrix = matrix, Materials = renderer.sharedMaterials, Baked = baked });
                     // The renderer's own mesh is read as it is: its bounds may be kept by a tool on purpose (Mixer's
                     // working mesh), and a shared asset must not change.

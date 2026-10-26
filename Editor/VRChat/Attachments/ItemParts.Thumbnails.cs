@@ -66,8 +66,8 @@ namespace Orbiters.Toolkit.Editor.VRChat.Attachments
                     }
                     else if (renderer.TryGetComponent(out MeshFilter filter) && filter.sharedMesh != null) mesh = filter.sharedMesh;
                     if (mesh == null || mesh.vertexCount == 0) { if (baked) Object.DestroyImmediate(mesh); continue; }
-                    // A baked mesh already has the renderer's scale.
-                    var matrix = baked ? Matrix4x4.TRS(renderer.transform.position, renderer.transform.rotation, Vector3.one) : renderer.localToWorldMatrix;
+                    // Baked with the renderer's scale, a skinned mesh is in the renderer's own space, as a mesh filter's is.
+                    var matrix = renderer.localToWorldMatrix;
                     parts.Add((mesh, matrix, renderer.sharedMaterials, baked));
                     var local = mesh.bounds;
                     for (int corner = 0; corner < 8; corner++)

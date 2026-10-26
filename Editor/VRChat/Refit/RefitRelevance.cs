@@ -44,19 +44,28 @@ namespace Orbiters.Toolkit.Editor.VRChat.Refit
             {
                 body.BakeMesh(baked);
                 positions = baked.vertices;
-                // A renderer without a skeleton bakes nothing: its mesh as it stands.
+                var toWorld = SkinnedMeshBounds.BakedToWorld(body);
+                bool posed = SkinnedMeshBounds.PosedByBones(body);
+                // A bake that left vertices out: the mesh as it stands, in the renderer's own space.
                 if (positions.Length != mesh.vertexCount)
                 {
-                    positions = mesh.vertices.Select(v => Vector3.Scale(v, body.transform.lossyScale)).ToArray();
+                    positions = mesh.vertices;
                     baked.vertices = positions;
+                    toWorld = body.transform.localToWorldMatrix;
+                    posed = false;
                 }
                 // BakeMesh leaves the bounds empty.
                 baked.RecalculateBounds();
-                // Blendshape offsets are in the mesh's own units; the baked mesh is in the avatar's (import scale, bones).
+                // Blendshape offsets are in the mesh's own units; a bake posed by bones is in the avatar's (import scale,
+                // bones), one its bones do not pose still in the mesh's own (the renderer's scale makes it the avatar's).
                 var raw = mesh.bounds.size;
                 float scale = Mathf.Max(baked.bounds.size.x, baked.bounds.size.y, baked.bounds.size.z) /
                               Mathf.Max(1e-6f, Mathf.Max(raw.x, Mathf.Max(raw.y, raw.z)));
-                var toWorld = SkinnedMeshBounds.BakedToWorld(body);
+                if (!posed)
+                {
+                    var lossy = body.transform.lossyScale;
+                    scale *= Mathf.Max(Mathf.Abs(lossy.x), Mathf.Abs(lossy.y), Mathf.Abs(lossy.z));
+                }
                 for (int i = 0; i < positions.Length; i++) positions[i] = toWorld.MultiplyPoint3x4(positions[i]);
                 map.scale = scale;
             }
@@ -131,13 +140,13 @@ namespace Orbiters.Toolkit.Editor.VRChat.Refit
             {
                 renderer.BakeMesh(baked);
                 var vertices = baked.vertices;
+                var toWorld = SkinnedMeshBounds.BakedToWorld(renderer);
+                // A bake that left vertices out: the mesh as it stands, in the renderer's own space.
                 if (vertices.Length != renderer.sharedMesh.vertexCount)
                 {
                     vertices = renderer.sharedMesh.vertices;
-                    var scale = renderer.transform.lossyScale;
-                    for (int i = 0; i < vertices.Length; i++) vertices[i] = Vector3.Scale(vertices[i], scale);
+                    toWorld = renderer.transform.localToWorldMatrix;
                 }
-                var toWorld = SkinnedMeshBounds.BakedToWorld(renderer);
                 int step = Mathf.Max(1, vertices.Length / MaxMeshPoints);
                 var points = new Vector3[(vertices.Length + step - 1) / step];
                 for (int i = 0, j = 0; i < vertices.Length; i += step, j++) points[j] = toWorld.MultiplyPoint3x4(vertices[i]);
