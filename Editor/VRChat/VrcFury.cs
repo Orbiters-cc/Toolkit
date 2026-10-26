@@ -94,6 +94,38 @@ namespace Orbiters.Toolkit.Editor.VRChat
             avatarRoot != null && Find("VF.Model.VRCFuryTest") is Type test && avatarRoot.GetComponent(test) != null;
 
         /// <summary>
+        /// What VRCFury holds around each of its build steps (VRCFuryBuildContext): the assets it writes are imported once,
+        /// at the end, without running the project's asset postprocessors. Dispose it when the step is done. Its build steps
+        /// called directly, without their error dialog, run inside one.
+        /// </summary>
+        public static IDisposable BuildContext() =>
+            (IDisposable)Activator.CreateInstance(Find("VF.Utils.VRCFuryBuildContext") ?? throw new InvalidOperationException("This VRCFury version has no build context."));
+
+        /// <summary>
+        /// VRCFury's own build of <paramref name="avatar"/> (its upload entry point, VRCFuryBuilder.RunMain), as one of its
+        /// build steps runs it, without the SDK and without its error dialog: its errors are thrown. Then, as in every build,
+        /// its controllers get copies of the project's clips and blend trees they play (<see cref="VrcFuryBuiltAnimations"/>),
+        /// so the steps after it may change them.
+        /// </summary>
+        public static void RunMain(GameObject avatar)
+        {
+            var builder = Find("VF.Builder.VRCFuryBuilder") ?? throw new InvalidOperationException("VRCFury is not installed.");
+            var wrapper = Find("VF.Utils.VFGameObject");
+            var convert = wrapper.GetMethods(BindingFlags.Public | BindingFlags.Static)
+                .Single(m => m.Name == "op_Implicit" && m.ReturnType == wrapper && m.GetParameters()[0].ParameterType == typeof(GameObject));
+            var run = builder.GetMethod("RunMain", BindingFlags.NonPublic | BindingFlags.Static);
+            using (BuildContext())
+            {
+                try { run.Invoke(null, new[] { convert.Invoke(null, new object[] { avatar }) }); }
+                catch (TargetInvocationException ex) when (ex.InnerException != null)
+                {
+                    System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(ex.InnerException).Throw();
+                }
+            }
+            VrcFuryBuiltAnimations.Own(avatar);
+        }
+
+        /// <summary>
         /// Makes VRCFury leave a build copy's Write Defaults as they are without asking: on a broken mix it would open a
         /// question in the middle of a check and save the answer on the copy, which is thrown away. Only on an avatar
         /// VRCFury builds whose own Fix Write Defaults doesn't decide already.
@@ -200,16 +232,77 @@ namespace Orbiters.Toolkit.Editor.VRChat
             public float ScaleFactor = 1;
             public bool AutoScaleFactor, ScaleFactorPowersOf10;
 
-            /// <summary>The avatar object VRCFury links <see cref="From"/> to: the first target that resolves inside the avatar.</summary>
+            /// <summary>
+            /// The avatar object VRCFury links <see cref="From"/> to: the first target that resolves inside the avatar, then,
+            /// after the first humanoid bone given without an offset, the bones VRCFury falls back to when the avatar lacks
+            /// it (<see cref="FallbackBones"/>).
+            /// </summary>
             public Transform Resolve(Transform avatarRoot, Func<HumanBodyBones, Transform> humanoid)
             {
-                foreach (var target in Targets)
+                var attempts = Targets.AsEnumerable();
+                var firstBone = Targets.FirstOrDefault(t => t.UseBone && string.IsNullOrWhiteSpace(t.Offset));
+                if (firstBone.UseBone) attempts = attempts.Concat(FallbackBones(firstBone.Bone).Select(b => new Target { UseBone = true, Bone = b }));
+                foreach (var target in attempts)
                 {
                     var t = target.UseBone ? humanoid(target.Bone) : !target.UseObject ? avatarRoot : target.Object != null ? target.Object.transform : null;
-                    if (t != null && !string.IsNullOrWhiteSpace(target.Offset)) t = FindPath(t, target.Offset);
+                    if (t != null && !string.IsNullOrWhiteSpace(target.Offset)) t = FindPath(t, target.Offset, avatarRoot);
                     if (t != null && t.IsChildOf(avatarRoot)) return t;
                 }
                 return null;
+            }
+
+            /// <summary>
+            /// The bones VRCFury links to in order when the avatar lacks <paramref name="bone"/> (FallbackBoneUtils): a
+            /// finger's joints nearer the hand, the joints of its neighbour fingers, then the hand; any other bone, its parents
+            /// up to the hips (eyes and jaw: the head; a shoulder: the upper chest).
+            /// </summary>
+            public static IEnumerable<HumanBodyBones> FallbackBones(HumanBodyBones bone)
+            {
+                int value = (int)bone;
+                bool left = value >= (int)HumanBodyBones.LeftThumbProximal && value <= (int)HumanBodyBones.LeftLittleDistal;
+                bool right = value >= (int)HumanBodyBones.RightThumbProximal && value <= (int)HumanBodyBones.RightLittleDistal;
+                if (left || right)
+                {
+                    int first = right ? (int)HumanBodyBones.RightThumbProximal : (int)HumanBodyBones.LeftThumbProximal;
+                    int finger = (value - first) / 3, segment = (value - first) % 3;
+                    for (int s = segment - 1; s >= 0; s--) yield return (HumanBodyBones)(first + finger * 3 + s);
+                    var nearby = finger == 0 ? new[] { 1, 2, 3, 4 } : finger == 1 ? new[] { 2, 3, 4, 0 } : finger == 2 ? new[] { 1, 3, 4, 0 }
+                        : finger == 3 ? new[] { 2, 4, 1, 0 } : new[] { 3, 2, 1, 0 };
+                    foreach (int other in nearby)
+                        for (int s = segment; s >= 0; s--) yield return (HumanBodyBones)(first + other * 3 + s);
+                    var hand = right ? HumanBodyBones.RightHand : HumanBodyBones.LeftHand;
+                    yield return hand;
+                    foreach (var fallback in FallbackBones(hand)) yield return fallback;
+                    yield break;
+                }
+                HumanBodyBones? parent;
+                switch (bone)
+                {
+                    case HumanBodyBones.Jaw: case HumanBodyBones.LeftEye: case HumanBodyBones.RightEye: parent = HumanBodyBones.Head; break;
+                    case HumanBodyBones.Head: parent = HumanBodyBones.Neck; break;
+                    case HumanBodyBones.Neck: parent = HumanBodyBones.UpperChest; break;
+                    case HumanBodyBones.UpperChest: parent = HumanBodyBones.Chest; break;
+                    case HumanBodyBones.Chest: parent = HumanBodyBones.Spine; break;
+                    case HumanBodyBones.Spine: parent = HumanBodyBones.Hips; break;
+                    case HumanBodyBones.LeftHand: parent = HumanBodyBones.LeftLowerArm; break;
+                    case HumanBodyBones.RightHand: parent = HumanBodyBones.RightLowerArm; break;
+                    case HumanBodyBones.LeftLowerArm: parent = HumanBodyBones.LeftUpperArm; break;
+                    case HumanBodyBones.RightLowerArm: parent = HumanBodyBones.RightUpperArm; break;
+                    case HumanBodyBones.LeftUpperArm: parent = HumanBodyBones.LeftShoulder; break;
+                    case HumanBodyBones.RightUpperArm: parent = HumanBodyBones.RightShoulder; break;
+                    case HumanBodyBones.LeftShoulder: case HumanBodyBones.RightShoulder: parent = HumanBodyBones.UpperChest; break;
+                    case HumanBodyBones.LeftToes: parent = HumanBodyBones.LeftFoot; break;
+                    case HumanBodyBones.RightToes: parent = HumanBodyBones.RightFoot; break;
+                    case HumanBodyBones.LeftFoot: parent = HumanBodyBones.LeftLowerLeg; break;
+                    case HumanBodyBones.RightFoot: parent = HumanBodyBones.RightLowerLeg; break;
+                    case HumanBodyBones.LeftLowerLeg: parent = HumanBodyBones.LeftUpperLeg; break;
+                    case HumanBodyBones.RightLowerLeg: parent = HumanBodyBones.RightUpperLeg; break;
+                    case HumanBodyBones.LeftUpperLeg: case HumanBodyBones.RightUpperLeg: parent = HumanBodyBones.Hips; break;
+                    default: parent = null; break;
+                }
+                if (parent == null) yield break;
+                yield return parent.Value;
+                foreach (var fallback in FallbackBones(parent.Value)) yield return fallback;
             }
 
             /// <summary>The multiplier of the target's scale VRCFury gives linked bones when aligning scale (ArmatureLinkService.GetScalingFactor).</summary>
@@ -223,16 +316,20 @@ namespace Orbiters.Toolkit.Editor.VRChat
                 return (float)Math.Pow(10, fraction > 0.75 ? Math.Ceiling(log) : Math.Floor(log));
             }
 
-            // VRCFury's relative paths: "a/b", "..", "." (ClipRewritersService.Join); a leading "/" starts from the scene root.
-            private static Transform FindPath(Transform from, string path)
+            // VRCFury's relative paths (VRCFObjectPathCache.Find): "a/b", "..", "."; a leading "/" starts from the avatar's root,
+            // and ".." never leaves it.
+            private static Transform FindPath(Transform from, string path, Transform avatarRoot)
             {
-                var t = path.StartsWith("/", StringComparison.Ordinal) ? null : from;
-                bool absolute = t == null;
+                var t = path.StartsWith("/", StringComparison.Ordinal) ? avatarRoot : from;
                 foreach (var part in path.Split('/'))
                 {
                     if (part.Length == 0 || part == ".") continue;
-                    if (absolute) { t = from.root.name == part ? from.root : null; absolute = false; }
-                    else t = part == ".." ? t.parent : t.Find(part);
+                    if (part == "..")
+                    {
+                        if (t == avatarRoot) return null;
+                        t = t.parent;
+                    }
+                    else t = t.Find(part);
                     if (t == null) return null;
                 }
                 return t;

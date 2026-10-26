@@ -204,7 +204,8 @@ namespace Orbiters.Toolkit.Editor.VRChat
             return issues;
         }
 
-        // VRCFury's steps run without the dialog its error boundary opens: their errors stop the build like any other's.
+        // VRCFury's steps run without the dialog its error boundary opens: their errors stop the build like any other's. Each
+        // still runs inside VRCFury's build context, as its own entry point runs it (assets imported once, at its end).
         private static Func<GameObject, bool> Runner(IVRCSDKPreprocessAvatarCallback callback)
         {
             var preprocessor = VrcFury.Find("VF.Hooks.VrcfAvatarPreprocessor");
@@ -216,7 +217,7 @@ namespace Orbiters.Toolkit.Editor.VRChat
             if (process == null || convert == null) return callback.OnPreprocessAvatar;
             return avatar =>
             {
-                process.Invoke(callback, new[] { convert.Invoke(null, new object[] { avatar }) });
+                using (VrcFury.BuildContext()) process.Invoke(callback, new[] { convert.Invoke(null, new object[] { avatar }) });
                 return true;
             };
         }
