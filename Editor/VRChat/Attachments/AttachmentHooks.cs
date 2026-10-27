@@ -70,12 +70,22 @@ namespace Orbiters.Toolkit.Editor.VRChat.Attachments
                 catch (Exception e) { Debug.LogWarning("[Orbiters] " + (to != null ? to.name : "The item") + " was updated without some of its earlier choices: " + e.Message); }
             }
             var before = Options(from);
-            foreach (var option in Options(to))
+            // A choice can change another option (N4N0's text slots and thumbnail size go together): the options are read
+            // again before each one, and a second pass puts back what a later choice changed of an earlier one.
+            for (int pass = 0; pass < 2; pass++)
             {
-                var was = before.FirstOrDefault(o => o.Label == option.Label);
-                if (was == null || was.Current < 0 || was.Current >= was.Choices.Count) continue;
-                int index = option.Choices.ToList().IndexOf(was.Choices[was.Current]);
-                if (index >= 0 && index != option.Current) option.Choose(index);
+                bool changed = false;
+                foreach (string label in Options(to).Select(o => o.Label).Distinct().ToList())
+                {
+                    var option = Options(to).FirstOrDefault(o => o.Label == label);
+                    var was = before.FirstOrDefault(o => o.Label == label);
+                    if (option == null || was == null || was.Current < 0 || was.Current >= was.Choices.Count) continue;
+                    int index = option.Choices.ToList().IndexOf(was.Choices[was.Current]);
+                    if (index < 0 || index == option.Current) continue;
+                    try { option.Choose(index); changed = true; }
+                    catch (Exception e) { Debug.LogWarning("[Orbiters] " + (to != null ? to.name : "The item") + " was updated without its earlier " + label + ": " + e.Message); }
+                }
+                if (!changed) break;
             }
         }
     }
