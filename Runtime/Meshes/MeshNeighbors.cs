@@ -40,6 +40,8 @@ namespace Orbiters.Toolkit.Meshes
             int n = vertices.Length;
             var weld = new int[n];
             var membersList = new List<List<int>>();
+            // By normal: each group's distinct normals (members facing exactly alike agree alike, so one stands for them all).
+            var groupNormals = byNormal ? new List<List<Vector3>>() : null;
             float cell = Math.Max(weldTolerance * 4f, 1e-7f);
             var grid = new Dictionary<long, List<int>>();
             float tol2 = weldTolerance * weldTolerance;
@@ -71,7 +73,7 @@ namespace Orbiters.Toolkit.Meshes
                                 }
                                 // Every member, not only the first: otherwise two members up to twice the limit apart
                                 // weld through a third, and which ones depends on the vertex order.
-                                float agreement = Agreement(normals, group, normals[v], minNormalDot);
+                                float agreement = Agreement(groupNormals[w], normals[v], minNormalDot);
                                 if (agreement > bestAgreement)
                                 {
                                     bestAgreement = agreement;
@@ -83,11 +85,13 @@ namespace Orbiters.Toolkit.Meshes
                 {
                     found = membersList.Count;
                     membersList.Add(new List<int>(2));
+                    groupNormals?.Add(new List<Vector3>(2));
                     long key = Key(cx, cy, cz);
                     if (!grid.TryGetValue(key, out var mine)) grid[key] = mine = new List<int>(2);
                     mine.Add(found);
                 }
                 membersList[found].Add(v);
+                if (byNormal) AddNormal(groupNormals[found], normals[v]);
                 weld[v] = found;
             }
 
@@ -116,16 +120,24 @@ namespace Orbiters.Toolkit.Meshes
             return new MeshNeighbors { Weld = weld, Members = members, Adjacent = adjacent, TrianglesOf = trianglesOf, Representative = representative };
         }
 
-        // How well a normal agrees with a group's: the least cosine to any member, or -infinity when one disagrees past the
-        // limit. A missing (zero) normal agrees with any.
-        private static float Agreement(Vector3[] normals, List<int> group, Vector3 normal, float minDot)
+        // A member's normal, unless the group has it already (exactly) or it is missing (zero): those change no agreement.
+        private static void AddNormal(List<Vector3> distinct, Vector3 normal)
+        {
+            if (normal.sqrMagnitude < 1e-12f) return;
+            for (int i = 0; i < distinct.Count; i++)
+                if (distinct[i].x == normal.x && distinct[i].y == normal.y && distinct[i].z == normal.z) return;
+            distinct.Add(normal);
+        }
+
+        // How well a normal agrees with a group's: the least cosine to any member's, or -infinity when one disagrees past
+        // the limit. A missing (zero) normal agrees with any.
+        private static float Agreement(List<Vector3> groupNormals, Vector3 normal, float minDot)
         {
             float least = 1f;
             float ln = normal.sqrMagnitude;
             if (ln < 1e-12f) return 1f;
-            foreach (int member in group)
+            foreach (var other in groupNormals)
             {
-                var other = normals[member];
                 float lo = other.sqrMagnitude;
                 if (lo < 1e-12f) continue;
                 float cosine = Vector3.Dot(other, normal) / Mathf.Sqrt(lo * ln);

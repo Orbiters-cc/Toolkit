@@ -275,13 +275,16 @@ namespace Orbiters.Toolkit.Meshes
             direction.Normalize();
             var inv = new Vector3(1f / (direction.x == 0f ? 1e-20f : direction.x), 1f / (direction.y == 0f ? 1e-20f : direction.y), 1f / (direction.z == 0f ? 1e-20f : direction.z));
             Span<int> stack = stackalloc int[StackSize];
+            // Where the ray enters each node on the stack: one entered past the best hit so far is skipped.
+            Span<float> entries = stackalloc float[StackSize];
             int top = 0;
-            stack[top++] = 0;
+            if (!RayBox(origin, inv, nodes[0].Min, nodes[0].Max, best.Distance, out float rootEntry)) return best;
+            stack[top] = 0; entries[top++] = rootEntry;
             while (top > 0)
             {
-                int i = stack[--top];
-                ref var node = ref nodes[i];
-                if (!RayBox(origin, inv, node.Min, node.Max, best.Distance)) continue;
+                --top;
+                if (entries[top] > best.Distance) continue;
+                ref var node = ref nodes[stack[top]];
                 if (node.Left < 0)
                 {
                     for (int k = node.Start; k < node.Start + node.Count; k++)
@@ -294,7 +297,18 @@ namespace Orbiters.Toolkit.Meshes
                         }
                     }
                 }
-                else { stack[top++] = node.Left; stack[top++] = node.Right; }
+                else
+                {
+                    // The child the ray enters first is searched first: a hit in it rules out more of the other.
+                    bool left = RayBox(origin, inv, nodes[node.Left].Min, nodes[node.Left].Max, best.Distance, out float leftEntry);
+                    bool right = RayBox(origin, inv, nodes[node.Right].Min, nodes[node.Right].Max, best.Distance, out float rightEntry);
+                    if (left && right && leftEntry > rightEntry) { stack[top] = node.Left; entries[top++] = leftEntry; stack[top] = node.Right; entries[top++] = rightEntry; }
+                    else
+                    {
+                        if (right) { stack[top] = node.Right; entries[top++] = rightEntry; }
+                        if (left) { stack[top] = node.Left; entries[top++] = leftEntry; }
+                    }
+                }
             }
             return best;
         }
@@ -349,7 +363,7 @@ namespace Orbiters.Toolkit.Meshes
             return dx * dx + dy * dy + dz * dz;
         }
 
-        private static bool RayBox(Vector3 origin, Vector3 inv, Vector3 min, Vector3 max, float maxDistance)
+        private static bool RayBox(Vector3 origin, Vector3 inv, Vector3 min, Vector3 max, float maxDistance, out float entry)
         {
             float t1 = (min.x - origin.x) * inv.x, t2 = (max.x - origin.x) * inv.x;
             float tmin = Math.Min(t1, t2), tmax = Math.Max(t1, t2);
@@ -357,7 +371,8 @@ namespace Orbiters.Toolkit.Meshes
             tmin = Math.Max(tmin, Math.Min(t1, t2)); tmax = Math.Min(tmax, Math.Max(t1, t2));
             t1 = (min.z - origin.z) * inv.z; t2 = (max.z - origin.z) * inv.z;
             tmin = Math.Max(tmin, Math.Min(t1, t2)); tmax = Math.Min(tmax, Math.Max(t1, t2));
-            return tmax >= Math.Max(tmin, 0f) && tmin <= maxDistance;
+            entry = Math.Max(tmin, 0f);
+            return tmax >= entry && tmin <= maxDistance;
         }
 
         private bool RayTriangle(Vector3 origin, Vector3 dir, int triangle, bool backfaces, out float distance, out Vector3 bary)
@@ -382,6 +397,10 @@ namespace Orbiters.Toolkit.Meshes
             return true;
         }
 
+        /// <summary>
+        /// The point of triangle abc nearest <paramref name="p"/>, with its barycentric weights. A collapsed triangle (two
+        /// corners at one place, or all three on a line) is the nearest point of its edges: always finite for finite input.
+        /// </summary>
         public static Vector3 ClosestPointOnTriangle(Vector3 p, Vector3 a, Vector3 b, Vector3 c, out Vector3 bary)
         {
             // Ericson, Real-Time Collision Detection 5.1.5.
@@ -392,18 +411,44 @@ namespace Orbiters.Toolkit.Meshes
             float d3 = Vector3.Dot(ab, bp), d4 = Vector3.Dot(ac, bp);
             if (d3 >= 0f && d4 <= d3) { bary = new Vector3(0, 1, 0); return b; }
             float vc = d1 * d4 - d3 * d2;
-            if (vc <= 0f && d1 >= 0f && d3 <= 0f) { float v = d1 / (d1 - d3); bary = new Vector3(1 - v, v, 0); return a + v * ab; }
+            // A triangle without area (two corners at one place, or all three about on a line): an edge test passed still
+            // gives the right point (p's projection lies within that edge) unless the edge has no length, and the face
+            // test below would divide by about nothing, so its edges decide there.
+            if (vc <= 0f && d1 >= 0f && d3 <= 0f && d1 - d3 > 0f) { float v = d1 / (d1 - d3); bary = new Vector3(1 - v, v, 0); return a + v * ab; }
             Vector3 cp = p - c;
             float d5 = Vector3.Dot(ab, cp), d6 = Vector3.Dot(ac, cp);
             if (d6 >= 0f && d5 <= d6) { bary = new Vector3(0, 0, 1); return c; }
             float vb = d5 * d2 - d1 * d6;
-            if (vb <= 0f && d2 >= 0f && d6 <= 0f) { float w = d2 / (d2 - d6); bary = new Vector3(1 - w, 0, w); return a + w * ac; }
+            if (vb <= 0f && d2 >= 0f && d6 <= 0f && d2 - d6 > 0f) { float w = d2 / (d2 - d6); bary = new Vector3(1 - w, 0, w); return a + w * ac; }
             float va = d3 * d6 - d5 * d4;
-            if (va <= 0f && d4 - d3 >= 0f && d5 - d6 >= 0f) { float w = (d4 - d3) / ((d4 - d3) + (d5 - d6)); bary = new Vector3(0, 1 - w, w); return b + w * (c - b); }
+            if (va <= 0f && d4 - d3 >= 0f && d5 - d6 >= 0f && (d4 - d3) + (d5 - d6) > 0f) { float w = (d4 - d3) / ((d4 - d3) + (d5 - d6)); bary = new Vector3(0, 1 - w, w); return b + w * (c - b); }
+            if (!(Vector3.Cross(ab, ac).sqrMagnitude > 1e-10f * ab.sqrMagnitude * ac.sqrMagnitude)) return ClosestPointOnCollapsed(p, a, b, c, out bary);
             float denom = 1f / (va + vb + vc);
             float vv = vb * denom, ww = vc * denom;
             bary = new Vector3(1 - vv - ww, vv, ww);
             return a + ab * vv + ac * ww;
+        }
+
+        // A triangle without area: the nearest of its three edges' nearest points (a point when all corners meet).
+        private static Vector3 ClosestPointOnCollapsed(Vector3 p, Vector3 a, Vector3 b, Vector3 c, out Vector3 bary)
+        {
+            float tab = Along(p, a, b), tbc = Along(p, b, c), tca = Along(p, c, a);
+            Vector3 qab = a + (b - a) * tab, qbc = b + (c - b) * tbc, qca = c + (a - c) * tca;
+            float dab = (qab - p).sqrMagnitude, dbc = (qbc - p).sqrMagnitude, dca = (qca - p).sqrMagnitude;
+            if (dab <= dbc && dab <= dca) { bary = new Vector3(1 - tab, tab, 0); return qab; }
+            if (dbc <= dca) { bary = new Vector3(0, 1 - tbc, tbc); return qbc; }
+            bary = new Vector3(tca, 0, 1 - tca);
+            return qca;
+        }
+
+        // Where along segment from-to the point nearest p lies (0..1; 0 for a segment of no length).
+        private static float Along(Vector3 p, Vector3 from, Vector3 to)
+        {
+            Vector3 d = to - from;
+            float length2 = d.sqrMagnitude;
+            if (length2 <= 0f) return 0f;
+            float t = Vector3.Dot(p - from, d) / length2;
+            return t < 0f ? 0f : t > 1f ? 1f : t;
         }
     }
 }

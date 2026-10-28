@@ -1,5 +1,58 @@
 # Orbiters Toolkit
 
+## Unreleased
+
+- **A variant never changes the files of another.** A variant's folder was named by its JSON and its files' sizes, so a
+  second variant with the same JSON and same-sized pictures or FBX wrote its bytes over the first one's: earlier items
+  and their Undo steps showed the new ones. The folder is now named by the variant's record (id, author, published hash,
+  thumbnail) and the SHA-256 of every file it names (`ItemParts.VariantIdentity`), and files already there are taken as
+  they are: a material is reused only when it is the very same material with the same record, else the new one gets its
+  own file beside it (`… 1.mat`), a baked mesh already saved is kept (`ModelMesh`), a record already written leaves its
+  `.meta` alone, and an FBX already imported for variants is not imported again (`ImportModel`). An apply that fails or
+  is cancelled leaves only new files, which go once nothing uses them.
+- **Cancelling and failing apply nothing.** `ItemParts.ApplyAsync` checks its cancellation before it starts and between
+  its steps (a values or model part without a renderer applied even when cancelled), and a change that throws while the
+  item changes takes back the changes made before it in the same Undo step.
+- **One apply at a time per item.** `ItemParts.ApplyAsync` waits for the item's apply before it (a card's choice, an
+  update's carry, another part's choice) to finish: a renderer draws every part of the item from the choices it reads as
+  it starts, so two parts chosen together no longer overwrite each other's choice.
+- **An update takes its options first, then its parts.** `AttachmentHooks.CarryOptions` sets the new copy's card options
+  before the registered carries (its parts' variants) run: an option can redraw the parts (N4N0's thumbnail size).
+- **Model variants under scale and mirroring.** Baking a variant object's transform (`ModelMesh`) turned normals and
+  shape normals by the rotation alone; they now go by the inverse transpose (right under non-uniform scale), tangents as
+  directions, and a mirroring transform also turns the triangles around and flips the tangents' handedness, so faces
+  still face out (`ItemParts.BakeTransform`). Folders made before keep what they hold: the new bake gets new folders.
+- **Checked redirects and a byte budget for downloads.** `OrbitersTransfer.DownloadFileAsync` follows redirects one hop
+  at a time, each to HTTPS or to this computer only (never from HTTPS down to plain HTTP elsewhere, where a signed
+  storage URL would travel in the clear), at most five, and the account token only goes to the first. New
+  `expectedBytes` (the size Orbiters published: it must be exactly that) and `maxBytes` stop a download as soon as it
+  announces or brings more, instead of filling the disk before a check (`Result.TooLarge`; not retried).
+  `PartVariant.ReadZipFile` refuses a variant file larger than a variant zip may be before reading it.
+- **Uploads prepare their body off the editor thread.** `UploadMultipartAsync` writes the multipart file on a worker
+  thread: a 64 MB package no longer freezes the editor before the upload starts.
+- **Import settings count as changes.** A `.unitypackage` entry with the bytes the project has but other import settings
+  (normal map, rig, texture size, user data) replaces those settings: `UnityPackagePreview` lists it under `Replaced`
+  (`Change.SettingsOnly`), so the conflicts question asks. Lines Unity rewrites without changing the import
+  (`timeCreated`, `licenseType`, line ends) don't count (`UnityPackageFiles.ImportSettingsHash`).
+- **Every asset kind counts as a user.** `ProjectReferences.ScanAsync` reads every asset under Assets/ but pictures,
+  sounds, scripts and plain data, instead of a list of types: a clip only an override controller uses (or a sprite
+  atlas, a shader include…) no longer looks unused to My Avatar's Cleanup and generated-file sweeps.
+- **Dependency plans are solved, not guessed.** `VpmDependencyPlan.Resolve` searches the versions (newest first, the
+  installed one first when it fits) and goes back to an older version when the newest leaves another package without
+  one, follows the dependencies of packages the project keeps (a kept package's missing dependency is installed), and
+  makes a version it installs fit what the project's other installed packages ask of it (the plan names them). Steps
+  come dependencies first. A long chain no longer stops after 32 rounds while saying it can be applied; a search
+  without an answer stops after 20,000 tries and names the package it could not choose. Packages Orbiters does not
+  curate offer every version the VPM repositories have, not only the newest, and an applied plan is checked against what
+  VPM installed. `IVpmCatalog` has `InstalledDependencies` and `InstalledPackages`.
+- **Collapsed triangles have a nearest point.** `MeshBvh.ClosestPointOnTriangle` gave NaN for a triangle with two
+  corners at one place, and a wrong edge for one with its corners on a line; such triangles now give the nearest point
+  of their edges. Other triangles give exactly the answers they gave.
+- **Faster raycasts and welds.** `MeshBvh.Raycast` searches the child box the ray enters first and skips boxes entered
+  past the best hit (about 1.3x faster on a 240k-triangle mesh, the same hits). Welding by normal compares a vertex with
+  a group's distinct normals, not every member: 8,000 coincident vertices weld in 1 ms instead of 90 ms, with the same
+  groups.
+
 ## 0.4.8 — 2026-10-26
 
 - **Pictures at the mesh's own scale**: skinned meshes scaled on their object (N4N0's ball) were pictured 1/scale too

@@ -145,5 +145,92 @@ namespace Orbiters.Toolkit.Editor.Tests
                 AssetDatabase.DeleteAsset("Assets/Orbiters/ToolkitTests");
             }
         }
+    
+
+        // REF-05 (audit 2026-10-28): a collapsed triangle (two corners at one place, all three on a line) gives the nearest
+        // point of its edges, never NaN; ReFit's SurfaceBvh has the same closest-point code (its own fix).
+        [Test]
+        public void CollapsedTrianglesGiveFiniteNearestPoints()
+        {
+            var q = MeshBvh.ClosestPointOnTriangle(new Vector3(.5f, 1, 0), Vector3.zero, Vector3.zero, new Vector3(1, 0, 0), out var bary);
+            Assert.That((q - new Vector3(.5f, 0, 0)).magnitude, Is.LessThan(1e-6f), "the audit's case: " + q);
+            Assert.That((bary.x + bary.y) * Vector3.zero + bary.z * new Vector3(1, 0, 0), Is.EqualTo(q));
+            q = MeshBvh.ClosestPointOnTriangle(new Vector3(3, 1, 0), Vector3.one, Vector3.one, Vector3.one, out bary);
+            Assert.That(q, Is.EqualTo(Vector3.one), "all corners at one place");
+            var random = new System.Random(3);
+            Vector3 R() => new Vector3((float)random.NextDouble() * 2 - 1, (float)random.NextDouble() * 2 - 1, (float)random.NextDouble() * 2 - 1);
+            for (int i = 0; i < 20000; i++)
+            {
+                Vector3 a = R(), b = R(), p = R() * 2;
+                // On the line through a and b, inside or outside the segment.
+                var c = i % 2 == 0 ? a + (b - a) * (float)random.NextDouble() * 1.5f : b;
+                q = MeshBvh.ClosestPointOnTriangle(p, a, b, c, out bary);
+                float best = new[] { Segment(p, a, b), Segment(p, b, c), Segment(p, c, a) }.Min(s => (s - p).magnitude);
+                Assert.That(float.IsNaN(q.x) || float.IsNaN(q.y) || float.IsNaN(q.z), Is.False, "case " + i);
+                Assert.That((q - p).magnitude, Is.EqualTo(best).Within(1e-4f), "case " + i);
+                Assert.That((a * bary.x + b * bary.y + c * bary.z - q).magnitude, Is.LessThan(1e-4f), "case " + i);
+            }
+            // A mesh with a collapsed triangle: the query still finds the real nearest triangle.
+            var bvh = MeshBvh.Build(new[] { Vector3.zero, Vector3.zero, Vector3.right, new Vector3(0, 0, 1), new Vector3(1, 0, 1) }, new[] { 0, 1, 2, 2, 3, 4 });
+            var hit = bvh.ClosestPoint(new Vector3(.5f, 1, .5f), 10);
+            Assert.That(hit.Found && !float.IsNaN(hit.Distance), Is.True);
+        }
+
+        private static Vector3 Segment(Vector3 p, Vector3 a, Vector3 b)
+        {
+            var d = b - a;
+            float length = d.sqrMagnitude;
+            return length <= 0 ? a : a + d * Mathf.Clamp01(Vector3.Dot(p - a, d) / length);
+        }
+
+        // OPT-11: rays search the child they enter first; the hit is still the nearest one (checked against every triangle).
+        [Test]
+        public void RaycastsFindTheNearestHit()
+        {
+            Sphere(40, 60, out var vertices, out var triangles);
+            var random = new System.Random(5);
+            vertices = vertices.Select(v => v * (1 + (float)(random.NextDouble() - .5) * .3f)).ToArray();
+            var bvh = MeshBvh.Build(vertices, triangles);
+            for (int i = 0; i < 500; i++)
+            {
+                var origin = new Vector3((float)random.NextDouble() * 6 - 3, (float)random.NextDouble() * 6 - 3, (float)random.NextDouble() * 6 - 3) * (i % 2 == 0 ? 1 : .1f);
+                var direction = (new Vector3((float)random.NextDouble() - .5f, (float)random.NextDouble() - .5f, (float)random.NextDouble() - .5f) - origin).normalized;
+                var hit = bvh.Raycast(origin, direction, 100);
+                // Every triangle the ray clearly crosses (away from its edges, where either answer is right).
+                float nearest = float.PositiveInfinity;
+                for (int t = 0; t < triangles.Length; t += 3)
+                {
+                    Vector3 a = vertices[triangles[t]], b = vertices[triangles[t + 1]], c = vertices[triangles[t + 2]];
+                    new Plane(a, b, c).Raycast(new Ray(origin, direction), out float d);
+                    if (!(d > 0)) continue;
+                    var at = origin + direction * d;
+                    var on = MeshBvh.ClosestPointOnTriangle(at, a, b, c, out var w);
+                    if ((on - at).magnitude < 1e-5f && w.x > 1e-3f && w.y > 1e-3f && w.z > 1e-3f) nearest = Mathf.Min(nearest, d);
+                }
+                if (!float.IsPositiveInfinity(nearest)) Assert.That(hit.Found && hit.Distance <= nearest + 1e-4f, Is.True, "ray " + i + ": a nearer triangle was missed");
+                if (hit.Found)
+                {
+                    int t = hit.Triangle * 3;
+                    var on = MeshBvh.ClosestPointOnTriangle(hit.Position, vertices[triangles[t]], vertices[triangles[t + 1]], vertices[triangles[t + 2]], out _);
+                    Assert.That((on - hit.Position).magnitude, Is.LessThan(1e-4f), "ray " + i + ": the hit is on its triangle");
+                }
+            }
+        }
+
+        // OPT-02: welding by normal compares a vertex with a group's distinct normals: many coincident vertices facing alike
+        // (a pile of collapsed vertices) stay fast, and the groups are the same as comparing with every member.
+        [Test]
+        public void ManyCoincidentVerticesWeldQuickly()
+        {
+            var points = new Vector3[8000];
+            var normals = Enumerable.Repeat(Vector3.up, points.Length).ToArray();
+            normals[100] = Vector3.down;
+            var watch = System.Diagnostics.Stopwatch.StartNew();
+            var neighbors = MeshNeighbors.Build(points, System.Array.Empty<int>(), normals: normals, minNormalDot: .5f);
+            watch.Stop();
+            Assert.That(neighbors.WeldedCount, Is.EqualTo(2), "the one facing down stays apart");
+            Assert.That(neighbors.Weld[100], Is.Not.EqualTo(neighbors.Weld[0]));
+            Assert.That(watch.ElapsedMilliseconds, Is.LessThan(50), "was ~100 ms (8000 x 8000 / 2 comparisons)");
+        }
     }
 }
