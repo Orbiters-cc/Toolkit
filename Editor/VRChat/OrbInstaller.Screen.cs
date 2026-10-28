@@ -108,8 +108,9 @@ namespace Orbiters.Toolkit.Editor.VRChat
         // their diagnostics (_PictureData, CRT A) and B's heartbeat no longer compared with the screen's clock, 13 the
         // version 9 pages (the Music timeline, Take back card), 14 the version 10 pages (27 of them: the simple Home, More,
         // Previous instances, Add Orbiters as a friend), 15 the version 11 pages (29 of them: More with the QR code
-        // scanner, the scanner's page).
-        internal const string ScreenRevision = "15";
+        // scanner, the scanner's page), 16 every one of those pages drawn (the shader's page count follows its layout rows;
+        // it had stayed at 22, so pages 23 on, the Home among them, showed empty).
+        internal const string ScreenRevision = "16";
         private const string ScreenShaderTemplate = "Packages/orbiters.toolkit/Editor/VRChat/OrbScreen.shader.txt";
         private const string BeamShaderTemplate = "Packages/orbiters.toolkit/Editor/VRChat/OrbBeam.shader.txt";
         private const string RayShaderTemplate = "Packages/orbiters.toolkit/Editor/VRChat/OrbRay.shader.txt";
