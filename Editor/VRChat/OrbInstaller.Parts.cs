@@ -260,7 +260,7 @@ namespace Orbiters.Toolkit.Editor.VRChat
             if (renderer == null) { job.Problems.Add(HasScreen(orb) ? OlderScreen : "This N4N0 has no screen: choose its options again."); return; }
             int thumbnailBytes = OptionsOf(orb).thumbnailBytes;
             var (_, shared) = ScreenAssets(ScreenFolder, thumbnailBytes, retro);
-            string folder = job.Folder + "/menu " + ItemParts.ShortHash(themeJson.ToString(Formatting.None) + "|" + stringsJson?.ToString(Formatting.None) + "|" + (drawn != null ? Path.GetFileName(drawn) : "shipped") + "|" + thumbnailBytes);
+            string folder = job.Folder + "/menu " + ItemParts.ShortHash(themeJson.ToString(Formatting.None) + "|" + stringsJson?.ToString(Formatting.None) + "|" + (drawn != null ? Path.GetFileName(drawn) : "shipped") + "|" + thumbnailBytes + "|" + ScreenRevision);
             ItemParts.EnsureFolder(folder);
             job.Made.Add(folder);
             var pages = shared.GetTexture("_Pages");
