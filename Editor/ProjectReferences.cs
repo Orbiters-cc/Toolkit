@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -8,13 +9,24 @@ using UnityEditor;
 namespace Orbiters.Toolkit.Editor
 {
     /// <summary>
-    /// Which project assets use which: every scene, prefab, material, animation and asset under Assets/ is asked for its
-    /// direct dependencies, a slice per editor tick so the editor stays responsive. Tools use it before replacing or
-    /// removing files (an imported material another avatar's prefab still uses is kept).
+    /// Which project assets use which: every file under Assets/ that can use another (all but folders and the kinds that
+    /// never do, as pictures, sounds and scripts: override controllers, sprite atlases, shaders and whatever comes next count
+    /// too) is asked for its direct dependencies, a slice per editor tick so the editor stays responsive. Tools use it before
+    /// replacing or removing files (an imported material another avatar's prefab still uses is kept).
     /// </summary>
     public sealed partial class ProjectReferences
     {
-        private static readonly string[] Users = { "t:Scene", "t:Prefab", "t:Material", "t:AnimationClip", "t:AnimatorController", "t:ScriptableObject", "t:Model" };
+        // Files that never use another asset: not asked (a picture, a sound, a script, plain data).
+        private static readonly HashSet<string> Leaves = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ".png", ".jpg", ".jpeg", ".tga", ".psd", ".tif", ".tiff", ".exr", ".hdr", ".bmp", ".gif", ".iff", ".pict",
+            ".wav", ".mp3", ".ogg", ".aif", ".aiff", ".flac", ".mod", ".it", ".s3m", ".xm",
+            ".cs", ".dll", ".txt", ".json", ".bytes", ".md", ".csv", ".xml", ".yaml", ".html", ".htm", ".py",
+        };
+
+        /// <summary>True when the scan asks <paramref name="path"/> what it uses (it may use another asset).</summary>
+        public static bool MayUseOthers(string path) => !string.IsNullOrEmpty(path) && !Leaves.Contains(Path.GetExtension(path));
+
         private readonly Dictionary<string, HashSet<string>> usedBy = new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase);
 
         public int Scanned { get; private set; }
@@ -27,10 +39,10 @@ namespace Orbiters.Toolkit.Editor
         public static async Task<ProjectReferences> ScanAsync(Action<float, string> progress = null, CancellationToken cancellation = default)
         {
             var map = new ProjectReferences();
-            var assets = AssetDatabase.FindAssets(string.Join(" ", Users), new[] { "Assets" })
-                .Select(AssetDatabase.GUIDToAssetPath).Where(p => !string.IsNullOrEmpty(p)).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
-            // Scenes are not found by type filters combined in one query on every Unity version: add them explicitly.
-            assets = assets.Concat(AssetDatabase.FindAssets("t:Scene", new[] { "Assets" }).Select(AssetDatabase.GUIDToAssetPath)).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+            // Every asset, not a list of types: a kind left out (an override controller using a clip) would make what it uses
+            // look unused.
+            var assets = AssetDatabase.FindAssets("", new[] { "Assets" }).Select(AssetDatabase.GUIDToAssetPath)
+                .Where(p => MayUseOthers(p) && !AssetDatabase.IsValidFolder(p)).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
             var started = DateTime.UtcNow;
             for (int i = 0; i < assets.Count; i++)
             {

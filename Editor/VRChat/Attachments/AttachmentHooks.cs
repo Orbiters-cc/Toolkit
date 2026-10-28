@@ -60,15 +60,11 @@ namespace Orbiters.Toolkit.Editor.VRChat.Attachments
 
         /// <summary>
         /// Sets <paramref name="to"/>'s options as <paramref name="from"/>'s are, matched by label and choice (an update
-        /// placed in place of an older copy keeps its settings), and what registered carries take over (its parts' variants).
+        /// placed in place of an older copy keeps its settings), then what registered carries take over (its parts' variants):
+        /// an option can redraw the parts (N4N0's thumbnail size), so the parts come last, drawn with the options as they are.
         /// </summary>
         public static void CarryOptions(GameObject from, GameObject to)
         {
-            foreach (var carry in Carries)
-            {
-                try { _ = carry(from, to); }
-                catch (Exception e) { Debug.LogWarning("[Orbiters] " + (to != null ? to.name : "The item") + " was updated without some of its earlier choices: " + e.Message); }
-            }
             var before = Options(from);
             // A choice can change another option (N4N0's text slots and thumbnail size go together): the options are read
             // again before each one, and a second pass puts back what a later choice changed of an earlier one.
@@ -86,6 +82,11 @@ namespace Orbiters.Toolkit.Editor.VRChat.Attachments
                     catch (Exception e) { Debug.LogWarning("[Orbiters] " + (to != null ? to.name : "The item") + " was updated without its earlier " + label + ": " + e.Message); }
                 }
                 if (!changed) break;
+            }
+            foreach (var carry in Carries)
+            {
+                try { _ = carry(from, to); }
+                catch (Exception e) { Debug.LogWarning("[Orbiters] " + (to != null ? to.name : "The item") + " was updated without some of its earlier choices: " + e.Message); }
             }
         }
     }

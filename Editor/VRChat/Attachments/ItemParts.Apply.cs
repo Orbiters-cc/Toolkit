@@ -114,11 +114,19 @@ namespace Orbiters.Toolkit.Editor.VRChat.Attachments
         {
             var importer = AssetImporter.GetAtPath(path);
             if (importer == null) return;
-            var record = new Record { parts = parts.Where(p => p != null).GroupBy(p => p.part).Select(g => g.Last()).ToList() };
-            importer.userData = new JObject { [RecordKey] = JToken.FromObject(record, JsonSerializer.Create(new JsonSerializerSettings { NullValueHandling = NullValueHandling.Ignore })) }.ToString(Formatting.None);
+            string data = RecordData(parts);
+            // A file kept from an earlier apply already says this: its .meta stays as it is.
+            if (importer.userData == data) return;
+            importer.userData = data;
             EditorUtility.SetDirty(importer);
             AssetDatabase.WriteImportSettingsIfDirty(path);
             Records.Remove(path);
+        }
+
+        private static string RecordData(IEnumerable<Applied> parts)
+        {
+            var record = new Record { parts = parts.Where(p => p != null).GroupBy(p => p.part).Select(g => g.Last()).ToList() };
+            return new JObject { [RecordKey] = JToken.FromObject(record, JsonSerializer.Create(new JsonSerializerSettings { NullValueHandling = NullValueHandling.Ignore })) }.ToString(Formatting.None);
         }
 
         /// <summary>The variant an applied record stands for, its files taken from where they were copied (or, base, from the asset).</summary>
@@ -181,11 +189,32 @@ namespace Orbiters.Toolkit.Editor.VRChat.Attachments
             return path;
         }
 
-        private static void SaveMaterial(Material material, string path)
+        /// <summary>
+        /// Saves a material made for a variant and returns its path: the file already at <paramref name="path"/> when it holds
+        /// this very material and record, else a new file (at a free path beside it). A file other items, prefabs or Undo
+        /// steps may use is never changed, so an apply that fails later leaves nothing but unused new files.
+        /// </summary>
+        private static string SaveMaterial(Material material, string path, IEnumerable<Applied> record)
         {
-            var existing = AssetDatabase.LoadAssetAtPath<Material>(path);
-            if (existing != null) { EditorUtility.CopySerialized(material, existing); existing.name = Path.GetFileNameWithoutExtension(path); EditorUtility.SetDirty(existing); AssetDatabase.SaveAssetIfDirty(existing); Object.DestroyImmediate(material); }
-            else AssetDatabase.CreateAsset(material, path);
+            string data = RecordData(record);
+            string stem = path.Substring(0, path.Length - Path.GetExtension(path).Length);
+            for (int copy = 0; ; copy++)
+            {
+                string candidate = copy == 0 ? path : stem + " " + copy + Path.GetExtension(path);
+                material.name = Path.GetFileNameWithoutExtension(candidate);
+                if (!File.Exists(candidate))
+                {
+                    AssetDatabase.CreateAsset(material, candidate);
+                    WriteRecord(candidate, record);
+                    return candidate;
+                }
+                var existing = AssetDatabase.LoadAssetAtPath<Material>(candidate);
+                if (existing != null && AssetImporter.GetAtPath(candidate)?.userData == data && EditorJsonUtility.ToJson(existing) == EditorJsonUtility.ToJson(material))
+                {
+                    Object.DestroyImmediate(material);
+                    return candidate;
+                }
+            }
         }
 
         internal static Texture2D ImportTexture(string path, bool normal, bool picture)
@@ -230,6 +259,31 @@ namespace Orbiters.Toolkit.Editor.VRChat.Attachments
         public static async Task<ApplyResult> ApplyAsync(Transform item, Definition definition, string prefabPath, string partsPath,
             IReadOnlyList<(Part part, PartVariant variant)> choices, Action<string> progress = null, CancellationToken cancellation = default)
         {
+            if (item == null) return await ApplyNowAsync(item, definition, prefabPath, partsPath, choices, progress, cancellation);
+            // One apply at a time per item (a card's choice, an update's carry, another part's choice): a renderer draws every
+            // part of the item from the choices it reads as it starts, so an apply waits for the one before it to finish.
+            int key = item.GetInstanceID();
+            Running.TryGetValue(key, out var before);
+            var mine = new TaskCompletionSource<bool>();
+            Running[key] = mine.Task;
+            try
+            {
+                if (before != null && !before.IsCompleted) { progress?.Invoke("Waiting for the item's other change…"); await before; }
+                return await ApplyNowAsync(item, definition, prefabPath, partsPath, choices, progress, cancellation);
+            }
+            finally
+            {
+                mine.SetResult(true);
+                if (Running.TryGetValue(key, out var last) && last == mine.Task) Running.Remove(key);
+            }
+        }
+
+        // The last apply started on each item (by instance id), done once it finished.
+        private static readonly Dictionary<int, Task> Running = new Dictionary<int, Task>();
+
+        private static async Task<ApplyResult> ApplyNowAsync(Transform item, Definition definition, string prefabPath, string partsPath,
+            IReadOnlyList<(Part part, PartVariant variant)> choices, Action<string> progress, CancellationToken cancellation)
+        {
             var result = new ApplyResult();
             progress ??= _ => { };
             if (item == null || definition == null || choices == null || choices.Count == 0) { result.Problems.Add("Nothing to apply."); return result; }
@@ -245,36 +299,44 @@ namespace Orbiters.Toolkit.Editor.VRChat.Attachments
             if (result.Problems.Count > 0) return result;
 
             var plan = new Plan { Item = item, Folder = ItemFolder(item), Definition = definition, PrefabPath = prefabPath, PartsPath = partsPath, Prefab = prefab };
+            var jobs = new List<RenderJob>();
+            // What was made goes once nothing uses it: all of it when the apply stops before the item changed.
+            void Forget() { GeneratedAssets.Track(plan.Made.Concat(jobs.SelectMany(j => j.Made))); GeneratedAssets.SweepSoon(); }
+            int group = -1;
             try
             {
-                foreach (var (part, variant) in choices.Where(c => c.part.kind != Model)) PrepareFiles(plan, part, variant);
+                // New files only (existing ones are kept or left alone, see SaveMaterial): stopping between steps changes nothing.
+                cancellation.ThrowIfCancellationRequested();
+                foreach (var (part, variant) in choices.Where(c => c.part.kind != Model)) { PrepareFiles(plan, part, variant); cancellation.ThrowIfCancellationRequested(); }
                 foreach (var (part, variant) in choices)
                 {
                     progress("Preparing " + part.Label.ToLowerInvariant() + "…");
                     if (part.kind == Model) PrepareModel(plan, part, variant, result.Problems);
                     if (part.kind == Values) PrepareTargets(plan, part, variant);
+                    cancellation.ThrowIfCancellationRequested();
                 }
-                if (result.Problems.Count > 0) { GeneratedAssets.Track(plan.Made); GeneratedAssets.SweepSoon(); return result; }
+                if (result.Problems.Count > 0) { Forget(); return result; }
 
                 // Every renderer named by a chosen part makes the item's pictures for all its parts' current choices.
-                var jobs = new List<RenderJob>();
                 foreach (string name in choices.Select(c => c.part.renderer).Where(r => !string.IsNullOrEmpty(r)).Distinct())
                 {
                     if (!Renderers.TryGetValue(name, out var renderer) || renderer.Render == null) { result.Problems.Add("There is no renderer \"" + name + "\" in this Toolkit."); continue; }
                     var job = Job(item, definition, prefabPath, partsPath, name, choices, progress, cancellation);
+                    jobs.Add(job);
                     progress("Drawing " + string.Join(" and ", job.Parts.Values.Select(p => p.part.Label.ToLowerInvariant())) + "…");
                     await renderer.Render(job);
                     cancellation.ThrowIfCancellationRequested();
                     if (job.Problems.Count > 0) result.Problems.AddRange(job.Problems);
                     if (job.Note != null) result.Note = job.Note;
-                    jobs.Add(job);
                 }
-                if (result.Problems.Count > 0) { GeneratedAssets.Track(plan.Made.Concat(jobs.SelectMany(j => j.Made))); GeneratedAssets.SweepSoon(); return result; }
-                if (item == null) { result.Problems.Add("The item is not in the scene any more."); return result; }
+                if (result.Problems.Count > 0) { Forget(); return result; }
+                if (item == null) { result.Problems.Add("The item is not in the scene any more."); Forget(); return result; }
+                cancellation.ThrowIfCancellationRequested();
 
-                // The item changes in one Undo step, once everything is ready.
+                // The item changes in one Undo step, once everything is ready, and all at once: a change that fails takes
+                // back the ones made before it.
                 Undo.IncrementCurrentGroup();
-                int group = Undo.GetCurrentGroup();
+                group = Undo.GetCurrentGroup();
                 Undo.SetCurrentGroupName(choices.Count == 1 ? "Customize " + choices[0].part.Label + ": " + choices[0].variant.name : "Customize " + item.name);
                 foreach (var assign in plan.Assign) assign();
                 foreach (var job in jobs)
@@ -285,15 +347,19 @@ namespace Orbiters.Toolkit.Editor.VRChat.Attachments
                 }
                 foreach (var after in plan.After) after();
                 Undo.CollapseUndoOperations(group);
+                group = -1;
                 GeneratedAssets.Track(plan.Made.Concat(jobs.SelectMany(j => j.Made)));
                 foreach (var (_, variant) in choices) KeepThumbnail(variant);
                 result.Applied = true;
                 Changed?.Invoke(item);
                 return result;
             }
-            catch (OperationCanceledException) { result.Problems.Add("Cancelled."); return result; }
+            catch (OperationCanceledException) { Forget(); result.Problems.Add("Cancelled."); return result; }
             catch (Exception e) when (!(e is OutOfMemoryException))
             {
+                // The changes made in this apply's Undo step (synchronous: nothing else was recorded since it began) go back.
+                if (group >= 0) Undo.RevertAllDownToGroup(group);
+                Forget();
                 Debug.LogException(e);
                 result.Problems.Add("It could not be applied: " + e.Message);
                 return result;
@@ -316,6 +382,8 @@ namespace Orbiters.Toolkit.Editor.VRChat.Attachments
             public readonly List<Action> After = new List<Action>();
             /// <summary>Where each chosen variant's files were copied, by part key.</summary>
             public readonly Dictionary<string, string> Files = new Dictionary<string, string>();
+            /// <summary>Each chosen variant's own folder (<see cref="VariantFolder"/>), by part key.</summary>
+            public readonly Dictionary<string, string> Folders = new Dictionary<string, string>();
             /// <summary>The imported files of each chosen variant, by part key then file name.</summary>
             public readonly Dictionary<string, Dictionary<string, string>> Imported = new Dictionary<string, Dictionary<string, string>>();
         }
@@ -323,11 +391,31 @@ namespace Orbiters.Toolkit.Editor.VRChat.Attachments
         private static string FilesFolder(Plan plan, Part part, PartVariant variant) =>
             plan.Files.TryGetValue(part.key, out var folder) ? folder : variant.IsBase ? variant.Folder : variant.Folder;
 
-        // A variant's own folder: by part, its name and what it holds (the same variant applied again uses the same files).
+        // A variant's own folder: by part, its name and a hash of what it is (its record, the bytes of every file it names and
+        // how files are made from them), so the same variant applied again uses the same files and another variant never
+        // lands in its folder.
         private static string VariantFolder(Plan plan, Part part, PartVariant variant)
         {
-            string content = variant.ToJson() + "|" + string.Join("|", variant.NamedFiles(part).Select(f => f + ":" + (variant.FileBytes(f)?.Length ?? 0)));
-            return plan.Folder + "/" + Clean(part.key, 24) + "/" + Clean(variant.name, 16) + " " + ShortHash(content);
+            if (plan.Folders.TryGetValue(part.key, out var known)) return known;
+            string folder = plan.Folder + "/" + Clean(part.key, 24) + "/" + Clean(variant.name, 16) + " " + VariantIdentity(part, variant);
+            plan.Folders[part.key] = folder;
+            return folder;
+        }
+
+        // Raised when what is made from a variant's files changes (ModelMesh's bake): earlier folders keep what they hold.
+        private const int MadeRevision = 2;
+
+        /// <summary>16 hex digits naming a variant by its content: its record (JSON, id, author, published hash, thumbnail) and its files' SHA-256.</summary>
+        internal static string VariantIdentity(Part part, PartVariant variant)
+        {
+            var text = new StringBuilder("made ").Append(MadeRevision).Append('|')
+                .Append(JsonConvert.SerializeObject(Applied.Of(variant, null), new JsonSerializerSettings { NullValueHandling = NullValueHandling.Ignore }));
+            foreach (string name in variant.NamedFiles(part).OrderBy(n => n, StringComparer.OrdinalIgnoreCase))
+            {
+                var bytes = variant.FileBytes(name);
+                text.Append('|').Append(name.ToLowerInvariant()).Append(':').Append(bytes == null ? "missing" : PartVariant.Hash(bytes));
+            }
+            using (var sha = SHA256.Create()) return string.Concat(sha.ComputeHash(Encoding.UTF8.GetBytes(text.ToString())).Take(8).Select(b => b.ToString("x2")));
         }
 
         // The pictures a values variant names, copied in and imported.
@@ -384,8 +472,7 @@ namespace Orbiters.Toolkit.Editor.VRChat.Attachments
                     var copy = new Material(source) { name = Path.GetFileNameWithoutExtension(path) };
                     foreach (var (_, target) in bySlot) SetValue(plan, part, variant, target, copy);
                     var others = RecordOf(source)?.parts.Where(p => p != null && p.part != part.key) ?? Enumerable.Empty<Applied>();
-                    SaveMaterial(copy, path);
-                    WriteRecord(path, others.Concat(new[] { record }).ToList());
+                    path = SaveMaterial(copy, path, others.Concat(new[] { record }).ToList());
                     copies[bySlot.Key] = AssetDatabase.LoadAssetAtPath<Material>(path);
                     plan.Made.Add(path);
                 }
@@ -480,9 +567,8 @@ namespace Orbiters.Toolkit.Editor.VRChat.Attachments
                 var materials = new Material[given.materials.Count];
                 for (int i = 0; i < materials.Length; i++)
                 {
-                    string path = folder + "/" + Clean(slot.key, 16) + " " + (i + 1) + ".mat";
-                    SaveMaterial(MakeMaterial(plan, part, variant, given.materials[i], Clean(slot.key, 16) + " " + (i + 1)), path);
-                    WriteRecord(path, new[] { record });
+                    string path = SaveMaterial(MakeMaterial(plan, part, variant, given.materials[i], Clean(slot.key, 16) + " " + (i + 1)),
+                        folder + "/" + Clean(slot.key, 16) + " " + (i + 1) + ".mat", new[] { record });
                     materials[i] = AssetDatabase.LoadAssetAtPath<Material>(path);
                     plan.Made.Add(path);
                 }
@@ -506,6 +592,10 @@ namespace Orbiters.Toolkit.Editor.VRChat.Attachments
         public static void ImportModel(string path)
         {
             if (!(AssetImporter.GetAtPath(path) is ModelImporter importer)) return;
+            // Already imported so (a variant's FBX kept from an earlier apply): other items' meshes from it are not imported again.
+            if (importer.preserveHierarchy && importer.materialImportMode == ModelImporterMaterialImportMode.None && !importer.importAnimation &&
+                importer.animationType == ModelImporterAnimationType.None && !importer.importCameras && !importer.importLights && !importer.importVisibility &&
+                importer.importBlendShapes && !importer.bakeAxisConversion && !importer.isReadable) return;
             importer.preserveHierarchy = true;
             // A variant brings a mesh and nothing else: no materials or textures from the file, no animation, rig, camera or light.
             importer.materialImportMode = ModelImporterMaterialImportMode.None;
@@ -523,6 +613,8 @@ namespace Orbiters.Toolkit.Editor.VRChat.Attachments
         /// The mesh of an imported variant FBX's object, as it stands in the file: its transform below the file's root (a
         /// Blender object's turn, a scale) baked into a copy, saved at <paramref name="saveTo"/> (else a temporary copy the
         /// caller destroys); the imported mesh itself when the object stands at the root. Null when there is no such object.
+        /// A mesh already saved at <paramref name="saveTo"/> is returned as it is: a variant's folder is named by its content
+        /// (<see cref="VariantIdentity"/>), so it was baked from these very bytes, and other items may use it.
         /// </summary>
         public static Mesh ModelMesh(GameObject root, string objectName, string saveTo = null)
         {
@@ -539,28 +631,81 @@ namespace Orbiters.Toolkit.Editor.VRChat.Attachments
             bool identity = true;
             for (int i = 0; i < 16 && identity; i++) identity = Mathf.Abs(matrix[i] - Matrix4x4.identity[i]) < 1e-5f;
             if (identity) return mesh;
+            if (saveTo != null && AssetDatabase.LoadAssetAtPath<Mesh>(saveTo) is Mesh kept) return kept;
+            var baked = BakeTransform(mesh, matrix);
+            if (saveTo == null) { baked.hideFlags = HideFlags.HideAndDontSave; return baked; }
+            AssetDatabase.CreateAsset(baked, saveTo);
+            return baked;
+        }
+
+        /// <summary>
+        /// A copy of <paramref name="mesh"/> with <paramref name="matrix"/> baked in: positions and blendshape offsets by the
+        /// whole matrix, normals by its inverse transpose (right under non-uniform scale), tangents as directions; a mirroring
+        /// matrix also turns the triangles around and flips the tangents' handedness, so the faces still face out.
+        /// </summary>
+        internal static Mesh BakeTransform(Mesh mesh, Matrix4x4 matrix)
+        {
             var baked = Object.Instantiate(mesh);
             baked.name = mesh.name;
+            float determinant = matrix.determinant;
+            bool singular = Mathf.Abs(determinant) < 1e-12f;
+            // A flattened axis has no inverse: normals then only turn.
+            var normalMatrix = singular ? Matrix4x4.Rotate(matrix.rotation) : matrix.inverse.transpose;
+            bool mirrored = determinant < 0f;
             var turn = matrix.rotation;
-            baked.vertices = mesh.vertices.Select(v => matrix.MultiplyPoint3x4(v)).ToArray();
-            baked.normals = mesh.normals.Select(n => (turn * n).normalized).ToArray();
-            baked.tangents = mesh.tangents.Select(t => { var d = (turn * new Vector3(t.x, t.y, t.z)).normalized; return new Vector4(d.x, d.y, d.z, t.w); }).ToArray();
-            // Blendshape offsets turn and scale as the vertices do.
+            Vector3 Normal(Vector3 n) => normalMatrix.MultiplyVector(n).normalized;
+            Vector3 Direction(Vector3 d) => matrix.MultiplyVector(d).normalized;
+
+            var vertices = mesh.vertices;
+            for (int i = 0; i < vertices.Length; i++) vertices[i] = matrix.MultiplyPoint3x4(vertices[i]);
+            baked.vertices = vertices;
+            var baseNormals = mesh.normals;
+            var normals = new Vector3[baseNormals.Length];
+            for (int i = 0; i < normals.Length; i++) normals[i] = Normal(baseNormals[i]);
+            baked.normals = normals;
+            var baseTangents = mesh.tangents;
+            var tangents = new Vector4[baseTangents.Length];
+            for (int i = 0; i < tangents.Length; i++)
+            {
+                var t = baseTangents[i];
+                var d = Direction(new Vector3(t.x, t.y, t.z));
+                tangents[i] = new Vector4(d.x, d.y, d.z, mirrored ? -t.w : t.w);
+            }
+            baked.tangents = tangents;
+            if (mirrored)
+                for (int sub = 0; sub < baked.subMeshCount; sub++)
+                {
+                    if (baked.GetTopology(sub) != MeshTopology.Triangles) continue;
+                    var indices = baked.GetIndices(sub, false);
+                    for (int i = 0; i + 2 < indices.Length; i += 3) (indices[i + 1], indices[i + 2]) = (indices[i + 2], indices[i + 1]);
+                    baked.SetIndices(indices, MeshTopology.Triangles, sub, false, (int)baked.GetBaseVertex(sub));
+                }
+
+            // Blendshape offsets move as the vertices do; a shape's normal and tangent offsets are the change of a unit
+            // direction, so they are taken as the change of the transformed direction (exact where the base one is known).
             baked.ClearBlendShapes();
             int count = mesh.vertexCount;
-            var deltas = new Vector3[count]; var normals = new Vector3[count]; var tangents = new Vector3[count];
+            var deltas = new Vector3[count]; var normalDeltas = new Vector3[count]; var tangentDeltas = new Vector3[count];
+            var outDeltas = new Vector3[count]; var outNormals = new Vector3[count]; var outTangents = new Vector3[count];
+            bool hasNormals = baseNormals.Length == count, hasTangents = baseTangents.Length == count;
             for (int shape = 0; shape < mesh.blendShapeCount; shape++)
             for (int frame = 0; frame < mesh.GetBlendShapeFrameCount(shape); frame++)
             {
-                mesh.GetBlendShapeFrameVertices(shape, frame, deltas, normals, tangents);
-                baked.AddBlendShapeFrame(mesh.GetBlendShapeName(shape), mesh.GetBlendShapeFrameWeight(shape, frame),
-                    deltas.Select(d => matrix.MultiplyVector(d)).ToArray(), normals.Select(n => turn * n).ToArray(), tangents.Select(t => turn * t).ToArray());
+                mesh.GetBlendShapeFrameVertices(shape, frame, deltas, normalDeltas, tangentDeltas);
+                for (int i = 0; i < count; i++)
+                {
+                    outDeltas[i] = matrix.MultiplyVector(deltas[i]);
+                    var dn = normalDeltas[i];
+                    outNormals[i] = dn == Vector3.zero ? Vector3.zero
+                        : hasNormals && baseNormals[i] != Vector3.zero ? Normal(baseNormals[i] + dn) - normals[i] : turn * dn;
+                    var dt = tangentDeltas[i];
+                    if (dt == Vector3.zero) { outTangents[i] = Vector3.zero; continue; }
+                    var bt = hasTangents ? new Vector3(baseTangents[i].x, baseTangents[i].y, baseTangents[i].z) : Vector3.zero;
+                    outTangents[i] = bt != Vector3.zero ? Direction(bt + dt) - new Vector3(tangents[i].x, tangents[i].y, tangents[i].z) : turn * dt;
+                }
+                baked.AddBlendShapeFrame(mesh.GetBlendShapeName(shape), mesh.GetBlendShapeFrameWeight(shape, frame), outDeltas, outNormals, outTangents);
             }
             baked.RecalculateBounds();
-            if (saveTo == null) { baked.hideFlags = HideFlags.HideAndDontSave; return baked; }
-            var existing = AssetDatabase.LoadAssetAtPath<Mesh>(saveTo);
-            if (existing != null) { EditorUtility.CopySerialized(baked, existing); Object.DestroyImmediate(baked); return existing; }
-            AssetDatabase.CreateAsset(baked, saveTo);
             return baked;
         }
 

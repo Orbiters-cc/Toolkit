@@ -133,6 +133,27 @@ namespace Orbiters.Toolkit.Editor.VRChat.Attachments
         public static bool AllowedName(string fileName) => fileName != null && NamePattern.IsMatch(fileName) && fileName != "." && fileName != "..";
 
         /// <summary>
+        /// <see cref="ReadZip"/> of a file (a downloaded or cached variant), its size checked before any of it is read: a
+        /// file larger than a variant's zip may be is never loaded into memory.
+        /// </summary>
+        public static PartVariant ReadZipFile(string path, List<string> problems)
+        {
+            problems ??= new List<string>();
+            try
+            {
+                var info = new FileInfo(path);
+                if (!info.Exists) { problems.Add("The variant's file is missing."); return null; }
+                if (info.Length > ItemParts.MaxZipBytes) { problems.Add("The variant's zip is larger than " + ItemParts.MaxZipBytes / (1024 * 1024) + " MB."); return null; }
+                return ReadZip(File.ReadAllBytes(path), problems);
+            }
+            catch (Exception e) when (e is IOException || e is UnauthorizedAccessException)
+            {
+                problems.Add("The variant's file could not be read: " + e.Message);
+                return null;
+            }
+        }
+
+        /// <summary>
         /// Reads a variant's zip, checking its shape (§2: size, file count, flat names, what is unpacked) before reading any
         /// file; null (with the problems said) when it can't be one. <see cref="ItemParts.Check"/> checks it against the part.
         /// </summary>

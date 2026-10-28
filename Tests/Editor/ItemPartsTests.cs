@@ -376,4 +376,220 @@ public sealed class ItemPartsTests
         Assert.AreEqual("Red", carried.Current.name);
         Assert.AreEqual(Color.red, update.transform.Find("Body").GetComponent<Renderer>().sharedMaterials[0].GetColor("_Color"));
     }
+
+    // ---- Audit 2026-10-28: variant files are named by their content and never change under an earlier user ----
+
+    private const string RedJson = "{ \"schema\": 1, \"part\": \"colour\", \"name\": \"Red\", \"values\": { \"main\": \"#FF0000\", \"shine\": 0.9, \"decal\": \"decal.png\" } }";
+
+    // Two variants with the same JSON and files of the same size but other bytes (the audit's probe) have other folders.
+    [Test] public void AVariantsFolderIsNamedByTheBytesOfItsFiles()
+    {
+        var part = Part("colour").Part;
+        var one = Variant(RedJson, ("decal.png", new byte[] { 1, 2, 3, 4 }));
+        var other = Variant(RedJson, ("decal.png", new byte[] { 1, 2, 3, 5 }));
+        other.Thumbnail = one.Thumbnail;
+        Assert.AreNotEqual(ItemParts.VariantIdentity(part, one), ItemParts.VariantIdentity(part, other));
+        var again = Variant(RedJson, ("decal.png", new byte[] { 1, 2, 3, 4 }));
+        again.Thumbnail = one.Thumbnail;
+        Assert.AreEqual(ItemParts.VariantIdentity(part, one), ItemParts.VariantIdentity(part, again), "the same variant again: the same folder");
+        var posted = Variant(RedJson, ("decal.png", new byte[] { 1, 2, 3, 4 }));
+        posted.Thumbnail = one.Thumbnail;
+        posted.Id = 7;
+        Assert.AreNotEqual(ItemParts.VariantIdentity(part, again), ItemParts.VariantIdentity(part, posted), "its record (here Orbiters' id) counts too");
+    }
+
+    // VAR-01/VAR-02: a second variant with the same JSON and a same-sized picture never changes the first one's files, so
+    // Undo brings back exactly what the item showed; applying the first again takes its files as they are.
+    [Test] public void AnotherVariantNeverChangesTheFilesOfAnEarlierOne()
+    {
+        var colour = Part("colour");
+        byte[] redPicture = Png(8, 4, Color.red), bluePicture = Png(8, 4, Color.blue);
+        var red = Variant(RedJson, ("decal.png", redPicture));
+        var blue = Variant(RedJson, ("decal.png", bluePicture));
+        blue.Thumbnail = red.Thumbnail;
+        Assert.IsTrue(ItemParts.ApplyAsync(colour, red).Result.Applied);
+        var body = placed.transform.Find("Body").GetComponent<Renderer>();
+        var first = body.sharedMaterials[0];
+        string firstPath = AssetDatabase.GetAssetPath(first), firstPicture = AssetDatabase.GetAssetPath(first.GetTexture("_MainTex"));
+        var firstMaterialText = File.ReadAllText(firstPath);
+
+        Assert.IsTrue(ItemParts.ApplyAsync(Part("colour"), blue).Result.Applied);
+        var second = body.sharedMaterials[0];
+        Assert.AreNotEqual(firstPath, AssetDatabase.GetAssetPath(second));
+        Assert.AreNotEqual(firstPicture, AssetDatabase.GetAssetPath(second.GetTexture("_MainTex")), "its picture has its own file");
+        CollectionAssert.AreEqual(redPicture, File.ReadAllBytes(firstPicture), "the first picture is as it was");
+        Assert.AreEqual(firstMaterialText, File.ReadAllText(firstPath), "the first material is as it was");
+
+        sandbox.PerformUndo();
+        Assert.AreEqual(firstPath, AssetDatabase.GetAssetPath(body.sharedMaterials[0]));
+        Assert.AreEqual(firstPicture, AssetDatabase.GetAssetPath(body.sharedMaterials[0].GetTexture("_MainTex")));
+
+        // The same variant again on the item as it was (as a card applies it again): its files are taken as they are.
+        sandbox.PerformUndo();
+        Assert.AreEqual(shell, body.sharedMaterials[0]);
+        var written = File.GetLastWriteTimeUtc(firstPath);
+        var redAgain = Variant(RedJson, ("decal.png", redPicture));
+        redAgain.Thumbnail = red.Thumbnail;
+        Assert.IsTrue(ItemParts.ApplyAsync(Part("colour"), redAgain).Result.Applied);
+        Assert.AreEqual(firstPath, AssetDatabase.GetAssetPath(body.sharedMaterials[0]), "the first material again, not a copy of it");
+        Assert.AreEqual(written, File.GetLastWriteTimeUtc(firstPath));
+    }
+
+    // VAR-02: a material made from an item's current material is never written over when that one changed since: a
+    // material other copies and Undo steps use keeps what it had, and the new values get their own file.
+    [Test] public void AMaterialMadeEarlierIsNotWrittenOverWhenItsSourceChanged()
+    {
+        var red = Variant(RedJson, ("decal.png", Png(8, 4, Color.red)));
+        Assert.IsTrue(ItemParts.ApplyAsync(Part("colour"), red).Result.Applied);
+        var body = placed.transform.Find("Body").GetComponent<Renderer>();
+        string firstPath = AssetDatabase.GetAssetPath(body.sharedMaterials[0]);
+        sandbox.PerformUndo();
+        // The item's own material changes (its creator's update, the user's edit), then the same variant is applied.
+        shell.SetFloat("_Glossiness", .1f);
+        shell.renderQueue = 2100;
+        EditorUtility.SetDirty(shell);
+        AssetDatabase.SaveAssetIfDirty(shell);
+        var text = File.ReadAllText(firstPath);
+        Assert.IsTrue(ItemParts.ApplyAsync(Part("colour"), red).Result.Applied);
+        Assert.AreNotEqual(firstPath, AssetDatabase.GetAssetPath(body.sharedMaterials[0]));
+        Assert.AreEqual(2100, body.sharedMaterials[0].renderQueue);
+        Assert.AreEqual(text, File.ReadAllText(firstPath), "the earlier copy is as it was");
+    }
+
+    // SEC-05: a cached or downloaded variant file larger than a variant's zip may be is refused before it is read.
+    [Test] public void AVariantFileTooLargeIsNotRead()
+    {
+        string path = Path.Combine(Path.GetDirectoryName(Application.dataPath), "Temp", "parts-test-" + System.Guid.NewGuid().ToString("N") + ".zip");
+        try
+        {
+            using (var stream = File.Create(path)) stream.SetLength(ItemParts.MaxZipBytes + 1);
+            var problems = new List<string>();
+            Assert.IsNull(PartVariant.ReadZipFile(path, problems));
+            Assert.IsTrue(problems.Any(p => p.Contains("larger than 16 MB")), string.Join("\n", problems));
+            Variant(RedJson, ("decal.png", Png(8, 4, Color.red))).WriteZip(path);
+            problems.Clear();
+            var read = PartVariant.ReadZipFile(path, problems);
+            Assert.IsNotNull(read, string.Join("\n", problems));
+            Assert.AreEqual("Red", read.name);
+        }
+        finally { if (File.Exists(path)) File.Delete(path); }
+    }
+
+    // VAR-03: applies on one item run one after another: a second part's choice waits until a renderer drawing the
+    // item's parts from the choices it read has finished, so neither overwrites the other.
+    [UnityEngine.TestTools.UnityTest] public System.Collections.IEnumerator AppliesOnOneItemRunOneAfterAnother()
+    {
+        var drawing = new TaskCompletionSource<bool>();
+        ItemParts.RegisterRenderer(Renderer, new ItemParts.PartRenderer
+        {
+            Anchors = item => new[] { item.Find("Body").GetComponent<Renderer>() },
+            Render = async job => { await drawing.Task; job.Assign = () => { }; },
+        });
+        var french = Variant("{ \"schema\": 1, \"part\": \"words\", \"name\": \"Français\", \"language\": \"fr\", \"strings\": { \"title\": \"Menu FR\", \"hello\": \"Salut\" } }");
+        var red = Variant(RedJson, ("decal.png", Png(8, 4, Color.red)));
+        var first = ItemParts.ApplyAsync(Part("words"), french);
+        var second = ItemParts.ApplyAsync(Part("colour"), red);
+        for (int i = 0; i < 5; i++) yield return null;
+        Assert.IsFalse(first.IsCompleted);
+        Assert.IsFalse(second.IsCompleted, "the colour waits for the words");
+        Assert.AreEqual(shell, placed.transform.Find("Body").GetComponent<Renderer>().sharedMaterials[0]);
+        drawing.SetResult(true);
+        double deadline = EditorApplication.timeSinceStartup + 30;
+        while (!(first.IsCompleted && second.IsCompleted) && EditorApplication.timeSinceStartup < deadline) yield return null;
+        Assert.IsTrue(first.Result.Applied, string.Join("\n", first.Result.Problems));
+        Assert.IsTrue(second.Result.Applied, string.Join("\n", second.Result.Problems));
+        Assert.AreEqual(Color.red, placed.transform.Find("Body").GetComponent<Renderer>().sharedMaterials[0].GetColor("_Color"));
+    }
+
+    // An update takes over its card's options first, then its parts: an option may redraw the parts.
+    [Test] public void AnUpdateTakesItsOptionsBeforeItsParts()
+    {
+        var order = new List<string>();
+        string tag = itemName;
+        int chosen = 0;
+        AttachmentHooks.RegisterOptions(root => root != null && root.name == tag ? new[] { new AttachmentOption { Label = "Order test " + tag, Choices = new[] { "A", "B" }, Current = root == placed ? 1 : chosen, Choose = i => { chosen = i; order.Add("option"); } } } : null);
+        AttachmentHooks.RegisterCarry((from, to) => { if (to != null && to.name == tag) order.Add("parts"); return Task.CompletedTask; });
+        var update = Place(itemName);
+        AttachmentHooks.CarryOptions(placed, update);
+        Assert.AreEqual(1, chosen);
+        CollectionAssert.AreEqual(new[] { "option", "parts" }, order.Where(o => o == "option" || o == "parts").Distinct().ToArray());
+        Assert.AreEqual("option", order.First());
+        Assert.AreEqual("parts", order.Last());
+    }
+
+    // VAR-04: an apply cancelled before it starts changes nothing and writes nothing.
+    [Test] public void ACancelledApplyChangesNothing()
+    {
+        var red = Variant(RedJson, ("decal.png", Png(8, 4, Color.red)));
+        var cancelled = new System.Threading.CancellationTokenSource();
+        cancelled.Cancel();
+        var result = ItemParts.ApplyAsync(Part("colour"), red, null, cancelled.Token).Result;
+        Assert.IsFalse(result.Applied);
+        CollectionAssert.Contains(result.Problems, "Cancelled.");
+        Assert.AreEqual(shell, placed.transform.Find("Body").GetComponent<Renderer>().sharedMaterials[0]);
+        Assert.IsFalse(AssetDatabase.IsValidFolder(ItemParts.ItemFolder(placed.transform) + "/colour"), "no file was made");
+    }
+
+    // VAR-05: a change that fails while the item changes takes back the changes made before it.
+    [Test] public void AFailingChangeTakesBackTheChangesBeforeIt()
+    {
+        ItemParts.RegisterRenderer(Renderer, new ItemParts.PartRenderer
+        {
+            Anchors = item => new[] { item.Find("Body").GetComponent<Renderer>() },
+            Render = job => { job.Assign = () => throw new System.InvalidOperationException("the renderer broke"); return Task.CompletedTask; },
+        });
+        var red = Variant(RedJson, ("decal.png", Png(8, 4, Color.red)));
+        var french = Variant("{ \"schema\": 1, \"part\": \"words\", \"name\": \"Français\", \"language\": \"fr\", \"strings\": { \"title\": \"Menu FR\", \"hello\": \"Salut\" } }");
+        var colour = Part("colour");
+        UnityEngine.TestTools.LogAssert.Expect(LogType.Exception, new System.Text.RegularExpressions.Regex("the renderer broke"));
+        var result = ItemParts.ApplyAsync(placed.transform, colour.Definition, colour.PrefabPath, colour.PartsPath,
+            new List<(ItemParts.Part, PartVariant)> { (colour.Part, red), (Part("words").Part, french) }).Result;
+        Assert.IsFalse(result.Applied);
+        Assert.IsTrue(result.Problems.Any(p => p.Contains("the renderer broke")), string.Join("\n", result.Problems));
+        Assert.AreEqual(shell, placed.transform.Find("Body").GetComponent<Renderer>().sharedMaterials[0], "the colour put on before the failure went back");
+        Assert.AreEqual("White", Part("colour").Current.name);
+    }
+
+    // VAR-06/VAR-07: a model object's transform is baked in with normals by the inverse transpose (non-uniform scale) and,
+    // mirrored, with its triangles turned around and its tangents' handedness flipped, so faces still face out.
+    [Test] public void BakedModelsKeepTheirNormalsUnderScaleAndMirroring()
+    {
+        var mesh = new Mesh { name = "Slope" };
+        mesh.vertices = new[] { new Vector3(0, 0, 0), new Vector3(1, 0, 0), new Vector3(0, 1, 0), new Vector3(1, 1, 0) };
+        var slanted = new Vector3(1, 1, 1).normalized;
+        mesh.normals = Enumerable.Repeat(slanted, 4).ToArray();
+        mesh.tangents = Enumerable.Repeat(new Vector4(1, -1, 0, 1).normalized, 4).Select(t => new Vector4(t.x, t.y, t.z, 1)).ToArray();
+        mesh.triangles = new[] { 0, 1, 2, 1, 3, 2 };
+        var shapeNormal = new Vector3(0, 0, 1) - slanted;
+        mesh.AddBlendShapeFrame("Flat", 100, new Vector3[4], Enumerable.Repeat(shapeNormal, 4).ToArray(), null);
+        try
+        {
+            var scale = Matrix4x4.Scale(new Vector3(3, 1, 1));
+            var baked = ItemParts.BakeTransform(mesh, scale);
+            try
+            {
+                var expected = new Vector3(1 / 3f, 1, 1).normalized;
+                Assert.Less(Vector3.Angle(expected, baked.normals[0]), .01f, "normal by the inverse transpose, not the scale");
+                Assert.AreEqual(0f, Vector3.Dot(baked.normals[0], new Vector3(baked.tangents[0].x, baked.tangents[0].y, baked.tangents[0].z)), 1e-4f, "the tangent stays in the surface");
+                var shapeNormals = new Vector3[4];
+                baked.GetBlendShapeFrameVertices(0, 0, new Vector3[4], shapeNormals, new Vector3[4]);
+                Assert.Less(Vector3.Angle(new Vector3(0, 0, 1), baked.normals[0] + shapeNormals[0]), .05f, "a shape's normal is the transformed one");
+                CollectionAssert.AreEqual(mesh.triangles, baked.triangles);
+            }
+            finally { Object.DestroyImmediate(baked); }
+
+            var mirrored = ItemParts.BakeTransform(mesh, Matrix4x4.Scale(new Vector3(-1, 1, 1)));
+            try
+            {
+                var v = mirrored.vertices; var t = mirrored.triangles;
+                var face = Vector3.Cross(v[t[1]] - v[t[0]], v[t[2]] - v[t[0]]);
+                Assert.Greater(Vector3.Dot(Vector3.Cross(mesh.vertices[1] - mesh.vertices[0], mesh.vertices[2] - mesh.vertices[0]), mesh.normals[0]), 0f);
+                Assert.Greater(Vector3.Dot(face, mirrored.normals[0]), 0f, "its winding still agrees with its normal: a front face where it was");
+                Assert.AreEqual(-1f, mirrored.tangents[0].w, "the tangents' handedness flips");
+                Assert.Less(Vector3.Angle(new Vector3(-1, 1, 1).normalized, mirrored.normals[0]), .01f);
+            }
+            finally { Object.DestroyImmediate(mirrored); }
+        }
+        finally { Object.DestroyImmediate(mesh); }
+    }
 }
