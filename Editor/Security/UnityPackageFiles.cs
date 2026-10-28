@@ -2,14 +2,17 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.IO.Compression;
+using System.Linq;
 using System.Security.Cryptography;
+using System.Text;
 using Orbiters.Toolkit.Editor.Storage;
 
 namespace Orbiters.Toolkit.Editor
 {
     /// <summary>
-    /// The file contents of a .unitypackage, read without importing it: the SHA-256 of each asset it carries (to tell what an
-    /// import would change in the project) and a filtered copy with only some of its entries (to import part of it).
+    /// The file contents of a .unitypackage, read without importing it: the SHA-256 of each asset it carries and of its import
+    /// settings (to tell what an import would change in the project) and a filtered copy with only some of its entries (to
+    /// import part of it).
     /// Both go through <see cref="UnityPackageReader"/>, which checks the archive's structure as it reads.
     /// </summary>
     public static class UnityPackageFiles
@@ -21,11 +24,40 @@ namespace Orbiters.Toolkit.Editor
             public bool Equals(Stamp other) => Length == other.Length && Ticks == other.Ticks;
         }
 
-        private static readonly Dictionary<string, (Stamp stamp, Dictionary<string, string> hashes)> Cache =
-            new Dictionary<string, (Stamp, Dictionary<string, string>)>(StringComparer.OrdinalIgnoreCase);
+        private sealed class Hashes
+        {
+            public readonly Dictionary<string, string> Assets = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            public readonly Dictionary<string, string> Settings = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        }
+
+        private static readonly Dictionary<string, (Stamp stamp, Hashes hashes)> Cache = new Dictionary<string, (Stamp, Hashes)>(StringComparer.OrdinalIgnoreCase);
 
         /// <summary>SHA-256 (lowercase hex) of each asset a Unity package carries, by GUID; cached while the file is unchanged.</summary>
-        public static Dictionary<string, string> AssetHashes(string packagePath, long maxExpandedBytes = ArchiveBudget.DefaultMaxTotalBytes)
+        public static Dictionary<string, string> AssetHashes(string packagePath, long maxExpandedBytes = ArchiveBudget.DefaultMaxTotalBytes) =>
+            Read(packagePath, maxExpandedBytes).Assets;
+
+        /// <summary>
+        /// <see cref="ImportSettingsHash"/> of each .meta a Unity package carries, by GUID (read in the same pass as
+        /// <see cref="AssetHashes"/>): importing writes these settings over the project's.
+        /// </summary>
+        public static Dictionary<string, string> ImportSettingsHashes(string packagePath, long maxExpandedBytes = ArchiveBudget.DefaultMaxTotalBytes) =>
+            Read(packagePath, maxExpandedBytes).Settings;
+
+        // .meta lines Unity rewrites without any change to how the asset imports.
+        private static readonly string[] Volatile = { "timeCreated:", "licenseType:" };
+
+        /// <summary>
+        /// SHA-256 of a .meta's import settings: its text with line ends, trailing spaces and the lines that say nothing of the
+        /// import (creation time, license type) left out, so the same settings written on two computers hash the same.
+        /// </summary>
+        public static string ImportSettingsHash(string metaText)
+        {
+            var lines = (metaText ?? "").Replace("\r\n", "\n").Replace('\r', '\n').Split('\n')
+                .Select(l => l.TrimEnd()).Where(l => l.Length > 0 && !Volatile.Any(v => l.StartsWith(v, StringComparison.Ordinal)));
+            using (var sha = SHA256.Create()) return Hex(sha.ComputeHash(Encoding.UTF8.GetBytes(string.Join("\n", lines))));
+        }
+
+        private static Hashes Read(string packagePath, long maxExpandedBytes)
         {
             string fullPath = Path.GetFullPath(packagePath);
             var info = new FileInfo(fullPath);
@@ -34,16 +66,21 @@ namespace Orbiters.Toolkit.Editor
             lock (Cache)
                 if (Cache.TryGetValue(fullPath, out var cached) && cached.stamp.Equals(stamp)) return cached.hashes;
 
-            var hashes = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            var hashes = new Hashes();
             var buffer = new byte[81920];
             UnityPackageReader.Read(fullPath, new UnityPackageReader.Options { MaxExpandedBytes = maxExpandedBytes }, record =>
             {
+                if (record.Part == UnityPackageReader.Part.Meta)
+                {
+                    hashes.Settings[record.Guid] = ImportSettingsHash(Encoding.UTF8.GetString(record.ReadAll()));
+                    return;
+                }
                 if (record.Part != UnityPackageReader.Part.Asset) return;
                 using (var sha = SHA256.Create())
                 {
                     for (int read; (read = record.Content.Read(buffer, 0, buffer.Length)) > 0;) sha.TransformBlock(buffer, 0, read, null, 0);
                     sha.TransformFinalBlock(Array.Empty<byte>(), 0, 0);
-                    hashes[record.Guid] = Hex(sha.Hash);
+                    hashes.Assets[record.Guid] = Hex(sha.Hash);
                 }
             });
 

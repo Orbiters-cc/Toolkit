@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
+using System.Net;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -12,13 +14,16 @@ namespace Orbiters.Toolkit.Editor.Net
 {
     /// <summary>
     /// Large transfers to and from Orbiters, shared by MCB and My Avatar: downloads to a file with progress, retries and a
-    /// checksum, and streaming multipart uploads with progress, cancellation and stall detection. Signed storage redirects
-    /// are followed without the account token (a signed URL is its own credential). Call from the editor thread.
+    /// checksum, and streaming multipart uploads with progress, cancellation and stall detection. Redirects are followed
+    /// one hop at a time, each checked (HTTPS only, plain HTTP only to this computer), and without the account token past
+    /// the first (a signed storage URL is its own credential). Call from the editor thread.
     /// </summary>
     public static class OrbitersTransfer
     {
         /// <summary>Seconds without a byte moving before a transfer counts as stalled and is aborted.</summary>
         public const double StallSeconds = 120d;
+        /// <summary>Redirects a download follows at most.</summary>
+        public const int MaxRedirects = 5;
 
         public enum End { Done, Cancelled, Stalled }
 
@@ -28,6 +33,8 @@ namespace Orbiters.Toolkit.Editor.Net
             public long StatusCode;
             public string Error, Body, Sha256;
             public long Bytes;
+            /// <summary>A download stopped because it was (or announced it was) larger than allowed.</summary>
+            public bool TooLarge;
             public readonly Dictionary<string, string> Headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
             public string Header(string name) => Headers.TryGetValue(name, out var value) ? value : null;
         }
@@ -60,10 +67,14 @@ namespace Orbiters.Toolkit.Editor.Net
         /// <summary>
         /// Downloads <paramref name="url"/> to <paramref name="destination"/> (replaced only once complete and, when given,
         /// matching <paramref name="expectedSha256"/>). Network failures and server errors (5xx, 429) are retried.
+        /// <paramref name="expectedBytes"/> (the size Orbiters published, 0 when unknown) must be the size exactly, and
+        /// <paramref name="maxBytes"/> (0: no limit) bounds it: a download announcing or bringing more stops at once, before
+        /// it fills the disk.
         /// </summary>
         public static async Task<Result> DownloadFileAsync(string url, string destination, string token, Progress progress = null,
-            CancellationToken cancellation = default, string expectedSha256 = null, int retries = 2)
+            CancellationToken cancellation = default, string expectedSha256 = null, int retries = 2, long expectedBytes = 0, long maxBytes = 0)
         {
+            long limit = expectedBytes > 0 && (maxBytes <= 0 || expectedBytes < maxBytes) ? expectedBytes : Math.Max(0, maxBytes);
             Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(destination)));
             string part = destination + ".part-" + Guid.NewGuid().ToString("N").Substring(0, 8);
             var result = new Result();
@@ -71,12 +82,19 @@ namespace Orbiters.Toolkit.Editor.Net
             {
                 for (int attempt = 0; ; attempt++)
                 {
-                    result = await DownloadOnceAsync(url, part, token, progress, cancellation);
+                    result = await DownloadOnceAsync(url, part, token, progress, cancellation, limit);
                     if (result.Success || result.Cancelled || attempt >= retries || !Retryable(result)) break;
                     await Task.Delay(1000 * (attempt + 1) * (attempt + 1), cancellation).ContinueWith(_ => { });
                     if (cancellation.IsCancellationRequested) { result = new Result { Cancelled = true, Error = "Cancelled." }; break; }
                 }
                 if (!result.Success) return result;
+                long size = new FileInfo(part).Length;
+                if (expectedBytes > 0 && size != expectedBytes)
+                {
+                    result.Success = false;
+                    result.Error = $"The download is {Storage.ArchiveBudget.Format(size)}, not the {Storage.ArchiveBudget.Format(expectedBytes)} Orbiters published. Try again.";
+                    return result;
+                }
                 result.Sha256 = await Task.Run(() => UnityPackageFiles.FileHash(part), cancellation);
                 if (!string.IsNullOrEmpty(expectedSha256) && !string.Equals(result.Sha256, expectedSha256, StringComparison.OrdinalIgnoreCase))
                 {
@@ -95,44 +113,83 @@ namespace Orbiters.Toolkit.Editor.Net
             }
         }
 
-        private static bool Retryable(Result result) => result.StatusCode == 0 || result.StatusCode == 429 || result.StatusCode >= 500;
+        private static bool Retryable(Result result) => !result.TooLarge && (result.StatusCode == 0 || result.StatusCode == 429 || result.StatusCode >= 500);
 
-        private static async Task<Result> DownloadOnceAsync(string url, string path, string token, Progress progress, CancellationToken cancellation)
+        /// <summary>
+        /// Where a download may be sent on to: HTTPS anywhere, plain HTTP only to this computer (a development server), so
+        /// never from HTTPS down to HTTP elsewhere. Null when <paramref name="location"/> is not such a place.
+        /// </summary>
+        public static Uri RedirectTarget(string from, string location)
+        {
+            if (string.IsNullOrWhiteSpace(location) || !Uri.TryCreate(from, UriKind.Absolute, out Uri source) || !Uri.TryCreate(source, location.Trim(), out Uri target)) return null;
+            if (target.Scheme == Uri.UriSchemeHttps) return target;
+            return target.Scheme == Uri.UriSchemeHttp && Loopback(target) ? target : null;
+        }
+
+        private static bool Loopback(Uri uri) =>
+            uri.IsLoopback || string.Equals(uri.Host, "localhost", StringComparison.OrdinalIgnoreCase) || uri.Host.EndsWith(".localhost", StringComparison.OrdinalIgnoreCase) ||
+            (IPAddress.TryParse(uri.Host.Trim('[', ']'), out var address) && IPAddress.IsLoopback(address));
+
+        /// <summary>True when a transfer of <paramref name="received"/> bytes, announced as <paramref name="announced"/> (0 when not), goes past <paramref name="limit"/> (0: none).</summary>
+        internal static bool PastLimit(long received, long announced, bool encoded, long limit) =>
+            limit > 0 && (received > limit || !encoded && announced > limit);
+
+        private static async Task<Result> DownloadOnceAsync(string url, string path, string token, Progress progress, CancellationToken cancellation, long limit)
         {
             var result = new Result();
-            UnityWebRequest request = Get(url, path, token);
+            UnityWebRequest request = null;
             try
             {
-                var end = await WaitAsync(request, request.SendWebRequest(), r => progress?.Invoke((long)r.downloadedBytes, Total(r)), cancellation);
-                Capture(request, result);
-                string location = !string.IsNullOrEmpty(token) && request.responseCode >= 300 && request.responseCode < 400 ? request.GetResponseHeader("Location") : null;
-                if (end == End.Done && !string.IsNullOrWhiteSpace(location) && Uri.TryCreate(new Uri(url), location, out Uri target) &&
-                    (target.Scheme == Uri.UriSchemeHttps || target.Scheme == Uri.UriSchemeHttp))
+                var end = End.Done;
+                // Each hop by hand: the token goes to the first only, and every place it is sent on to is checked.
+                for (int hop = 0; ; hop++)
                 {
-                    request.Dispose();
-                    request = Get(target.AbsoluteUri, path, null);
-                    end = await WaitAsync(request, request.SendWebRequest(), r => progress?.Invoke((long)r.downloadedBytes, Total(r)), cancellation);
+                    request?.Dispose();
+                    request = Get(url, path, hop == 0 ? token : null);
+                    end = await WaitAsync(request, request.SendWebRequest(), r =>
+                    {
+                        long total = Total(r);
+                        progress?.Invoke((long)r.downloadedBytes, total);
+                        // DownloadHandlerFile has no limit of its own: an announced or arriving size past it stops the download
+                        // (a redirect's own body does not count; a compressed body's announced size is not its size).
+                        if (!result.TooLarge && PastLimit((long)r.downloadedBytes, Redirect(r) ? 0 : total, r.GetResponseHeader("Content-Encoding") != null, limit))
+                        {
+                            result.TooLarge = true;
+                            r.Abort();
+                        }
+                    }, cancellation);
+                    Capture(request, result);
+                    // Finished between two looks: what arrived counts as well.
+                    if (end == End.Done && !result.TooLarge && !Redirect(request) && PastLimit((long)request.downloadedBytes, 0, true, limit)) result.TooLarge = true;
+                    if (end != End.Done || result.TooLarge || !Redirect(request)) break;
+                    var target = RedirectTarget(url, request.GetResponseHeader("Location"));
+                    result.StatusCode = request.responseCode;
+                    if (target == null) { result.Error = "The download was sent on to a place Orbiters does not download from (not HTTPS)."; return result; }
+                    if (hop + 1 >= MaxRedirects) { result.Error = "The download was redirected too many times."; return result; }
+                    url = target.AbsoluteUri;
+                    result.Headers.Clear();
                 }
                 result.Cancelled = end == End.Cancelled;
                 result.StatusCode = request.responseCode;
                 result.Bytes = (long)request.downloadedBytes;
+                if (result.TooLarge) { result.Error = $"The download is larger than the {Storage.ArchiveBudget.Format(limit)} expected, so it was stopped."; return result; }
                 if (end == End.Stalled) { result.Error = $"The download stopped: no data arrived for {StallSeconds:0} seconds."; return result; }
                 if (result.Cancelled) { result.Error = "Cancelled."; return result; }
                 if (request.result == UnityWebRequest.Result.Success) { result.Success = true; progress?.Invoke(result.Bytes, result.Bytes); return result; }
                 result.Error = ErrorMessage(request, File.Exists(path) && new FileInfo(path).Length < 64 * 1024 ? File.ReadAllText(path) : null);
                 return result;
             }
-            finally { request.Dispose(); }
+            finally { request?.Dispose(); }
         }
+
+        private static bool Redirect(UnityWebRequest request) =>
+            request.responseCode >= 300 && request.responseCode < 400 && !string.IsNullOrWhiteSpace(request.GetResponseHeader("Location"));
 
         private static UnityWebRequest Get(string url, string path, string token)
         {
-            var request = new UnityWebRequest(url, UnityWebRequest.kHttpVerbGET) { downloadHandler = new DownloadHandlerFile(path) { removeFileOnAbort = true }, timeout = 0 };
-            if (!string.IsNullOrEmpty(token))
-            {
-                request.SetRequestHeader("Authorization", "Bearer " + token);
-                request.redirectLimit = 0;
-            }
+            // Redirects are followed by hand (DownloadOnceAsync), never by Unity.
+            var request = new UnityWebRequest(url, UnityWebRequest.kHttpVerbGET) { downloadHandler = new DownloadHandlerFile(path) { removeFileOnAbort = true }, timeout = 0, redirectLimit = 0 };
+            if (!string.IsNullOrEmpty(token)) request.SetRequestHeader("Authorization", "Bearer " + token);
             return request;
         }
 
@@ -212,9 +269,12 @@ namespace Orbiters.Toolkit.Editor.Net
             string boundary = "----OrbitersUpload" + Guid.NewGuid().ToString("N");
             string bodyPath = Path.Combine(Path.GetTempPath(), $"orbiters_upload_{Guid.NewGuid():N}.tmp");
             var result = new Result();
+            // Read here (a caller's list may be lazy), written on a worker thread: copying a large file never holds up the editor.
+            var list = (parts ?? Enumerable.Empty<Part>()).ToList();
             try
             {
-                WriteMultipart(bodyPath, boundary, parts);
+                try { await Task.Run(() => WriteMultipart(bodyPath, boundary, list), cancellation); }
+                catch (OperationCanceledException) { return new Result { Cancelled = true, Error = "The upload was cancelled." }; }
                 long total = new FileInfo(bodyPath).Length;
                 using (var request = new UnityWebRequest(url, method))
                 {

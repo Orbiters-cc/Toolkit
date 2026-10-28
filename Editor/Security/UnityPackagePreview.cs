@@ -22,13 +22,15 @@ namespace Orbiters.Toolkit.Editor
             public string Guid, PackagePath, ProjectPath;
             /// <summary>The project keeps the asset at another path than the package names: Unity updates it in place.</summary>
             public bool Moved => !string.Equals(PackagePath, ProjectPath, StringComparison.OrdinalIgnoreCase);
+            /// <summary>Replaced with the same content but other import settings (a normal map, a rig, a texture size).</summary>
+            public bool SettingsOnly;
         }
 
         /// <summary>New files.</summary>
         public readonly List<Change> Added = new List<Change>();
-        /// <summary>Files the project has with other content: importing replaces them.</summary>
+        /// <summary>Files the project has with other content or other import settings (<see cref="Change.SettingsOnly"/>): importing replaces them.</summary>
         public readonly List<Change> Replaced = new List<Change>();
-        /// <summary>Files the project already has with the same content.</summary>
+        /// <summary>Files the project already has with the same content and import settings.</summary>
         public readonly List<Change> Unchanged = new List<Change>();
         /// <summary>
         /// Entries that would write outside Assets/ (VPM packages and other managed folders), by their name or through a GUID
@@ -52,6 +54,7 @@ namespace Orbiters.Toolkit.Editor
             {
                 var preview = new UnityPackagePreview();
                 var hashes = UnityPackageFiles.AssetHashes(packagePath);
+                var settings = UnityPackageFiles.ImportSettingsHashes(packagePath);
                 foreach (var entry in index.Entries)
                 {
                     cancellation.ThrowIfCancellationRequested();
@@ -65,10 +68,19 @@ namespace Orbiters.Toolkit.Editor
                     // A folder record has no content to replace.
                     if (!hashes.TryGetValue(entry.Guid, out string packageHash) || Directory.Exists(file)) { preview.Unchanged.Add(change); continue; }
                     string projectHash = UnityPackageFiles.FileHash(file);
-                    (string.Equals(projectHash, packageHash, StringComparison.OrdinalIgnoreCase) ? preview.Unchanged : preview.Replaced).Add(change);
+                    if (!string.Equals(projectHash, packageHash, StringComparison.OrdinalIgnoreCase)) { preview.Replaced.Add(change); continue; }
+                    // The same bytes with other settings import otherwise (Unity writes the package's .meta over the project's).
+                    change.SettingsOnly = settings.TryGetValue(entry.Guid, out string packageSettings) && packageSettings != ProjectSettingsHash(file);
+                    (change.SettingsOnly ? preview.Replaced : preview.Unchanged).Add(change);
                 }
                 return preview;
             }, cancellation);
+        }
+
+        private static string ProjectSettingsHash(string file)
+        {
+            try { return File.Exists(file + ".meta") ? UnityPackageFiles.ImportSettingsHash(File.ReadAllText(file + ".meta")) : null; }
+            catch (Exception e) when (e is IOException || e is UnauthorizedAccessException) { return null; }
         }
 
         /// <summary>The kind of a replaced file, for summaries ("3 materials, 1 prefab").</summary>

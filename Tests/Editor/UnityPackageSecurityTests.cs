@@ -142,6 +142,45 @@ public sealed class UnityPackageSecurityTests
         Assert.IsEmpty(preview.CodeFiles);
     }
 
+    // SEC-08 (audit 2026-10-28): an entry with the project's bytes but other import settings replaces those settings, so
+    // it is a replacement (settings only); one whose .meta differs only in what Unity rewrites anyway is unchanged.
+    [UnityEngine.TestTools.UnityTest] public System.Collections.IEnumerator OtherImportSettingsAreAReplacement()
+    {
+        string folder = "Assets/__Orbiters preview test " + Guid.NewGuid().ToString("N").Substring(0, 8), path = folder + "/Notes.txt";
+        UnityEditor.AssetDatabase.CreateFolder("Assets", folder.Substring("Assets/".Length));
+        try
+        {
+            File.WriteAllText(path, "notes");
+            UnityEditor.AssetDatabase.ImportAsset(path);
+            string guid = UnityEditor.AssetDatabase.AssetPathToGUID(path), meta = File.ReadAllText(path + ".meta");
+            StringAssert.Contains("userData:", meta);
+            foreach (var (packageMeta, replaced) in new[]
+            {
+                (meta, false),
+                (System.Text.RegularExpressions.Regex.Replace(meta, "timeCreated: [0-9]+", "timeCreated: 1").Replace("\n", "\r\n") + "  ", false),
+                (meta.Replace("userData: ", "userData: changed"), true),
+            })
+            {
+                Write((guid + "/pathname", Bytes(path)), (guid + "/asset", Bytes("notes")), (guid + "/asset.meta", Bytes(packageMeta)));
+                var task = UnityPackagePreview.CreateAsync(file, UnityPackageIndex.Read(file));
+                while (!task.IsCompleted) yield return null;
+                var preview = task.Result;
+                Assert.That(preview.Replaced.Count, Is.EqualTo(replaced ? 1 : 0), packageMeta);
+                Assert.That(preview.Unchanged.Count, Is.EqualTo(replaced ? 0 : 1), packageMeta);
+                if (replaced) Assert.That(preview.Replaced[0].SettingsOnly, Is.True);
+                File.Delete(file);
+            }
+        }
+        finally { UnityEditor.AssetDatabase.DeleteAsset(folder); }
+    }
+
+    [Test] public void ImportSettingsHashLeavesOutWhatUnityRewrites()
+    {
+        string meta = "fileFormatVersion: 2\nguid: " + A + "\ntimeCreated: 1700000000\nlicenseType: Free\nTextureImporter:\n  sRGBTexture: 1\n";
+        Assert.AreEqual(UnityPackageFiles.ImportSettingsHash(meta), UnityPackageFiles.ImportSettingsHash(meta.Replace("1700000000", "1").Replace("Free", "Pro").Replace("\n", "\r\n")));
+        Assert.AreNotEqual(UnityPackageFiles.ImportSettingsHash(meta), UnityPackageFiles.ImportSettingsHash(meta.Replace("sRGBTexture: 1", "sRGBTexture: 0")));
+    }
+
     // An index of a package naming many long paths stops at the pathname budget, before keeping them all.
     [Test] public void PathnamesTogetherAreBounded()
     {
