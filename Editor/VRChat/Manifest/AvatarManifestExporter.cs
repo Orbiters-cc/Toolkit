@@ -113,6 +113,8 @@ namespace Orbiters.Toolkit.Editor.VRChat.Manifest
             }
             catch (Exception ex) { Debug.LogWarning("Orbiters Toolkit could not write the avatar manifest Orbiters - N4N0 reads: " + ex.Message); }
             if (!string.IsNullOrEmpty(avatarId)) SaveThumbnail(avatarId);
+            // The scene as uploaded, for Orbiters - N4N0's 3D preview of the project.
+            Orbiters.Toolkit.Editor.Preview.ProjectPreview.RequestActiveScene("upload");
         }
 
         /// <summary>
