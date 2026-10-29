@@ -132,6 +132,12 @@ namespace Orbiters.Toolkit.Editor.VRChat
         private static void Continue(string path, string statePath, string id, JObject request, State state)
         {
             var items = ((JArray)request["items"] ?? new JArray()).Cast<JObject>().ToList();
+            // The items' asset ids are that server's: a development id installed from production is another item.
+            string server = (string)request["server"];
+            if (!string.IsNullOrEmpty(server) && !SameServer(server, OrbitersEnvironment.ApiUrl()))
+                throw new SetupException(OrbitersEnvironment.IsDevelopment
+                    ? "Orbiters - N4N0 uses the production server but Unity's Orbiters tools use the development one: switch them to production (Orbiters settings) and ask again."
+                    : "Orbiters - N4N0 uses the development server but Unity's Orbiters tools use production: switch them to development (Orbiters settings) and ask again.");
             string avatarId = (string)request["avatar"]?["id"];
             if (string.IsNullOrEmpty(avatarId)) throw new SetupException("The request names no avatar.");
             var avatar = FindAvatar(avatarId, (string)request["avatar"]?["scene"]);
@@ -186,6 +192,8 @@ namespace Orbiters.Toolkit.Editor.VRChat
             }
             return null;
         }
+
+        private static bool SameServer(string a, string b) => string.Equals(a.TrimEnd('/'), b.TrimEnd('/'), StringComparison.OrdinalIgnoreCase);
 
         private static GameObject InOpenScenes(string blueprintId)
         {
