@@ -8,6 +8,19 @@
   for a development build, which was `OrbInstaller.DesktopApp`). `VrcThumbnailHash` (the MD5 VRChat compares a
   thumbnail upload by, from My Avatar) is public in `Orbiters.Toolkit.Editor` for avatars and worlds alike.
 
+- **N4N0's capture kit records whatever VRChat's camera looks at.** Its strip, skeleton band and depth frames were in a
+  frame only while the camera saw the avatar: My Avatar's upload gave the kit the avatar's shared box at the hips
+  (`AvatarBounds.Unify`), and the rig that was to carry its box to the camera stood elsewhere. Meshes whose box a
+  constraint carries (their root bone, or what it hangs from, moved by one) now keep their own box, and while the kit
+  records, N4N0's animator makes its bounds 10 km wide (`m_AABB` extents 5000, 2 when off), so VRChat's camera is
+  always inside them; in a recording of 2026-10-28, none of the 1137 frames without the avatar in view had a strip.
+- **N4N0's camera rig hangs from the hips** (contracts' `Docs/rig-frames.md`). Its Parent Constraint's first source was
+  the world origin, a source without a transform, which VRChat leaves out of an upload: the animator's offsets then
+  moved the rig from the hips, 5 to 33 m from the camera, and most of a recording's six-view moments gave nothing. The
+  constraint now has the hips as its one source (set as the avatar is built); `N4N0/Capture/RigX`, `RigY`, `RigZ` and
+  `RigYaw` are offsets from them (Orbiters - N4N0 reads where the hips are from the skeleton band), zero while
+  `N4N0/Capture/Follow` is off; the "Capture follow" layer is gone. Takes a new N4N0 from the gallery and an upload.
+
 - **A variant never changes the files of another.** A variant's folder was named by its JSON and its files' sizes, so a
   second variant with the same JSON and same-sized pictures or FBX wrote its bytes over the first one's: earlier items
   and their Undo steps showed the new ones. The folder is now named by the variant's record (id, author, published hash,

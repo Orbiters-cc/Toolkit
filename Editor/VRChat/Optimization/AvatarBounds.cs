@@ -10,7 +10,9 @@ namespace Orbiters.Toolkit.Editor.VRChat.Optimization
     /// for raised arms, kicks and sitting. A mesh whose own box was measured small, or from a bone far from where it shows
     /// (clothing bound to one bone, a tail's tip), no longer vanishes at the edge of the view, and every part of the avatar
     /// is culled together. Meshes that can leave the avatar (a bone a constraint moves, or one below it: a prop dropped in
-    /// the world) keep their own box. The room never takes a box that fits VRChat's best bounds rank out of it.
+    /// the world) keep their own box, and so do meshes whose box a constraint carries (their root bone, or what it hangs
+    /// from, is moved by one: N4N0's capture kit, whose box goes with its camera rig). The room never takes a box that fits
+    /// VRChat's best bounds rank out of it.
     /// </summary>
     public static class AvatarBounds
     {
@@ -28,7 +30,8 @@ namespace Orbiters.Toolkit.Editor.VRChat.Optimization
             if (hips == null) return 0;
             var constrained = AvatarUsage.ConstraintTargets(root);
             var renderers = root.GetComponentsInChildren<SkinnedMeshRenderer>(true)
-                .Where(r => r.sharedMesh != null && r.sharedMesh.vertexCount > 0 && r.bones.Length > 0 && r.bones.All(b => b != null && Follows(b, hips, constrained))).ToList();
+                .Where(r => r.sharedMesh != null && r.sharedMesh.vertexCount > 0 && r.bones.Length > 0 && r.bones.All(b => b != null && Follows(b, hips, constrained))
+                            && !Carried(r.rootBone != null ? r.rootBone : r.transform, constrained)).ToList();
             if (renderers.Count == 0) return 0;
             var toHips = hips.worldToLocalMatrix;
             Bounds? box = null;
@@ -74,6 +77,14 @@ namespace Orbiters.Toolkit.Editor.VRChat.Optimization
                 grown[axis] = size[axis] > limit ? size[axis] + room : Mathf.Min(size[axis] + room, limit);
             }
             return grown;
+        }
+
+        // Whether a constraint moves this transform or what it hangs from.
+        private static bool Carried(Transform transform, HashSet<Transform> constrained)
+        {
+            for (var t = transform; t != null; t = t.parent)
+                if (constrained.Contains(t)) return true;
+            return false;
         }
 
         // Whether a bone moves with the hips: it is below them and nothing constrains it or what it hangs from.

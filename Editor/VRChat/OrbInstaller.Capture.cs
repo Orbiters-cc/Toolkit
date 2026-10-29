@@ -28,9 +28,10 @@ namespace Orbiters.Toolkit.Editor.VRChat
     /// The rig and its six cameras come with N4N0 (their shader copied into its folder, the contracts' as they are); the
     /// kit's skinned helper mesh is made for the avatar's armature as the avatar is built for upload
     /// (<see cref="OrbCaptureHook"/>, PC only: phones have no avatar cameras and no custom shaders), so it always fits
-    /// the armature uploaded. The kit's bounds stand around the rig: at the hips while the rig rests there (VRChat's
-    /// "Good" bounds), at VRChat's camera while Orbiters - N4N0 has the rig follow it, so the kit draws wherever the
-    /// camera goes.
+    /// the armature uploaded. The kit's bounds stand around the rig, 4 m wide at rest (VRChat's "Good" bounds), and are
+    /// 10 km wide while the kit records, so the kit draws into every frame VRChat's camera renders whatever it looks at.
+    /// The rig hangs from the hips: Orbiters - N4N0 places it at VRChat's camera from where the skeleton band says the
+    /// hips are.
     /// </para>
     /// </summary>
     public static partial class OrbInstaller
@@ -40,11 +41,12 @@ namespace Orbiters.Toolkit.Editor.VRChat
         public const string CaptureRecord = "N4N0/Capture/Record";
         /// <summary>While recording, about one colour frame in <see cref="DepthEvery"/> is a depth frame (local, set by Orbiters - N4N0).</summary>
         public const string CaptureDepth = "N4N0/Capture/Depth";
-        /// <summary>The rig stands where <see cref="CaptureRigX"/>, Y, Z and <see cref="CaptureRigYaw"/> say, else at the hips (local).</summary>
+        /// <summary>The rig stands where <see cref="CaptureRigX"/>, Y, Z and <see cref="CaptureRigYaw"/> say from the hips, else at the hips (local).</summary>
         public const string CaptureFollow = "N4N0/Capture/Follow";
         /// <summary>The rig's six cameras render and its renderer draws (local, the wearer's client only).</summary>
         public const string CaptureRig = "N4N0/Capture/Rig";
-        /// <summary>Where the rig stands while following: value × <see cref="RigReachMetres"/> (Unity world), heading value × <see cref="RigYawDegrees"/>.</summary>
+        /// <summary>Where the rig stands while following, from the hips: value × <see cref="RigReachMetres"/> along the hips' axes (their
+        /// position and rotation, without scale), turned value × <see cref="RigYawDegrees"/> about their up axis.</summary>
         public const string CaptureRigX = "N4N0/Capture/RigX", CaptureRigY = "N4N0/Capture/RigY", CaptureRigZ = "N4N0/Capture/RigZ", CaptureRigYaw = "N4N0/Capture/RigYaw";
         /// <summary>Every capture parameter (contracts' <c>orb::params::CAPTURE</c>): Orbiters - N4N0's own.</summary>
         public static readonly IReadOnlyList<string> CaptureParameters = new[] { CaptureRecord, CaptureDepth, CaptureFollow, CaptureRig, CaptureRigX, CaptureRigY, CaptureRigZ, CaptureRigYaw };
@@ -76,6 +78,11 @@ namespace Orbiters.Toolkit.Editor.VRChat
         internal const float DepthEvery = 4f;
         // The kit's and the rig renderer's bounds, around the rig: VRChat's "Good" bounds while it rests at the hips.
         internal const float CaptureBounds = 4f;
+        // The kit's bounds while it records: VRChat's camera is always inside them, so the kit is never culled, whatever the
+        // camera looks at (at 4 m, the strip went missing whenever the camera did not see the avatar).
+        internal const float RecordingBounds = 10000f;
+        // The kit renderer's bounds as its animator sets them (half sizes, in its root bone's units).
+        internal static readonly string[] KitExtents = { "m_AABB.m_Extent.x", "m_AABB.m_Extent.y", "m_AABB.m_Extent.z" };
         // VRChat's UI layers (UI, UiMenu, InternalUI): the rig's cameras leave them out.
         private const int RigHiddenLayers = (1 << 5) | (1 << 12) | (1 << 19);
         // The contracts' shaders, as they are (Orbiters contracts' Shaders/), and their includes.
@@ -103,9 +110,13 @@ namespace Orbiters.Toolkit.Editor.VRChat
 
         /// <summary>
         /// The capture part below <paramref name="orb"/> (an orb that has one keeps it): the rig, placed by a VRChat Parent
-        /// Constraint whose first source is the world origin (offsets from the animator) and whose second the hips (set as
-        /// the avatar is built), its six cameras into HDR render textures and the renderer drawing their pictures, all off;
-        /// and the kit's renderer, whose mesh the build makes. Shaders, material and textures go to <paramref name="folder"/>.
+        /// Constraint whose one source is the hips (set as the avatar is built; the animator sets its offsets), its six
+        /// cameras into HDR render textures and the renderer drawing their pictures, all off; and the kit's renderer, whose
+        /// mesh the build makes. Shaders, material and textures go to <paramref name="folder"/>.
+        /// <para>
+        /// No source is left without a transform: VRChat leaves such a source out of an uploaded avatar, and the animator's
+        /// offsets of the first source then move the rig from the next one (N4N0 up to 1.0.15 had the world origin first).
+        /// </para>
         /// </summary>
         internal static Transform AddCapture(Transform orb, string folder)
         {
@@ -117,7 +128,6 @@ namespace Orbiters.Toolkit.Editor.VRChat
             capture.SetParent(orb, false);
             var rig = Child(capture, "Rig");
             var constraint = rig.gameObject.AddComponent<VRCParentConstraint>();
-            constraint.Sources.Add(new VRCConstraintSource(null, 0f));
             constraint.Sources.Add(new VRCConstraintSource(null, 1f));
             constraint.IsActive = true; constraint.Locked = true;
 
@@ -333,7 +343,7 @@ namespace Orbiters.Toolkit.Editor.VRChat
         /// <summary>
         /// Makes the kit of <paramref name="orb"/> for the avatar it is on (<paramref name="animator"/>, named
         /// <paramref name="avatarName"/>): the mesh for its armature and a material with its bones and identity, saved in a
-        /// folder of the avatar's below <paramref name="root"/>; the kit's bounds around the rig; the rig resting at the hips.
+        /// folder of the avatar's below <paramref name="root"/>; the kit's bounds around the rig; the rig hanging from the hips.
         /// Returns the kit's renderer, off (the animator turns it on), or null for an orb without the capture part.
         /// </summary>
         public static SkinnedMeshRenderer BuildCaptureKit(Transform orb, Animator animator, string avatarName, string root = CaptureKitFolder)
@@ -364,8 +374,8 @@ namespace Orbiters.Toolkit.Editor.VRChat
             smr.skinnedMotionVectors = false;
             smr.enabled = false;
             var constraint = rig.GetComponent<VRCParentConstraint>();
-            // Its resting place: the hips, as they are (the follow layer gives this source the weight while not following).
-            if (constraint != null && constraint.Sources.Count >= 2) constraint.Sources[1] = new VRCConstraintSource(bones[0], 1f, Vector3.zero, Vector3.zero);
+            // The hips, as they are: at rest the rig stands at them, following it stands where the animator's offsets say.
+            if (constraint != null && constraint.Sources.Count >= 1) constraint.Sources[0] = new VRCConstraintSource(bones[0], 1f, Vector3.zero, Vector3.zero);
             return smr;
         }
 
@@ -442,10 +452,11 @@ namespace Orbiters.Toolkit.Editor.VRChat
         /// <summary>
         /// The capture parameters, layers and N4N0 › Record: the kit off, recording, or recording with depth frames
         /// (<see cref="CaptureRecord"/>, <see cref="CaptureDepth"/>), giving the rig's renderer the same depth cadence (rig
-        /// frames are never depth frames); the kit drawing on the wearer's client only (IsLocal); the rig on while
-        /// <see cref="CaptureRig"/> is on the wearer's client; following its four values or resting at the hips
-        /// (<see cref="CaptureFollow"/>); placed by them (a direct blend tree of one linear 1D tree per value, Write Defaults
-        /// on). Every state sets all its layer animates, so any Write Defaults leave nothing behind.
+        /// frames are never depth frames) and the kit its <see cref="RecordingBounds"/> while recording; the kit drawing on
+        /// the wearer's client only (IsLocal); the rig on while <see cref="CaptureRig"/> is on the wearer's client; placed
+        /// by its four values from the hips while following (<see cref="CaptureFollow"/>: a direct blend tree of one linear
+        /// 1D tree per value, Write Defaults on), at the hips otherwise. Every state sets all its layer animates, so any
+        /// Write Defaults leave nothing behind.
         /// </summary>
         // What recordings and 3D pictures must not show, and their renderers: N4N0's screen (with its rays), its handle, the
         // link card, the text panel and the desktop gaze dot.
@@ -461,12 +472,13 @@ namespace Orbiters.Toolkit.Editor.VRChat
             foreach (string name in new[] { CaptureRigX, CaptureRigY, CaptureRigZ, CaptureRigYaw }) controller.AddParameter(name, AnimatorControllerParameterType.Float);
             if (!controller.parameters.Any(p => p.name == "IsLocal")) controller.AddParameter("IsLocal", AnimatorControllerParameterType.Bool);
 
-            // The kit: drawn while recording, with the depth cadence for it and the rig's renderer.
+            // The kit: drawn while recording, never culled then, with the depth cadence for it and the rig's renderer.
             var kit = Layer(controller, "Capture");
             AnimatorState KitState(string name, bool shown, float depthEvery)
             {
                 var clip = new AnimationClip { name = "Capture " + name };
                 Curve(clip, CaptureKitPath, typeof(SkinnedMeshRenderer), "m_Enabled", shown ? 1 : 0);
+                foreach (string extent in KitExtents) Curve(clip, CaptureKitPath, typeof(SkinnedMeshRenderer), extent, (shown ? RecordingBounds : CaptureBounds) / 2);
                 Curve(clip, CaptureKitPath, typeof(SkinnedMeshRenderer), "material._OrbitersDepthEvery", depthEvery);
                 Curve(clip, RigRendererPath, typeof(MeshRenderer), "material._OrbitersDepthEvery", depthEvery);
                 return HeldPropRig.State(controller, kit, name, clip);
@@ -529,30 +541,20 @@ namespace Orbiters.Toolkit.Editor.VRChat
             Transition(shownForCapture, hiddenForCapture, (CaptureRecord, AnimatorConditionMode.If, 0));
             Transition(hiddenForCapture, shownForCapture, (CaptureRecord, AnimatorConditionMode.IfNot, 0));
 
-            // Following the camera (the world origin's source) or resting at the hips (the second source).
-            var follow = Layer(controller, "Capture follow");
-            AnimatorState FollowState(string name, bool on)
-            {
-                var clip = new AnimationClip { name = "Capture " + name.ToLowerInvariant() };
-                Curve(clip, CaptureRigPath, typeof(VRCParentConstraint), "Sources.source0.Weight", on ? 1 : 0);
-                Curve(clip, CaptureRigPath, typeof(VRCParentConstraint), "Sources.source1.Weight", on ? 0 : 1);
-                return HeldPropRig.State(controller, follow, name, clip);
-            }
-            var resting = FollowState("At the hips", false);
-            var following = FollowState("Following", true);
-            follow.defaultState = resting;
-            Transition(resting, following, (CaptureFollow, AnimatorConditionMode.If, 0));
-            Transition(following, resting, (CaptureFollow, AnimatorConditionMode.IfNot, 0));
-
-            // Where it stands while following.
+            // Where it stands: from the hips (the constraint's one source) by the four values while following, at them
+            // otherwise.
             var pose = Layer(controller, "Capture rig pose");
+            var offsets = new[]
+            {
+                (CaptureRigX, "ParentPositionOffset.x", RigReachMetres), (CaptureRigY, "ParentPositionOffset.y", RigReachMetres),
+                (CaptureRigZ, "ParentPositionOffset.z", RigReachMetres), (CaptureRigYaw, "ParentRotationOffset.y", RigYawDegrees),
+            };
+            var atTheHips = new AnimationClip { name = "Capture rig at the hips" };
+            foreach (var (_, property, _) in offsets) Curve(atTheHips, CaptureRigPath, typeof(VRCParentConstraint), "Sources.source0." + property, 0);
+            var resting = HeldPropRig.State(controller, pose, "At the hips", atTheHips);
             var tree = Hidden(new BlendTree { name = "Capture rig pose", blendType = BlendTreeType.Direct });
             var children = new List<ChildMotion>();
-            foreach (var (parameter, property, reach) in new[]
-                     {
-                         (CaptureRigX, "ParentPositionOffset.x", RigReachMetres), (CaptureRigY, "ParentPositionOffset.y", RigReachMetres),
-                         (CaptureRigZ, "ParentPositionOffset.z", RigReachMetres), (CaptureRigYaw, "ParentRotationOffset.y", RigYawDegrees),
-                     })
+            foreach (var (parameter, property, reach) in offsets)
             {
                 var axis = Hidden(new BlendTree { name = parameter, blendType = BlendTreeType.Simple1D, blendParameter = parameter, useAutomaticThresholds = false });
                 foreach (float end in new[] { -1f, 1f })
@@ -564,8 +566,13 @@ namespace Orbiters.Toolkit.Editor.VRChat
                 children.Add(new ChildMotion { motion = axis, directBlendParameter = One, timeScale = 1 });
             }
             tree.children = children.ToArray();
-            var placed = HeldPropRig.State(controller, pose, "Capture rig pose", tree);
-            placed.writeDefaultValues = true;
+            var following = HeldPropRig.State(controller, pose, "Following", tree);
+            // A direct blend tree needs Write Defaults; the layer's other state the same.
+            following.writeDefaultValues = true;
+            resting.writeDefaultValues = true;
+            pose.defaultState = resting;
+            Transition(resting, following, (CaptureFollow, AnimatorConditionMode.If, 0));
+            Transition(following, resting, (CaptureFollow, AnimatorConditionMode.IfNot, 0));
 
             // Local, never saved, never synced: Orbiters - N4N0 sets them over OSC (expression parameters all the same).
             parameters.Add(Parameter(CaptureRecord, synced: false));

@@ -10,6 +10,8 @@ using UnityEditor;
 using UnityEditor.Animations;
 using UnityEditor.SceneManagement;
 using UnityEngine;
+using UnityEngine.Animations;
+using UnityEngine.Playables;
 using UnityEngine.SceneManagement;
 using VRC.SDK3.Avatars.Components;
 using VRC.SDK3.Avatars.ScriptableObjects;
@@ -54,9 +56,8 @@ public class OrbCaptureTests
         Assert.AreEqual(root, root.Find(OrbInstaller.Capture).parent, "Beside Shown: hiding N4N0 leaves capture working");
         var rig = root.Find(OrbInstaller.CaptureRigPath);
         var constraint = rig.GetComponent<VRCParentConstraint>();
-        Assert.AreEqual(2, constraint.Sources.Count, "the world origin (offsets from the animator), then the hips");
-        Assert.IsNull(constraint.Sources[0].SourceTransform);
-        Assert.AreEqual((0f, 1f), (constraint.Sources[0].Weight, constraint.Sources[1].Weight), "resting at the hips until asked to follow");
+        Assert.AreEqual(1, constraint.Sources.Count, "the hips alone (VRChat leaves a source without a transform out of an upload)");
+        Assert.AreEqual(1f, constraint.Sources[0].Weight);
         var renderer = root.Find(OrbInstaller.RigRendererPath).GetComponent<MeshRenderer>();
         Assert.IsFalse(renderer.enabled);
         Assert.AreEqual(OrbInstaller.RigShaderName, renderer.sharedMaterial.shader.name);
@@ -108,7 +109,7 @@ public class OrbCaptureTests
 
         var controller = AssetDatabase.LoadAssetAtPath<AnimatorController>(folder + "/N4N0.controller");
         var layers = controller.layers.ToDictionary(l => l.name, l => l.stateMachine);
-        foreach (string layer in new[] { "Capture", "Capture local", "Capture rig", "Capture follow", "Capture rig pose" }) Assert.IsTrue(layers.ContainsKey(layer), layer);
+        foreach (string layer in new[] { "Capture", "Capture local", "Capture rig", "Capture rig pose" }) Assert.IsTrue(layers.ContainsKey(layer), layer);
         float Value(AnimatorState state, string path, Type type, string property)
         {
             var curve = AnimationUtility.GetEditorCurve((AnimationClip)state.motion, EditorCurveBinding.FloatCurve(path, type, property));
@@ -120,6 +121,13 @@ public class OrbCaptureTests
         Assert.AreEqual("Off", layers["Capture"].defaultState.name);
         Assert.AreEqual(0f, Value(In("Capture", "Off"), OrbInstaller.CaptureKitPath, typeof(SkinnedMeshRenderer), "m_Enabled"));
         Assert.AreEqual(1f, Value(In("Capture", "Recording"), OrbInstaller.CaptureKitPath, typeof(SkinnedMeshRenderer), "m_Enabled"));
+        // Never culled while recording: VRChat's camera is inside its bounds wherever it looks; 4 m otherwise.
+        foreach (string extent in OrbInstaller.KitExtents)
+        {
+            Assert.AreEqual(2f, Value(In("Capture", "Off"), OrbInstaller.CaptureKitPath, typeof(SkinnedMeshRenderer), extent), extent);
+            foreach (string state in new[] { "Recording", "Recording with depth frames" })
+                Assert.AreEqual(5000f, Value(In("Capture", state), OrbInstaller.CaptureKitPath, typeof(SkinnedMeshRenderer), extent), state + " " + extent);
+        }
         var depth = In("Capture", "Recording with depth frames");
         Assert.AreEqual(4f, Value(depth, OrbInstaller.CaptureKitPath, typeof(SkinnedMeshRenderer), "material._OrbitersDepthEvery"));
         Assert.AreEqual(4f, Value(depth, OrbInstaller.RigRendererPath, typeof(MeshRenderer), "material._OrbitersDepthEvery"), "rig frames are never depth frames");
@@ -130,13 +138,12 @@ public class OrbCaptureTests
         for (int face = 1; face <= 6; face++) Assert.AreEqual(1f, Value(rigOn, OrbInstaller.RigFacePath(face), typeof(Camera), "m_Enabled"));
         Assert.IsTrue(layers["Capture rig"].states.Single(s => s.state.name == "Rig off").state.transitions.Single().conditions.Any(c => c.parameter == "IsLocal"),
             "on only on the wearer's client");
-        // Following: the world origin's source takes the weight from the hips'.
-        var followingState = In("Capture follow", "Following");
-        Assert.AreEqual((1f, 0f), (Value(followingState, OrbInstaller.CaptureRigPath, typeof(VRCParentConstraint), "Sources.source0.Weight"),
-            Value(followingState, OrbInstaller.CaptureRigPath, typeof(VRCParentConstraint), "Sources.source1.Weight")));
-        Assert.AreEqual("At the hips", layers["Capture follow"].defaultState.name);
-        // Placed by the four values, linear from -1 to 1 over ±4096 m and ±180°, in a direct tree with Write Defaults on.
-        var pose = layers["Capture rig pose"].defaultState;
+        // At the hips until asked to follow: the hips' offsets all zero.
+        Assert.AreEqual("At the hips", layers["Capture rig pose"].defaultState.name);
+        foreach (string offset in new[] { "ParentPositionOffset.x", "ParentPositionOffset.y", "ParentPositionOffset.z", "ParentRotationOffset.y" })
+            Assert.AreEqual(0f, Value(In("Capture rig pose", "At the hips"), OrbInstaller.CaptureRigPath, typeof(VRCParentConstraint), "Sources.source0." + offset), offset);
+        // Following: placed by the four values, linear from -1 to 1 over ±4096 m and ±180°, in a direct tree with Write Defaults on.
+        var pose = In("Capture rig pose", "Following");
         Assert.IsTrue(pose.writeDefaultValues, "a direct blend tree needs Write Defaults");
         var tree = (BlendTree)pose.motion;
         Assert.AreEqual(BlendTreeType.Direct, tree.blendType);
@@ -196,10 +203,88 @@ public class OrbCaptureTests
         Assert.AreSame(built.Find(OrbInstaller.CaptureRigPath), smr.rootBone, "its bounds stand around the rig");
         Assert.AreEqual(4f, smr.localBounds.size.x * Mathf.Abs(smr.rootBone.lossyScale.x), 1e-3f, "4 m in the world");
         var constraint = built.Find(OrbInstaller.CaptureRigPath).GetComponent<VRCParentConstraint>();
-        Assert.AreSame(smr.bones[0], constraint.Sources[1].SourceTransform, "resting at the hips");
+        Assert.AreSame(smr.bones[0], constraint.Sources[0].SourceTransform, "hanging from the hips");
         // Built again (another upload): the same files.
         var again = OrbInstaller.BuildCaptureKit(built, animator, "Kit test avatar", folder + "/Kits");
         Assert.AreSame(mesh, again.sharedMesh);
+    }
+
+    /// <summary>
+    /// Where Orbiters - N4N0's four values put the rig, through N4N0's animator and VRChat's constraint solver: at the
+    /// camera, from the hips wherever they are and however they lean (the contracts' <c>rig::follow_values</c>, as
+    /// <see cref="FollowValues"/> here), and back at the hips when it stops following.
+    /// </summary>
+    [Test]
+    public void TheRigStandsWhereOrbitersN4N0PutsItFromTheHips()
+    {
+        if (VrcFury.Writer == null) Assert.Ignore("Requires the VRCFury integration.");
+        var (avatar, orb) = Placed();
+        var copy = Object.Instantiate(avatar.gameObject);
+        SceneManager.MoveGameObjectToScene(copy, scene);
+        copy.transform.SetPositionAndRotation(new Vector3(15.08f, -4.1f, 6.8f), Quaternion.Euler(0, 81.8f, 0));
+        var built = copy.transform.Find(orb.name);
+        var animator = copy.GetComponent<Animator>();
+        OrbInstaller.BuildCaptureKit(built, animator, "Kit test avatar", folder + "/Kits");
+        var hips = animator.GetBoneTransform(HumanBodyBones.Hips);
+        var rig = built.Find(OrbInstaller.CaptureRigPath);
+
+        var graph = PlayableGraph.Create("N4N0 capture rig test");
+        var solver = new ConstraintSolver();
+        try
+        {
+            var playable = AnimatorControllerPlayable.Create(graph, AssetDatabase.LoadAssetAtPath<AnimatorController>(folder + "/N4N0.controller"));
+            AnimationPlayableOutput.Create(graph, "N4N0", built.gameObject.AddComponent<Animator>()).SetSourcePlayable(playable);
+            graph.SetTimeUpdateMode(DirectorUpdateMode.Manual);
+            graph.Play();
+            solver.Track(built.gameObject);
+            void Step() { for (int i = 0; i < 3; i++) { graph.Evaluate(.02f); solver.Solve(); } }
+            Step();
+            Assert.Less(Vector3.Distance(hips.position, rig.position), 1e-4f, "at the hips until asked to follow");
+
+            foreach (var (lean, at, yaw) in new[]
+                     {
+                         (Quaternion.identity, new Vector3(41.5f, 1.75f, -18.25f), 143.2f),
+                         (Quaternion.Euler(12f, -40f, 7f), new Vector3(6.95f, -1.66f, 13.68f), 10f),
+                     })
+            {
+                hips.rotation = lean * hips.rotation;
+                float[] values = FollowValues(hips.position, hips.rotation, at, yaw);
+                playable.SetBool(OrbInstaller.CaptureFollow, true);
+                playable.SetFloat(OrbInstaller.CaptureRigX, values[0]);
+                playable.SetFloat(OrbInstaller.CaptureRigY, values[1]);
+                playable.SetFloat(OrbInstaller.CaptureRigZ, values[2]);
+                playable.SetFloat(OrbInstaller.CaptureRigYaw, values[3]);
+                Step();
+                Assert.Less(Vector3.Distance(at, rig.position), 2e-3f, "at the camera (" + lean.eulerAngles + ")");
+                var expected = hips.rotation * Quaternion.Euler(0, values[3] * OrbInstaller.RigYawDegrees, 0);
+                Assert.Less(Quaternion.Angle(expected, rig.rotation), .05f, "turned about the hips' up axis");
+                if (lean == Quaternion.identity)
+                {
+                    Assert.Less(Vector3.Angle(Vector3.up, rig.up), .05f, "level on upright hips");
+                    Assert.AreEqual(yaw, Quaternion.LookRotation(rig.forward).eulerAngles.y, .05f, "with the camera's heading");
+                }
+            }
+            playable.SetBool(OrbInstaller.CaptureFollow, false);
+            Step();
+            Assert.Less(Vector3.Distance(hips.position, rig.position), 1e-4f, "back at the hips");
+            Assert.Less(Quaternion.Angle(hips.rotation, rig.rotation), .05f);
+        }
+        finally
+        {
+            solver.Release();
+            graph.Destroy();
+        }
+    }
+
+    /// <summary>The contracts' <c>rig::follow_values</c>: the offsets from the hips that put the rig at <paramref name="at"/>
+    /// heading <paramref name="yaw"/> (the turn about the hips' up axis nearest to it), over the parameters' reach.</summary>
+    private static float[] FollowValues(Vector3 hips, Quaternion hipsRotation, Vector3 at, float yaw)
+    {
+        var offset = Quaternion.Inverse(hipsRotation) * (at - hips);
+        var m = Matrix4x4.Rotate(Quaternion.Inverse(hipsRotation) * Quaternion.Euler(0, yaw, 0));
+        float turn = Mathf.Atan2(m.m02 - m.m20, m.m00 + m.m22) * Mathf.Rad2Deg;
+        float r = OrbInstaller.RigReachMetres;
+        return new[] { offset.x / r, offset.y / r, offset.z / r, turn / OrbInstaller.RigYawDegrees };
     }
 
     [Test]

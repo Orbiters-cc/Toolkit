@@ -642,6 +642,25 @@ public sealed class AvatarOptimizationTests
         Assert.That(prop.localBounds, Is.EqualTo(propBox));
     }
 
+    // N4N0's capture kit: skinned to the avatar's bones, its box around a camera rig a constraint moves (to VRChat's camera
+    // while recording). Given the avatar's box at the hips, the kit drew only while the camera saw the avatar.
+    [Test] public void MeshesWhoseBoxAConstraintCarriesKeepIt()
+    {
+        var human = Humanoid();
+        var shirt = Weighted("Shirt", human["Chest"], human["HandL"]);
+        var rig = Child("Rig").transform;
+        rig.gameObject.AddComponent<VRCParentConstraint>();
+        var kit = Weighted("Kit", human["Hips"], human["Chest"], human["HandR"]);
+        kit.rootBone = rig;
+        kit.localBounds = new Bounds(Vector3.zero, Vector3.one * 4f);
+
+        Assert.That(AvatarBounds.Unify(root), Is.EqualTo(1));
+
+        Assert.That(shirt.rootBone, Is.SameAs(human["Hips"]));
+        Assert.That(kit.rootBone, Is.SameAs(rig), "Its box goes with the rig.");
+        Assert.That(kit.localBounds, Is.EqualTo(new Bounds(Vector3.zero, Vector3.one * 4f)));
+    }
+
     [Test] public void TheRoomNeverTakesTheBoxOutOfTheExcellentRank()
     {
         var human = Humanoid();
