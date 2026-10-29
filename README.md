@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- **Orbiters - N4N0's setup requests are asked in a small window that blocks nothing.** "Add N4N0 to …?" was a modal
+  dialog that froze the editor, and anything driving it, until answered. `SetupRequestWindow` shows what is added (its
+  name and version), to which avatar and in which scene, and what happens after, with **Add** and **Not now** (closing it
+  is Not now); the request waits in its folder until it is answered, through script reloads (`ProjectSetupRequests.Ask`,
+  `Answer`). `N4N0Logo`: N4N0's logo for the tools' cards about N4N0.
+
 - **Orbiters - N4N0 and VRChat thumbnails for worlds too.** `OrbitersDesktopApp` (whether Orbiters - N4N0 is installed and
   runs, `StartInTray`, `InstallAndOpenAsync`) moved to the generic editor assembly (`Orbiters.Toolkit.Editor.Net`), so
   world tools use it (My World's Publish 3D captures); it also finds the installed app itself (`Installed`, `Override`

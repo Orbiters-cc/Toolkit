@@ -18,7 +18,8 @@ namespace Orbiters.Toolkit.Editor.VRChat
 {
     /// <summary>
     /// Applies the setup requests Orbiters - N4N0 leaves in this project (contracts' Docs/project-setup.md): "add N4N0 to
-    /// avtr_… in Canine.unity". It asks once, opens the scene, finds the avatar by its blueprint id, has My Avatar install
+    /// avtr_… in Canine.unity". It asks once (<see cref="SetupRequestWindow"/>, a small window that blocks nothing: the
+    /// request waits until it is answered), opens the scene, finds the avatar by its blueprint id, has My Avatar install
     /// each gallery item (<see cref="Gallery"/>; My Avatar's installer may ask its own questions in its window and survives
     /// domain reloads), then saves the scene and opens the VRChat SDK's builder on the avatar, and writes the result for
     /// the desktop. A request being worked on keeps its progress in &lt;id&gt;.state.json so a reload picks it up again.
@@ -41,14 +42,16 @@ namespace Orbiters.Toolkit.Editor.VRChat
         /// <summary>Set by My Avatar; null when My Avatar is not in the project.</summary>
         public static IGalleryItems Gallery { get; set; }
 
-        /// <summary>Asks the person whether to apply a request (a dialog; tests answer without one).</summary>
-        internal static Func<JObject, bool> Confirm = Accept;
+        /// <summary>
+        /// Asks the person whether to apply the request at a path (with its id): <see cref="SetupRequestWindow"/>, which
+        /// answers through <see cref="Answer"/>; tests answer without one.
+        /// </summary>
+        internal static Action<string, string> Ask = SetupRequestWindow.Ask;
 
         internal const int Schema = 1;
         private const double Interval = 2;
         private static readonly TimeSpan KeepResults = TimeSpan.FromDays(7);
         private static double next;
-        private static bool asking;
 
         internal static string Folder => Path.Combine(Path.GetDirectoryName(Path.GetFullPath(Application.dataPath)), "UserSettings", "Orbiters", "SetupRequests");
 
@@ -67,7 +70,7 @@ namespace Orbiters.Toolkit.Editor.VRChat
 
         private static void Tick()
         {
-            if (asking || EditorApplication.timeSinceStartup < next) return;
+            if (EditorApplication.timeSinceStartup < next) return;
             next = EditorApplication.timeSinceStartup + Interval;
             if (EditorApplication.isCompiling || EditorApplication.isUpdating || EditorApplication.isPlayingOrWillChangePlaymode || BuildPipeline.isBuildingPlayer) return;
             string folder = Folder;
@@ -103,10 +106,11 @@ namespace Orbiters.Toolkit.Editor.VRChat
             var state = File.Exists(statePath) ? JsonConvert.DeserializeObject<State>(File.ReadAllText(statePath)) : null;
             try
             {
+                // Not answered yet: asked (once a window), the request waits; Answer starts it or declines it.
                 if (state == null)
                 {
-                    if (!Confirm(request)) { Finish(path, statePath, id, "declined", "Not added: you chose Not now in Unity.", null); return; }
-                    state = new State();
+                    Ask(path, id);
+                    return;
                 }
                 Continue(path, statePath, id, request, state);
             }
@@ -117,16 +121,24 @@ namespace Orbiters.Toolkit.Editor.VRChat
             }
         }
 
-        private static bool Accept(JObject request)
+        /// <summary>
+        /// The person's answer to the request at <paramref name="path"/>: Add starts it at the next tick (its state file),
+        /// Not now writes the result "declined". A request no longer waiting (answered, withdrawn, not in the folder) is left alone.
+        /// </summary>
+        internal static void Answer(string path, string id, bool add)
         {
-            var items = (JArray)request["items"] ?? new JArray();
-            string what = string.Join(" and ", items.Select(i => (string)i["name"] ?? "an item"));
-            string avatar = (string)request["avatar"]?["name"] ?? (string)request["avatar"]?["id"];
-            string scene = (string)request["avatar"]?["scene"];
-            string where = string.IsNullOrEmpty(scene) ? "" : " in " + Path.GetFileName(scene);
-            asking = true;
-            try { return EditorUtility.DisplayDialog("Orbiters - N4N0", $"Orbiters - N4N0 asks to add {what} to {avatar}{where}. Add it?", "Add", "Not now"); }
-            finally { asking = false; }
+            if (string.IsNullOrEmpty(path) || string.IsNullOrEmpty(id) || !File.Exists(path)) return;
+            if (!string.Equals(Path.GetDirectoryName(Path.GetFullPath(path)), Path.GetFullPath(Folder), StringComparison.OrdinalIgnoreCase)) return;
+            string statePath = Path.Combine(Folder, id + ".state.json");
+            if (File.Exists(statePath)) return;
+            try
+            {
+                if (add) Save(statePath, new State());
+                else Finish(path, statePath, id, "declined", "Not added: you chose Not now in Unity.", null);
+            }
+            catch (IOException e) { Debug.LogWarning("Orbiters Toolkit could not answer Orbiters - N4N0's request: " + e.Message); }
+            catch (UnauthorizedAccessException e) { Debug.LogWarning("Orbiters Toolkit could not answer Orbiters - N4N0's request: " + e.Message); }
+            next = 0;
         }
 
         private static void Continue(string path, string statePath, string id, JObject request, State state)

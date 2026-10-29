@@ -1,0 +1,31 @@
+/* Orbiters - N4N0's setup request (SetupRequestWindow): My Avatar's palette, radii and buttons. */
+.orb-setup { flex-grow: 1; padding: 18px 20px 16px 20px; background-color: #1e1e1e; transition-property: opacity, translate; transition-duration: 0.28s; transition-timing-function: ease-out-cubic; }
+.orb-setup--entering { opacity: 0; translate: 0 8px; }
+
+.orb-setup__header { flex-direction: row; align-items: center; }
+.orb-setup__tile { width: 52px; height: 52px; flex-shrink: 0; margin-right: 14px; padding: 7px; border-radius: 15px; background-color: rgba(0, 218, 109, 0.13); }
+.orb-setup__tile .orb-n4n0-logo { flex-grow: 1; }
+.orb-setup__texts { flex-grow: 1; flex-shrink: 1; min-width: 0; }
+.orb-setup__eyebrow { margin: 0; padding: 0; font-size: 10px; letter-spacing: 1.2px; -unity-font-style: bold; color: #7dffb8; }
+.orb-setup__title { margin: 3px 0 0 0; padding: 0; font-size: 17px; -unity-font-style: bold; color: #ffffff; white-space: normal; }
+
+.orb-setup__card { margin-top: 16px; padding: 4px 12px; border-radius: 14px; background-color: #262626; border-width: 1px; border-color: rgba(255, 255, 255, 0.05); }
+.orb-setup__row { flex-direction: row; align-items: center; padding: 8px 0; }
+.orb-setup__row--divided { border-top-width: 1px; border-color: #2f2f2f; }
+.orb-setup__icon { width: 30px; height: 30px; flex-shrink: 0; margin-right: 11px; border-radius: 9px; background-color: #303030; align-items: center; justify-content: center; }
+.orb-setup__icon .orb-icon { width: 15px; height: 15px; --icon-color: #d6d6d6; }
+.orb-setup__row-texts { flex-grow: 1; flex-shrink: 1; min-width: 0; }
+.orb-setup__row-head { flex-direction: row; align-items: center; }
+.orb-setup__name { margin: 0; padding: 0; font-size: 12px; -unity-font-style: bold; color: #f2f2f2; }
+.orb-setup__version { margin: 0 0 0 6px; padding: 1px 7px; border-radius: 9px; font-size: 10px; -unity-font-style: bold; color: #7dffb8; background-color: rgba(0, 218, 109, 0.14); }
+.orb-setup__detail { margin: 2px 0 0 0; padding: 0; font-size: 11px; color: #8f8f8f; white-space: normal; }
+.orb-setup__line { margin: 10px 2px 0 2px; padding: 0; font-size: 11px; color: #a6a6a6; white-space: normal; }
+
+.orb-setup__actions { flex-direction: row; align-items: center; padding-top: 14px; }
+.orb-setup__chip { margin: 0; padding: 2px 8px; border-radius: 9px; font-size: 10px; color: #ffcf7a; background-color: rgba(255, 176, 32, 0.14); }
+.orb-setup .mcb-button { height: 34px; min-height: 34px; margin: 0; padding: 0 16px; border-radius: 10px; font-size: 12px; transition-property: background-color, scale; transition-duration: 0.12s; }
+.orb-setup .mcb-button.pressed { scale: 0.97 0.97; }
+.orb-setup .orb-setup__later { margin-right: 8px; background-color: #3a3a3a; }
+.orb-setup .orb-setup__later:hover { background-color: #474747; }
+.orb-setup .orb-setup__add { min-width: 140px; }
+.orb-setup .orb-setup__add:hover { background-color: #19e27d; }
