@@ -160,6 +160,7 @@ namespace Orbiters.Toolkit.Editor.VRChat
             }
             if (light) LightController(controller, folder, parameters, controls);
             CaptureController(controller, parameters, controls);
+            InputParametersOf(parameters);
             Install(root, folder, controller, MenuPath, "N4N0 menu", controls, parameters.ToArray(), parameters.Select(p => p.name), MenuIcon(folder));
         }
 

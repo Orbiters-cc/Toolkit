@@ -78,8 +78,9 @@ public class OrbTests
         // The screen's parameters follow (TheScreensTouchPointsAndParametersAreLocal).
         CollectionAssert.AreEqual(expected, parameters.parameters.Take(expected.Count).Select(p => (p.name, p.valueType, p.networkSynced, p.saved, p.defaultValue)).ToList());
         Assert.IsTrue(parameters.parameters.Skip(expected.Count).All(p => p.name.StartsWith("N4N0/Screen/", StringComparison.Ordinal) || p.name.StartsWith("N4N0/Card/", StringComparison.Ordinal) ||
-                                                                      p.name.StartsWith("N4N0/Capture/", StringComparison.Ordinal) || p.name.StartsWith("N4N0/Picture/", StringComparison.Ordinal)),
-            "then the screen's, the link card's, the capture kit's (OrbCaptureTests) and the full pictures' (OrbPictureTests)");
+                                                                      p.name.StartsWith("N4N0/Capture/", StringComparison.Ordinal) || p.name.StartsWith("N4N0/Picture/", StringComparison.Ordinal) ||
+                                                                      p.name.StartsWith("N4N0/Touchpad/", StringComparison.Ordinal) || p.name.StartsWith("N4N0/Stick/", StringComparison.Ordinal)),
+            "then the screen's, the link card's, the capture kit's (OrbCaptureTests), the full pictures' (OrbPictureTests) and the controller input's");
         Assert.AreEqual(1 + 8 + 1 + 8 + 8 * 8 + 3 + 8 + 3, parameters.CalcTotalCost(), "Synced bits: 1 + 8 + 1 + 8 + 8·N, the screen's 3 + 8, the card's 3");
 
         // Global in the Full Controller, so VRCFury keeps the names OSC looks for; its own parameters are renamed as usual.
@@ -87,6 +88,12 @@ public class OrbTests
         foreach (var p in expected) Assert.IsTrue(VrcFury.IsGlobalParameter(full, p.name), p.name + " is global");
         Assert.IsFalse(VrcFury.IsGlobalParameter(full, OrbInstaller.Cell(0)));
         Assert.IsTrue(expected.All(p => VrcParameters.OscDriven(p.name)), "Optimizers leave OSC's parameters alone");
+        // The controller input (contracts' Docs/orb-input.md): local, never saved, at rest, global, left alone by optimizers.
+        var inputs = parameters.parameters.Where(p => p.name.StartsWith("N4N0/Touchpad/", StringComparison.Ordinal) || p.name.StartsWith("N4N0/Stick/", StringComparison.Ordinal)).ToList();
+        CollectionAssert.AreEqual(OrbInstaller.InputParameters.ToList(), inputs.Select(p => p.name).ToList());
+        Assert.IsTrue(inputs.All(p => !p.networkSynced && !p.saved && p.defaultValue == 0 && VrcFury.IsGlobalParameter(full, p.name) && VrcParameters.OscDriven(p.name)));
+        Assert.AreEqual(8, inputs.Count(p => p.valueType == VRCExpressionParameters.ValueType.Bool));
+        Assert.AreEqual(10, inputs.Count(p => p.valueType == VRCExpressionParameters.ValueType.Float));
 
         var controller = AssetDatabase.LoadAssetAtPath<AnimatorController>(folder + "/N4N0.controller");
         var types = controller.parameters.ToDictionary(p => p.name, p => p.type);

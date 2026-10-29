@@ -1,5 +1,15 @@
 # Orbiters Toolkit
 
+## Unreleased
+
+- **Controller input for avatars** (contracts' Docs/orb-input.md): N4N0 declares each hand's touchpad and thumbstick
+  as its local parameters, which VRChat gives avatars none of: `N4N0/Touchpad/Left/X`, `/Y` (−1 to 1, 0 untouched),
+  `/Touch`, `/Click`, `/Force` (0 to 1) and the same for `Right`; `N4N0/Stick/Left/X`, `/Y`, `/Touch`, `/Click` and the
+  same for `Right` (`OrbInstaller.TouchpadParameters`, `StickParameters`, `InputParameters`). Orbiters - N4N0 (its N4N0 page ›
+  On your avatar › Controller input, on by default) reads them through SteamVR and sends them to an avatar that lists them. Use
+  them in your own animators by adding parameters of the same names; they cost no synced bits. Takes a new N4N0 from the
+  gallery and an upload.
+
 ## 0.4.9 — 2026-10-29
 
 - **Orbiters - N4N0's setup requests are asked in a small window that blocks nothing.** "Add N4N0 to …?" was a modal
@@ -1054,6 +1064,17 @@ sync value.
   alone ("N4N0 screen retro" beside each size's), kept through the other options: no parameter, no synced bit. The
   option shows a picture of each look (`AttachmentOption.ChoicePictures`, from `orbiters-desktop --orb-menu`), and
   Orbiters - N4N0's overlay has the same look as a setting of its own.
+- **Controller input** (contracts' Docs/orb-input.md): each hand's touchpad and thumbstick as N4N0's local, unsaved
+  parameters (`N4N0/Touchpad/Left/X`, `Y`, `Touch`, `Click`, `Force`, the same for `Right`; `N4N0/Stick/Left/X`, `Y`,
+  `Touch`, `Click`, the same for `Right`), PC only. N4N0 uses none of them itself: Orbiters - N4N0 sets them over OSC
+  while its SteamVR overlay runs, on change at most 30 times a second, and they go back to rest when it stops. An
+  avatar's own controllers read them by adding Float (X, Y, Force) or Bool (Touch, Click) parameters of the same names,
+  in any layer; an avatar without N4N0 can list them in its own Expression Parameters (sync off) to get them too. They
+  are local, so only the wearer sees what they drive: to show it to everyone, copy the value into a synced parameter of
+  your own with a VRC Avatar Parameter Driver (Copy) in a state only the wearer runs (`IsLocal`), for instance
+  `N4N0/Touchpad/Right/X` into a synced Float (8 bits), and drive the effect from that one. Never mark N4N0's own
+  declarations synced: a gallery update puts them back. Sticks are there because most controllers have no touchpad;
+  VRChat still walks with them, so check `VelocityMagnitude`, `Seated` or `InStation` if that matters.
 - **Pointing** (screen version 4, contracts' Docs/orb.md, Pointing; `AddPointing`): a VRChat raycast (`VRCRaycast`,
   "Hit Worlds And Players", 0.6 m scaled with N4N0) from each index fingertip along the finger meets a thin solid box
   on the screen's face, shown to its owner as a beam and a bead (N4N0's own mesh and material); the bead's local
