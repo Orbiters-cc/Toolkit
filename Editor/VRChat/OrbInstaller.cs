@@ -215,6 +215,8 @@ namespace Orbiters.Toolkit.Editor.VRChat
             AddMobile(root.transform, folder, model, material);
             // The capture kit and camera rig Orbiters - N4N0 records with (OrbInstaller.Capture).
             AddCapture(root.transform, folder);
+            // The screen mirror's camera (OrbInstaller.Mirror).
+            AddMirror(root.transform, folder);
             AddParts(root.transform, folder);
         }
 

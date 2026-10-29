@@ -316,6 +316,7 @@ namespace Orbiters.Toolkit.Editor.VRChat
                 material.SetTexture("_Layout", layout);
                 material.SetTexture("_MainTex", glyphs);
                 SetPictureTextures(material, folder);
+                SetMirrorTexture(material, folder);
                 material.renderQueue = (int)RenderQueue.Transparent;
                 AssetDatabase.DeleteAsset(materialPath);
                 AssetDatabase.CreateAsset(material, materialPath);

@@ -79,8 +79,9 @@ public class OrbTests
         CollectionAssert.AreEqual(expected, parameters.parameters.Take(expected.Count).Select(p => (p.name, p.valueType, p.networkSynced, p.saved, p.defaultValue)).ToList());
         Assert.IsTrue(parameters.parameters.Skip(expected.Count).All(p => p.name.StartsWith("N4N0/Screen/", StringComparison.Ordinal) || p.name.StartsWith("N4N0/Card/", StringComparison.Ordinal) ||
                                                                       p.name.StartsWith("N4N0/Capture/", StringComparison.Ordinal) || p.name.StartsWith("N4N0/Picture/", StringComparison.Ordinal) ||
-                                                                      p.name.StartsWith("N4N0/Touchpad/", StringComparison.Ordinal) || p.name.StartsWith("N4N0/Stick/", StringComparison.Ordinal)),
-            "then the screen's, the link card's, the capture kit's (OrbCaptureTests), the full pictures' (OrbPictureTests) and the controller input's");
+                                                                      p.name.StartsWith("N4N0/Touchpad/", StringComparison.Ordinal) || p.name.StartsWith("N4N0/Stick/", StringComparison.Ordinal) ||
+                                                                      p.name.StartsWith("N4N0/Mirror/", StringComparison.Ordinal)),
+            "then the screen's, the link card's, the capture kit's (OrbCaptureTests), the full pictures' (OrbPictureTests), the controller input's and the screen mirror's (OrbMirrorTests)");
         Assert.AreEqual(1 + 8 + 1 + 8 + 8 * 8 + 3 + 8 + 3, parameters.CalcTotalCost(), "Synced bits: 1 + 8 + 1 + 8 + 8·N, the screen's 3 + 8, the card's 3");
 
         // Global in the Full Controller, so VRCFury keeps the names OSC looks for; its own parameters are renamed as usual.
