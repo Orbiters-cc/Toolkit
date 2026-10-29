@@ -4,22 +4,54 @@ using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 using Newtonsoft.Json.Linq;
-using Orbiters.Toolkit.Editor.Net;
 
-namespace Orbiters.Toolkit.Editor.VRChat
+namespace Orbiters.Toolkit.Editor.Net
 {
     /// <summary>
-    /// Orbiters - N4N0 on this computer: whether it is installed, and installing its latest release then opening it, for
-    /// tools that need it (N4N0 on an avatar does nothing without it). The release comes from the feed the app itself
-    /// updates from (`&lt;feed&gt;/stable.json`, the development server's feed in the development environment); its setup is
-    /// checked against the release's SHA-256 before it runs, silently, then the app is started.
+    /// Orbiters - N4N0 on this computer: whether it is installed and runs, starting it in the tray, and installing its
+    /// latest release then opening it, for tools that need it (N4N0 on an avatar does nothing without it; My World hands
+    /// it a world's captures). The release comes from the feed the app itself updates from (`&lt;feed&gt;/stable.json`, the
+    /// development server's feed in the development environment); its setup is checked against the release's SHA-256
+    /// before it runs, silently, then the app is started.
     /// </summary>
     public static class OrbitersDesktopApp
     {
         private const string ProductionFeed = "https://orbiters.cc/downloads/desktop";
 
-        /// <summary>The installed app's program, or null.</summary>
-        public static string Installed => OrbInstaller.DesktopApp();
+        /// <summary>A build of Orbiters - N4N0 to use instead of the installed one (tests, a development build), or null.</summary>
+        public static string Override;
+
+        /// <summary>The installed app's program (its install folder from its uninstall entry, else the default one), or null.</summary>
+        public static string Installed
+        {
+            get
+            {
+                if (!string.IsNullOrEmpty(Override) && File.Exists(Override)) return Override;
+                string location = null;
+                try
+                {
+                    using (var key = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Uninstall\OrbitersDesktop"))
+                        location = key?.GetValue("InstallLocation") as string;
+                }
+                catch (Exception e) when (e is System.Security.SecurityException || e is UnauthorizedAccessException || e is IOException) { location = null; }
+                if (string.IsNullOrEmpty(location))
+                    location = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Programs", "Orbiters - N4N0");
+                string exe = Path.Combine(location.Trim('"'), "orbiters-desktop.exe");
+                return File.Exists(exe) ? exe : null;
+            }
+        }
+
+        /// <summary>Whether <paramref name="exe"/> runs (its tray service or a window).</summary>
+        public static bool Running(string exe) => exe != null && Process.GetProcessesByName(Path.GetFileNameWithoutExtension(exe)).Length > 0;
+
+        /// <summary>Starts the installed app in the tray, without its window, unless it runs already. False when it is not installed.</summary>
+        public static bool StartInTray()
+        {
+            string exe = Installed;
+            if (exe == null) return false;
+            if (!Running(exe)) Process.Start(new ProcessStartInfo(exe, "--hidden") { UseShellExecute = false, CreateNoWindow = true });
+            return true;
+        }
 
         private static string Feed => OrbitersEnvironment.IsDevelopment ? OrbitersEnvironment.ApiUrl("downloads/desktop") : ProductionFeed;
 
@@ -62,7 +94,7 @@ namespace Orbiters.Toolkit.Editor.VRChat
             string exe = Installed;
             if (exe == null) throw new InvalidOperationException("The setup finished but Orbiters - N4N0 is not where it installs.");
             // A silent setup leaves starting the app to its caller (a second start shows the running one).
-            if (Process.GetProcessesByName(Path.GetFileNameWithoutExtension(exe)).Length == 0) Process.Start(new ProcessStartInfo(exe) { UseShellExecute = true });
+            if (!Running(exe)) Process.Start(new ProcessStartInfo(exe) { UseShellExecute = true });
             status?.Invoke($"Orbiters - N4N0 {version} is installed and open.");
         }
     }

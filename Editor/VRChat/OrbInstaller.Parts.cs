@@ -7,6 +7,7 @@ using System.Linq;
 using System.Threading.Tasks;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
+using Orbiters.Toolkit.Editor.Net;
 using Orbiters.Toolkit.Editor.VRChat.Attachments;
 using UnityEditor;
 using UnityEngine;
@@ -173,28 +174,8 @@ namespace Orbiters.Toolkit.Editor.VRChat
             return card != null && card.TryGetComponent(out SkinnedMeshRenderer renderer) ? renderer : null;
         }
 
-        /// <summary>A build of Orbiters - N4N0 to draw with instead of the installed one (tests, a development build), or null.</summary>
-        internal static string DesktopAppOverride;
-
         // The page N4N0's menu shows first (Home with ten places, page 16): the thumbnail of a theme or a language.
         private const int HomePage = 16;
-
-        /// <summary>Orbiters - N4N0 on this computer (its install folder from its uninstall entry, else the default one), or null.</summary>
-        internal static string DesktopApp()
-        {
-            if (!string.IsNullOrEmpty(DesktopAppOverride) && File.Exists(DesktopAppOverride)) return DesktopAppOverride;
-            string location = null;
-            try
-            {
-                using (var key = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Uninstall\OrbitersDesktop"))
-                    location = key?.GetValue("InstallLocation") as string;
-            }
-            catch (Exception e) when (e is System.Security.SecurityException || e is UnauthorizedAccessException || e is IOException) { location = null; }
-            if (string.IsNullOrEmpty(location))
-                location = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Programs", "Orbiters - N4N0");
-            string exe = Path.Combine(location.Trim('"'), "orbiters-desktop.exe");
-            return File.Exists(exe) ? exe : null;
-        }
 
         // Its version, from the install record beside it.
         internal static string DesktopVersion(string exe)
@@ -209,7 +190,7 @@ namespace Orbiters.Toolkit.Editor.VRChat
 
         private static string MenuNote()
         {
-            string exe = DesktopApp();
+            string exe = OrbitersDesktopApp.Installed;
             if (exe == null) return "Orbiters - N4N0 isn't on this computer: N4N0's menu keeps its English pictures in the Modern or Retro look. Install it to see the menu in your theme and language.";
             string version = DesktopVersion(exe);
             if (version != null && CompareVersions(version, ThemedMenuVersion) < 0)
@@ -226,7 +207,7 @@ namespace Orbiters.Toolkit.Editor.VRChat
             var stringsJson = strings.variant != null ? new JObject { ["schema"] = 1, ["language"] = strings.variant.language ?? "en", ["strings"] = JObject.FromObject(strings.variant.strings ?? new Dictionary<string, string>()) } : null;
 
             // Orbiters - N4N0 draws the pages, kept by what it was asked (and its version) in Library.
-            string exe = DesktopApp();
+            string exe = OrbitersDesktopApp.Installed;
             string version = exe != null ? DesktopVersion(exe) : null;
             bool themed = exe != null && (version == null || CompareVersions(version, ThemedMenuVersion) >= 0);
             string drawn = null;

@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- **Orbiters - N4N0 and VRChat thumbnails for worlds too.** `OrbitersDesktopApp` (whether Orbiters - N4N0 is installed and
+  runs, `StartInTray`, `InstallAndOpenAsync`) moved to the generic editor assembly (`Orbiters.Toolkit.Editor.Net`), so
+  world tools use it (My World's Publish 3D captures); it also finds the installed app itself (`Installed`, `Override`
+  for a development build, which was `OrbInstaller.DesktopApp`). `VrcThumbnailHash` (the MD5 VRChat compares a
+  thumbnail upload by, from My Avatar) is public in `Orbiters.Toolkit.Editor` for avatars and worlds alike.
+
 - **A variant never changes the files of another.** A variant's folder was named by its JSON and its files' sizes, so a
   second variant with the same JSON and same-sized pictures or FBX wrote its bytes over the first one's: earlier items
   and their Undo steps showed the new ones. The folder is now named by the variant's record (id, author, published hash,
