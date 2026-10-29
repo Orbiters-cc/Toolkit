@@ -25,6 +25,9 @@ namespace Orbiters.Toolkit.Editor.VRChat.Manifest
         public const int Version = 1;
 
         public string AvatarId, Name, WrittenUtc, Generator;
+        // The Unity project (absolute folder) and the scene (path from it) the avatar was built from: Orbiters - N4N0 finds
+        // the project to add N4N0 to by them (contracts' Docs/project-setup.md).
+        public string Project, Scene;
         public readonly List<Parameter> Parameters = new List<Parameter>();
         public readonly List<Control> Controls = new List<Control>();
         /// <summary>The N4N0 prop's number of text sync values (4, 8 or 16), when the avatar carries it.</summary>
@@ -213,6 +216,8 @@ namespace Orbiters.Toolkit.Editor.VRChat.Manifest
                 if (!string.IsNullOrEmpty(Name)) Write(json, "name", Name);
                 if (!string.IsNullOrEmpty(WrittenUtc)) Write(json, "written_utc", WrittenUtc);
                 if (!string.IsNullOrEmpty(Generator)) Write(json, "generator", Generator);
+                if (!string.IsNullOrEmpty(Project)) Write(json, "project", Project);
+                if (!string.IsNullOrEmpty(Scene)) Write(json, "scene", Scene);
                 json.WritePropertyName("parameters");
                 json.WriteStartArray();
                 foreach (var p in Parameters)

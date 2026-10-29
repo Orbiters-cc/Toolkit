@@ -147,14 +147,19 @@ namespace Orbiters.Toolkit.Storage
         /// step: a crash or a full disk mid-write leaves the previous file whole, never a cut one. Throws what the write
         /// throws (IOException, UnauthorizedAccessException); the temporary file is removed then.
         /// </summary>
-        public static void ReplaceFile(string path, string text)
+        public static void ReplaceFile(string path, string text) => ReplaceFile(path, temp => File.WriteAllText(temp, text));
+
+        /// <summary>The same for a small binary file (a picture).</summary>
+        public static void ReplaceFile(string path, byte[] bytes) => ReplaceFile(path, temp => File.WriteAllBytes(temp, bytes));
+
+        private static void ReplaceFile(string path, Action<string> write)
         {
             string folder = Path.GetDirectoryName(Path.GetFullPath(path));
             if (!string.IsNullOrEmpty(folder)) Directory.CreateDirectory(folder);
             string temp = path + "." + Guid.NewGuid().ToString("N").Substring(0, 8) + ".tmp";
             try
             {
-                File.WriteAllText(temp, text);
+                write(temp);
                 if (File.Exists(path)) File.Replace(temp, path, null);
                 else File.Move(temp, path);
             }
