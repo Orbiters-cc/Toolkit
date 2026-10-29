@@ -28,7 +28,7 @@ namespace Orbiters.Toolkit.Editor.VRChat
         // The controller, parameters and menu of each choice of options, shared by every N4N0 switched to it (they name no
         // object of their own: their curves follow paths below N4N0).
         // A new menu or parameters get a new folder: orbs switched earlier keep the files they use.
-        internal const string OptionsFolder = "Assets/Orbiters/N4N0/Menu 19/";
+        internal const string OptionsFolder = "Assets/Orbiters/N4N0/Menu 20/";
 
         [InitializeOnLoadMethod]
         private static void RegisterOrbOptions() => AttachmentHooks.RegisterOptions(root => FindAll(root).SelectMany(orb =>

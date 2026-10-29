@@ -1085,7 +1085,7 @@ public class OrbTests
         var parameters = AssetDatabase.LoadAssetAtPath<VRCExpressionParameters>(OrbInstaller.OptionsFolder + "Text slots 8 + screen in VR/Parameters.asset");
         var version = parameters.parameters.Single(p => p.name == OrbInstaller.ScreenVersionParameter);
         Assert.AreEqual((VRCExpressionParameters.ValueType.Int, false, false, (float)OrbInstaller.ScreenVersion), (version.valueType, version.networkSynced, version.saved, version.defaultValue));
-        Assert.AreEqual(12, OrbInstaller.ScreenVersion);
+        Assert.AreEqual(13, OrbInstaller.ScreenVersion);
     }
 
     // The retro look is the screen's material alone: it stays through N4N0's other options, and goes back.

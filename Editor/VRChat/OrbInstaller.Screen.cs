@@ -74,8 +74,10 @@ namespace Orbiters.Toolkit.Editor.VRChat
         /// and 29: Orbiters - N4N0 reads VRChat's stream camera while it shows and opens a QR code's web link). 12 shares 3D
         /// captures (pages 30 to 33): the 3D picture page with the last capture, Share publicly, Share to … and History; History
         /// with both shares on each capture; the friends to share with; the warning before an explicit capture goes public.
+        /// 13 gives VRChat worlds feedback (pages 34 to 37, contracts' Docs/world-feedback.md): a world's likes, the labels
+        /// people gave it and its comments; Like, labels and comments to give; More with room for eight cards.
         /// </summary>
-        public const int ScreenVersion = 12;
+        public const int ScreenVersion = 13;
         /// <summary>
         /// Local, not saved, set by no menu: the screen's version (<see cref="ScreenVersion"/>), which Orbiters - N4N0 reads
         /// to know the pages the screen has. Screens before version 3 lack it.
@@ -113,8 +115,9 @@ namespace Orbiters.Toolkit.Editor.VRChat
         // scanner, the scanner's page), 16 every one of those pages drawn (the shader's page count follows its layout rows;
         // it had stayed at 22, so pages 23 on, the Home among them, showed empty), 17 the version 12 pages (33 of them: the
         // 3D picture with the last capture, History, Share to …, the explicit warning), 18 the same pages redrawn (a friend
-        // chosen in Share to … carries a green check, History's and Share to …'s counts are quiet subtitles).
-        internal const string ScreenRevision = "18";
+        // chosen in Share to … carries a green check, History's and Share to …'s counts are quiet subtitles), 19 the version
+        // 13 pages (37 of them: World feedback, its labels and comments, More with eight places).
+        internal const string ScreenRevision = "19";
         private const string ScreenShaderTemplate = "Packages/orbiters.toolkit/Editor/VRChat/OrbScreen.shader.txt";
         private const string BeamShaderTemplate = "Packages/orbiters.toolkit/Editor/VRChat/OrbBeam.shader.txt";
         private const string RayShaderTemplate = "Packages/orbiters.toolkit/Editor/VRChat/OrbRay.shader.txt";
@@ -124,7 +127,7 @@ namespace Orbiters.Toolkit.Editor.VRChat
         // The same pages in the retro look (`orbiters-desktop --orb-menu`'s "N4N0 screen pages retro.png").
         private const string ScreenPagesRetroTemplate = "Packages/orbiters.toolkit/Editor/VRChat/OrbScreenPagesRetro.png.bytes";
         private const string ScreenLayoutTemplate = "Packages/orbiters.toolkit/Editor/VRChat/OrbScreenLayout.png.bytes";
-        internal const int ScreenPageSlices = 34;
+        internal const int ScreenPageSlices = 38;
 
         public static string ScreenValue(int index) => ScreenValuePrefix + index;
         public static string ScreenTouch(bool right, int index) => ScreenTouchPrefix + (right ? "R" : "L") + index;
