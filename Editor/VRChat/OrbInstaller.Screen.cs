@@ -112,8 +112,9 @@ namespace Orbiters.Toolkit.Editor.VRChat
         // Previous instances, Add Orbiters as a friend), 15 the version 11 pages (29 of them: More with the QR code
         // scanner, the scanner's page), 16 every one of those pages drawn (the shader's page count follows its layout rows;
         // it had stayed at 22, so pages 23 on, the Home among them, showed empty), 17 the version 12 pages (33 of them: the
-        // 3D picture with the last capture, History, Share to …, the explicit warning).
-        internal const string ScreenRevision = "17";
+        // 3D picture with the last capture, History, Share to …, the explicit warning), 18 the same pages redrawn (a friend
+        // chosen in Share to … carries a green check, History's and Share to …'s counts are quiet subtitles).
+        internal const string ScreenRevision = "18";
         private const string ScreenShaderTemplate = "Packages/orbiters.toolkit/Editor/VRChat/OrbScreen.shader.txt";
         private const string BeamShaderTemplate = "Packages/orbiters.toolkit/Editor/VRChat/OrbBeam.shader.txt";
         private const string RayShaderTemplate = "Packages/orbiters.toolkit/Editor/VRChat/OrbRay.shader.txt";
