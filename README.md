@@ -9,6 +9,17 @@
   On your avatar › Controller input, on by default) reads them through SteamVR and sends them to an avatar that lists them. Use
   them in your own animators by adding parameters of the same names; they cost no synced bits. Takes a new N4N0 from the
   gallery and an upload.
+- **N4N0 brings a world's video screen to its projected screen** (screen version 14, screen files revision 20; contracts'
+  Docs/orb.md, Screen mirror). Avatars cannot read a world's textures, so N4N0 carries a small camera
+  (`OrbInstaller.Mirror`, `Shown/Mirror`): More › Screen mirror (page 39's card) opens page 38, the camera follows its
+  owner's eyes for 3 seconds and then stays where they looked, frozen in the world, and the page shows its 384 × 216
+  picture (`_Mirror`, drawn while the camera's layer sets `_MirrorLive`, as dots in the retro look) with Aim, Zoom in,
+  Zoom out and Stop. It renders on its wearer's client only, every other frame, only while the page shows, players,
+  menus and mirror reflections left out; everyone else sees the page's placeholder. Three local parameters
+  (`N4N0/Mirror/On`, `Placed`, `Zoom`), no synced bit; PC only (phones lose it with the PC N4N0), and the build points
+  each camera at its screen's picture or leaves it out of an older screen (`OrbMirrorHook`). Options folder Menu 21.
+- **The back of N4N0's screen shows Orbiters - N4N0's icon** (the N4N0 mark on its night square, in the retro look the
+  mark in brackets) instead of the Orbiters logo, as the SteamVR overlay's back does.
 
 ## 0.4.9 — 2026-10-29
 

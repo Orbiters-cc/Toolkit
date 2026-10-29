@@ -75,9 +75,11 @@ namespace Orbiters.Toolkit.Editor.VRChat
         /// captures (pages 30 to 33): the 3D picture page with the last capture, Share publicly, Share to … and History; History
         /// with both shares on each capture; the friends to share with; the warning before an explicit capture goes public.
         /// 13 gives VRChat worlds feedback (pages 34 to 37, contracts' Docs/world-feedback.md): a world's likes, the labels
-        /// people gave it and its comments; Like, labels and comments to give; More with room for eight cards.
+        /// people gave it and its comments; Like, labels and comments to give; More with room for eight cards. 14 the screen
+        /// mirror (page 38, <see cref="AddMirror"/>): what N4N0's camera sees before a world's video screen, Aim, Zoom in, Zoom
+        /// out, Stop; More with its card among seven (page 39).
         /// </summary>
-        public const int ScreenVersion = 13;
+        public const int ScreenVersion = 14;
         /// <summary>
         /// Local, not saved, set by no menu: the screen's version (<see cref="ScreenVersion"/>), which Orbiters - N4N0 reads
         /// to know the pages the screen has. Screens before version 3 lack it.
@@ -116,8 +118,10 @@ namespace Orbiters.Toolkit.Editor.VRChat
         // it had stayed at 22, so pages 23 on, the Home among them, showed empty), 17 the version 12 pages (33 of them: the
         // 3D picture with the last capture, History, Share to …, the explicit warning), 18 the same pages redrawn (a friend
         // chosen in Share to … carries a green check, History's and Share to …'s counts are quiet subtitles), 19 the version
-        // 13 pages (37 of them: World feedback, its labels and comments, More with eight places).
-        internal const string ScreenRevision = "19";
+        // 13 pages (37 of them: World feedback, its labels and comments, More with eight places), 20 the version 14 pages
+        // (39 of them: the screen mirror, its camera's picture drawn from _Mirror while _MirrorLive, and More with its card)
+        // and the back with Orbiters - N4N0's icon.
+        internal const string ScreenRevision = "20";
         private const string ScreenShaderTemplate = "Packages/orbiters.toolkit/Editor/VRChat/OrbScreen.shader.txt";
         private const string BeamShaderTemplate = "Packages/orbiters.toolkit/Editor/VRChat/OrbBeam.shader.txt";
         private const string RayShaderTemplate = "Packages/orbiters.toolkit/Editor/VRChat/OrbRay.shader.txt";
@@ -127,7 +131,7 @@ namespace Orbiters.Toolkit.Editor.VRChat
         // The same pages in the retro look (`orbiters-desktop --orb-menu`'s "N4N0 screen pages retro.png").
         private const string ScreenPagesRetroTemplate = "Packages/orbiters.toolkit/Editor/VRChat/OrbScreenPagesRetro.png.bytes";
         private const string ScreenLayoutTemplate = "Packages/orbiters.toolkit/Editor/VRChat/OrbScreenLayout.png.bytes";
-        internal const int ScreenPageSlices = 38;
+        internal const int ScreenPageSlices = 40;
 
         public static string ScreenValue(int index) => ScreenValuePrefix + index;
         public static string ScreenTouch(bool right, int index) => ScreenTouchPrefix + (right ? "R" : "L") + index;

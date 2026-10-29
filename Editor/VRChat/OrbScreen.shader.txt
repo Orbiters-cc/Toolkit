@@ -13,6 +13,8 @@
 // the pages ("N4N0 menu, look at the other side"): the menu is its owner's, on the side they face. With _Retro (the retro
 // look, Docs/orb.md) the pages are the retro ones and what changes is drawn as Orbiters - N4N0's retro overlay draws it:
 // cut corners, hover outlines, pressed elements inverted, chosen ones in brackets, pictures as green dots, scanlines.
+// On the screen mirror's page (38) its owner's screen shows, in the page's picture place, what N4N0's camera sees (_Mirror,
+// while the camera's layer sets _MirrorLive), as dots in the retro look; everyone else sees the page's own picture there.
 // Viewers who hide custom shaders see nothing of it (VRCFallback). OrbInstaller writes this file, the word properties and the decoder
 // filled in, as "N4N0 screen.shader" (or "N4N0 screen 128 B.shader").
 Shader "Orbiters/N4N0 Screen"
@@ -35,12 +37,14 @@ Shader "Orbiters/N4N0 Screen"
         _Glow ("Projected glow", Range(0, 2)) = 1
         [HideInInspector] _Pictures ("Full pictures (CRT B)", 2D) = "black" {}
         [HideInInspector] _PictureData ("Picture data (CRT A, for the diagnostics)", 2D) = "black" {}
+        [HideInInspector] _Mirror ("Screen mirror (N4N0's camera)", 2D) = "black" {}
+        [HideInInspector] _MirrorLive ("Screen mirror shown (animated)", Float) = 0
 //@PROPERTIES
     }
     SubShader
     {
         // OrbScreen: the files' revision (OrbInstaller.ScreenRevision); a screen of an older one is swapped for these.
-        Tags { "Queue" = "Transparent" "RenderType" = "Transparent" "IgnoreProjector" = "True" "VRCFallback" = "Hidden" "OrbScreen" = "19" }
+        Tags { "Queue" = "Transparent" "RenderType" = "Transparent" "IgnoreProjector" = "True" "VRCFallback" = "Hidden" "OrbScreen" = "20" }
         Cull Off
         ZWrite Off
         Blend SrcAlpha OneMinusSrcAlpha
@@ -63,6 +67,8 @@ Shader "Orbiters/N4N0 Screen"
             float _Retro;
             fixed4 _Dim, _Hot, _Plate, _Edge;
             float _Glow;
+            sampler2D _Mirror;
+            float _MirrorLive;
 
             // The screen's memory as one array over its 372 properties (each takes a register of its own).
             CBUFFER_START(WordBuffer)
@@ -83,7 +89,9 @@ Shader "Orbiters/N4N0 Screen"
             static const int Hover = 2, Pressed = 3, On = 4, Hidden = 8, Layers = 16, Unavailable = 21, TextStart = 24, PicturesStart = 384,
                 PictureBytes = THUMBNAIL_BYTES;
             // The layout table's columns.
-            static const int TableSlots = 1, TablePictures = 33, TableElements = 40, LayoutRows = 38;
+            static const int TableSlots = 1, TablePictures = 33, TableElements = 40, LayoutRows = 40;
+            // The screen mirror's page (contracts' Docs/orb.md, Screen mirror): its picture place is the camera's.
+            static const int MirrorPage = 38;
             // Slice 0 is the back; every other slice is a page.
             static const int Pages = LayoutRows - 1;
 
@@ -387,6 +395,34 @@ Shader "Orbiters/N4N0 Screen"
                 [loop] for (int t = 0; t < head.z; t++)
                 {
                     float4 r = float4(Texel(TablePictures + t, page)) * 4;
+                    if (page == MirrorPage)
+                    {
+                        // What N4N0's camera sees, on its owner's screen while the camera renders; else the page's own
+                        // picture of the place (the camera's sRGB texture reads linear, as the screen draws).
+                        if (_MirrorLive < .5) continue;
+                        if (retro)
+                        {
+                            float box = Cover(Chamfer(p, r, 0), pixel);
+                            if (box <= 0) continue;
+                            float2 f = saturate((p - r.xy) / r.zw) * Dots;
+                            float2 cell = min(floor(f), Dots - 1);
+                            fixed3 seen = tex2Dlod(_Mirror, float4((cell.x + .5) / Dots.x, 1 - (cell.y + .5) / Dots.y, 0, 0)).rgb;
+                            #ifndef UNITY_COLORSPACE_GAMMA
+                            seen = LinearToGammaSpace(seen);
+                            #endif
+                            int level = DotStep(dot(seen, float3(.299, .587, .114)), cell);
+                            fixed3 shade = level == 3 ? _Hot.rgb : level == 2 ? _Accent.rgb : level == 1 ? _Dim.rgb : _Card.rgb;
+                            float2 inCell = f - cell;
+                            if (r.z / Dots.x > 3 * pixel && max(inCell.x, inCell.y) > .78) shade = _Card.rgb;
+                            colour = lerp(colour, shade, box);
+                            continue;
+                        }
+                        float shown = Rounded(p, r, 10);
+                        if (shown <= 0) continue;
+                        float2 at = saturate((p - r.xy) / r.zw);
+                        colour = lerp(colour, tex2Dlod(_Mirror, float4(at.x, 1 - at.y, 0, 0)).rgb, shown);
+                        continue;
+                    }
                     int layers = Byte(Layers + t);
                     int full = FullPicture(page, t, layers, r.z, pixel, alive);
                     if (diagnostics) colour = lerp(colour, PictureWhyColour(full), saturate(1.5 - abs(RoundedDistance(p, r, 10) - 3)));
