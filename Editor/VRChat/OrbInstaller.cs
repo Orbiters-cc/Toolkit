@@ -20,7 +20,7 @@ namespace Orbiters.Toolkit.Editor.VRChat
 
     /// <summary>
     /// N4N0, the Orbiters companion (Orbiters contracts, Docs/orb.md): a black sphere with a white face (OrbInstaller.Model) that floats beside its
-    /// owner's head, lazily and with a spring (a PhysBone chain anyone can grab and let spring back), and the text panel it
+    /// owner's head, carried by their hips, lazily and with a spring (a PhysBone chain anyone can grab and let spring back), and the text panel it
     /// projects in front of its owner, which everyone around reads. Orbiters - N4N0 drives it over OSC through global
     /// parameters: what N4N0 is doing (<see cref="State"/>: its expression, the projector beam) and the panel's text,
     /// a block of cells at a time (KillFrenzy Avatar Text's protocol under N4N0's names). Its owner talks to it by holding the
@@ -43,6 +43,8 @@ namespace Orbiters.Toolkit.Editor.VRChat
         public static readonly IReadOnlyList<int> TextSyncCounts = new[] { 4, 8, 16 };
 
         internal const string Shown = "Shown", Head = Shown + "/Head", StayFrame = Head + "/Stay", Tether = StayFrame + "/Tether", Ball = Tether + "/1/2/Ball";
+        // Where N4N0 hangs follows the hips, not the head: its owner can lie down, lean or nod and look at it.
+        internal const string HipsFrame = Shown + "/Hips", HipsAnchor = HipsFrame + "/Anchor";
         internal const string Hop = Ball + "/Hop", Body = Hop + "/Body", Emitter = Hop + "/Emitter", Toucher = Ball + "/Touch", Panel = Head + "/Panel";
         internal static readonly Color Colour = new Color(0, 218 / 255f, 109 / 255f);
 
@@ -59,7 +61,7 @@ namespace Orbiters.Toolkit.Editor.VRChat
         // the right of its owner's view, out of its middle, and below the face as people in front see it.
         internal static readonly Vector3 OrbFromEyes = new Vector3(.26f, .02f, .12f), PanelFromEyes = new Vector3(.06f, -.18f, .5f);
         // Until Bind: the head bone 1.51 m up, the eyes 9 cm above it and 7 cm before it.
-        private static readonly Vector3 DefaultHead = new Vector3(0, 1.51f, 0), DefaultEyes = new Vector3(0, .09f, .07f);
+        private static readonly Vector3 DefaultHips = new Vector3(0, .95f, 0), DefaultHead = new Vector3(0, 1.51f, 0), DefaultEyes = new Vector3(0, .09f, .07f);
 
         private const string TextShaderTemplate = "Packages/orbiters.toolkit/Editor/VRChat/OrbText.shader.txt";
         // Drawn by the contracts' Tools~/OrbTextAtlas from the glyph table: 2048 × 4096, 16 × 16 tiles of 128 × 256.
@@ -114,14 +116,25 @@ namespace Orbiters.Toolkit.Editor.VRChat
             level.Sources.Add(new VRCConstraintSource(null, 1));
             level.IsActive = true; level.Locked = true;
 
-            // Where N4N0 hangs: with the head, or where it is in the world while it stays there (N4N0 › Light › Stay there
-            // freezes it).
+            // Where N4N0 hangs: beside the head as the avatar stands, carried by the hips (turned like the avatar, so it stays
+            // upright and beside its owner whether they stand, sit or lie down), or where it is in the world while it stays
+            // there (N4N0 › Light › Stay there freezes it). Bind puts the anchor where the head is at rest.
+            var hips = Child(shown, "Hips");
+            hips.localPosition = DefaultHips;
+            var carry = hips.gameObject.AddComponent<VRCPositionConstraint>();
+            carry.Sources.Add(new VRCConstraintSource(null, 1));
+            carry.IsActive = true; carry.Locked = true;
+            var turn = hips.gameObject.AddComponent<VRCRotationConstraint>();
+            turn.Sources.Add(new VRCConstraintSource(null, 1));
+            turn.IsActive = true; turn.Locked = true;
+            var rest = Child(hips, "Anchor");
+            rest.localPosition = DefaultHead - DefaultHips;
             var stay = Child(head, "Stay");
             var anchor = stay.gameObject.AddComponent<VRCParentConstraint>();
-            anchor.Sources.Add(new VRCConstraintSource(head, 1));
+            anchor.Sources.Add(new VRCConstraintSource(rest, 1));
             anchor.IsActive = true; anchor.Locked = true;
-            // The tether's root stays with it; its two links and N4N0 on their tip lag behind and drift back, smoothly
-            // (a weak pull and a soft spring: it barely overshoots), whatever moves the head.
+            // The tether's root stays with it; its two links and N4N0 on their tip lag behind and drift back lazily
+            // (a weak pull and a soft spring: it barely overshoots).
             var tether = Child(stay, "Tether");
             var link = Child(tether, "1"); link.localPosition = Vector3.up * Link;
             var tip = Child(link, "2"); tip.localPosition = Vector3.up * Link;
@@ -138,7 +151,7 @@ namespace Orbiters.Toolkit.Editor.VRChat
 
             var phys = tether.gameObject.AddComponent<VRCPhysBone>();
             phys.rootTransform = tether; phys.integrationType = VRCPhysBoneBase.IntegrationType.Simplified;
-            phys.pull = .09f; phys.spring = .4f; phys.gravity = 0; phys.gravityFalloff = 0;
+            phys.pull = .05f; phys.spring = .35f; phys.gravity = 0; phys.gravityFalloff = 0;
             phys.immobileType = VRCPhysBoneBase.ImmobileType.AllMotion; phys.immobile = .05f;
             // Only the tip, where N4N0 is, can be grabbed; pulled, the tether stretches and springs back.
             phys.radius = Radius; phys.radiusCurve = AnimationCurve.Constant(0, .49f, 0);
@@ -218,6 +231,29 @@ namespace Orbiters.Toolkit.Editor.VRChat
         }
 
         /// <summary>
+        /// The frame N4N0 hangs from (<see cref="HipsFrame"/>): on the hips bone, turned like the avatar, as large as the head
+        /// object, its anchor where the head object is at rest, which Stay follows. An N4N0 from before it keeps hanging
+        /// from the head.
+        /// </summary>
+        private static void BindHips(Transform orb, Transform avatar, Animator animator, Transform head, float size)
+        {
+            var hips = orb.Find(HipsFrame);
+            var rest = orb.Find(HipsAnchor);
+            var bone = animator.GetBoneTransform(HumanBodyBones.Hips);
+            var carry = hips != null ? hips.GetComponent<VRCPositionConstraint>() : null;
+            var turn = hips != null ? hips.GetComponent<VRCRotationConstraint>() : null;
+            if (rest == null || bone == null || carry == null || turn == null || carry.Sources.Count < 1 || turn.Sources.Count < 1) return;
+            Undo.RecordObjects(new Object[] { hips, rest, carry, turn }, "Fit orb");
+            hips.SetPositionAndRotation(bone.position, avatar.rotation);
+            float parent = hips.parent != null ? Mathf.Abs(hips.parent.lossyScale.x) : 1;
+            hips.localScale = Vector3.one * (size / Mathf.Max(parent, 1e-4f));
+            rest.SetPositionAndRotation(head.position, head.rotation);
+            carry.Sources[0] = new VRCConstraintSource(bone, 1, Vector3.zero, Vector3.zero);
+            turn.Sources[0] = new VRCConstraintSource(avatar, 1, Vector3.zero, Vector3.zero);
+            EditorUtility.SetDirty(carry); EditorUtility.SetDirty(turn);
+        }
+
+        /// <summary>
         /// Fits a placed orb to <paramref name="avatar"/>: it follows the head bone, turned like the avatar, sized by how
         /// high the avatar's eyes are, N4N0 beside the eyes and the panel below them. Recorded with Undo; binding again
         /// (another avatar, a moved armature) replaces the earlier fit.
@@ -246,6 +282,7 @@ namespace Orbiters.Toolkit.Editor.VRChat
             follow.Sources[0] = new VRCConstraintSource(bone, 1, Vector3.zero, Vector3.zero);
             level.Sources[0] = new VRCConstraintSource(avatar, 1, Vector3.zero, Vector3.zero);
             Layout(tether, panel, head.InverseTransformPoint(eyes));
+            BindHips(orb, avatar, animator, head, size);
             // The eyes and the gaze point before them turn with the head bone (in desktop mode, with where its owner
             // looks), looking ahead at rest. Offsets are in the head bone's axes, unscaled.
             gaze.SetPositionAndRotation(eyes, avatar.rotation);

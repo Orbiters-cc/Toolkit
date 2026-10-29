@@ -330,12 +330,19 @@ namespace Orbiters.Toolkit.Editor.VRChat
         /// <summary>
         /// Whether the screen stays, its owner's call (synced as <see cref="ScreenPlaced"/>): it does once its middle is in
         /// their sight, and goes on staying until it has been out of their sight for <see cref="LookAwayTime"/> (a closed
-        /// screen is out of sight, so it opens again before the eyes) or while a hand holds it.
+        /// screen is out of sight, so it opens again before the eyes) or while a hand holds it. An open screen that glided
+        /// back also stays once its glide had time to end ("Settled"), even when the view contact never saw it: it is where
+        /// the eyes looked, and it only glides again after its owner has seen it and looked away (or it closed). Without
+        /// that, a view contact that missed it made the screen glide, wait and glide again forever in front of its owner.
         /// </summary>
         private static void StaysLayer(AnimatorController controller)
         {
             var machine = Layer(controller, "Screen stays");
-            var following = HeldPropRig.State(controller, machine, "Following", new AnimationClip { name = "Screen following" });
+            // Following lasts as long as a glide back and its arrival: then an open screen settles (below).
+            var settle = new AnimationClip { name = "Screen following" };
+            AnimationUtility.SetEditorCurve(settle, EditorCurveBinding.FloatCurve("", typeof(Animator), One), AnimationCurve.Constant(0, GlideTime + .15f, 1));
+            Once(settle);
+            var following = HeldPropRig.State(controller, machine, "Following", settle);
             var staying = HeldPropRig.State(controller, machine, "Staying", new AnimationClip { name = "Screen staying" });
             var away = new AnimationClip { name = "Screen looked away" };
             // Its length is the wait: a parameter of its own, which nothing reads.
@@ -343,16 +350,27 @@ namespace Orbiters.Toolkit.Editor.VRChat
             Once(away);
             var lookingAway = HeldPropRig.State(controller, machine, "Looking away", away);
             var holding = HeldPropRig.State(controller, machine, "Holding", new AnimationClip { name = "Screen holding" });
+            var settled = HeldPropRig.State(controller, machine, "Settled", new AnimationClip { name = "Screen settled" });
+            // Closed, it waits here, so opening it starts Following (and its settle time) afresh.
+            var closed = HeldPropRig.State(controller, machine, "Closed", new AnimationClip { name = "Screen closed" });
             machine.defaultState = following;
             Drive(following, (ScreenPlaced, false));
             Drive(staying, (ScreenPlaced, true));
             Drive(holding, (ScreenPlaced, true));
+            Drive(settled, (ScreenPlaced, true));
+            Drive(closed, (ScreenPlaced, false));
             var local = ("IsLocal", AnimatorConditionMode.If, 0f);
             Transition(following, staying, local, (ScreenInView, AnimatorConditionMode.If, 0));
+            foreach (var open in new[] { ScreenOpen, Menu }) Exit(following, settled, local, (open, AnimatorConditionMode.If, 0));
+            Transition(settled, staying, (ScreenInView, AnimatorConditionMode.If, 0));
+            var shut = new[] { (ScreenOpen, AnimatorConditionMode.IfNot, 0f), (Menu, AnimatorConditionMode.IfNot, 0f) };
+            Transition(settled, closed, shut);
+            Transition(following, closed, shut);
+            foreach (var open in new[] { ScreenOpen, Menu }) Transition(closed, following, (open, AnimatorConditionMode.If, 0));
             Transition(staying, lookingAway, (ScreenInView, AnimatorConditionMode.IfNot, 0));
             Transition(lookingAway, staying, (ScreenInView, AnimatorConditionMode.If, 0));
             Exit(lookingAway, following, (ScreenInView, AnimatorConditionMode.IfNot, 0));
-            foreach (var state in new[] { following, staying, lookingAway })
+            foreach (var state in new[] { following, staying, lookingAway, settled })
             {
                 Transition(state, holding, local, (ScreenHeldLeft, AnimatorConditionMode.If, 0));
                 Transition(state, holding, local, (ScreenHeldRight, AnimatorConditionMode.If, 0));
