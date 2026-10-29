@@ -1,6 +1,6 @@
 # Orbiters Toolkit
 
-## Unreleased
+## 0.4.10 — 2026-10-29
 
 - **Controller input for avatars** (contracts' Docs/orb-input.md): N4N0 declares each hand's touchpad and thumbstick
   as its local parameters, which VRChat gives avatars none of: `N4N0/Touchpad/Left/X`, `/Y` (−1 to 1, 0 untouched),
