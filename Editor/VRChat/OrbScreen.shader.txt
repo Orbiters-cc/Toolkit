@@ -40,7 +40,7 @@ Shader "Orbiters/N4N0 Screen"
     SubShader
     {
         // OrbScreen: the files' revision (OrbInstaller.ScreenRevision); a screen of an older one is swapped for these.
-        Tags { "Queue" = "Transparent" "RenderType" = "Transparent" "IgnoreProjector" = "True" "VRCFallback" = "Hidden" "OrbScreen" = "16" }
+        Tags { "Queue" = "Transparent" "RenderType" = "Transparent" "IgnoreProjector" = "True" "VRCFallback" = "Hidden" "OrbScreen" = "17" }
         Cull Off
         ZWrite Off
         Blend SrcAlpha OneMinusSrcAlpha
@@ -83,7 +83,7 @@ Shader "Orbiters/N4N0 Screen"
             static const int Hover = 2, Pressed = 3, On = 4, Hidden = 8, Layers = 16, Unavailable = 21, TextStart = 24, PicturesStart = 384,
                 PictureBytes = THUMBNAIL_BYTES;
             // The layout table's columns.
-            static const int TableSlots = 1, TablePictures = 33, TableElements = 40, LayoutRows = 30;
+            static const int TableSlots = 1, TablePictures = 33, TableElements = 40, LayoutRows = 34;
             // Slice 0 is the back; every other slice is a page.
             static const int Pages = LayoutRows - 1;
 
