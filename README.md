@@ -1,6 +1,6 @@
 # Orbiters Toolkit
 
-## Unreleased
+## 0.4.9 — 2026-10-29
 
 - **Orbiters - N4N0's setup requests are asked in a small window that blocks nothing.** "Add N4N0 to …?" was a modal
   dialog that froze the editor, and anything driving it, until answered. `SetupRequestWindow` shows what is added (its
