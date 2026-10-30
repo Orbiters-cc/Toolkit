@@ -629,6 +629,101 @@ public class OrbTests
         Assert.AreEqual(OrbInstaller.LookAwayTime, away.motion.averageDuration, 1e-3f, "Out of sight that long first");
     }
 
+    [Test]
+    public void GrabbingThenRecenteringLeavesTheScreenStillInFrontOfTheEyes()
+    {
+        if (VrcFury.Writer == null) Assert.Ignore("Requires the VRCFury integration.");
+        var prefab = AssetDatabase.LoadAssetAtPath<GameObject>(OrbInstaller.CreatePrefab(folder));
+        var (avatar, head) = Humanoid(eyes: 1.4f);
+        var orb = ((GameObject)PrefabUtility.InstantiatePrefab(prefab, avatar)).transform;
+        AttachmentHooks.Prepare(orb.gameObject, avatar);
+        var controller = AssetDatabase.LoadAssetAtPath<AnimatorController>(folder + "/N4N0.controller");
+        graph = PlayableGraph.Create("N4N0 grab and recenter");
+        playable = AnimatorControllerPlayable.Create(graph, controller);
+        AnimationPlayableOutput.Create(graph, "N4N0", orb.gameObject.AddComponent<Animator>()).SetSourcePlayable(playable);
+        graph.SetTimeUpdateMode(DirectorUpdateMode.Manual); graph.Play();
+        playable.SetBool("IsLocal", true);
+        playable.SetBool(OrbInstaller.Menu, true);
+        var screen = orb.Find(OrbInstaller.ScreenObject);
+        var home = orb.Find(OrbInstaller.ScreenHome);
+        var view = orb.Find(OrbInstaller.Gaze).GetComponentsInChildren<VRCContactSender>(true)
+            .Where(c => c.collisionTags.Contains(OrbInstaller.ViewTag)).ToArray();
+        var states = new int[controller.layers.Length];
+        var solver = new ConstraintSolver();
+        bool intermittentView = false;
+        int frame = 0, recenters = 0;
+        bool wasPlaced = false;
+        var transitions = new List<string>();
+        void Step(int count)
+        {
+            for (int n = 0; n < count; n++)
+            {
+                frame++;
+                playable.SetBool(OrbInstaller.ScreenInView, intermittentView ? frame % 12 == 0 :
+                    view.Any(c => Vector3.Distance(c.transform.position, screen.position) < c.radius * c.transform.lossyScale.x));
+                graph.Evaluate(.05f);
+                // The real SDK constraint solver below; parameter-driver Set behaviours emulated on entry (VRChat runs them).
+                for (int l = 0; l < states.Length; l++)
+                {
+                    var state = playable.GetCurrentAnimatorStateInfo(l);
+                    if (states[l] == state.fullPathHash) continue;
+                    states[l] = state.fullPathHash;
+                    var definition = controller.layers[l].stateMachine.states.Select(s => s.state).FirstOrDefault(s => Animator.StringToHash(s.name) == state.shortNameHash);
+                    if (definition == null) continue;
+                    if (controller.layers[l].name == "Screen stays" || controller.layers[l].name == "Screen grip")
+                        transitions.Add(frame + " " + controller.layers[l].name + "=" + definition.name + " view=" + playable.GetBool(OrbInstaller.ScreenInView) + " held=" + playable.GetBool(OrbInstaller.ScreenHeldLeft));
+                    foreach (var driver in definition.behaviours.OfType<VRCAvatarParameterDriver>())
+                    foreach (var p in driver.parameters.Where(p => p.type == VRC.SDKBase.VRC_AvatarParameterDriver.ChangeType.Set))
+                        if (controller.parameters.Any(x => x.name == p.name && x.type == AnimatorControllerParameterType.Bool)) playable.SetBool(p.name, p.value != 0);
+                }
+                solver.Solve();
+                bool placed = playable.GetBool(OrbInstaller.ScreenPlaced);
+                if (wasPlaced && !placed) recenters++;
+                wasPlaced = placed;
+            }
+        }
+        try
+        {
+            solver.Track(orb.gameObject);
+            Step(40);
+            Assert.Less(Vector3.Distance(home.position, screen.position), .001f, "opened before the eyes");
+            playable.SetBool(OrbInstaller.ScreenGrab + "_IsGrabbed", true);
+            playable.SetBool(OrbInstaller.ScreenHandL, true);
+            playable.SetInteger("GestureLeft", 1);
+            Step(5);
+            avatar.GetComponent<Animator>().GetBoneTransform(HumanBodyBones.LeftHand).position += new Vector3(.15f, -.08f, -.1f);
+            Step(5);
+            playable.SetBool(OrbInstaller.ScreenGrab + "_IsGrabbed", false);
+            playable.SetInteger("GestureLeft", 0);
+            Step(5);
+            head.rotation = avatar.rotation * Quaternion.Euler(0, 90, 0);
+            Step(48);
+            Assert.Less(Vector3.Distance(home.position, screen.position), .001f, "recentered after a grab\n" + string.Join("\n", transitions));
+            var arrived = screen.position;
+            Step(80);
+            Assert.Less(Vector3.Distance(arrived, screen.position), .001f, "stays centered without another glide");
+            Assert.IsTrue(playable.GetBool(OrbInstaller.ScreenPlaced));
+            Assert.IsFalse(playable.GetBool(OrbInstaller.ScreenHeldLeft));
+            // A contact that briefly sees the centered screen must not re-arm an endless glide loop.
+            // One recenter is allowed when sight first goes; subsequent one-frame pulses cannot keep restarting it.
+            intermittentView = true;
+            recenters = 0;
+            Step(120);
+            Assert.LessOrEqual(recenters, 1, "intermittent view contact re-armed repeated recentering after a grab");
+            // Closing during a grip must drop it, even when the gesture has not relaxed yet.
+            intermittentView = false;
+            playable.SetBool(OrbInstaller.ScreenGrab + "_IsGrabbed", true);
+            playable.SetInteger("GestureLeft", 1);
+            Step(5);
+            Assert.IsTrue(playable.GetBool(OrbInstaller.ScreenHeldLeft));
+            playable.SetBool(OrbInstaller.Menu, false);
+            playable.SetBool(OrbInstaller.ScreenOpen, false);
+            Step(5);
+            Assert.IsFalse(playable.GetBool(OrbInstaller.ScreenHeldLeft), "a hidden handle cannot keep its grip latched");
+        }
+        finally { solver.Release(); }
+    }
+
     // The link card (Docs/orb.md, Link card; screen version 7): an object of its own, out while N4N0/Card/Out is on (for
     // everyone: it is synced), frozen where it appeared, N4N0's beam projecting it a moment; anyone's pickup grab moves it;
     // its memory comes from the text channel's pointers past the screen's on every client; every N4N0's hands feel it.

@@ -61,6 +61,8 @@ namespace Orbiters.Toolkit.Editor.VRChat
         // size at the ends of ScreenSize, how long it glides back, how long it may be out of sight first.
         internal static readonly Vector3 ScreenHomeFromEyes = new Vector3(0, -.06f, .45f);
         internal const float LargestScreen = 1.8f, SmallestScreen = .6f, GlideTime = .5f, LookAwayTime = .4f;
+        // A brief contact pulse during a grab/glide must not arm another recenter.
+        internal const float ViewConfirmTime = .2f;
         internal static readonly float DefaultScreenSize = (1 - SmallestScreen) / (LargestScreen - SmallestScreen);
         // The view cone: spheres along the line of sight, each as wide as this share of its distance (about 58°).
         internal static readonly float[] ViewDistances = { .35f, .7f, 1.2f, 2f };
@@ -291,6 +293,9 @@ namespace Orbiters.Toolkit.Editor.VRChat
             foreach (string axis in new[] { "x", "y", "z" })
                 Set(ScreenPlace, typeof(VRCParentConstraint), "Sources.source" + PlaceTarget + "." + offset + "." + axis, 0);
             Set(ScreenPlace, typeof(VRCParentConstraint), "FreezeToWorld", frozen ? 1 : 0);
+            // Catching a hand preserves the pickup offset. Arriving at home must instead use the animated zero
+            // offset: rebaking on that unfreeze would preserve the old place and jump back when the glide lets go.
+            Set(ScreenPlace, typeof(VRCParentConstraint), "RebakeOffsetsWhenUnfrozen", source == PlaceTarget ? 0 : 1);
             for (int s = PlaceTarget; s <= PlaceRight; s++) Set(ScreenPlace, typeof(VRCParentConstraint), "Sources.source" + s + ".Weight", s == source ? 1 : 0);
             Set(ScreenGlide, typeof(VRCParentConstraint), "Sources.source0.Weight", onPlace);
             Set(ScreenGlide, typeof(VRCParentConstraint), "Sources.source1.Weight", 1 - onPlace);
@@ -334,6 +339,8 @@ namespace Orbiters.Toolkit.Editor.VRChat
         /// back also stays once its glide had time to end ("Settled"), even when the view contact never saw it: it is where
         /// the eyes looked, and it only glides again after its owner has seen it and looked away (or it closed). Without
         /// that, a view contact that missed it made the screen glide, wait and glide again forever in front of its owner.
+        /// After a glide, sight must stay valid for ViewConfirmTime before looking away can trigger another one; a
+        /// single contact pulse on arrival cannot re-arm the loop. A released grab stays put but can recenter if out of sight.
         /// </summary>
         private static void StaysLayer(AnimatorController controller)
         {
@@ -351,6 +358,10 @@ namespace Orbiters.Toolkit.Editor.VRChat
             var lookingAway = HeldPropRig.State(controller, machine, "Looking away", away);
             var holding = HeldPropRig.State(controller, machine, "Holding", new AnimationClip { name = "Screen holding" });
             var settled = HeldPropRig.State(controller, machine, "Settled", new AnimationClip { name = "Screen settled" });
+            var confirm = new AnimationClip { name = "Screen confirming view" };
+            AnimationUtility.SetEditorCurve(confirm, EditorCurveBinding.FloatCurve("", typeof(Animator), One), AnimationCurve.Constant(0, ViewConfirmTime, 1));
+            Once(confirm);
+            var confirming = HeldPropRig.State(controller, machine, "Confirming view", confirm);
             // Closed, it waits here, so opening it starts Following (and its settle time) afresh.
             var closed = HeldPropRig.State(controller, machine, "Closed", new AnimationClip { name = "Screen closed" });
             machine.defaultState = following;
@@ -358,23 +369,25 @@ namespace Orbiters.Toolkit.Editor.VRChat
             Drive(staying, (ScreenPlaced, true));
             Drive(holding, (ScreenPlaced, true));
             Drive(settled, (ScreenPlaced, true));
+            Drive(confirming, (ScreenPlaced, true));
             Drive(closed, (ScreenPlaced, false));
             var local = ("IsLocal", AnimatorConditionMode.If, 0f);
-            Transition(following, staying, local, (ScreenInView, AnimatorConditionMode.If, 0));
-            foreach (var open in new[] { ScreenOpen, Menu }) Exit(following, settled, local, (open, AnimatorConditionMode.If, 0));
-            Transition(settled, staying, (ScreenInView, AnimatorConditionMode.If, 0));
             var shut = new[] { (ScreenOpen, AnimatorConditionMode.IfNot, 0f), (Menu, AnimatorConditionMode.IfNot, 0f) };
-            Transition(settled, closed, shut);
-            Transition(following, closed, shut);
-            foreach (var open in new[] { ScreenOpen, Menu }) Transition(closed, following, (open, AnimatorConditionMode.If, 0));
-            Transition(staying, lookingAway, (ScreenInView, AnimatorConditionMode.IfNot, 0));
-            Transition(lookingAway, staying, (ScreenInView, AnimatorConditionMode.If, 0));
-            Exit(lookingAway, following, (ScreenInView, AnimatorConditionMode.IfNot, 0));
-            foreach (var state in new[] { following, staying, lookingAway, settled })
+            // Closing and grabbing take priority over the contact and timers.
+            foreach (var state in new[] { following, staying, lookingAway, settled, confirming, holding }) Transition(state, closed, shut);
+            foreach (var state in new[] { following, staying, lookingAway, settled, confirming })
             {
                 Transition(state, holding, local, (ScreenHeldLeft, AnimatorConditionMode.If, 0));
                 Transition(state, holding, local, (ScreenHeldRight, AnimatorConditionMode.If, 0));
             }
+            foreach (var open in new[] { ScreenOpen, Menu }) Transition(closed, following, (open, AnimatorConditionMode.If, 0));
+            foreach (var open in new[] { ScreenOpen, Menu }) Exit(following, settled, local, (open, AnimatorConditionMode.If, 0));
+            Transition(settled, confirming, (ScreenInView, AnimatorConditionMode.If, 0));
+            Transition(confirming, settled, (ScreenInView, AnimatorConditionMode.IfNot, 0));
+            Exit(confirming, staying, (ScreenInView, AnimatorConditionMode.If, 0));
+            Transition(staying, lookingAway, (ScreenInView, AnimatorConditionMode.IfNot, 0));
+            Transition(lookingAway, staying, (ScreenInView, AnimatorConditionMode.If, 0));
+            Exit(lookingAway, following, (ScreenInView, AnimatorConditionMode.IfNot, 0));
             Transition(holding, staying, (ScreenHeldLeft, AnimatorConditionMode.IfNot, 0), (ScreenHeldRight, AnimatorConditionMode.IfNot, 0));
         }
 
@@ -395,8 +408,10 @@ namespace Orbiters.Toolkit.Editor.VRChat
             Hold(holdRight, ScreenHeldLeft, ScreenHeldRight, false, true);
             foreach (var (state, hand, gesture) in new[] { (holdLeft, ScreenHandL, "GestureLeft"), (holdRight, ScreenHandR, "GestureRight") })
             {
+                foreach (var open in new[] { ScreenOpen, Menu })
                 Transition(free, state, new[] { ("IsLocal", AnimatorConditionMode.If, 0f), (ScreenGrab + "_IsGrabbed", AnimatorConditionMode.If, 0f),
-                    (hand, AnimatorConditionMode.If, 0f) }.Concat(Gripping(gesture)).ToArray());
+                    (hand, AnimatorConditionMode.If, 0f), (open, AnimatorConditionMode.If, 0f) }.Concat(Gripping(gesture)).ToArray());
+                Transition(state, free, (ScreenOpen, AnimatorConditionMode.IfNot, 0), (Menu, AnimatorConditionMode.IfNot, 0));
                 LetGo(state, free, gesture);
             }
         }
