@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using Orbiters.Toolkit.Meshes;
 using Unity.Collections;
 using UnityEngine;
 using UnityEngine.Rendering;
@@ -229,12 +230,13 @@ namespace Orbiters.Toolkit.Editor.VRChat.Optimization
             float minDot = Mathf.Cos(angle * Mathf.Deg2Rad);
             var surface = new Surface(vertices, triangles, 2f * budget);
             bool shading = normals != null && vertexNormals != null && vertexNormals.Length == vertices.Length;
+            var nearby = shading ? new List<int>() : null;
             int over = 0, allowed = points.Length / 100, turned = 0, tolerated = points.Length / 500;
             for (int i = 0; i < points.Length; i++)
             {
-                var (distance, _) = surface.Nearest(points[i], budget);
+                var (distance, _) = surface.Nearest(points[i]);
                 if (distance > 2f * budget || distance > budget && ++over > allowed) return false;
-                if (shading && !surface.Shades(points[i], normals[i], budget / 4f, vertexNormals, minDot) && ++turned > tolerated) return false;
+                if (shading && !surface.Shades(points[i], normals[i], distance, budget / 4f, vertexNormals, minDot, nearby) && ++turned > tolerated) return false;
             }
             return true;
         }
@@ -291,9 +293,11 @@ namespace Orbiters.Toolkit.Editor.VRChat.Optimization
                 var found = surface.Value;
                 var corners = new int[targets.Length * 3];
                 var weights = new float[targets.Length * 3];
+                // Scratch belongs to this call: a ShapeSource can be matched on several worker threads.
+                var nearby = new List<int>();
                 for (int i = 0; i < targets.Length; i++)
                 {
-                    var (t, b) = found.Closest(targets[i], targetNormals != null ? targetNormals[i] : (Vector3?)null, normals, reach / 16f);
+                    var (t, b) = found.Closest(targets[i], targetNormals != null ? targetNormals[i] : (Vector3?)null, normals, reach / 16f, nearby);
                     if (t < 0) continue;
                     corners[3 * i] = triangles[t]; corners[3 * i + 1] = triangles[t + 1]; corners[3 * i + 2] = triangles[t + 2];
                     weights[3 * i] = b.x; weights[3 * i + 1] = b.y; weights[3 * i + 2] = b.z;
@@ -328,150 +332,79 @@ namespace Orbiters.Toolkit.Editor.VRChat.Optimization
             }
         }
 
-        // Triangles in cells about a triangle wide (at least the reach): each fills a few, each cell holds a few.
+        // A uniform grid put thousands of overlapping body triangles in the same cells and visited them repeatedly
+        // for every vertex and every pose. Share the mesh BVH used by the other geometry tools: nearest-first bounds
+        // prune distant triangles, and a second, small query considers the nearby sides of hard edges and seams.
         private sealed class Surface
         {
             private readonly Vector3[] vertices;
             private readonly int[] triangles;
-            private readonly float cell, reach;
-            private readonly Dictionary<long, List<int>> grid = new Dictionary<long, List<int>>();
-            // A triangle spanning many cells (a long sliver) is checked by every point instead of filling them all.
-            private readonly List<int> large = new List<int>();
+            private readonly float reach;
+            private readonly MeshBvh bvh;
 
             public Surface(Vector3[] vertices, int[] triangles, float reach)
             {
-                this.vertices = vertices; this.triangles = triangles; this.reach = reach;
-                double edges = 0;
-                for (int t = 0; t + 2 < triangles.Length; t += 3) edges += (vertices[triangles[t]] - vertices[triangles[t + 1]]).magnitude;
-                cell = Mathf.Max(reach, triangles.Length > 0 ? (float)(edges / (triangles.Length / 3)) : reach);
-                for (int t = 0; t + 2 < triangles.Length; t += 3)
-                {
-                    Vector3 a = vertices[triangles[t]], b = vertices[triangles[t + 1]], c = vertices[triangles[t + 2]];
-                    var from = Vector3Int.FloorToInt(Vector3.Min(a, Vector3.Min(b, c)) / cell);
-                    var to = Vector3Int.FloorToInt(Vector3.Max(a, Vector3.Max(b, c)) / cell);
-                    if ((long)(to.x - from.x + 1) * (to.y - from.y + 1) * (to.z - from.z + 1) > 64) { large.Add(t); continue; }
-                    for (int x = from.x; x <= to.x; x++)
-                        for (int y = from.y; y <= to.y; y++)
-                            for (int z = from.z; z <= to.z; z++)
-                            {
-                                long key = Cell(x, y, z);
-                                if (!grid.TryGetValue(key, out var list)) grid[key] = list = new List<int>();
-                                list.Add(t);
-                            }
-                }
+                this.vertices = vertices;
+                this.triangles = triangles;
+                this.reach = reach;
+                bvh = MeshBvh.Build(vertices, triangles);
             }
 
-            // The distance to the nearest triangle and that triangle, up to the reach (beyond it: more than the reach, no
-            // triangle). Stops at the first one within the good enough distance.
-            public (float Distance, int Triangle) Nearest(Vector3 p, float good)
+            public (float Distance, int Triangle) Nearest(Vector3 p)
             {
-                float best = reach + 1f;
-                int nearest = -1;
-                void Test(int t)
-                {
-                    float d = PointTriangle(p, vertices[triangles[t]], vertices[triangles[t + 1]], vertices[triangles[t + 2]]);
-                    if (d < best) { best = d; nearest = t; }
-                }
-                foreach (int t in large) Test(t);
-                var at = Vector3Int.FloorToInt(p / cell);
-                for (int x = -1; x <= 1 && best > good; x++)
-                    for (int y = -1; y <= 1 && best > good; y++)
-                        for (int z = -1; z <= 1 && best > good; z++)
-                            if (grid.TryGetValue(Cell(at.x + x, at.y + y, at.z + z), out var list))
-                                foreach (int t in list) Test(t);
-                return (best, nearest);
+                var hit = bvh.ClosestPoint(p, reach + 1f);
+                return hit.Found ? (hit.Distance, hit.Triangle * 3) : (reach + 1f, -1);
             }
 
-            // Whether p is shaded like the normal n there: by one of the triangles about as near as the nearest (within the
-            // slack of it: both sides of a hard edge or a two-sided card), not any triangle further around.
-            public bool Shades(Vector3 p, Vector3 n, float slack, Vector3[] normals, float minDot)
+            // The distance and shading checks share the nearest result. Candidates outside its slack cannot make a
+            // flipped surface pass by borrowing the normal of a more distant sheet.
+            public bool Shades(Vector3 p, Vector3 n, float nearest, float slack, Vector3[] normals, float minDot, List<int> nearby)
             {
-                var (nearest, _) = Nearest(p, 0f);
                 if (nearest > reach) return false;
                 float within = nearest + slack;
-                bool Test(int t) => PointTriangle(p, vertices[triangles[t]], vertices[triangles[t + 1]], vertices[triangles[t + 2]]) <= within &&
-                                    Vector3.Dot(Normal(p, t, normals), n) >= minDot;
-                foreach (int t in large) if (Test(t)) return true;
-                var at = Vector3Int.FloorToInt(p / cell);
-                for (int x = -1; x <= 1; x++)
-                    for (int y = -1; y <= 1; y++)
-                        for (int z = -1; z <= 1; z++)
-                            if (grid.TryGetValue(Cell(at.x + x, at.y + y, at.z + z), out var list))
-                                foreach (int t in list) if (Test(t)) return true;
+                bvh.TrianglesNear(p, within, nearby);
+                foreach (int triangle in nearby)
+                {
+                    int t = triangle * 3;
+                    var point = Point(p, t, out var bary);
+                    if ((point - p).magnitude <= within && Vector3.Dot(Normal(t, bary, normals), n) >= minDot) return true;
+                }
                 return false;
             }
 
-            // The triangle nearest to p and the barycentric coordinates of its point closest to p. With a normal, among the
-            // triangles about as near (within the slack of the nearest), the one shading most like it.
-            public (int Triangle, Vector3 Barycentric) Closest(Vector3 p, Vector3? normal, Vector3[] normals, float slack)
+            // Among the surfaces about as near, prefer the side whose normal matches. Triangle order breaks equal
+            // normal matches deterministically, independent of how the BVH partitions them.
+            public (int Triangle, Vector3 Barycentric) Closest(Vector3 p, Vector3? normal, Vector3[] normals, float slack, List<int> nearby)
             {
-                var (nearest, triangle) = Nearest(p, 0f);
+                var (nearest, triangle) = Nearest(p);
                 if (triangle < 0) return (-1, Vector3.zero);
+                Point(p, triangle, out var barycentric);
                 if (normal != null && normals != null)
                 {
-                    float best = -2f;
-                    void Test(int t)
+                    float within = nearest + slack, best = -2f;
+                    bvh.TrianglesNear(p, within, nearby);
+                    foreach (int candidate in nearby)
                     {
-                        if (PointTriangle(p, vertices[triangles[t]], vertices[triangles[t + 1]], vertices[triangles[t + 2]]) > nearest + slack) return;
-                        float dot = Vector3.Dot(Normal(p, t, normals), normal.Value);
-                        if (dot > best) { best = dot; triangle = t; }
+                        int t = candidate * 3;
+                        var point = Point(p, t, out var bary);
+                        if ((point - p).magnitude > within) continue;
+                        float dot = Vector3.Dot(Normal(t, bary, normals), normal.Value);
+                        if (dot > best || dot == best && t < triangle)
+                        {
+                            best = dot;
+                            triangle = t;
+                            barycentric = bary;
+                        }
                     }
-                    foreach (int t in large) Test(t);
-                    var at = Vector3Int.FloorToInt(p / cell);
-                    for (int x = -1; x <= 1; x++)
-                        for (int y = -1; y <= 1; y++)
-                            for (int z = -1; z <= 1; z++)
-                                if (grid.TryGetValue(Cell(at.x + x, at.y + y, at.z + z), out var list))
-                                    foreach (int t in list) Test(t);
                 }
-                return (triangle, Barycentric(p, triangle));
+                return (triangle, barycentric);
             }
 
-            // The barycentric coordinates of the point of the triangle closest to p (p projected, clamped inside).
-            private Vector3 Barycentric(Vector3 p, int t)
-            {
-                Vector3 a = vertices[triangles[t]], b = vertices[triangles[t + 1]], c = vertices[triangles[t + 2]];
-                var n = Vector3.Cross(b - a, c - a);
-                var q = n.sqrMagnitude > 0 ? p - Vector3.Dot(p - a, n) / n.sqrMagnitude * n : a;
-                Vector3 v0 = b - a, v1 = c - a, v2 = q - a;
-                float d00 = Vector3.Dot(v0, v0), d01 = Vector3.Dot(v0, v1), d11 = Vector3.Dot(v1, v1), d20 = Vector3.Dot(v2, v0), d21 = Vector3.Dot(v2, v1);
-                float denominator = d00 * d11 - d01 * d01;
-                float v = denominator != 0 ? (d11 * d20 - d01 * d21) / denominator : 0f, w = denominator != 0 ? (d00 * d21 - d01 * d20) / denominator : 0f;
-                v = Mathf.Clamp01(v); w = Mathf.Clamp01(w);
-                if (v + w > 1f) { float sum = v + w; v /= sum; w /= sum; }
-                return new Vector3(1f - v - w, v, w);
-            }
+            private Vector3 Point(Vector3 p, int t, out Vector3 bary) =>
+                MeshBvh.ClosestPointOnTriangle(p, vertices[triangles[t]], vertices[triangles[t + 1]], vertices[triangles[t + 2]], out bary);
 
-            // The vertex normals of the triangle interpolated at its point closest to p.
-            private Vector3 Normal(Vector3 p, int t, Vector3[] normals)
-            {
-                var b = Barycentric(p, t);
-                return (b.x * normals[triangles[t]] + b.y * normals[triangles[t + 1]] + b.z * normals[triangles[t + 2]]).normalized;
-            }
-        }
-
-        private static long Cell(int x, int y, int z) => ((long)(x & 0x1FFFFF) << 42) | ((long)(y & 0x1FFFFF) << 21) | (uint)(z & 0x1FFFFF);
-
-        // The distance from p to the triangle abc (closest point by regions, Ericson's Real-Time Collision Detection 5.1.5).
-        private static float PointTriangle(Vector3 p, Vector3 a, Vector3 b, Vector3 c)
-        {
-            Vector3 ab = b - a, ac = c - a, ap = p - a;
-            float d1 = Vector3.Dot(ab, ap), d2 = Vector3.Dot(ac, ap);
-            if (d1 <= 0 && d2 <= 0) return ap.magnitude;
-            var bp = p - b;
-            float d3 = Vector3.Dot(ab, bp), d4 = Vector3.Dot(ac, bp);
-            if (d3 >= 0 && d4 <= d3) return bp.magnitude;
-            float vc = d1 * d4 - d3 * d2;
-            if (vc <= 0 && d1 >= 0 && d3 <= 0) return (p - (a + ab * (d1 / (d1 - d3)))).magnitude;
-            var cp = p - c;
-            float d5 = Vector3.Dot(ab, cp), d6 = Vector3.Dot(ac, cp);
-            if (d6 >= 0 && d5 <= d6) return cp.magnitude;
-            float vb = d5 * d2 - d1 * d6;
-            if (vb <= 0 && d2 >= 0 && d6 <= 0) return (p - (a + ac * (d2 / (d2 - d6)))).magnitude;
-            float va = d3 * d6 - d5 * d4;
-            if (va <= 0 && d4 - d3 >= 0 && d5 - d6 >= 0) return (p - (b + (c - b) * ((d4 - d3) / (d4 - d3 + (d5 - d6))))).magnitude;
-            float denominator = 1f / (va + vb + vc);
-            return (p - (a + ab * (vb * denominator) + ac * (vc * denominator))).magnitude;
+            private Vector3 Normal(int t, Vector3 bary, Vector3[] normals) =>
+                (bary.x * normals[triangles[t]] + bary.y * normals[triangles[t + 1]] + bary.z * normals[triangles[t + 2]]).normalized;
         }
 
         /// <summary>
