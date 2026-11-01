@@ -1027,11 +1027,12 @@ head bone, turns it with the avatar and sizes it by the avatar's eye height.
 Its code (`N4N0Installer`, `N4N0State`, the `N4N0*` template files, `IsN4N0`) and everything it puts in a project or on
 an avatar say N4N0: the prefab and its object, files and folders (`Assets/Orbiters/N4N0/…`), shaders (`Orbiters/N4N0`,
 `Orbiters/N4N0 Text`, `Orbiters/N4N0 Screen (…)`), menu and parameters (`N4N0/…`) and contact tags (`N4N0PointerL`/`R`,
-`N4N0Eye`, `N4N0Gaze`). The sphere on the tether's tip is `Ball`. Only names that are already in projects, on avatars or
-on the wire keep the companion's former name, each a single constant: the avatar manifest's key and tag
-(`AvatarManifestTags.N4N0Wire`), the screen shader's revision tag (`N4N0Installer.ScreenRevisionTag`), the mobile N4N0's
-object (`N4N0Installer.MobileN4N0Name`), Orbiters - N4N0's menu pages option (`N4N0Installer.MenuPagesOption`) and the
-preview file's first bytes (`PreviewFile`).
+`N4N0Eye`, `N4N0Gaze`). The sphere on the tether's tip is `Ball`. Only names that are already in projects or on avatars
+keep the companion's former name, each a single constant: the screen shader's revision tag
+(`N4N0Installer.ScreenRevisionTag`) and the mobile N4N0's object (`N4N0Installer.MobileN4N0Name`). The avatar manifest's
+key and tag (`AvatarManifestTags.N4N0Wire`), the preview file's first bytes (`PreviewFile`) and Orbiters - N4N0's menu
+pages option (`--n4n0-menu`, `N4N0Installer.MenuPagesOption`) are `n4n0` now; Orbiters - N4N0 0.3.4-dev.9 and later
+still read manifests and previews written under the former name.
 
 What Orbiters - N4N0 sends is the contract in Orbiters contracts' Docs/n4n0.md: `N4N0/Visible` (saved, on by default),
 `N4N0/State` (`N4N0State`: idle, listening, thinking, talking, sleeping, happy, annoyed, surprised), `N4N0/Text/Visible`,

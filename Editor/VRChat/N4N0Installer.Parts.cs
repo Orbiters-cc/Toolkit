@@ -33,10 +33,10 @@ namespace Orbiters.Toolkit.Editor.VRChat
         /// <summary>The renderer N4N0's theme and language parts name.</summary>
         public const string MenuRenderer = "orbiters-n4n0-menu";
         /// <summary>
-        /// Orbiters - N4N0's command-line option that draws N4N0's menu pages into a folder. Its released builds take it under
-        /// the companion's former name: kept as it is.
+        /// Orbiters - N4N0's command-line option that draws N4N0's menu pages into a folder (Orbiters - N4N0 0.3.4-dev.9
+        /// and later).
         /// </summary>
-        internal const string MenuPagesOption = "--orb-menu";
+        internal const string MenuPagesOption = "--n4n0-menu";
         public const string PartsFolderName = "N4N0 parts";
         /// <summary>The renderers N4N0's model part puts a variant's model in: the PC body and the phone's, which share the model.</summary>
         internal static readonly string[] ModelSlotPaths = { Body, MobileBody };

@@ -85,8 +85,8 @@ namespace Orbiters.Toolkit.Editor.Preview
     /// </summary>
     internal static class PreviewFile
     {
-        // The file's first 8 bytes, as the contract defines them (a wire format that Orbiters - N4N0 reads: kept as it is).
-        private const string Magic = "ORBPREV\0";
+        // The file's first 8 bytes, as the contract defines them (Orbiters - N4N0 also reads the former start of older files).
+        private const string Magic = "N4N0PRV\0";
         private const int Schema = 1;
         private const int VertexSize = 20;
 

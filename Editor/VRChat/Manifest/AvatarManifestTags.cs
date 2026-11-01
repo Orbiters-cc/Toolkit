@@ -24,10 +24,10 @@ namespace Orbiters.Toolkit.Editor.VRChat.Manifest
     public static class AvatarManifestTags
     {
         /// <summary>
-        /// N4N0's name in an avatar manifest, its tag and its object's key: the wire name Orbiters - N4N0 reads (contracts'
-        /// Docs/avatar-manifest.md), the companion's former name, kept as it is.
+        /// N4N0's name in an avatar manifest, its tag and its object's key (contracts' Docs/avatar-manifest.md). Orbiters -
+        /// N4N0 also reads manifests written before Toolkit 0.4.11 under the companion's former name.
         /// </summary>
-        public const string N4N0Wire = "orb";
+        public const string N4N0Wire = "n4n0";
 
         // Several words joined by + are a phrase ("face+tracking").
         private static readonly (AvatarTags tag, string latin, string japanese)[] Words =

@@ -75,6 +75,7 @@ public class AvatarManifestTests
         Assert.AreEqual(AvatarTags.Effect, Of("Particles"));
         Assert.AreEqual(AvatarTags.System, Of("Réglages"));
         Assert.AreEqual(AvatarTags.None, Of("Toggle 1"), "Nothing clear, no tag");
+        Assert.AreEqual("n4n0", AvatarManifestTags.N4N0Wire, "N4N0's key and tag in the manifest (contracts' Docs/avatar-manifest.md)");
         CollectionAssert.AreEqual(new[] { "clothing", "nsfw", AvatarManifestTags.N4N0Wire }, AvatarManifestTags.Names(AvatarTags.N4N0 | AvatarTags.Clothing | AvatarTags.Nsfw));
     }
 
