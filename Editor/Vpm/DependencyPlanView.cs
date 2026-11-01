@@ -20,17 +20,17 @@ namespace Orbiters.Toolkit.Editor.Vpm
             Plan = plan;
             var sheet = AssetDatabase.LoadAssetAtPath<StyleSheet>(StyleSheetPath);
             if (sheet) styleSheets.Add(sheet);
-            AddToClassList("orb-plan");
-            var heading = new Label(title); heading.AddToClassList("orb-plan__title"); Add(heading);
+            AddToClassList("orbiters-plan");
+            var heading = new Label(title); heading.AddToClassList("orbiters-plan__title"); Add(heading);
             foreach (var step in plan.Steps.OrderBy(s => s.Action == VpmStepAction.Keep ? 1 : 0))
             {
-                var row = new VisualElement(); row.AddToClassList("orb-plan__row"); Add(row);
-                var dot = new VisualElement(); dot.AddToClassList("orb-plan__dot"); dot.AddToClassList("orb-plan__dot--" + step.Action.ToString().ToLowerInvariant()); row.Add(dot);
-                var texts = new VisualElement(); texts.AddToClassList("orb-plan__texts"); row.Add(texts);
-                var name = new Label(VpmDependencyPlan.Describe(step)); name.AddToClassList("orb-plan__name"); texts.Add(name);
+                var row = new VisualElement(); row.AddToClassList("orbiters-plan__row"); Add(row);
+                var dot = new VisualElement(); dot.AddToClassList("orbiters-plan__dot"); dot.AddToClassList("orbiters-plan__dot--" + step.Action.ToString().ToLowerInvariant()); row.Add(dot);
+                var texts = new VisualElement(); texts.AddToClassList("orbiters-plan__texts"); row.Add(texts);
+                var name = new Label(VpmDependencyPlan.Describe(step)); name.AddToClassList("orbiters-plan__name"); texts.Add(name);
                 string detail = step.Action == VpmStepAction.Keep ? null
                     : !string.IsNullOrEmpty(step.Reason) ? step.Reason : step.RequiredBy.Count > 0 ? "Needed by " + string.Join(", ", step.RequiredBy) : null;
-                if (!string.IsNullOrEmpty(detail)) { var info = new Label(detail); info.AddToClassList("orb-plan__detail"); texts.Add(info); }
+                if (!string.IsNullOrEmpty(detail)) { var info = new Label(detail); info.AddToClassList("orbiters-plan__detail"); texts.Add(info); }
             }
             var repositories = plan.Repositories.Where(url => !VpmDependencies.RepositoryAdded(url)).ToList();
             if (repositories.Count > 0)
@@ -38,18 +38,18 @@ namespace Orbiters.Toolkit.Editor.Vpm
                 // They go into the user's Creator Companion settings, shared by every project: each is named in full.
                 var note = new Label("Adds " + (repositories.Count == 1 ? "this VPM repository" : "these VPM repositories") + " to your Creator Companion (every project uses them): " +
                                      string.Join(", ", repositories.Select(Host)) + ".") { tooltip = string.Join("\n", repositories) };
-                note.AddToClassList("orb-plan__note"); Add(note);
+                note.AddToClassList("orbiters-plan__note"); Add(note);
             }
             if (!plan.CanApply)
             {
-                var blocked = new Label("Nothing is changed until these are solved."); blocked.AddToClassList("orb-plan__note"); blocked.AddToClassList("orb-plan__note--warning"); Add(blocked);
+                var blocked = new Label("Nothing is changed until these are solved."); blocked.AddToClassList("orbiters-plan__note"); blocked.AddToClassList("orbiters-plan__note--warning"); Add(blocked);
             }
-            var actions = new VisualElement(); actions.AddToClassList("orb-plan__actions"); Add(actions);
-            var cancel = new Button { text = "Cancel" }; cancel.AddToClassList("orb-plan__cancel"); actions.Add(cancel);
+            var actions = new VisualElement(); actions.AddToClassList("orbiters-plan__actions"); Add(actions);
+            var cancel = new Button { text = "Cancel" }; cancel.AddToClassList("orbiters-plan__cancel"); actions.Add(cancel);
             ButtonInteraction.RegisterImmediateClick(cancel, () => cancelled?.Invoke());
             int changes = plan.Changes.Count();
             confirm = new Button { text = confirmLabel ?? (changes == 0 ? "Continue" : changes == 1 ? "Install 1 package" : $"Install {changes} packages") };
-            confirm.AddToClassList("orb-dependency__install"); confirm.AddToClassList("orb-plan__confirm");
+            confirm.AddToClassList("orbiters-dependency__install"); confirm.AddToClassList("orbiters-plan__confirm");
             confirm.SetEnabled(plan.CanApply);
             actions.Add(confirm);
             ButtonInteraction.RegisterImmediateClick(confirm, () => { confirm.SetEnabled(false); confirmed?.Invoke(plan); });

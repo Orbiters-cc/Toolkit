@@ -12,7 +12,7 @@ namespace Orbiters.Toolkit.Editor.VRChat.Manifest
     {
         None = 0,
         Clothing = 1 << 0, Accessory = 1 << 1, Hair = 1 << 2, Body = 1 << 3, Face = 1 << 4, Nsfw = 1 << 5, Pose = 1 << 6,
-        Emote = 1 << 7, Locomotion = 1 << 8, Prop = 1 << 9, Effect = 1 << 10, System = 1 << 11, Orb = 1 << 12,
+        Emote = 1 << 7, Locomotion = 1 << 8, Prop = 1 << 9, Effect = 1 << 10, System = 1 << 11, N4N0 = 1 << 12,
     }
 
     /// <summary>
@@ -23,6 +23,12 @@ namespace Orbiters.Toolkit.Editor.VRChat.Manifest
     /// </summary>
     public static class AvatarManifestTags
     {
+        /// <summary>
+        /// N4N0's name in an avatar manifest, its tag and its object's key: the wire name Orbiters - N4N0 reads (contracts'
+        /// Docs/avatar-manifest.md), the companion's former name, kept as it is.
+        /// </summary>
+        public const string N4N0Wire = "orb";
+
         // Several words joined by + are a phrase ("face+tracking").
         private static readonly (AvatarTags tag, string latin, string japanese)[] Words =
         {
@@ -144,7 +150,7 @@ namespace Orbiters.Toolkit.Editor.VRChat.Manifest
         public static IEnumerable<string> Names(AvatarTags tags)
         {
             foreach (AvatarTags tag in Enum.GetValues(typeof(AvatarTags)))
-                if (tag != AvatarTags.None && (tags & tag) != 0) yield return tag.ToString().ToLowerInvariant();
+                if (tag != AvatarTags.None && (tags & tag) != 0) yield return tag == AvatarTags.N4N0 ? N4N0Wire : tag.ToString().ToLowerInvariant();
         }
 
         private static AvatarTags OfWords(List<string> words)

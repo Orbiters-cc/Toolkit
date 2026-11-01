@@ -18,10 +18,10 @@ namespace Orbiters.Toolkit.Editor
             this.changed = changed;
             var sheet = AssetDatabase.LoadAssetAtPath<StyleSheet>(StyleSheetPath);
             if (sheet) styleSheets.Add(sheet);
-            AddToClassList("orb-check");
+            AddToClassList("orbiters-check");
             focusable = true;
             var mark = new VectorIcon(IconGlyph.Check);
-            mark.AddToClassList("orb-check__mark");
+            mark.AddToClassList("orbiters-check__mark");
             Add(mark);
             SetValueWithoutNotify(value);
             RegisterCallback<PointerDownEvent>(evt => { if (evt.button == 0) { Flip(); evt.StopPropagation(); } });
@@ -31,7 +31,7 @@ namespace Orbiters.Toolkit.Editor
         public void SetValueWithoutNotify(bool value)
         {
             Value = value;
-            EnableInClassList("orb-check--on", value);
+            EnableInClassList("orbiters-check--on", value);
         }
 
         private void Flip()

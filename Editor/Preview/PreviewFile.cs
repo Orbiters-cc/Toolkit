@@ -79,12 +79,14 @@ namespace Orbiters.Toolkit.Editor.Preview
     }
 
     /// <summary>
-    /// Writes a <see cref="PreviewData"/> as a preview file (contracts' Docs/project-preview.md): "ORBPREV\0", schema 1, the
-    /// header's length, the JSON header, then the blobs, each at a multiple of 16 from the data section's start.
-    /// Runs on a worker thread: only thread-safe Unity calls (ImageConversion's array encoders).
+    /// Writes a <see cref="PreviewData"/> as a preview file (contracts' Docs/project-preview.md): <see cref="Magic"/>,
+    /// schema 1, the header's length, the JSON header, then the blobs, each at a multiple of 16 from the data section's
+    /// start. Runs on a worker thread: only thread-safe Unity calls (ImageConversion's array encoders).
     /// </summary>
     internal static class PreviewFile
     {
+        // The file's first 8 bytes, as the contract defines them (a wire format that Orbiters - N4N0 reads: kept as it is).
+        private const string Magic = "ORBPREV\0";
         private const int Schema = 1;
         private const int VertexSize = 20;
 
@@ -247,7 +249,7 @@ namespace Orbiters.Toolkit.Editor.Preview
             int start = 16 + json.Length;
             int dataStart = (start + 15) / 16 * 16;
             var file = new byte[dataStart + blobs.Length];
-            Encoding.ASCII.GetBytes("ORBPREV\0").CopyTo(file, 0);
+            Encoding.ASCII.GetBytes(Magic).CopyTo(file, 0);
             BitConverter.GetBytes(Schema).CopyTo(file, 8);
             BitConverter.GetBytes(json.Length).CopyTo(file, 12);
             json.CopyTo(file, 16);

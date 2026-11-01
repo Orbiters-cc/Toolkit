@@ -25,27 +25,27 @@ public sealed class OrbitersSignInElement : VisualElement
         this.client = client;
         AddToClassList("mcb-auth-panel");
         AddToClassList("mcb-form-card");
-        AddToClassList("orb-signin");
+        AddToClassList("orbiters-signin");
         var sheet = UnityEditor.AssetDatabase.LoadAssetAtPath<StyleSheet>("Packages/orbiters.toolkit/Runtime/EditorServices/signin.uss");
         if (sheet) styleSheets.Add(sheet);
 
-        buttons = new VisualElement(); buttons.AddToClassList("orb-signin__buttons"); Add(buttons);
+        buttons = new VisualElement(); buttons.AddToClassList("orbiters-signin__buttons"); Add(buttons);
         buttons.Add(SignInButton());
 
-        waiting = new VisualElement(); waiting.AddToClassList("orb-signin__waiting"); Add(waiting);
-        var pulse = new VisualElement(); pulse.AddToClassList("orb-signin__pulse"); waiting.Add(pulse);
-        waitingLabel = new Label(); waitingLabel.AddToClassList("orb-signin__waiting-label"); waiting.Add(waitingLabel);
+        waiting = new VisualElement(); waiting.AddToClassList("orbiters-signin__waiting"); Add(waiting);
+        var pulse = new VisualElement(); pulse.AddToClassList("orbiters-signin__pulse"); waiting.Add(pulse);
+        waitingLabel = new Label(); waitingLabel.AddToClassList("orbiters-signin__waiting-label"); waiting.Add(waitingLabel);
         var reopen = Link("Open again", () => { if (!string.IsNullOrEmpty(lastUrl)) Application.OpenURL(lastUrl); });
         var cancel = Link("Cancel", CancelPressed);
         waiting.Add(reopen); waiting.Add(cancel);
         waiting.style.display = DisplayStyle.None;
         // A soft pulse shows the tool is still listening for the browser.
-        pulse.schedule.Execute(() => pulse.ToggleInClassList("orb-signin__pulse--on")).Every(700);
+        pulse.schedule.Execute(() => pulse.ToggleInClassList("orbiters-signin__pulse--on")).Every(700);
 
         reasonLabel = new Label(string.IsNullOrWhiteSpace(reason) ? "Connect your Orbiters account to use its online features." : reason);
-        reasonLabel.AddToClassList("orb-signin__reason");
+        reasonLabel.AddToClassList("orbiters-signin__reason");
         Add(reasonLabel);
-        error = new Label(); error.AddToClassList("orb-signin__error"); error.style.display = DisplayStyle.None; Add(error);
+        error = new Label(); error.AddToClassList("orbiters-signin__error"); error.style.display = DisplayStyle.None; Add(error);
 
         // A script reload detaches every panel: the sign-in waiting for the browser carries on through it.
         RegisterCallback<DetachFromPanelEvent>(_ => { if (!reloading) Cancel(); OrbitersBrowserLogin.ResumedEnded -= ResumedEnded; });
@@ -74,7 +74,7 @@ public sealed class OrbitersSignInElement : VisualElement
     private Button SignInButton()
     {
         var button = new Button { text = "Sign in" };
-        button.AddToClassList("orb-signin__provider");
+        button.AddToClassList("orbiters-signin__provider");
         button.RegisterCallback<PointerDownEvent>(_ => button.AddToClassList("pressed"), TrickleDown.TrickleDown);
         button.RegisterCallback<PointerUpEvent>(_ => button.RemoveFromClassList("pressed"), TrickleDown.TrickleDown);
         button.RegisterCallback<PointerLeaveEvent>(_ => button.RemoveFromClassList("pressed"));
@@ -85,7 +85,7 @@ public sealed class OrbitersSignInElement : VisualElement
     private static Button Link(string text, Action action)
     {
         var button = new Button(action) { text = text };
-        button.AddToClassList("orb-signin__link");
+        button.AddToClassList("orbiters-signin__link");
         return button;
     }
 

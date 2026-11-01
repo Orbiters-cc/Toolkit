@@ -46,7 +46,7 @@ namespace Orbiters.Toolkit.Editor.Animations
             rig = Text("", "ae-chip"); titleRow.Add(rig);
             path = Text("", "ae-caption", "ae-model__path"); titles.Add(path);
             var close = new IconButton(IconGlyph.Close, "", "Remove from the list. The model stays in the project.", remove);
-            close.AddToClassList("orb-icon-button--small");
+            close.AddToClassList("orbiters-icon-button--small");
             header.Add(close);
 
             var bar = new VisualElement(); bar.AddToClassList("ae-model__bar"); Add(bar);

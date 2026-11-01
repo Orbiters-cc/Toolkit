@@ -27,9 +27,9 @@ namespace Orbiters.Toolkit.Editor
         {
             var sheet = AssetDatabase.LoadAssetAtPath<StyleSheet>(StyleSheetPath);
             if (sheet) styleSheets.Add(sheet);
-            AddToClassList("orb-budget");
-            bar = new VisualElement(); bar.AddToClassList("orb-budget__bar"); Add(bar);
-            legend = new VisualElement(); legend.AddToClassList("orb-budget__legend"); Add(legend);
+            AddToClassList("orbiters-budget");
+            bar = new VisualElement(); bar.AddToClassList("orbiters-budget__bar"); Add(bar);
+            legend = new VisualElement(); legend.AddToClassList("orbiters-budget__legend"); Add(legend);
         }
 
         /// <summary>Segments share the bar by value; a segment of zero keeps its legend row but takes no width.</summary>
@@ -39,18 +39,18 @@ namespace Orbiters.Toolkit.Editor
             foreach (var segment in segments)
             {
                 var part = new VisualElement();
-                part.AddToClassList("orb-budget__segment");
+                part.AddToClassList("orbiters-budget__segment");
                 part.style.backgroundColor = segment.Color;
                 part.style.flexGrow = Mathf.Max(0f, segment.Value);
                 part.style.display = segment.Value > 0f ? DisplayStyle.Flex : DisplayStyle.None;
                 part.tooltip = segment.Label;
                 bar.Add(part);
 
-                var row = new VisualElement(); row.AddToClassList("orb-budget__row");
-                var swatch = new VisualElement(); swatch.AddToClassList("orb-budget__swatch");
+                var row = new VisualElement(); row.AddToClassList("orbiters-budget__row");
+                var swatch = new VisualElement(); swatch.AddToClassList("orbiters-budget__swatch");
                 swatch.style.backgroundColor = segment.Color;
                 row.Add(swatch);
-                var label = new Label(segment.Label); label.AddToClassList("orb-budget__label");
+                var label = new Label(segment.Label); label.AddToClassList("orbiters-budget__label");
                 row.Add(label);
                 legend.Add(row);
             }

@@ -18,9 +18,9 @@ namespace Orbiters.Toolkit.Editor
             this.changed = changed;
             var sheet = AssetDatabase.LoadAssetAtPath<StyleSheet>(StyleSheetPath);
             if (sheet) styleSheets.Add(sheet);
-            AddToClassList("orb-switch");
+            AddToClassList("orbiters-switch");
             focusable = true;
-            var knob = new VisualElement(); knob.AddToClassList("orb-switch__knob"); knob.pickingMode = PickingMode.Ignore; Add(knob);
+            var knob = new VisualElement(); knob.AddToClassList("orbiters-switch__knob"); knob.pickingMode = PickingMode.Ignore; Add(knob);
             SetValueWithoutNotify(value);
             RegisterCallback<PointerDownEvent>(evt => { if (evt.button == 0) { Flip(); evt.StopPropagation(); } });
             RegisterCallback<KeyDownEvent>(evt => { if (evt.keyCode == KeyCode.Space || evt.keyCode == KeyCode.Return) Flip(); });
@@ -29,7 +29,7 @@ namespace Orbiters.Toolkit.Editor
         public void SetValueWithoutNotify(bool value)
         {
             Value = value;
-            EnableInClassList("orb-switch--on", value);
+            EnableInClassList("orbiters-switch--on", value);
         }
 
         private void Flip()

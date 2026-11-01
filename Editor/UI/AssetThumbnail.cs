@@ -12,7 +12,7 @@ namespace Orbiters.Toolkit.Editor
     /// </summary>
     public sealed class AssetThumbnail : Image
     {
-        public const string ShownClass = "orb-thumbnail--shown";
+        public const string ShownClass = "orbiters-thumbnail--shown";
         private const float Wait = 6f;
         private IVisualElementScheduledItem poll;
 
@@ -28,7 +28,7 @@ namespace Orbiters.Toolkit.Editor
         {
             scaleMode = ScaleMode.ScaleAndCrop;
             pickingMode = PickingMode.Ignore;
-            AddToClassList("orb-thumbnail");
+            AddToClassList("orbiters-thumbnail");
             if (source == null || !expected) return;
             double until = EditorApplication.timeSinceStartup + Wait;
             if (TryShow(source)) return;

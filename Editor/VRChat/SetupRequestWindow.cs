@@ -54,10 +54,10 @@ namespace Orbiters.Toolkit.Editor.VRChat
             var root = rootVisualElement;
             foreach (var sheet in new[] { ThemePath, StylePath }.Select(AssetDatabase.LoadAssetAtPath<StyleSheet>))
                 if (sheet) root.styleSheets.Add(sheet);
-            root.AddToClassList("orb-setup");
+            root.AddToClassList("orbiters-setup");
             if (request == null)
             {
-                var gone = new Label("This request was answered or withdrawn."); gone.AddToClassList("orb-setup__line"); root.Add(gone);
+                var gone = new Label("This request was answered or withdrawn."); gone.AddToClassList("orbiters-setup__line"); root.Add(gone);
                 return;
             }
 
@@ -66,15 +66,15 @@ namespace Orbiters.Toolkit.Editor.VRChat
             string avatar = (string)request["avatar"]?["name"] ?? (string)request["avatar"]?["id"] ?? "your avatar";
             string scene = (string)request["avatar"]?["scene"];
 
-            var header = new VisualElement(); header.AddToClassList("orb-setup__header"); root.Add(header);
-            var tile = new VisualElement(); tile.AddToClassList("orb-setup__tile"); header.Add(tile);
+            var header = new VisualElement(); header.AddToClassList("orbiters-setup__header"); root.Add(header);
+            var tile = new VisualElement(); tile.AddToClassList("orbiters-setup__tile"); header.Add(tile);
             tile.Add(Orbiters.Toolkit.Editor.N4N0Logo.Image(new Color(0f, 0.855f, 0.427f)));
-            var texts = new VisualElement(); texts.AddToClassList("orb-setup__texts"); header.Add(texts);
-            var eyebrow = new Label("ORBITERS - N4N0 ASKS"); eyebrow.AddToClassList("orb-setup__eyebrow"); texts.Add(eyebrow);
-            var title = new Label($"Add {what} to {avatar}?"); title.AddToClassList("orb-setup__title"); texts.Add(title);
+            var texts = new VisualElement(); texts.AddToClassList("orbiters-setup__texts"); header.Add(texts);
+            var eyebrow = new Label("ORBITERS - N4N0 ASKS"); eyebrow.AddToClassList("orbiters-setup__eyebrow"); texts.Add(eyebrow);
+            var title = new Label($"Add {what} to {avatar}?"); title.AddToClassList("orbiters-setup__title"); texts.Add(title);
 
             // What is added, and where.
-            var card = new VisualElement(); card.AddToClassList("orb-setup__card"); root.Add(card);
+            var card = new VisualElement(); card.AddToClassList("orbiters-setup__card"); root.Add(card);
             foreach (var item in items)
                 Row(card, IconGlyph.Download, (string)item["name"] ?? "Item", (string)item["version"] ?? "latest", "From the Orbiters gallery, installed by My Avatar");
             Row(card, IconGlyph.Person, avatar, null, string.IsNullOrEmpty(scene) ? "Found by its VRChat avatar id" : "In " + Path.GetFileName(scene));
@@ -82,42 +82,42 @@ namespace Orbiters.Toolkit.Editor.VRChat
             string after = string.Join(" and ", then.Select(t => t == "save-scene" ? "the scene is saved" : t == "open-build-panel" ? "the VRChat SDK opens, ready to upload" : null).Where(t => t != null));
             if (after.Length > 0)
             {
-                var line = new Label("Then " + after + "."); line.AddToClassList("orb-setup__line"); root.Add(line);
+                var line = new Label("Then " + after + "."); line.AddToClassList("orbiters-setup__line"); root.Add(line);
             }
 
             var push = new VisualElement(); push.style.flexGrow = 1; root.Add(push);
-            var actions = new VisualElement(); actions.AddToClassList("orb-setup__actions"); root.Add(actions);
+            var actions = new VisualElement(); actions.AddToClassList("orbiters-setup__actions"); root.Add(actions);
             string server = (string)request["server"];
             if (!string.IsNullOrEmpty(server) && (server.Contains("127.0.0.1") || server.Contains("localhost")))
             {
-                var dev = new Label("Development server"); dev.AddToClassList("orb-setup__chip"); actions.Add(dev);
+                var dev = new Label("Development server"); dev.AddToClassList("orbiters-setup__chip"); actions.Add(dev);
             }
             var spacer = new VisualElement(); spacer.style.flexGrow = 1; actions.Add(spacer);
             var later = Button("Not now", "Nothing changes; Orbiters - N4N0 hears that you said not now.", () => Answer(false));
-            later.AddToClassList("orb-setup__later"); actions.Add(later);
+            later.AddToClassList("orbiters-setup__later"); actions.Add(later);
             var add = Button("Add " + what, "Install it on the avatar with My Avatar, with Undo.", () => Answer(true));
-            add.AddToClassList("mcb-button--primary"); add.AddToClassList("orb-setup__add"); actions.Add(add);
+            add.AddToClassList("mcb-button--primary"); add.AddToClassList("orbiters-setup__add"); actions.Add(add);
 
             // Rises in once laid out.
-            root.AddToClassList("orb-setup--entering");
-            root.schedule.Execute(() => root.RemoveFromClassList("orb-setup--entering")).StartingIn(30);
+            root.AddToClassList("orbiters-setup--entering");
+            root.schedule.Execute(() => root.RemoveFromClassList("orbiters-setup--entering")).StartingIn(30);
         }
 
         private static void Row(VisualElement parent, IconGlyph glyph, string name, string chip, string detail)
         {
-            var row = new VisualElement(); row.AddToClassList("orb-setup__row");
-            row.EnableInClassList("orb-setup__row--divided", parent.childCount > 0);
+            var row = new VisualElement(); row.AddToClassList("orbiters-setup__row");
+            row.EnableInClassList("orbiters-setup__row--divided", parent.childCount > 0);
             parent.Add(row);
-            var badge = new VisualElement(); badge.AddToClassList("orb-setup__icon"); row.Add(badge);
+            var badge = new VisualElement(); badge.AddToClassList("orbiters-setup__icon"); row.Add(badge);
             badge.Add(new VectorIcon(glyph));
-            var texts = new VisualElement(); texts.AddToClassList("orb-setup__row-texts"); row.Add(texts);
-            var head = new VisualElement(); head.AddToClassList("orb-setup__row-head"); texts.Add(head);
-            var label = new Label(name); label.AddToClassList("orb-setup__name"); head.Add(label);
+            var texts = new VisualElement(); texts.AddToClassList("orbiters-setup__row-texts"); row.Add(texts);
+            var head = new VisualElement(); head.AddToClassList("orbiters-setup__row-head"); texts.Add(head);
+            var label = new Label(name); label.AddToClassList("orbiters-setup__name"); head.Add(label);
             if (chip != null)
             {
-                var version = new Label(chip); version.AddToClassList("orb-setup__version"); head.Add(version);
+                var version = new Label(chip); version.AddToClassList("orbiters-setup__version"); head.Add(version);
             }
-            var line = new Label(detail); line.AddToClassList("orb-setup__detail"); texts.Add(line);
+            var line = new Label(detail); line.AddToClassList("orbiters-setup__detail"); texts.Add(line);
         }
 
         private static Button Button(string text, string tip, Action action)

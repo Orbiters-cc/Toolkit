@@ -18,7 +18,7 @@ namespace Orbiters.Toolkit.Editor
         public static Image Image(Color colour)
         {
             var image = new Image { image = Texture, scaleMode = ScaleMode.ScaleToFit, tintColor = colour, pickingMode = PickingMode.Ignore };
-            image.AddToClassList("orb-n4n0-logo");
+            image.AddToClassList("orbiters-n4n0-logo");
             return image;
         }
     }

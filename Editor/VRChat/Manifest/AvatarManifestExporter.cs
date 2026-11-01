@@ -56,7 +56,7 @@ namespace Orbiters.Toolkit.Editor.VRChat.Manifest
             string id = avatar.GetComponent<PipelineManager>()?.blueprintId;
             var manifest = AvatarManifest.Read(avatar, id);
             // N4N0's own version, noted as the build started (its gallery folder is no longer known by now).
-            if (manifest.OrbTextSync.HasValue) manifest.OrbVersion = OrbInstaller.BuiltVersion(avatar);
+            if (manifest.N4N0TextSync.HasValue) manifest.N4N0Version = N4N0Installer.BuiltVersion(avatar);
             // The SDK builds a copy named after the avatar.
             if (manifest.Name.EndsWith("(Clone)", StringComparison.Ordinal)) manifest.Name = manifest.Name.Substring(0, manifest.Name.Length - "(Clone)".Length).TrimEnd();
             manifest.WrittenUtc = DateTime.UtcNow.ToString("yyyy-MM-dd'T'HH:mm:ss'Z'", CultureInfo.InvariantCulture);

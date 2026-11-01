@@ -26,27 +26,27 @@ namespace Orbiters.Toolkit.Editor
         {
             this.min = min; this.max = max; this.rest = rest; this.tick = tick; this.majorEvery = Mathf.Max(1, majorEvery); this.loops = loops;
             this.pixelsPerUnit = pixelsPerUnit; this.snapRange = snapRange; this.format = format; this.changed = changed;
-            AddToClassList("orb-dial");
+            AddToClassList("orbiters-dial");
             var sheet = UnityEditor.AssetDatabase.LoadAssetAtPath<StyleSheet>("Packages/orbiters.toolkit/Editor/UI/scrub-dial.uss");
             if (sheet) styleSheets.Add(sheet);
 
             var name = new Label(label);
-            name.AddToClassList("orb-dial__label");
+            name.AddToClassList("orbiters-dial__label");
             Add(name);
             strip = new VisualElement { focusable = true, tabIndex = 0 };
-            strip.AddToClassList("orb-dial__strip");
+            strip.AddToClassList("orbiters-dial__strip");
             strip.generateVisualContent += DrawTicks;
             Add(strip);
             var mark = new VisualElement { pickingMode = PickingMode.Ignore };
-            mark.AddToClassList("orb-dial__mark");
+            mark.AddToClassList("orbiters-dial__mark");
             strip.Add(mark);
             readout = new Label();
-            readout.AddToClassList("orb-dial__value");
+            readout.AddToClassList("orbiters-dial__value");
             Add(readout);
 
             strip.RegisterCallback<PointerDownEvent>(OnPointerDown);
             strip.RegisterCallback<PointerMoveEvent>(OnPointerMove);
-            drag = new PointerDragCapture(strip, () => RemoveFromClassList("orb-dial--active"));
+            drag = new PointerDragCapture(strip, () => RemoveFromClassList("orbiters-dial--active"));
             strip.RegisterCallback<KeyDownEvent>(OnKeyDown);
         }
 
@@ -78,7 +78,7 @@ namespace Orbiters.Toolkit.Editor
             dragStartX = evt.position.x;
             dragStartValue = value;
             drag.Begin(evt.pointerId);
-            AddToClassList("orb-dial--active");
+            AddToClassList("orbiters-dial--active");
             evt.StopPropagation();
         }
 

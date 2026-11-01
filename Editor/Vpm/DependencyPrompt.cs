@@ -34,13 +34,13 @@ namespace Orbiters.Toolkit.Editor.Vpm
             this.message = message;
             var sheet = AssetDatabase.LoadAssetAtPath<StyleSheet>(StyleSheetPath);
             if (sheet) styleSheets.Add(sheet);
-            AddToClassList("orb-dependency");
+            AddToClassList("orbiters-dependency");
 
-            var texts = new VisualElement(); texts.AddToClassList("orb-dependency__texts"); Add(texts);
-            title = new Label(); title.AddToClassList("orb-dependency__title"); texts.Add(title);
-            reason = new Label(); reason.AddToClassList("orb-dependency__reason"); texts.Add(reason);
-            error = new Label(); error.AddToClassList("orb-dependency__error"); texts.Add(error);
-            install = new Button(); install.AddToClassList("orb-dependency__install"); Add(install);
+            var texts = new VisualElement(); texts.AddToClassList("orbiters-dependency__texts"); Add(texts);
+            title = new Label(); title.AddToClassList("orbiters-dependency__title"); texts.Add(title);
+            reason = new Label(); reason.AddToClassList("orbiters-dependency__reason"); texts.Add(reason);
+            error = new Label(); error.AddToClassList("orbiters-dependency__error"); texts.Add(error);
+            install = new Button(); install.AddToClassList("orbiters-dependency__install"); Add(install);
             ButtonInteraction.RegisterImmediateClick(install, Install);
 
             RegisterCallback<AttachToPanelEvent>(_ => VpmDependencies.StatusChanged += OnStatusChanged);
@@ -78,7 +78,7 @@ namespace Orbiters.Toolkit.Editor.Vpm
             if (panel == null) return;
             ShowBusy();
             plan = new DependencyPlanView(resolved, "Before installing " + (Status.DisplayName ?? PackageId), Apply, () => { plan.RemoveFromHierarchy(); plan = null; Refresh(); });
-            plan.AddToClassList("orb-dependency__plan");
+            plan.AddToClassList("orbiters-dependency__plan");
             install.style.display = DisplayStyle.None;
             Add(plan);
         }
@@ -106,7 +106,7 @@ namespace Orbiters.Toolkit.Editor.Vpm
             string name = Status?.DisplayName ?? PackageId;
             install.text = busy ? "Installing " + name + "..." : "Install " + name;
             install.SetEnabled(!busy);
-            EnableInClassList("orb-dependency--installing", busy);
+            EnableInClassList("orbiters-dependency--installing", busy);
         }
 
         private void ShowError(string text)

@@ -49,57 +49,57 @@ namespace Orbiters.Toolkit.Editor
                 var sheet = AssetDatabase.LoadAssetAtPath<StyleSheet>(path);
                 if (sheet) root.styleSheets.Add(sheet);
             }
-            root.AddToClassList("orb-about");
+            root.AddToClassList("orbiters-about");
 
-            var scrollView = new ScrollView(); scrollView.AddToClassList("orb-about__scroll"); root.Add(scrollView);
-            var scroll = new VisualElement(); scroll.AddToClassList("orb-about__content"); scrollView.Add(scroll);
+            var scrollView = new ScrollView(); scrollView.AddToClassList("orbiters-about__scroll"); root.Add(scrollView);
+            var scroll = new VisualElement(); scroll.AddToClassList("orbiters-about__content"); scrollView.Add(scroll);
 
-            var header = new VisualElement(); header.AddToClassList("orb-about__header"); scroll.Add(header);
+            var header = new VisualElement(); header.AddToClassList("orbiters-about__header"); scroll.Add(header);
             var logo = product.Logo?.Invoke();
-            if (logo != null) { logo.AddToClassList("orb-about__logo"); header.Add(logo); }
-            var name = new Label(product.Name); name.AddToClassList("orb-about__name"); header.Add(name);
+            if (logo != null) { logo.AddToClassList("orbiters-about__logo"); header.Add(logo); }
+            var name = new Label(product.Name); name.AddToClassList("orbiters-about__name"); header.Add(name);
             var meta = new Label((string.IsNullOrEmpty(product.Version) ? "" : "Version " + product.Version + " · ") + "by " + product.Author);
-            meta.AddToClassList("orb-about__meta"); header.Add(meta);
+            meta.AddToClassList("orbiters-about__meta"); header.Add(meta);
             if (!string.IsNullOrEmpty(product.LicensePath) && File.Exists(Path.GetFullPath(product.LicensePath)))
             {
                 var license = Button("License", "Open " + product.Name + "'s license.", () => OpenFile(product.LicensePath));
-                license.AddToClassList("orb-about__license"); header.Add(license);
+                license.AddToClassList("orbiters-about__license"); header.Add(license);
             }
 
-            var section = new Label("Third-party software"); section.AddToClassList("orb-about__section"); scroll.Add(section);
-            var caption = new Label(product.Caption); caption.AddToClassList("orb-about__caption"); scroll.Add(caption);
+            var section = new Label("Third-party software"); section.AddToClassList("orbiters-about__section"); scroll.Add(section);
+            var caption = new Label(product.Caption); caption.AddToClassList("orbiters-about__caption"); scroll.Add(caption);
 
             var notices = Read(AssetDatabase.LoadAssetAtPath<TextAsset>(product.NoticesPath)?.text);
             if (notices.Count == 0)
             {
                 var missing = new Label("The third-party notices file is missing from this installation.");
-                missing.AddToClassList("orb-about__caption"); scroll.Add(missing);
+                missing.AddToClassList("orbiters-about__caption"); scroll.Add(missing);
             }
             foreach (var notice in notices) scroll.Add(Card(notice));
 
-            var footer = new VisualElement(); footer.AddToClassList("orb-about__footer"); scroll.Add(footer);
+            var footer = new VisualElement(); footer.AddToClassList("orbiters-about__footer"); scroll.Add(footer);
             footer.Add(Button("Open notices file", "Open " + Path.GetFileName(product.NoticesPath) + ".", () => OpenFile(product.NoticesPath)));
         }
 
         // One card per project: its name, what the tool uses it for, a license chip; the full text slides open below.
         private static VisualElement Card(Notice notice)
         {
-            var card = new VisualElement(); card.AddToClassList("orb-about__card");
-            var head = new VisualElement(); head.AddToClassList("orb-about__card-head"); card.Add(head);
-            var texts = new VisualElement(); texts.AddToClassList("orb-about__card-texts"); head.Add(texts);
-            var title = new Label(notice.title); title.AddToClassList("orb-about__card-title"); texts.Add(title);
-            if (!string.IsNullOrEmpty(notice.intro)) { var intro = new Label(notice.intro); intro.AddToClassList("orb-about__card-intro"); texts.Add(intro); }
-            var chip = new Label(notice.license); chip.AddToClassList("orb-about__chip"); head.Add(chip);
+            var card = new VisualElement(); card.AddToClassList("orbiters-about__card");
+            var head = new VisualElement(); head.AddToClassList("orbiters-about__card-head"); card.Add(head);
+            var texts = new VisualElement(); texts.AddToClassList("orbiters-about__card-texts"); head.Add(texts);
+            var title = new Label(notice.title); title.AddToClassList("orbiters-about__card-title"); texts.Add(title);
+            if (!string.IsNullOrEmpty(notice.intro)) { var intro = new Label(notice.intro); intro.AddToClassList("orbiters-about__card-intro"); texts.Add(intro); }
+            var chip = new Label(notice.license); chip.AddToClassList("orbiters-about__chip"); head.Add(chip);
             if (!string.IsNullOrEmpty(notice.url))
             {
                 var link = Button("↗", notice.url, () => Application.OpenURL(notice.url));
-                link.AddToClassList("orb-about__link"); head.Add(link);
+                link.AddToClassList("orbiters-about__link"); head.Add(link);
             }
             if (string.IsNullOrEmpty(notice.text)) return card;
 
             // Paragraphs reflow to the window width; the file keeps the license's original line breaks.
             string reflowed = Regex.Replace(Regex.Replace(notice.text, @"(?<!\n)\n(?!\n)", " "), @"[ \t]{2,}", " ");
-            var body = new Label(reflowed); body.AddToClassList("orb-about__license-text");
+            var body = new Label(reflowed); body.AddToClassList("orbiters-about__license-text");
             body.selection.isSelectable = true;
             card.Add(body);
             body.style.display = DisplayStyle.None;
@@ -107,11 +107,11 @@ namespace Orbiters.Toolkit.Editor
             head.RegisterCallback<PointerDownEvent>(evt =>
             {
                 if (evt.button != 0 || evt.target is Button) return;
-                bool open = !card.ClassListContains("orb-about__card--open");
-                card.EnableInClassList("orb-about__card--open", open);
+                bool open = !card.ClassListContains("orbiters-about__card--open");
+                card.EnableInClassList("orbiters-about__card--open", open);
                 body.style.display = open ? DisplayStyle.Flex : DisplayStyle.None;
-                body.RemoveFromClassList("orb-about__license-text--shown");
-                if (open) body.schedule.Execute(() => body.AddToClassList("orb-about__license-text--shown"));
+                body.RemoveFromClassList("orbiters-about__license-text--shown");
+                if (open) body.schedule.Execute(() => body.AddToClassList("orbiters-about__license-text--shown"));
             });
             return card;
         }
@@ -169,11 +169,11 @@ namespace Orbiters.Toolkit.Editor
         private static Button Button(string text, string tooltip, Action action)
         {
             var button = new Button(action) { text = text, tooltip = tooltip };
-            button.AddToClassList("orb-about__button");
+            button.AddToClassList("orbiters-about__button");
             // Immediate feedback on press; the click itself still follows Unity's normal release behaviour.
-            button.RegisterCallback<PointerDownEvent>(_ => button.AddToClassList("orb-about__button--pressed"), TrickleDown.TrickleDown);
-            button.RegisterCallback<PointerUpEvent>(_ => button.RemoveFromClassList("orb-about__button--pressed"), TrickleDown.TrickleDown);
-            button.RegisterCallback<PointerLeaveEvent>(_ => button.RemoveFromClassList("orb-about__button--pressed"));
+            button.RegisterCallback<PointerDownEvent>(_ => button.AddToClassList("orbiters-about__button--pressed"), TrickleDown.TrickleDown);
+            button.RegisterCallback<PointerUpEvent>(_ => button.RemoveFromClassList("orbiters-about__button--pressed"), TrickleDown.TrickleDown);
+            button.RegisterCallback<PointerLeaveEvent>(_ => button.RemoveFromClassList("orbiters-about__button--pressed"));
             return button;
         }
     }

@@ -1,6 +1,6 @@
 /* Account connection of the Orbiters tools: a Sign in button, then a waiting row while the browser is open. */
 
-.orb-signin {
+.orbiters-signin {
     padding: 14px;
     border-radius: 14px;
     background-color: #242424;
@@ -8,11 +8,11 @@
     border-color: rgba(255, 255, 255, 0.05);
 }
 
-.orb-signin__buttons {
+.orbiters-signin__buttons {
     flex-direction: row;
 }
 
-.orb-signin__provider {
+.orbiters-signin__provider {
     flex-grow: 1;
     flex-basis: 0;
     height: 34px;
@@ -29,15 +29,15 @@
     transition-timing-function: ease-out, ease-out-back;
 }
 
-.orb-signin__provider:hover {
+.orbiters-signin__provider:hover {
     background-color: #1ee684;
 }
 
-.orb-signin__provider.pressed {
+.orbiters-signin__provider.pressed {
     scale: 0.96 0.96;
 }
 
-.orb-signin__waiting {
+.orbiters-signin__waiting {
     flex-direction: row;
     align-items: center;
     height: 34px;
@@ -46,7 +46,7 @@
     background-color: #1a1a1a;
 }
 
-.orb-signin__pulse {
+.orbiters-signin__pulse {
     width: 8px;
     height: 8px;
     border-radius: 4px;
@@ -59,12 +59,12 @@
     transition-timing-function: ease-in-out, ease-in-out;
 }
 
-.orb-signin__pulse--on {
+.orbiters-signin__pulse--on {
     opacity: 1;
     scale: 1.15 1.15;
 }
 
-.orb-signin__waiting-label {
+.orbiters-signin__waiting-label {
     flex-grow: 1;
     flex-shrink: 1;
     color: #e6e6e6;
@@ -74,7 +74,7 @@
     text-overflow: ellipsis;
 }
 
-.orb-signin__link {
+.orbiters-signin__link {
     height: 24px;
     margin: 0 0 0 4px;
     padding: 0 10px;
@@ -85,12 +85,12 @@
     font-size: 11px;
 }
 
-.orb-signin__link:hover {
+.orbiters-signin__link:hover {
     background-color: rgba(255, 255, 255, 0.08);
     color: #e6e6e6;
 }
 
-.orb-signin__reason {
+.orbiters-signin__reason {
     margin: 10px 4px 0 4px;
     color: #8f8f8f;
     font-size: 11px;
@@ -98,7 +98,7 @@
     -unity-text-align: middle-center;
 }
 
-.orb-signin__error {
+.orbiters-signin__error {
     margin: 8px 4px 0 4px;
     color: #ffb020;
     font-size: 11px;

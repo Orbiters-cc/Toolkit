@@ -32,7 +32,7 @@ namespace Orbiters.Toolkit.Editor
         public VectorIcon(IconGlyph glyph)
         {
             this.glyph = glyph;
-            AddToClassList("orb-icon");
+            AddToClassList("orbiters-icon");
             pickingMode = PickingMode.Ignore;
             generateVisualContent += Draw;
             RegisterCallback<CustomStyleResolvedEvent>(_ =>

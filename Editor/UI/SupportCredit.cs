@@ -19,22 +19,22 @@ namespace Orbiters.Toolkit.Editor
         {
             var sheet = AssetDatabase.LoadAssetAtPath<StyleSheet>(StyleSheetPath);
             if (sheet) styleSheets.Add(sheet);
-            AddToClassList("orb-credit");
+            AddToClassList("orbiters-credit");
             tooltip = KofiUrl;
             Add(Text("by blackorbit"));
-            Add(Picture(ProfilePath, "orb-credit__profile", true, ScaleMode.ScaleAndCrop));
+            Add(Picture(ProfilePath, "orbiters-credit__profile", true, ScaleMode.ScaleAndCrop));
             Add(Text("support me on KoFi"));
-            Add(Picture(KofiSymbolPath, "orb-credit__kofi", false, ScaleMode.ScaleToFit));
-            RegisterCallback<MouseDownEvent>(_ => AddToClassList("orb-credit--pressed"));
-            RegisterCallback<MouseUpEvent>(_ => RemoveFromClassList("orb-credit--pressed"));
-            RegisterCallback<MouseLeaveEvent>(_ => RemoveFromClassList("orb-credit--pressed"));
+            Add(Picture(KofiSymbolPath, "orbiters-credit__kofi", false, ScaleMode.ScaleToFit));
+            RegisterCallback<MouseDownEvent>(_ => AddToClassList("orbiters-credit--pressed"));
+            RegisterCallback<MouseUpEvent>(_ => RemoveFromClassList("orbiters-credit--pressed"));
+            RegisterCallback<MouseLeaveEvent>(_ => RemoveFromClassList("orbiters-credit--pressed"));
             RegisterCallback<ClickEvent>(evt => { Application.OpenURL(KofiUrl); evt.StopPropagation(); });
         }
 
         private static Label Text(string text)
         {
             var label = new Label(text);
-            label.AddToClassList("orb-credit__text");
+            label.AddToClassList("orbiters-credit__text");
             return label;
         }
 

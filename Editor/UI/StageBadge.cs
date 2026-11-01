@@ -16,17 +16,17 @@ namespace Orbiters.Toolkit.Editor
         {
             var sheet = AssetDatabase.LoadAssetAtPath<StyleSheet>(StyleSheetPath);
             if (sheet) styleSheets.Add(sheet);
-            AddToClassList("orb-stage");
+            AddToClassList("orbiters-stage");
             pickingMode = PickingMode.Ignore;
             SetStage(stage);
         }
 
         public void SetStage(FeatureStage stage)
         {
-            RemoveFromClassList("orb-stage--" + Name(Stage));
+            RemoveFromClassList("orbiters-stage--" + Name(Stage));
             Stage = stage;
             text = stage == FeatureStage.Stable ? string.Empty : Name(stage);
-            AddToClassList("orb-stage--" + Name(stage));
+            AddToClassList("orbiters-stage--" + Name(stage));
             style.display = stage == FeatureStage.Stable ? DisplayStyle.None : DisplayStyle.Flex;
         }
 

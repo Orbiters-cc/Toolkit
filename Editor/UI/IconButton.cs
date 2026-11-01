@@ -24,19 +24,19 @@ namespace Orbiters.Toolkit.Editor
             this.tooltip = tooltip;
             var sheet = AssetDatabase.LoadAssetAtPath<StyleSheet>(StyleSheetPath);
             if (sheet) styleSheets.Add(sheet);
-            AddToClassList("orb-icon-button");
+            AddToClassList("orbiters-icon-button");
             focusable = true;
-            Icon = new VectorIcon(glyph); Icon.AddToClassList("orb-icon-button__icon"); Add(Icon);
-            Label = new Label(label); Label.AddToClassList("orb-icon-button__label"); Label.pickingMode = PickingMode.Ignore; Add(Label);
+            Icon = new VectorIcon(glyph); Icon.AddToClassList("orbiters-icon-button__icon"); Add(Icon);
+            Label = new Label(label); Label.AddToClassList("orbiters-icon-button__label"); Label.pickingMode = PickingMode.Ignore; Add(Label);
             RegisterCallback<PointerDownEvent>(evt =>
             {
                 if (evt.button != 0 || !enabledInHierarchy) return;
-                AddToClassList("orb-icon-button--pressed");
+                AddToClassList("orbiters-icon-button--pressed");
                 pressed?.Invoke();
                 evt.StopPropagation();
             });
-            RegisterCallback<PointerUpEvent>(_ => RemoveFromClassList("orb-icon-button--pressed"));
-            RegisterCallback<PointerLeaveEvent>(_ => RemoveFromClassList("orb-icon-button--pressed"));
+            RegisterCallback<PointerUpEvent>(_ => RemoveFromClassList("orbiters-icon-button--pressed"));
+            RegisterCallback<PointerLeaveEvent>(_ => RemoveFromClassList("orbiters-icon-button--pressed"));
             RegisterCallback<KeyDownEvent>(evt =>
             {
                 if (evt.keyCode != KeyCode.Return && evt.keyCode != KeyCode.KeypadEnter && evt.keyCode != KeyCode.Space) return;
@@ -48,7 +48,7 @@ namespace Orbiters.Toolkit.Editor
         public void SetOn(bool on)
         {
             On = on;
-            EnableInClassList("orb-icon-button--on", on);
+            EnableInClassList("orbiters-icon-button--on", on);
         }
     }
 }

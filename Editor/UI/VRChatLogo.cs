@@ -26,7 +26,7 @@ namespace Orbiters.Toolkit.Editor
             var image = Texture;
             if (image == null) return null;
             var logo = new Image { image = image, scaleMode = ScaleMode.ScaleToFit, pickingMode = PickingMode.Ignore };
-            logo.AddToClassList("orb-vrchat-logo");
+            logo.AddToClassList("orbiters-vrchat-logo");
             logo.style.width = Width;
             logo.style.height = Height;
             logo.style.flexShrink = 0;

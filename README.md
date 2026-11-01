@@ -2,22 +2,22 @@
 
 ## 0.4.10 — 2026-10-29
 
-- **Controller input for avatars** (contracts' Docs/orb-input.md): N4N0 declares each hand's touchpad and thumbstick
+- **Controller input for avatars** (contracts' Docs/n4n0-input.md): N4N0 declares each hand's touchpad and thumbstick
   as its local parameters, which VRChat gives avatars none of: `N4N0/Touchpad/Left/X`, `/Y` (−1 to 1, 0 untouched),
   `/Touch`, `/Click`, `/Force` (0 to 1) and the same for `Right`; `N4N0/Stick/Left/X`, `/Y`, `/Touch`, `/Click` and the
-  same for `Right` (`OrbInstaller.TouchpadParameters`, `StickParameters`, `InputParameters`). Orbiters - N4N0 (its N4N0 page ›
+  same for `Right` (`N4N0Installer.TouchpadParameters`, `StickParameters`, `InputParameters`). Orbiters - N4N0 (its N4N0 page ›
   On your avatar › Controller input, on by default) reads them through SteamVR and sends them to an avatar that lists them. Use
   them in your own animators by adding parameters of the same names; they cost no synced bits. Takes a new N4N0 from the
   gallery and an upload.
 - **N4N0 brings a world's video screen to its projected screen** (screen version 14, screen files revision 20; contracts'
-  Docs/orb.md, Screen mirror). Avatars cannot read a world's textures, so N4N0 carries a small camera
-  (`OrbInstaller.Mirror`, `Shown/Mirror`): More › Screen mirror (page 39's card) opens page 38, the camera follows its
+  Docs/n4n0.md, Screen mirror). Avatars cannot read a world's textures, so N4N0 carries a small camera
+  (`N4N0Installer.Mirror`, `Shown/Mirror`): More › Screen mirror (page 39's card) opens page 38, the camera follows its
   owner's eyes for 3 seconds and then stays where they looked, frozen in the world, and the page shows its 384 × 216
   picture (`_Mirror`, drawn while the camera's layer sets `_MirrorLive`, as dots in the retro look) with Aim, Zoom in,
   Zoom out and Stop. It renders on its wearer's client only, every other frame, only while the page shows, players,
   menus and mirror reflections left out; everyone else sees the page's placeholder. Three local parameters
   (`N4N0/Mirror/On`, `Placed`, `Zoom`), no synced bit; PC only (phones lose it with the PC N4N0), and the build points
-  each camera at its screen's picture or leaves it out of an older screen (`OrbMirrorHook`). Options folder Menu 21.
+  each camera at its screen's picture or leaves it out of an older screen (`N4N0MirrorHook`). Options folder Menu 21.
 - **The back of N4N0's screen shows Orbiters - N4N0's icon** (the N4N0 mark on its night square, in the retro look the
   mark in brackets) instead of the Orbiters logo, as the SteamVR overlay's back does.
 
@@ -32,7 +32,7 @@
 - **Orbiters - N4N0 and VRChat thumbnails for worlds too.** `OrbitersDesktopApp` (whether Orbiters - N4N0 is installed and
   runs, `StartInTray`, `InstallAndOpenAsync`) moved to the generic editor assembly (`Orbiters.Toolkit.Editor.Net`), so
   world tools use it (My World's Publish 3D captures); it also finds the installed app itself (`Installed`, `Override`
-  for a development build, which was `OrbInstaller.DesktopApp`). `VrcThumbnailHash` (the MD5 VRChat compares a
+  for a development build, which was `N4N0Installer.DesktopApp`). `VrcThumbnailHash` (the MD5 VRChat compares a
   thumbnail upload by, from My Avatar) is public in `Orbiters.Toolkit.Editor` for avatars and worlds alike.
 
 - **N4N0's capture kit records whatever VRChat's camera looks at.** Its strip, skeleton band and depth frames were in a
@@ -122,7 +122,7 @@
   the screen's back shows N4N0's face logo. N4N0's language files have the new text (`card.takeBack`).
 - **Full pictures' diagnostics**: with Orbiters - N4N0's N4N0 › Testing › Picture diagnostics on, the screen (which
   also reads CRT A now) frames each picture in the colour of why it shows what it shows and draws the textures' state
-  in a row of cells at its bottom left (contracts `Docs/orb-picture.md`, Diagnostics). A picture shows once CRT B ran:
+  in a row of cells at its bottom left (contracts `Docs/n4n0-picture.md`, Diagnostics). A picture shows once CRT B ran:
   B's heartbeat is no longer compared with the screen's clock (Custom Render Texture updates and cameras need not share
   `_Time`).
 - N4N0's options folder is `Menu 16`, its screen revision 13.
@@ -135,13 +135,13 @@
   Hidden builds run each VRCFury step inside its build context (`VrcFury.BuildContext`, `VrcFury.RunMain` for direct
   callers), and Armature Link targets fall back to related bones and resolve offsets from the avatar root as VRCFury
   does. Needs VRCFury 1.1434 or later where VRCFury is installed.
-- **N4N0's new look** (`OrbInstaller.Model`): a black sphere with white patterns, its face on the front (two wide eyes
+- **N4N0's new look** (`N4N0Installer.Model`): a black sphere with white patterns, its face on the front (two wide eyes
   wrapping round its sides and a small mouth) and the N4N0 mark under a triangle's three corners on the back. Its
   expressions are the model's blendshapes (Surprised, Annoyed, Happy, Thinking, Sleeping, Blink, Talk), which N4N0's
   states set: it blinks now and then, its mouth moves while it talks, its eyes widen with its owner's voice while it
   listens; everyone sees it face ahead, its owner sees it turn to them. One VRChat/Mobile/Standard Lite material (two
   4 × 4 pictures: a dark shell, white patterns that glow alone), the same mesh and material for the phone N4N0, about
-  1,600 triangles; the Light option tints the patterns' glow, annoyed turns it red. The shader-drawn orb and the
+  1,600 triangles; the Light option tints the patterns' glow, annoyed turns it red. The shader-drawn sphere and the
   phones' face picture are gone.
 - **Customizable parts** (`ItemParts`): a creator's `<Prefab>.parts.json` beside the prefab names parts others may make
   variants of (values on materials, a model, texts), each limited to the files the creator allows (pictures, one FBX,
@@ -156,7 +156,7 @@
   rides the head any more.
 - **Out of recordings and 3D pictures**: while N4N0's capture kit records (`N4N0/Capture/Record`), its owner's client
   hides N4N0's screen, handle, link card, text panel and desktop dot, and shows them again after, the menu left open.
-- **N4N0's full pictures** (screen version 8; Orbiters contracts, `Docs/orb-picture.md`): the screen shows the
+- **N4N0's full pictures** (screen version 8; Orbiters contracts, `Docs/n4n0-picture.md`): the screen shows the
   pictures Orbiters - N4N0 sends at the size of their place (the results' thumbnails at 128 × 72, the music's art and
   the link card's picture at 256 × 144) over the small thumbnails they belong to, for everyone once they arrived: the
   owner's first, through 64 local float parameters over OSC (`N4N0/Picture/Value0` to `Value63` and
@@ -166,21 +166,21 @@
   after) and two Custom Render Textures in its screen folder: CRT A (512 × 256) keeps each picture's stream and decodes
   one picture at a time, CRT B (512 × 290) keeps the decoded pictures with their signatures and a heartbeat. Their
   shaders are written from the contracts' `OrbitersPicture.cginc`, every chunk value in a register of its own
-  (`OrbPicturesHook` gives the bridge the screen's own folder before each upload). A picture shows only over the
+  (`N4N0PicturesHook` gives the bridge the screen's own folder before each upload). A picture shows only over the
   thumbnail whose first 8 bytes it carries, while CRT B is alive, and while a screen pixel spans under two of its
-  texels; the thumbnail shows otherwise. Tests: `OrbPictureTests` (a contracts vector's chunks through the bridge and
+  texels; the thumbnail shows otherwise. Tests: `N4N0PictureTests` (a contracts vector's chunks through the bridge and
   both CRTs' shaders into CRT B, pixel for pixel).
 - N4N0's options folder is `Menu 15`, its screen revision 11.
 
 ## 0.4.6 — 2026-10-26
 
-- **N4N0's capture kit and camera rig** (`OrbInstaller.Capture`; Orbiters contracts 0.7.0, `Docs/rig-frames.md`,
+- **N4N0's capture kit and camera rig** (`N4N0Installer.Capture`; Orbiters contracts 0.7.0, `Docs/rig-frames.md`,
   N4N0's capture kit): what lets Orbiters - N4N0 record a VRChat world through VRChat's camera (3D pictures,
   recordings) is part of N4N0 now, instead of Mixer's "Orbiters Capture Kit" with its own Action Menu toggles. N4N0
   carries the rig (six square 90° cameras into 512² HDR render textures, and the renderer of their rig frames) and the
   kit's renderer under `Capture`, beside `Shown` (hiding N4N0 leaves capture working); the kit's skinned helper mesh,
   one triangle per humanoid bone, is made for the avatar's armature as the avatar is built for upload
-  (`OrbCaptureHook`, after the platform's N4N0 is kept and before VRCFury; its files in
+  (`N4N0CaptureHook`, after the platform's N4N0 is kept and before VRCFury; its files in
   `Assets/Orbiters/N4N0/Capture kit/<avatar>`), and phones' builds leave the capture part out. The contracts' shaders
   are copied into N4N0's folder under their own names (`Hidden/Orbiters/N4N0 Capture Kit`, `… Capture Rig`), their
   includes written into them. Orbiters - N4N0 drives them over OSC through local, unsynced, unsaved parameters (no
@@ -199,7 +199,7 @@
   back before its owner's eyes only after 0.4 s out of their sight. Its handle is a pickup latched to the palm, as the
   Hand screen's is. Its size is the synced `N4N0/Screen/Size`, which Orbiters - N4N0 sets. N4N0 floats lazier and
   smoother.
-- **N4N0's link card is an object of its own** (`OrbInstaller.Card`): Drop puts the card out (synced `N4N0/Card/Out`)
+- **N4N0's link card is an object of its own** (`N4N0Installer.Card`): Drop puts the card out (synced `N4N0/Card/Out`)
   in front of its owner, projected by N4N0's beam for 1.5 s. It then stays where it is in the world, apart from N4N0
   and the menu. Anyone's pickup grab moves it (its owner's hand latches it, `N4N0/Card/HeldLeft`/`HeldRight`), and
   grabbing it still copies its link. It draws with the screen's mesh and materials, with a memory of its own that
@@ -229,10 +229,10 @@
   Needs the Orbiters server's new sign-in; older Toolkit versions can no longer sign in once it is live.
 - **N4N0's menu looks projected and follows its owner**, as N4N0's speech panel does: the page's dark card is a tinted,
   see-through plate with a bright edge, a glow past it, a light from the top and faint scan lines, front and back,
-  and N4N0's beam reaches its corners (a second part of the now skinned screen, `OrbBeam`). It no longer freezes in
+  and N4N0's beam reaches its corners (a second part of the now skinned screen, `N4N0Beam`). It no longer freezes in
   the world: it hangs from a PhysBone swing rooted at the eyes (`Head/Screen swing`), lagging behind the head and
   the avatar's turns and settling in front of them. The retro look keeps its own tube.
-- **Link cards** (`OrbInstaller.Card`): Orbiters - N4N0 drops the screen in the world with a link on it; it stays
+- **Link cards** (`N4N0Installer.Card`): Orbiters - N4N0 drops the screen in the world with a link on it; it stays
   where it is for its owner while `N4N0/Screen/Drop` is on, even in VR without Replace and through Menu off, and for
   everyone else from text pointer 253 until 254. Meanwhile it carries an `N4N0Card` contact sender, which every
   N4N0's hand receivers feel (`N4N0/Card/TouchL`, `TouchR`, local): a grab copies the link. Screen blocks now stay
@@ -240,11 +240,11 @@
 - **Screen version 5**: the seven-tile Home (with States), the States page and the link card's page, from
   Orbiters - N4N0's new pictures (16 page slices). Screen files revision 7, options files in `N4N0/Menu 12`. An N4N0
   built before this version must be updated as a whole (My Avatar) before its options change.
-- **N4N0 on Quest** (`OrbInstaller.Mobile`): every N4N0 built from now on carries a mobile N4N0 beside the PC one
-  (`Mobile`, off in the editor), and a build step before VRCFury (`OrbPlatformHook`) keeps it in Android and iOS builds
-  and the PC N4N0 in PC builds, which stay as before: one avatar uploads to both. The mobile N4N0 is one skinned orb
+- **N4N0 on Quest** (`N4N0Installer.Mobile`): every N4N0 built from now on carries a mobile N4N0 beside the PC one
+  (`Mobile`, off in the editor), and a build step before VRCFury (`N4N0PlatformHook`) keeps it in Android and iOS builds
+  and the PC N4N0 in PC builds, which stay as before: one avatar uploads to both. The mobile N4N0 is one skinned sphere
   (384 triangles, one bone) with one `VRChat/Mobile/Toon Standard` material. Its face comes from `N4N0 faces.png`
-  (3 × 3 cells of 256², drawn from the orb shader's eyes; the animator moves the texture's offset with `N4N0/State`,
+  (3 × 3 cells of 256², drawn from the N4N0 shader's eyes; the animator moves the texture's offset with `N4N0/State`,
   and Idle, Listening and Talking blink); it glows, bobs and hops as the PC N4N0 does, takes the Light option's colour
   at its brightness (green while off, red while annoyed), follows the head without the tether (no PhysBone), looks at
   its owner on their own client and ahead for everyone else, and its owner touches it (`N4N0/Touch`, local). A mobile
@@ -268,14 +268,14 @@
 
 ## 0.4.3 — 2026-10-24
 
-- **N4N0** is Orb's new name in everything the Toolkit puts in a project or on an avatar: the prefab and its object,
-  files and folders (`Assets/Orbiters/N4N0/…`), shaders, menu and parameters (`N4N0/…`), contact tags, screen pictures
-  and texts. Orbiters desktop is Orbiters - N4N0, and texts name the Mixer console, Mixer Git and Avatar Gizmos (were the
-  Logger, Unit Git and XRay Gizmos). The code keeps its names (`OrbInstaller`, `OrbState`, the `Orb*` templates,
-  `IsOrb`, the avatar manifest's `orb` keys); the sphere on the tether's tip is `Ball`. An avatar with Orb needs N4N0
+- **N4N0** is the companion's new name in everything the Toolkit puts in a project or on an avatar: the prefab and its
+  object, files and folders (`Assets/Orbiters/N4N0/…`), shaders, menu and parameters (`N4N0/…`), contact tags, screen
+  pictures and texts. Orbiters desktop is Orbiters - N4N0, and texts name the Mixer console, Mixer Git and Avatar Gizmos
+  (were the Logger, Unit Git and XRay Gizmos). The code kept its former names (its source files and types took N4N0's
+  later); the sphere on the tether's tip is `Ball`. An avatar with the companion under its former name needs N4N0
   installed again.
 - **Colour thumbnails** on N4N0's projected screen (contracts 0.6.0): 64 × 36 pictures, blurred as their first layer
-  arrives and sharper with each next one, decoded by straight-line shader code generated from `OrbThumbnail.json`
+  arrives and sharper with each next one, decoded by straight-line shader code generated from `N4N0Thumbnail.json`
   (about 0.4 ms per million pixels at 128 bytes on an RTX 4080). A **Thumbnail size** option on N4N0's card picks
   72 bytes (as before) or 128 (sharper, slower to arrive, with 8 text slots or more).
 - A **Light** option on N4N0's card: a point light under it in eight colours at a synced level, N4N0 › Light in the
@@ -295,73 +295,73 @@
 
 ## 0.4.2 — 2026-10-21
 
-- **Orb**, the Orbiters companion (`OrbInstaller.CreatePrefab(folder, textSync)`, Orbiters contracts' Docs/orb.md): a
-  small glowing orb in Orbiters green with simple eyes that floats beside its owner's head, lazily and with a spring (a
+- **N4N0**, the Orbiters companion (`N4N0Installer.CreatePrefab(folder, textSync)`, Orbiters contracts' Docs/n4n0.md): a
+  small glowing sphere in Orbiters green with simple eyes that floats beside its owner's head, lazily and with a spring (a
   two-link PhysBone tether anyone can grab and let spring back), and the text panel it projects in front of its owner.
-  Orbiters desktop drives it over OSC: `Orb/State` shows what it is doing (idle with a slow bob and blinks, listening
+  Orbiters desktop drives it over OSC: `N4N0/State` shows what it is doing (idle with a slow bob and blinks, listening
   brighter with wide eyes glowing up with its owner's voice, thinking with lidded eyes and a dashed ring turning around
   it, talking with the projector beam to the panel, asleep dim with closed eyes, happy arches, annoyed red slits,
   surprised round eyes and a hop: one shader, the eyes morph from state to state), and the panel shows 4 rows of 32
-  glyphs sent a block of 4, 8 or 16 cells at a time (`Orb/Text/Pointer`, `Orb/Text/Sync*`, KillFrenzy Avatar Text's
-  protocol: pointer 255 clears, the cells stay). Its owner talks to it by holding the menu's Talk button (`Orb/Talk`) or
-  touching it (`Orb/Touch`, their own hands, on their client only). Every parameter is global in its VRCFury Full
+  glyphs sent a block of 4, 8 or 16 cells at a time (`N4N0/Text/Pointer`, `N4N0/Text/Sync*`, KillFrenzy Avatar Text's
+  protocol: pointer 255 clears, the cells stay). Its owner talks to it by holding the menu's Talk button (`N4N0/Talk`) or
+  touching it (`N4N0/Touch`, their own hands, on their client only). Every parameter is global in its VRCFury Full
   Controller, so OSC finds them by the contract's names; synced bits 1 + 8 + 1 + 8 + 8 per sync value (82 with 8).
   The cells are kept by one direct blend tree (Write Defaults on, as VRCFury keeps it), whatever the avatar's Write
   Defaults: VRCFury turns a Full Controller's layers to the avatar's setting, which would wipe cells kept with Write
   Defaults off. The panel is only as large as its text (a dark plate with a green edge, white glyphs with a dark outline),
-  sits low and to the orb's side of its owner's view, out of its middle and below the face as people in front see it,
+  sits low and to the N4N0's side of its owner's view, out of its middle and below the face as people in front see it,
   reads the right way round from behind and in mirrors, and grows for viewers further away about its corner nearest the
   face. Its atlas (255 glyphs: ASCII, Western European accents, Russian Cyrillic, symbols; drawn by the contracts' tool
   from Cascadia Mono and Noto Sans JP) and both shaders are copied into the prop's folder; `Bind` fits it to the avatar's
   head bone, its facing and its eye height. The text shader derives from KillFrenzy Avatar Text's (MIT), see
   `Editor/THIRD_PARTY_NOTICES.md`.
-- **Orb's text slots on an avatar** (`OrbInstaller.SetTextSync`, `TextSyncOf`): a placed orb switches between 4 and
+- **N4N0's text slots on an avatar** (`N4N0Installer.SetTextSync`, `TextSyncOf`): a placed N4N0 switches between 4 and
   8 text sync values (50 or 82 synced bits; a full panel in about 10 or 5 s). Its VRCFury Full Controller takes the
-  controller and parameters made once for that number in `Assets/Orbiters/Orb/Text slots N` and its global
-  parameters follow, with Undo; the orb's own files (a gallery's) stay as they are.
-- **Orb's Walk boost radial** (`OrbInstaller.SetOptions(orb, textSync, walkBoost)`, `OptionsOf`): an option on the orb's
-  card adds Orb › Walk boost to its menu (`Orb/WalkBoost`, a local saved float, no synced bits), which sets Orbiters
+  controller and parameters made once for that number in `Assets/Orbiters/N4N0/Text slots N` and its global
+  parameters follow, with Undo; the N4N0's own files (a gallery's) stay as they are.
+- **N4N0's Walk boost radial** (`N4N0Installer.SetOptions(n4n0, textSync, walkBoost)`, `OptionsOf`): an option on the N4N0's
+  card adds N4N0 › Walk boost to its menu (`N4N0/WalkBoost`, a local saved float, no synced bits), which sets Orbiters
   desktop's walk boost. Each choice of text slots and radial has its shared controller, parameters and menu in
-  `Assets/Orbiters/Orb/Text slots N[ + walk boost]`.
-- **Orb's 3D picture button** (`Orb/Photo3D`, local): Orb › 3D picture asks Orbiters desktop to record a second of
+  `Assets/Orbiters/N4N0/Text slots N[ + walk boost]`.
+- **N4N0's 3D picture button** (`N4N0/Photo3D`, local): N4N0 › 3D picture asks Orbiters desktop to record a second of
   VRChat's camera swinging around its subject and reconstruct it.
-- **Orb › Call** (`Orb/Call/Menu`, `Pick`, `Go`, `End`, all local): the contacts on the panel, a radial choosing one, call
-  or answer, decline or hang up, for Orbiters desktop's calls (contracts `Docs/orb-calls.md`). Orbs switched after this get
-  their options' files in `Assets/Orbiters/Orb/Menu 3/` (earlier ones keep theirs).
-- **Orb's projected screen** (on every orb; contracts Docs/orb.md, Screen): Orb's menu (fast walk, YouTube, calls, a
+- **N4N0 › Call** (`N4N0/Call/Menu`, `Pick`, `Go`, `End`, all local): the contacts on the panel, a radial choosing one, call
+  or answer, decline or hang up, for Orbiters desktop's calls (contracts `Docs/n4n0-calls.md`). N4N0s switched after this get
+  their options' files in `Assets/Orbiters/N4N0/Menu 3/` (earlier ones keep theirs).
+- **N4N0's projected screen** (on every N4N0; contracts Docs/n4n0.md, Screen): N4N0's menu (fast walk, YouTube, calls, a
   3D picture) opens on a screen in front of its owner in VRChat's desktop mode (`VRMode` 0) and, in VR, with "Replace
-  Orbiters overlay" on the orb's card (`OrbInstaller.SetOptions(orb, textSync, walkBoost, replace)`: the local
-  `Orb/Screen/Replace`'s default, never saved); in VR without it the animator keeps the screen closed and Orbiters
+  Orbiters overlay" on the N4N0's card (`N4N0Installer.SetOptions(n4n0, textSync, walkBoost, replace)`: the local
+  `N4N0/Screen/Replace`'s default, never saved); in VR without it the animator keeps the screen closed and Orbiters
   desktop's SteamVR overlay shows the menu. It shows the page pictures Orbiters
-  desktop draws (`OrbScreenPages.png.bytes`, `OrbScreenLayout.png.bytes`, from `orbiters-desktop --orb-menu`) and draws
+  desktop draws (`N4N0ScreenPages.png.bytes`, `N4N0ScreenLayout.png.bytes`, from `orbiters-desktop`'s menu pages option, `N4N0Installer.MenuPagesOption`) and draws
   over them what the desktop sends: texts, black and white thumbnails, hovered, pressed, chosen and hidden buttons. Its
   744 bytes of memory sit two to an animated parameter, written for its owner through local parameters (16 a block)
   and for everyone else through the text panel's synced channel (no synced bits of its own). It appears 42 cm before
   the eyes and stays frozen in the world while open; eight local contact receivers (four per index finger, not
-  counted in VRChat's performance rank) tell the desktop where a finger touches it. A new orb's screen files are in
-  its own folder; an orb made without a screen gets one (files shared in `Assets/Orbiters/Orb/Screen 2/`) when its
-  options change; options' files are now in `Assets/Orbiters/Orb/Menu 7/`. Avatar manifests say `orb.screen`.
-- **Orb's menu in desktop mode**: look at a button and left-click, as VRChat's own desktop menus work. Two local
-  contact senders on the head bone (the eyes and a point 38 cm ahead on the line of sight, `OrbEye`/`OrbGaze`) and
-  four receivers each on the screen (`Orb/Screen/Eye*`, `Orb/Screen/Gaze*`) tell Orbiters desktop the line of sight;
+  counted in VRChat's performance rank) tell the desktop where a finger touches it. A new N4N0's screen files are in
+  its own folder; an N4N0 made without a screen gets one (files shared in `Assets/Orbiters/N4N0/Screen 2/`) when its
+  options change; options' files are now in `Assets/Orbiters/N4N0/Menu 7/`. Avatar manifests give its `screen` version.
+- **N4N0's menu in desktop mode**: look at a button and left-click, as VRChat's own desktop menus work. Two local
+  contact senders on the head bone (the eyes and a point 38 cm ahead on the line of sight, `N4N0Eye`/`N4N0Gaze`) and
+  four receivers each on the screen (`N4N0/Screen/Eye*`, `N4N0/Screen/Gaze*`) tell Orbiters desktop the line of sight;
   a small dot shows where it points while the menu is open (its owner only, desktop mode only). Local contacts: nothing
   in VRChat's performance rank.
-- **Orb's options survive an upload**: VRCFury reverts every override of its components in a prefab instance when an
-  upload starts, so the options set on a placed orb (text slots, walk boost, Replace Orbiters overlay) came back off
-  after each upload. `SetOptions` now replaces the prefab's Full Controller by a copy of the orb's own (the prefab's
+- **N4N0's options survive an upload**: VRCFury reverts every override of its components in a prefab instance when an
+  upload starts, so the options set on a placed N4N0 (text slots, walk boost, Replace Orbiters overlay) came back off
+  after each upload. `SetOptions` now replaces the prefab's Full Controller by a copy of the N4N0's own (the prefab's
   removed, an override VRCFury keeps). `AttachmentHooks.CarryOptions(from, to)` sets a placed prop's options as an
   older copy's are, by label and choice.
-- **Orb's text no longer comes out scrambled** (`OrbInstaller.ValueLag`): VRChat could apply the sync values a frame
+- **N4N0's text no longer comes out scrambled** (`N4N0Installer.ValueLag`): VRChat could apply the sync values a frame
   before the pointer sent with them, so each block of the panel was written with the next one's letters (chunks of
   text in the wrong places). The panel reads the values two updates after the pointer (three against one), and
   everyone else's screen reads its bytes from those late values too. Orbiters desktop also never changes a pointer and
   its values in one step any more. The 3D picture page's cube no longer overlaps the 10 s timer button.
-- **Orb › Menu** (`Orb/Menu`, local, no synced bits): a toggle that opens Orb's menu directly (the projected screen
-  when the orb has one, else Orbiters desktop's SteamVR overlay), where the other triggers (the binding, the wake word,
-  a hand on the orb) all go through Orbiters desktop. With the screen, the owner's screen shows the moment it is on: a
-  screen that stays blank says the desktop does not answer. Options' files in `Assets/Orbiters/Orb/Menu 6/`.
+- **N4N0 › Menu** (`N4N0/Menu`, local, no synced bits): a toggle that opens N4N0's menu directly (the projected screen
+  when the N4N0 has one, else Orbiters desktop's SteamVR overlay), where the other triggers (the binding, the wake word,
+  a hand on the N4N0) all go through Orbiters desktop. With the screen, the owner's screen shows the moment it is on: a
+  screen that stays blank says the desktop does not answer. Options' files in `Assets/Orbiters/N4N0/Menu 6/`.
 - **Attachment options** (`AttachmentHooks.RegisterOptions`, `Options`, `AttachmentOption`): a prop offers a few
-  settings once it is on an avatar, which tools show on its card (Orb's text slots in My Avatar).
+  settings once it is on an avatar, which tools show on its card (N4N0's text slots in My Avatar).
 - `AvatarObjectUpdate` / `IAvatarObjectUpdates` (`AvatarObjectTools.RegisterUpdates`, `UpdateOf`): a tool tells views of
   an avatar's objects (Mixer's Hierarchy) that a newer version waits for one of them (My Avatar's gallery items, MCB's
   custom base), how its update is going, and starts it as its own Update button does.
@@ -370,7 +370,7 @@
   `%LOCALAPPDATA%\Orbiters\Avatars\<blueprint id>.json`: the expression parameters with their final names (VRCFury's
   VF##_ ones), every control of the menu by its labels (each submenu once, rich text removed), what each sets, and tags
   from the words of labels, folders and parameter names in English, French, Spanish, German and Japanese (clothing,
-  accessory, hair, body, face, nsfw kept to plain words, pose, emote, locomotion, prop, effect, system, orb), and the Orb
+  accessory, hair, body, face, nsfw kept to plain words, pose, emote, locomotion, prop, effect, system, N4N0), and the N4N0
   prop's text sync count. A Build & Test build also writes it as `local_sdk_<avatar name>-<hash>.json`: as in contracts
   0.4.0, a name whose id had characters other than letters, digits, _ and - replaced ends with the FNV-1a hash of the
   id, so avatars named "ネコ" and "イヌ" get files of their own and Orbiters desktop finds the one VRChat loaded. An avatar
@@ -380,9 +380,9 @@
 - `VrcFury.IWriter.FullController` takes global parameters (VRCFury's `AddGlobalParam`): they keep their names in the
   avatar. `HeldPropRig.Install` passes them on; `HeldPropRig.Parameter` makes ints, floats, saved and defaults too;
   `CopyFile` copies a binary template (a picture) into a prop's folder; `Quiet` is shared by the glowing props.
-- `VrcParameters.OscDriven` counts `Orb/…`: optimizers leave Orb's parameters alone.
+- `VrcParameters.OscDriven` counts `N4N0/…`: optimizers leave N4N0's parameters alone.
 - `Editor/THIRD_PARTY_NOTICES.md` lists what ships with the Toolkit under its own license: Meshia Mesh Simplification
-  (AlterMesh), KillFrenzy Avatar Text (Orb's text shader) and the fonts drawn into Orb's glyph atlas.
+  (AlterMesh), KillFrenzy Avatar Text (N4N0's text shader) and the fonts drawn into N4N0's glyph atlas.
 
 ## 0.4.1 — 2026-10-21
 
@@ -1017,21 +1017,24 @@ attaches are shown by name match.
 
 ## N4N0
 
-`OrbInstaller.CreatePrefab(folder, textSync = 8)` builds N4N0, the Orbiters companion, into a folder below Assets/ (the
+`N4N0Installer.CreatePrefab(folder, textSync = 8)` builds N4N0, the Orbiters companion, into a folder below Assets/ (the
 gallery packages each version in a folder of its own): the prefab, its controller, menu (**N4N0** › Show N4N0, Talk) and
-parameters, its two shaders and its glyph atlas (copied from the Toolkit's `Orb.shader.txt`, `OrbText.shader.txt` and
-`OrbText.png.bytes`, so the package refers to no Toolkit file), meshes and materials. VRCFury merges it (a Full
+parameters, its two shaders and its glyph atlas (copied from the Toolkit's `N4N0.shader.txt`, `N4N0Text.shader.txt` and
+`N4N0Text.png.bytes`, so the package refers to no Toolkit file), meshes and materials. VRCFury merges it (a Full
 Controller whose parameters are global); `Bind`, run by `AttachmentHooks` when it is attached, ties it to the avatar's
 head bone, turns it with the avatar and sizes it by the avatar's eye height.
 
-N4N0 was called Orb. Its code keeps that name (`OrbInstaller`, `OrbState`, the `Orb*` template files, `IsOrb`, the
-avatar manifest's `orb` keys and tag); everything it puts in a project or on an avatar says N4N0: the prefab and its
-object, files and folders (`Assets/Orbiters/N4N0/…`), shaders (`Orbiters/N4N0`, `Orbiters/N4N0 Text`, `Orbiters/N4N0
-Screen (…)`), menu and parameters (`N4N0/…`) and contact tags (`N4N0PointerL`/`R`, `N4N0Eye`, `N4N0Gaze`). The sphere
-on the tether's tip is `Ball`.
+Its code (`N4N0Installer`, `N4N0State`, the `N4N0*` template files, `IsN4N0`) and everything it puts in a project or on
+an avatar say N4N0: the prefab and its object, files and folders (`Assets/Orbiters/N4N0/…`), shaders (`Orbiters/N4N0`,
+`Orbiters/N4N0 Text`, `Orbiters/N4N0 Screen (…)`), menu and parameters (`N4N0/…`) and contact tags (`N4N0PointerL`/`R`,
+`N4N0Eye`, `N4N0Gaze`). The sphere on the tether's tip is `Ball`. Only names that are already in projects, on avatars or
+on the wire keep the companion's former name, each a single constant: the avatar manifest's key and tag
+(`AvatarManifestTags.N4N0Wire`), the screen shader's revision tag (`N4N0Installer.ScreenRevisionTag`), the mobile N4N0's
+object (`N4N0Installer.MobileN4N0Name`), Orbiters - N4N0's menu pages option (`N4N0Installer.MenuPagesOption`) and the
+preview file's first bytes (`PreviewFile`).
 
-What Orbiters - N4N0 sends is the contract in Orbiters contracts' Docs/orb.md: `N4N0/Visible` (saved, on by default),
-`N4N0/State` (`OrbState`: idle, listening, thinking, talking, sleeping, happy, annoyed, surprised), `N4N0/Text/Visible`,
+What Orbiters - N4N0 sends is the contract in Orbiters contracts' Docs/n4n0.md: `N4N0/Visible` (saved, on by default),
+`N4N0/State` (`N4N0State`: idle, listening, thinking, talking, sleeping, happy, annoyed, surprised), `N4N0/Text/Visible`,
 `N4N0/Text/Pointer` and `N4N0/Text/Sync0`… (a block of 4, 8 or 16 of the panel's 128 cells per pointer; 255 clears), and
 it reads `N4N0/Talk` (the menu's button) and `N4N0/Touch` (the owner's hands, local). Synced bits: 1 + 8 + 1 + 8 + 8 per
 sync value.
@@ -1064,18 +1067,18 @@ sync value.
 - Seen from behind (by the people around, or in a mirror), N4N0's screen shows its back: N4N0 over "N4N0 menu" and "look
   at the other side", slice 0 of the pages, drawn by Orbiters - N4N0 as its SteamVR overlay's back. Which side the
   camera is on comes from its place, not from the face drawn (VRChat's mirrors turn that round). The shader carries its
-  files' revision (tag `OrbScreen`, 6): changing N4N0's options swaps a screen of an older one for these. Elements
+  files' revision (tag `N4N0Screen`, 6): changing N4N0's options swaps a screen of an older one for these. Elements
   the desktop greys out (memory bytes 21 to 23: fast walk while VRChat runs in desktop mode, "Only in VR") fade into
   the card.
 - A **Look** option on N4N0's card (`SetLook`, `RetroOf`): Orbiters' own, or **Retro**, a cassette-futurism terminal
-  (contracts' Docs/orb.md, Retro look): its own page pictures (`OrbScreenPagesRetro.png.bytes`, cut corners, bracketed
+  (contracts' Docs/n4n0.md, Retro look): its own page pictures (`N4N0ScreenPagesRetro.png.bytes`, cut corners, bracketed
   icons, monospace capitals, a dot grid, a double frame), the phosphor palette, hover outlines, pressed elements
   inverted, chosen ones in brackets, scanlines, and thumbnails as 96 × 54 green dots in four dithered steps, read from
   the same bytes as Orbiters' own look. Text arriving a block at a time reads as typed out. It is the screen's material
   alone ("N4N0 screen retro" beside each size's), kept through the other options: no parameter, no synced bit. The
-  option shows a picture of each look (`AttachmentOption.ChoicePictures`, from `orbiters-desktop --orb-menu`), and
+  option shows a picture of each look (`AttachmentOption.ChoicePictures`, from `orbiters-desktop`'s menu pages option, `N4N0Installer.MenuPagesOption`), and
   Orbiters - N4N0's overlay has the same look as a setting of its own.
-- **Controller input** (contracts' Docs/orb-input.md): each hand's touchpad and thumbstick as N4N0's local, unsaved
+- **Controller input** (contracts' Docs/n4n0-input.md): each hand's touchpad and thumbstick as N4N0's local, unsaved
   parameters (`N4N0/Touchpad/Left/X`, `Y`, `Touch`, `Click`, `Force`, the same for `Right`; `N4N0/Stick/Left/X`, `Y`,
   `Touch`, `Click`, the same for `Right`), PC only. N4N0 uses none of them itself: Orbiters - N4N0 sets them over OSC
   while its SteamVR overlay runs, on change at most 30 times a second, and they go back to rest when it stops. An
@@ -1086,7 +1089,7 @@ sync value.
   `N4N0/Touchpad/Right/X` into a synced Float (8 bits), and drive the effect from that one. Never mark N4N0's own
   declarations synced: a gallery update puts them back. Sticks are there because most controllers have no touchpad;
   VRChat still walks with them, so check `VelocityMagnitude`, `Seated` or `InStation` if that matters.
-- **Pointing** (screen version 4, contracts' Docs/orb.md, Pointing; `AddPointing`): a VRChat raycast (`VRCRaycast`,
+- **Pointing** (screen version 4, contracts' Docs/n4n0.md, Pointing; `AddPointing`): a VRChat raycast (`VRCRaycast`,
   "Hit Worlds And Players", 0.6 m scaled with N4N0) from each index fingertip along the finger meets a thin solid box
   on the screen's face, shown to its owner as a beam and a bead (N4N0's own mesh and material); the bead's local
   contact (tags `N4N0PointerL`/`N4N0PointerR`, radius 2 mm) on three touch points per hand tells Orbiters - N4N0 exactly
@@ -1104,7 +1107,8 @@ avatar for Windows: Orbiters contracts' Docs/avatar-manifest.md, read by Orbiter
 `AvatarManifest.Read(builtAvatar, id)` takes the expression parameters as built (VRCFury's `VF##_` names included) and
 every control of the menu by its labels (rich text removed, each submenu once at its first place), with what it sets and
 its tags (`AvatarManifestTags`: words of the label, its folders and its parameters' names, in English, French, Spanish,
-German and Japanese); `orb.text_sync` when the N4N0 prop is there. Build & Test also writes
+German and Japanese); N4N0's object (`text_sync`, `screen`, `version`, under `AvatarManifestTags.N4N0Wire`) when the
+N4N0 prop is there. Build & Test also writes
 `local_sdk_<avatar name>-<hash>.json` (`AvatarManifest.FileName`: characters other than letters, digits, _ and - become
 _, and then the FNV-1a hash of the id follows, as Orbiters - N4N0 names it); an avatar given its id only at upload gets
 its file when the upload succeeds. Problems are said in the Console and never

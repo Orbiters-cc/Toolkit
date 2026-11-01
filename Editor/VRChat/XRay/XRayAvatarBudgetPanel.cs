@@ -47,12 +47,12 @@ namespace Orbiters.Toolkit.Editor.VRChat.XRay
             this.avatar = avatar ?? SelectedAvatar;
             var sheet = AssetDatabase.LoadAssetAtPath<StyleSheet>(StyleSheetPath);
             if (sheet) styleSheets.Add(sheet);
-            AddToClassList("orb-avatar-budget");
-            avatarName = new Label(); avatarName.AddToClassList("orb-avatar-budget__avatar"); Add(avatarName);
-            empty = new Label("Select an avatar to see its budget."); empty.AddToClassList("orb-avatar-budget__note"); Add(empty);
-            legend = new VisualElement(); legend.AddToClassList("orb-avatar-budget__legend"); Add(legend);
-            metrics = new VisualElement(); metrics.AddToClassList("orb-avatar-budget__metrics"); Add(metrics);
-            compression = new Label(); compression.AddToClassList("orb-avatar-budget__note");
+            AddToClassList("orbiters-avatar-budget");
+            avatarName = new Label(); avatarName.AddToClassList("orbiters-avatar-budget__avatar"); Add(avatarName);
+            empty = new Label("Select an avatar to see its budget."); empty.AddToClassList("orbiters-avatar-budget__note"); Add(empty);
+            legend = new VisualElement(); legend.AddToClassList("orbiters-avatar-budget__legend"); Add(legend);
+            metrics = new VisualElement(); metrics.AddToClassList("orbiters-avatar-budget__metrics"); Add(metrics);
+            compression = new Label(); compression.AddToClassList("orbiters-avatar-budget__note");
             compression.tooltip = "Change compression behavior from VRCFury's global settings.";
             Add(compression);
 
@@ -190,16 +190,16 @@ namespace Orbiters.Toolkit.Editor.VRChat.XRay
         private VisualElement Metric(string name, int total, string unit, string chipText, string chipClass, string chipTooltip,
             BudgetCount split, int scale, IEnumerable<int> ticks, bool large, string note)
         {
-            var metric = new VisualElement(); metric.AddToClassList("orb-avatar-budget__metric");
-            metric.EnableInClassList("orb-avatar-budget__metric--large", large);
-            var head = new VisualElement(); head.AddToClassList("orb-avatar-budget__head"); metric.Add(head);
-            var title = new Label(name); title.AddToClassList("orb-avatar-budget__name"); head.Add(title);
-            var value = new Label(total.ToString()); value.AddToClassList("orb-avatar-budget__value"); head.Add(value);
-            if (!string.IsNullOrEmpty(unit)) { var u = new Label(unit); u.AddToClassList("orb-avatar-budget__unit"); head.Add(u); }
-            var chip = new Label(chipText) { tooltip = chipTooltip }; chip.AddToClassList("orb-avatar-budget__chip");
-            chip.AddToClassList("orb-avatar-budget__chip--" + chipClass); head.Add(chip);
+            var metric = new VisualElement(); metric.AddToClassList("orbiters-avatar-budget__metric");
+            metric.EnableInClassList("orbiters-avatar-budget__metric--large", large);
+            var head = new VisualElement(); head.AddToClassList("orbiters-avatar-budget__head"); metric.Add(head);
+            var title = new Label(name); title.AddToClassList("orbiters-avatar-budget__name"); head.Add(title);
+            var value = new Label(total.ToString()); value.AddToClassList("orbiters-avatar-budget__value"); head.Add(value);
+            if (!string.IsNullOrEmpty(unit)) { var u = new Label(unit); u.AddToClassList("orbiters-avatar-budget__unit"); head.Add(u); }
+            var chip = new Label(chipText) { tooltip = chipTooltip }; chip.AddToClassList("orbiters-avatar-budget__chip");
+            chip.AddToClassList("orbiters-avatar-budget__chip--" + chipClass); head.Add(chip);
 
-            var track = new VisualElement(); track.AddToClassList("orb-avatar-budget__track"); metric.Add(track);
+            var track = new VisualElement(); track.AddToClassList("orbiters-avatar-budget__track"); metric.Add(track);
             track.tooltip = "Avatar " + split.Avatar + " · Custom base " + split.CustomBase + (split.FaceTracking > 0 ? " · Face tracking " + split.FaceTracking : string.Empty);
             AddSegment(track, split.Avatar, scale, AvatarColor);
             AddSegment(track, split.CustomBase, scale, CustomBaseColor);
@@ -207,18 +207,18 @@ namespace Orbiters.Toolkit.Editor.VRChat.XRay
             foreach (int limit in ticks)
             {
                 if (limit <= 0 || limit >= scale) continue;
-                var tick = new VisualElement(); tick.AddToClassList("orb-avatar-budget__tick");
+                var tick = new VisualElement(); tick.AddToClassList("orbiters-avatar-budget__tick");
                 tick.style.left = new Length(100f * limit / scale, LengthUnit.Percent);
                 track.Add(tick);
             }
-            if (!string.IsNullOrEmpty(note)) { var hint = new Label(note); hint.AddToClassList("orb-avatar-budget__hint"); metric.Add(hint); }
+            if (!string.IsNullOrEmpty(note)) { var hint = new Label(note); hint.AddToClassList("orbiters-avatar-budget__hint"); metric.Add(hint); }
             return metric;
         }
 
         private static void AddSegment(VisualElement track, int value, int scale, Color color)
         {
             if (value <= 0 || scale <= 0) return;
-            var segment = new VisualElement(); segment.AddToClassList("orb-avatar-budget__segment");
+            var segment = new VisualElement(); segment.AddToClassList("orbiters-avatar-budget__segment");
             segment.style.width = new Length(Mathf.Min(100f, 100f * value / scale), LengthUnit.Percent);
             segment.style.backgroundColor = color;
             track.Add(segment);
@@ -226,9 +226,9 @@ namespace Orbiters.Toolkit.Editor.VRChat.XRay
 
         private static VisualElement Key(string text, Color color, string tooltip)
         {
-            var row = new VisualElement { tooltip = tooltip }; row.AddToClassList("orb-avatar-budget__key");
-            var swatch = new VisualElement(); swatch.AddToClassList("orb-avatar-budget__swatch"); swatch.style.backgroundColor = color; row.Add(swatch);
-            var label = new Label(text); label.AddToClassList("orb-avatar-budget__key-label"); row.Add(label);
+            var row = new VisualElement { tooltip = tooltip }; row.AddToClassList("orbiters-avatar-budget__key");
+            var swatch = new VisualElement(); swatch.AddToClassList("orbiters-avatar-budget__swatch"); swatch.style.backgroundColor = color; row.Add(swatch);
+            var label = new Label(text); label.AddToClassList("orbiters-avatar-budget__key-label"); row.Add(label);
             return row;
         }
 

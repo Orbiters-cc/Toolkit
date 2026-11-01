@@ -10,8 +10,8 @@ namespace Orbiters.Toolkit.Editor
     /// Unity's ListView positions rows in pixels with floats, which loses whole pixels past a few million rows; here
     /// a hundred million rows scroll as smoothly as a hundred. Scrolling one row rebinds one row: each item keeps the
     /// pooled row <c>item % pool</c>. An item may take several rows' height (<see cref="SpanOf"/>); positions and
-    /// scrolling are then counted in rows, not items. Classes: <c>orb-vlist</c>, <c>orb-vlist__viewport</c>,
-    /// <c>orb-vlist__scroller</c>, <c>orb-vlist__row</c>; the host's stylesheet gives them their look.
+    /// scrolling are then counted in rows, not items. Classes: <c>orbiters-vlist</c>, <c>orbiters-vlist__viewport</c>,
+    /// <c>orbiters-vlist__scroller</c>, <c>orbiters-vlist__row</c>; the host's stylesheet gives them their look.
     /// </summary>
     public sealed class VirtualList : VisualElement
     {
@@ -34,7 +34,7 @@ namespace Orbiters.Toolkit.Editor
             this.rowHeight = rowHeight;
             this.makeRow = makeRow;
             this.bindRow = bindRow;
-            AddToClassList("orb-vlist");
+            AddToClassList("orbiters-vlist");
             focusable = true;
             tabIndex = 0;
             style.flexGrow = 1;
@@ -42,7 +42,7 @@ namespace Orbiters.Toolkit.Editor
             style.overflow = Overflow.Hidden;
 
             viewport = new VisualElement();
-            viewport.AddToClassList("orb-vlist__viewport");
+            viewport.AddToClassList("orbiters-vlist__viewport");
             viewport.style.flexGrow = 1;
             viewport.style.overflow = Overflow.Hidden;
             Add(viewport);
@@ -51,7 +51,7 @@ namespace Orbiters.Toolkit.Editor
             {
                 if (!updatingScroller) SetFirst(value, fromScroller: true);
             }, SliderDirection.Vertical);
-            scroller.AddToClassList("orb-vlist__scroller");
+            scroller.AddToClassList("orbiters-vlist__scroller");
             Add(scroller);
 
             RegisterCallback<WheelEvent>(OnWheel);
@@ -219,7 +219,7 @@ namespace Orbiters.Toolkit.Editor
             while (pool.Count < needed)
             {
                 var row = makeRow();
-                row.AddToClassList("orb-vlist__row");
+                row.AddToClassList("orbiters-vlist__row");
                 row.style.position = Position.Absolute;
                 row.style.left = 0;
                 row.style.right = 0;

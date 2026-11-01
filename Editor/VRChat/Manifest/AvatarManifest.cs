@@ -31,11 +31,11 @@ namespace Orbiters.Toolkit.Editor.VRChat.Manifest
         public readonly List<Parameter> Parameters = new List<Parameter>();
         public readonly List<Control> Controls = new List<Control>();
         /// <summary>The N4N0 prop's number of text sync values (4, 8 or 16), when the avatar carries it.</summary>
-        public int? OrbTextSync;
-        /// <summary>The N4N0 prop's projected screen: its protocol's version (<see cref="OrbInstaller.ScreenVersion"/>), 0 without one.</summary>
-        public int OrbScreen;
+        public int? N4N0TextSync;
+        /// <summary>The N4N0 prop's projected screen: its protocol's version (<see cref="N4N0Installer.ScreenVersion"/>), 0 without one.</summary>
+        public int N4N0Screen;
         /// <summary>The N4N0 prop's own version (its release in My Avatar's gallery), when known.</summary>
-        public string OrbVersion;
+        public string N4N0Version;
 
         /// <summary>An expression parameter as uploaded. <see cref="Type"/>: "bool", "int" or "float".</summary>
         public sealed class Parameter
@@ -125,16 +125,16 @@ namespace Orbiters.Toolkit.Editor.VRChat.Manifest
             if (descriptor.expressionsMenu != null)
                 manifest.Walk(descriptor.expressionsMenu, new List<string>(), AvatarTags.None, new HashSet<VRCExpressionsMenu> { descriptor.expressionsMenu });
             // The prop is there when its pointer is; its sync values are counted as Orbiters - N4N0 counts them.
-            if (manifest.Parameters.Any(p => p.Name == OrbInstaller.TextPointer))
+            if (manifest.Parameters.Any(p => p.Name == N4N0Installer.TextPointer))
             {
-                var sync = new Regex("^" + Regex.Escape(OrbInstaller.TextSyncPrefix) + "[0-9]+$");
+                var sync = new Regex("^" + Regex.Escape(N4N0Installer.TextSyncPrefix) + "[0-9]+$");
                 int count = manifest.Parameters.Count(p => sync.IsMatch(p.Name));
-                if (OrbInstaller.TextSyncCounts.Contains(count)) manifest.OrbTextSync = count;
+                if (N4N0Installer.TextSyncCounts.Contains(count)) manifest.N4N0TextSync = count;
                 // The screen's own version (older screens lack the parameter: version 2).
-                if (manifest.Parameters.Any(p => p.Name == OrbInstaller.ScreenPointer))
+                if (manifest.Parameters.Any(p => p.Name == N4N0Installer.ScreenPointer))
                 {
-                    var version = manifest.Parameters.FirstOrDefault(p => p.Name == OrbInstaller.ScreenVersionParameter);
-                    manifest.OrbScreen = version != null ? Mathf.RoundToInt(version.Default) : 2;
+                    var version = manifest.Parameters.FirstOrDefault(p => p.Name == N4N0Installer.ScreenVersionParameter);
+                    manifest.N4N0Screen = version != null ? Mathf.RoundToInt(version.Default) : 2;
                 }
             }
             return manifest;
@@ -167,16 +167,16 @@ namespace Orbiters.Toolkit.Editor.VRChat.Manifest
                 var names = new[] { control.Parameter }.Concat(control.SubParameters).Where(n => !string.IsNullOrEmpty(n)).ToList();
                 control.Tags = folder | AvatarManifestTags.Of(c.name, names);
                 // N4N0's own controls, and a folder of nothing else.
-                if (names.Any(IsOrb) || submenu && c.subMenu != null && c.subMenu.controls != null && c.subMenu.controls.Count > 0 &&
-                    c.subMenu.controls.All(s => s != null && IsOrb(s.parameter?.name)))
-                    control.Tags |= AvatarTags.Orb;
+                if (names.Any(IsN4N0) || submenu && c.subMenu != null && c.subMenu.controls != null && c.subMenu.controls.Count > 0 &&
+                    c.subMenu.controls.All(s => s != null && IsN4N0(s.parameter?.name)))
+                    control.Tags |= AvatarTags.N4N0;
                 Controls.Add(control);
                 // What a folder is about, what it holds is about too.
                 if (submenu && c.subMenu != null) Walk(c.subMenu, control.Path, control.Tags, listed);
             }
         }
 
-        private static bool IsOrb(string parameter) => parameter != null && parameter.StartsWith("N4N0/", StringComparison.Ordinal);
+        private static bool IsN4N0(string parameter) => parameter != null && parameter.StartsWith("N4N0/", StringComparison.Ordinal);
 
         private static string Named(string name) => string.IsNullOrEmpty(name) ? null : name;
 
@@ -246,13 +246,13 @@ namespace Orbiters.Toolkit.Editor.VRChat.Manifest
                     json.WriteEndObject();
                 }
                 json.WriteEndArray();
-                if (OrbTextSync.HasValue)
+                if (N4N0TextSync.HasValue)
                 {
-                    json.WritePropertyName("orb");
+                    json.WritePropertyName(AvatarManifestTags.N4N0Wire);
                     json.WriteStartObject();
-                    json.WritePropertyName("text_sync"); json.WriteValue(OrbTextSync.Value);
-                    if (OrbScreen > 0) { json.WritePropertyName("screen"); json.WriteValue(OrbScreen); }
-                    if (!string.IsNullOrEmpty(OrbVersion)) { json.WritePropertyName("version"); json.WriteValue(OrbVersion); }
+                    json.WritePropertyName("text_sync"); json.WriteValue(N4N0TextSync.Value);
+                    if (N4N0Screen > 0) { json.WritePropertyName("screen"); json.WriteValue(N4N0Screen); }
+                    if (!string.IsNullOrEmpty(N4N0Version)) { json.WritePropertyName("version"); json.WriteValue(N4N0Version); }
                     json.WriteEndObject();
                 }
                 json.WriteEndObject();

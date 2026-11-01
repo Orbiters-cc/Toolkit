@@ -37,20 +37,20 @@ namespace Orbiters.Toolkit.Editor
         {
             var sheet = AssetDatabase.LoadAssetAtPath<StyleSheet>(StyleSheetPath);
             if (sheet) rootVisualElement.styleSheets.Add(sheet);
-            rootVisualElement.AddToClassList("orb-settings");
+            rootVisualElement.AddToClassList("orbiters-settings");
             // Padding on an inner element: Unity's own ScrollView content-container rules override padding set on it.
-            var scroll = new ScrollView(ScrollViewMode.Vertical); scroll.AddToClassList("orb-settings__scroll"); rootVisualElement.Add(scroll);
-            var content = new VisualElement(); content.AddToClassList("orb-settings__content"); scroll.Add(content);
+            var scroll = new ScrollView(ScrollViewMode.Vertical); scroll.AddToClassList("orbiters-settings__scroll"); rootVisualElement.Add(scroll);
+            var content = new VisualElement(); content.AddToClassList("orbiters-settings__content"); scroll.Add(content);
 
-            var serverCard = new VisualElement(); serverCard.AddToClassList("orb-settings__card"); content.Add(serverCard);
+            var serverCard = new VisualElement(); serverCard.AddToClassList("orbiters-settings__card"); content.Add(serverCard);
             serverCard.Add(Title("Server"));
             server = new SegmentedControl(new[] { "Production", "Development" }, index => OrbitersEnvironment.IsDevelopment = index == 1);
             serverCard.Add(server);
-            caption = new Label(); caption.AddToClassList("orb-settings__caption"); serverCard.Add(caption);
+            caption = new Label(); caption.AddToClassList("orbiters-settings__caption"); serverCard.Add(caption);
 
             foreach (var (title, build) in sections)
             {
-                var card = new VisualElement(); card.AddToClassList("orb-settings__card"); content.Add(card);
+                var card = new VisualElement(); card.AddToClassList("orbiters-settings__card"); content.Add(card);
                 card.Add(Title(title));
                 try { card.Add(build()); }
                 catch (Exception ex) { card.Add(new Label("This section could not be shown: " + ex.Message)); }
@@ -72,19 +72,19 @@ namespace Orbiters.Toolkit.Editor
         {
             featureRows.Clear();
             if (OrbitersFeatures.All.Count == 0) return;
-            var title = Title("Features"); title.AddToClassList("orb-settings__title--section"); content.Add(title);
+            var title = Title("Features"); title.AddToClassList("orbiters-settings__title--section"); content.Add(title);
             var note = new Label("Early features are off by default. They may change or break between updates.");
-            note.AddToClassList("orb-settings__caption"); note.AddToClassList("orb-settings__caption--lead"); content.Add(note);
+            note.AddToClassList("orbiters-settings__caption"); note.AddToClassList("orbiters-settings__caption--lead"); content.Add(note);
 
             foreach (var product in OrbitersFeatures.All.GroupBy(f => string.IsNullOrEmpty(f.Product) ? "Orbiters" : f.Product))
             {
-                var group = new VisualElement(); group.AddToClassList("orb-settings__group"); content.Add(group);
-                var name = new Label(product.Key); name.AddToClassList("orb-settings__product"); group.Add(name);
+                var group = new VisualElement(); group.AddToClassList("orbiters-settings__group"); content.Add(group);
+                var name = new Label(product.Key); name.AddToClassList("orbiters-settings__product"); group.Add(name);
                 foreach (var feature in product)
                 {
                     var row = FeatureRow(feature);
                     // USS has no sibling selector: the first row of a group drops its separator here.
-                    row.EnableInClassList("orb-settings__feature--first", group.childCount == 1);
+                    row.EnableInClassList("orbiters-settings__feature--first", group.childCount == 1);
                     group.Add(row);
                 }
             }
@@ -92,17 +92,17 @@ namespace Orbiters.Toolkit.Editor
 
         private VisualElement FeatureRow(OrbitersFeature feature)
         {
-            var row = new VisualElement(); row.AddToClassList("orb-settings__feature");
-            var texts = new VisualElement(); texts.AddToClassList("orb-settings__feature-texts"); row.Add(texts);
-            var head = new VisualElement(); head.AddToClassList("orb-settings__feature-head"); texts.Add(head);
-            var label = new Label(feature.Label); label.AddToClassList("orb-settings__feature-label"); head.Add(label);
+            var row = new VisualElement(); row.AddToClassList("orbiters-settings__feature");
+            var texts = new VisualElement(); texts.AddToClassList("orbiters-settings__feature-texts"); row.Add(texts);
+            var head = new VisualElement(); head.AddToClassList("orbiters-settings__feature-head"); texts.Add(head);
+            var label = new Label(feature.Label); label.AddToClassList("orbiters-settings__feature-label"); head.Add(label);
             head.Add(new StageBadge(feature.Stage));
             if (!string.IsNullOrEmpty(feature.Description))
             {
-                var description = new Label(feature.Description); description.AddToClassList("orb-settings__feature-description"); texts.Add(description);
+                var description = new Label(feature.Description); description.AddToClassList("orbiters-settings__feature-description"); texts.Add(description);
             }
             var toggle = new ToggleSwitch(OrbitersFeatures.IsEnabled(feature.Key), on => OrbitersFeatures.SetEnabled(feature.Key, on));
-            toggle.AddToClassList("orb-settings__feature-toggle");
+            toggle.AddToClassList("orbiters-settings__feature-toggle");
             row.Add(toggle);
             featureRows[feature.Key] = (toggle, row);
             return row;
@@ -131,7 +131,7 @@ namespace Orbiters.Toolkit.Editor
 
         private static Label Title(string text)
         {
-            var title = new Label(text); title.AddToClassList("orb-settings__title");
+            var title = new Label(text); title.AddToClassList("orbiters-settings__title");
             return title;
         }
     }

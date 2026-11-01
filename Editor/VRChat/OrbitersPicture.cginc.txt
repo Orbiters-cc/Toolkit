@@ -1,5 +1,5 @@
-// Orbiters contracts: N4N0's full pictures (Docs/orb-picture.md), the HLSL shared by the bridge, the two Custom Render
-// Textures and N4N0's screen. Rust orb::picture is the reference: the CRTs decode a stream into exactly its planes.
+// Orbiters contracts: N4N0's full pictures (Docs/n4n0-picture.md), the HLSL shared by the bridge, the two Custom Render
+// Textures and N4N0's screen. Rust n4n0::picture is the reference: the CRTs decode a stream into exactly its planes.
 //
 // Define one of these before including it:
 //   PICTURE_BRIDGE  the bridge's write and restore passes (the chunks as pixels in a slot of the frame); reads CRT A's key
@@ -15,7 +15,7 @@
 // Integer division by constants is what the layout is made of: FXC's advice to use uints there is noise.
 #pragma warning (disable : 3556)
 
-// ---- The formats (Rust orb::picture) ----
+// ---- The formats (Rust n4n0::picture) ----
 
 #define PIC_FORMAT 1
 #define PIC_LEVELS 5
@@ -536,7 +536,7 @@ float4 PicMiscUpdate(int x, float4 prev)
     }
     if (x == 2)
     {
-        // The diagnostics (a screen shows them when asked, Docs/orb-picture.md): the last frame's grab (its reading mode
+        // The diagnostics (a screen shows them when asked, Docs/n4n0-picture.md): the last frame's grab (its reading mode
         // + 1, 0 when the slot was not found), frames since a valid local chunk and since a valid synced one (at most
         // 65535), and the valid chunks counted (local mod 4096 + 4096 × synced mod 4096).
         bool local = PicA(8, PIC_PORT_ROW).x > .5, synced = PicA(0, PIC_PORT_ROW).x > .5;
@@ -963,7 +963,7 @@ int PictureMatch(int slot, uint4 signature0, uint4 signature1)
 // The slot's picture is shown, and its signature is `signature`.
 bool PictureFor(int slot, uint4 signature0, uint4 signature1) { return PictureMatch(slot, signature0, signature1) == 1; }
 
-// ---- Diagnostics (the screen's flag, Docs/orb-picture.md, Diagnostics) ----
+// ---- Diagnostics (the screen's flag, Docs/n4n0-picture.md, Diagnostics) ----
 
 static const float3 PicDiagRed = float3(.9, .12, .1), PicDiagOrange = float3(1, .45, .05), PicDiagYellow = float3(.95, .8, .1),
     PicDiagGreen = float3(.1, .85, .3), PicDiagBlue = float3(.2, .5, 1), PicDiagGrey = float3(.4, .4, .43), PicDiagWhite = float3(.95, .95, .95);

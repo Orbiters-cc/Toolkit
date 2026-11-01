@@ -35,20 +35,20 @@ namespace Orbiters.Toolkit.Editor
             this.changed = changed;
             var sheet = AssetDatabase.LoadAssetAtPath<StyleSheet>(StyleSheetPath);
             if (sheet) styleSheets.Add(sheet);
-            AddToClassList("orb-search-dropdown");
+            AddToClassList("orbiters-search-dropdown");
             if (!string.IsNullOrEmpty(label))
             {
                 var caption = new Label(label);
-                caption.AddToClassList("orb-search-dropdown__label");
+                caption.AddToClassList("orbiters-search-dropdown__label");
                 Add(caption);
             }
             var button = new VisualElement { focusable = true };
-            button.AddToClassList("orb-search-dropdown__button");
+            button.AddToClassList("orbiters-search-dropdown__button");
             valueLabel = new Label { pickingMode = PickingMode.Ignore };
-            valueLabel.AddToClassList("orb-search-dropdown__value");
+            valueLabel.AddToClassList("orbiters-search-dropdown__value");
             button.Add(valueLabel);
             var caret = new VectorIcon(IconGlyph.Chevron);
-            caret.AddToClassList("orb-search-dropdown__caret");
+            caret.AddToClassList("orbiters-search-dropdown__caret");
             button.Add(caret);
             button.RegisterCallback<PointerDownEvent>(evt =>
             {
@@ -75,7 +75,7 @@ namespace Orbiters.Toolkit.Editor
             Value = items.Any(i => i.Key == value) ? value : null;
             string full = Value != null ? items.First(i => i.Key == Value).Value : null;
             valueLabel.text = full == null ? (items.Count == 0 ? "Nothing to choose" : placeholder) : shortLabel != null ? shortLabel(Value) : full;
-            valueLabel.EnableInClassList("orb-search-dropdown__value--empty", Value == null);
+            valueLabel.EnableInClassList("orbiters-search-dropdown__value--empty", Value == null);
             tooltip = full;
         }
 

@@ -26,8 +26,8 @@ public sealed class UntrustedCodeDialogTests
             });
             typeof(UntrustedCodeDialog).GetField("Answered", Private).SetValue(window, (Action<bool>)answers.Add);
             typeof(UntrustedCodeDialog).GetMethod("CreateGUI", Private).Invoke(window, null);
-            Assert.IsFalse(window.rootVisualElement.Q<Label>(className: "orb-code__subject").enableRichText);
-            Assert.IsFalse(window.rootVisualElement.Q<Label>(className: "orb-code__file").enableRichText);
+            Assert.IsFalse(window.rootVisualElement.Q<Label>(className: "orbiters-code__subject").enableRichText);
+            Assert.IsFalse(window.rootVisualElement.Q<Label>(className: "orbiters-code__file").enableRichText);
             Assert.AreSame(focused, EditorWindow.focusedWindow);
             if (action == "close") UnityEngine.Object.DestroyImmediate(window);
             else if (action == "escape")

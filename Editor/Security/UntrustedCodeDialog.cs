@@ -57,31 +57,31 @@ namespace Orbiters.Toolkit.Editor
             root.Clear();
             var sheet = AssetDatabase.LoadAssetAtPath<StyleSheet>(StyleSheetPath);
             if (sheet) root.styleSheets.Add(sheet);
-            root.AddToClassList("orb-code");
+            root.AddToClassList("orbiters-code");
             if (request == null) { Close(); return; }
 
-            var header = new VisualElement(); header.AddToClassList("orb-code__header"); root.Add(header);
+            var header = new VisualElement(); header.AddToClassList("orbiters-code__header"); root.Add(header);
             var icon = new Image { image = EditorGUIUtility.IconContent("console.warnicon").image, scaleMode = ScaleMode.ScaleToFit };
-            icon.AddToClassList("orb-code__icon"); header.Add(icon);
-            var titles = new VisualElement(); titles.AddToClassList("orb-code__titles"); header.Add(titles);
-            titles.Add(Text(string.IsNullOrEmpty(request.Title) ? "This content contains code" : request.Title, "orb-code__title"));
+            icon.AddToClassList("orbiters-code__icon"); header.Add(icon);
+            var titles = new VisualElement(); titles.AddToClassList("orbiters-code__titles"); header.Add(titles);
+            titles.Add(Text(string.IsNullOrEmpty(request.Title) ? "This content contains code" : request.Title, "orbiters-code__title"));
             string subject = string.IsNullOrEmpty(request.Author) ? request.Subject : $"{request.Subject} · by {request.Author}";
-            if (!string.IsNullOrEmpty(subject)) titles.Add(Text(subject, "orb-code__subject"));
+            if (!string.IsNullOrEmpty(subject)) titles.Add(Text(subject, "orbiters-code__subject"));
 
-            var card = new VisualElement(); card.AddToClassList("orb-code__card"); root.Add(card);
-            card.Add(Text(request.Message ?? "Orbiters does not review the files and scripts of this content. Unity compiles and runs code as soon as it is imported, with your permissions.", "orb-code__message"));
+            var card = new VisualElement(); card.AddToClassList("orbiters-code__card"); root.Add(card);
+            card.Add(Text(request.Message ?? "Orbiters does not review the files and scripts of this content. Unity compiles and runs code as soon as it is imported, with your permissions.", "orbiters-code__message"));
 
             int count = request.Files?.Count ?? 0;
             string kind = string.IsNullOrEmpty(request.FileKind) ? "code file" : request.FileKind;
-            root.Add(Text($"{count} {kind}{(count == 1 ? "" : "s")}", "orb-code__count"));
-            var list = new ScrollView(ScrollViewMode.Vertical); list.AddToClassList("orb-code__list"); root.Add(list);
-            foreach (var file in (request.Files ?? new List<string>()).Take(MaxListed)) list.Add(Text(file, "orb-code__file"));
-            if (count > MaxListed) list.Add(Text($"…and {count - MaxListed} more", "orb-code__file"));
+            root.Add(Text($"{count} {kind}{(count == 1 ? "" : "s")}", "orbiters-code__count"));
+            var list = new ScrollView(ScrollViewMode.Vertical); list.AddToClassList("orbiters-code__list"); root.Add(list);
+            foreach (var file in (request.Files ?? new List<string>()).Take(MaxListed)) list.Add(Text(file, "orbiters-code__file"));
+            if (count > MaxListed) list.Add(Text($"…and {count - MaxListed} more", "orbiters-code__file"));
 
-            var buttons = new VisualElement(); buttons.AddToClassList("orb-code__buttons"); root.Add(buttons);
-            var cancel = new Button { name = "cancel", text = "Cancel" }; cancel.AddToClassList("orb-code__button");
+            var buttons = new VisualElement(); buttons.AddToClassList("orbiters-code__buttons"); root.Add(buttons);
+            var cancel = new Button { name = "cancel", text = "Cancel" }; cancel.AddToClassList("orbiters-code__button");
             var confirm = new Button { name = "confirm", text = string.IsNullOrEmpty(request.ConfirmLabel) ? "Import anyway" : request.ConfirmLabel };
-            confirm.AddToClassList("orb-code__button"); confirm.AddToClassList("orb-code__button--risk");
+            confirm.AddToClassList("orbiters-code__button"); confirm.AddToClassList("orbiters-code__button--risk");
             ButtonInteraction.RegisterImmediateClick(cancel, () => Answer(false));
             ButtonInteraction.RegisterImmediateClick(confirm, () => Answer(true));
             buttons.Add(cancel); buttons.Add(confirm);

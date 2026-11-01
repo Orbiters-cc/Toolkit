@@ -41,37 +41,37 @@ namespace Orbiters.Toolkit.Editor
             this.changed = changed;
             var sheet = AssetDatabase.LoadAssetAtPath<StyleSheet>(StyleSheetPath);
             if (sheet) styleSheets.Add(sheet);
-            AddToClassList("orb-segmented");
+            AddToClassList("orbiters-segmented");
             indicator = new VisualElement { pickingMode = PickingMode.Ignore };
-            indicator.AddToClassList("orb-segmented__indicator");
-            indicator.AddToClassList("orb-segmented__indicator--hidden");
+            indicator.AddToClassList("orbiters-segmented__indicator");
+            indicator.AddToClassList("orbiters-segmented__indicator--hidden");
             Add(indicator);
             foreach (var option in options)
             {
                 int index = tabs.Count;
                 var tab = new VisualElement { focusable = true, tooltip = option.Tooltip };
-                tab.AddToClassList("orb-segmented__tab");
+                tab.AddToClassList("orbiters-segmented__tab");
                 if (option.Icon.HasValue)
                 {
                     var icon = new VectorIcon(option.Icon.Value);
-                    icon.AddToClassList("orb-segmented__icon");
+                    icon.AddToClassList("orbiters-segmented__icon");
                     tab.Add(icon);
                 }
                 if (!string.IsNullOrEmpty(option.Label))
                 {
                     var label = new Label(option.Label) { pickingMode = PickingMode.Ignore };
-                    label.AddToClassList("orb-segmented__label");
+                    label.AddToClassList("orbiters-segmented__label");
                     tab.Add(label);
                 }
                 tab.RegisterCallback<PointerDownEvent>(evt =>
                 {
                     if (evt.button != 0) return;
-                    tab.AddToClassList("orb-segmented__tab--pressed");
+                    tab.AddToClassList("orbiters-segmented__tab--pressed");
                     Choose(index);
                     evt.StopPropagation();
                 });
-                tab.RegisterCallback<PointerUpEvent>(_ => tab.RemoveFromClassList("orb-segmented__tab--pressed"));
-                tab.RegisterCallback<PointerLeaveEvent>(_ => tab.RemoveFromClassList("orb-segmented__tab--pressed"));
+                tab.RegisterCallback<PointerUpEvent>(_ => tab.RemoveFromClassList("orbiters-segmented__tab--pressed"));
+                tab.RegisterCallback<PointerLeaveEvent>(_ => tab.RemoveFromClassList("orbiters-segmented__tab--pressed"));
                 tab.RegisterCallback<KeyDownEvent>(evt =>
                 {
                     if (evt.keyCode == KeyCode.Return || evt.keyCode == KeyCode.Space) Choose(index);
@@ -88,7 +88,7 @@ namespace Orbiters.Toolkit.Editor
         public void SetIndex(int index)
         {
             Index = index >= 0 && index < tabs.Count ? index : -1;
-            for (int i = 0; i < tabs.Count; i++) tabs[i].EnableInClassList("orb-segmented__tab--selected", i == Index);
+            for (int i = 0; i < tabs.Count; i++) tabs[i].EnableInClassList("orbiters-segmented__tab--selected", i == Index);
             MoveIndicator();
         }
 
@@ -98,7 +98,7 @@ namespace Orbiters.Toolkit.Editor
 
         private void MoveIndicator()
         {
-            indicator.EnableInClassList("orb-segmented__indicator--hidden", Index < 0);
+            indicator.EnableInClassList("orbiters-segmented__indicator--hidden", Index < 0);
             if (Index < 0) return;
             var target = tabs[Index].layout;
             if (float.IsNaN(target.width) || target.width <= 0f) return;
@@ -106,8 +106,8 @@ namespace Orbiters.Toolkit.Editor
             if (!placed)
             {
                 placed = true;
-                indicator.AddToClassList("orb-segmented__indicator--instant");
-                indicator.schedule.Execute(() => indicator.RemoveFromClassList("orb-segmented__indicator--instant")).StartingIn(50);
+                indicator.AddToClassList("orbiters-segmented__indicator--instant");
+                indicator.schedule.Execute(() => indicator.RemoveFromClassList("orbiters-segmented__indicator--instant")).StartingIn(50);
             }
             indicator.style.left = target.x;
             indicator.style.width = target.width;

@@ -28,14 +28,14 @@ namespace Orbiters.Toolkit.Editor
         public static VisualElement Marker(bool isFirst, bool isLast, bool isSelected, bool isDisabled)
         {
             var timeline = Styled(new VisualElement());
-            timeline.AddToClassList("orb-version-timeline");
-            timeline.EnableInClassList("orb-version-timeline--disabled", isDisabled);
+            timeline.AddToClassList("orbiters-version-timeline");
+            timeline.EnableInClassList("orbiters-version-timeline--disabled", isDisabled);
             timeline.Add(Line(isFirst));
             var shell = new VisualElement();
-            shell.AddToClassList("orb-version-timeline__marker-shell");
-            shell.EnableInClassList("orb-version-timeline__marker-shell--selected", isSelected);
+            shell.AddToClassList("orbiters-version-timeline__marker-shell");
+            shell.EnableInClassList("orbiters-version-timeline__marker-shell--selected", isSelected);
             var marker = new VisualElement();
-            marker.AddToClassList("orb-version-timeline__marker");
+            marker.AddToClassList("orbiters-version-timeline__marker");
             shell.Add(marker);
             timeline.Add(shell);
             timeline.Add(Line(isLast));
@@ -46,17 +46,17 @@ namespace Orbiters.Toolkit.Editor
         public static VisualElement Connector(bool collapsed)
         {
             var timeline = Styled(new VisualElement());
-            timeline.AddToClassList("orb-version-timeline");
-            timeline.AddToClassList("orb-version-timeline--connector");
-            timeline.EnableInClassList("orb-version-timeline--collapsed", collapsed);
+            timeline.AddToClassList("orbiters-version-timeline");
+            timeline.AddToClassList("orbiters-version-timeline--connector");
+            timeline.EnableInClassList("orbiters-version-timeline--collapsed", collapsed);
             if (collapsed)
             {
                 var dots = new VisualElement();
-                dots.AddToClassList("orb-version-timeline__connector-dots");
+                dots.AddToClassList("orbiters-version-timeline__connector-dots");
                 for (int i = 0; i < 3; i++)
                 {
                     var dot = new VisualElement();
-                    dot.AddToClassList("orb-version-timeline__connector-dot");
+                    dot.AddToClassList("orbiters-version-timeline__connector-dot");
                     dots.Add(dot);
                 }
                 timeline.Add(dots);
@@ -64,7 +64,7 @@ namespace Orbiters.Toolkit.Editor
             else
             {
                 var line = new VisualElement();
-                line.AddToClassList("orb-version-timeline__connector-line");
+                line.AddToClassList("orbiters-version-timeline__connector-line");
                 timeline.Add(line);
             }
             return timeline;
@@ -73,8 +73,8 @@ namespace Orbiters.Toolkit.Editor
         private static VisualElement Line(bool hidden)
         {
             var line = new VisualElement();
-            line.AddToClassList("orb-version-timeline__line");
-            line.EnableInClassList("orb-version-timeline__line--hidden", hidden);
+            line.AddToClassList("orbiters-version-timeline__line");
+            line.EnableInClassList("orbiters-version-timeline__line--hidden", hidden);
             return line;
         }
 
@@ -83,7 +83,7 @@ namespace Orbiters.Toolkit.Editor
         {
             string value = text ?? string.Empty;
             var chip = Styled(new Label(lowercase ? value.ToLowerInvariant() : value));
-            chip.AddToClassList("orb-version-chip");
+            chip.AddToClassList("orbiters-version-chip");
             chip.style.fontSize = 11;
             chip.style.unityFontStyleAndWeight = FontStyle.Bold;
             chip.style.color = color;
@@ -113,19 +113,19 @@ namespace Orbiters.Toolkit.Editor
             System.Action<IVersionRecord, VisualElement> decorate = null, int selected = -1)
         {
             var list = Styled(new VisualElement());
-            list.AddToClassList("orb-version-list");
+            list.AddToClassList("orbiters-version-list");
             for (int i = 0; i < records.Count; i++)
             {
                 var record = records[i];
                 var row = new VisualElement();
-                row.AddToClassList("orb-version-list__row");
+                row.AddToClassList("orbiters-version-list__row");
                 row.Add(Marker(i == 0, i == records.Count - 1, i == selected, false));
                 var body = new VisualElement();
-                body.AddToClassList("orb-version-list__body");
+                body.AddToClassList("orbiters-version-list__body");
                 var header = new VisualElement();
-                header.AddToClassList("orb-version-list__header");
+                header.AddToClassList("orbiters-version-list__header");
                 var name = new Label(record.Version + (string.IsNullOrWhiteSpace(record.Title) ? "" : " · " + record.Title));
-                name.AddToClassList("orb-version-list__name");
+                name.AddToClassList("orbiters-version-list__name");
                 header.Add(name);
                 header.Add(ScopeChip(record.Scope));
                 decorate?.Invoke(record, header);
@@ -134,13 +134,13 @@ namespace Orbiters.Toolkit.Editor
                 if (!string.IsNullOrEmpty(date))
                 {
                     var when = new Label(date);
-                    when.AddToClassList("orb-version-list__date");
+                    when.AddToClassList("orbiters-version-list__date");
                     body.Add(when);
                 }
                 if (!string.IsNullOrWhiteSpace(record.Changelog))
                 {
                     var changes = new Label(record.Changelog.Trim());
-                    changes.AddToClassList("orb-version-list__changelog");
+                    changes.AddToClassList("orbiters-version-list__changelog");
                     body.Add(changes);
                 }
                 row.Add(body);

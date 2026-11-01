@@ -75,16 +75,16 @@ public class AvatarManifestTests
         Assert.AreEqual(AvatarTags.Effect, Of("Particles"));
         Assert.AreEqual(AvatarTags.System, Of("Réglages"));
         Assert.AreEqual(AvatarTags.None, Of("Toggle 1"), "Nothing clear, no tag");
-        CollectionAssert.AreEqual(new[] { "clothing", "nsfw", "orb" }, AvatarManifestTags.Names(AvatarTags.Orb | AvatarTags.Clothing | AvatarTags.Nsfw));
+        CollectionAssert.AreEqual(new[] { "clothing", "nsfw", AvatarManifestTags.N4N0Wire }, AvatarManifestTags.Names(AvatarTags.N4N0 | AvatarTags.Clothing | AvatarTags.Nsfw));
     }
 
     [Test]
     public void TheManifestListsTheMenuAsVRChatShowsIt()
     {
         var clothes = Menu(Item("<b>Hoodie</b>", Control.ControlType.Toggle, "VF12_Clothes/Hoodie"), Item("Nude", Control.ControlType.Toggle, "VF13_Nude"));
-        var orb = Menu(Item("Show N4N0", Control.ControlType.Toggle, OrbInstaller.Visible), Item("Talk", Control.ControlType.Button, OrbInstaller.Talk));
+        var n4n0 = Menu(Item("Show N4N0", Control.ControlType.Toggle, N4N0Installer.Visible), Item("Talk", Control.ControlType.Button, N4N0Installer.Talk));
         var main = Menu(Folder("Clothes", clothes), Item("Hair colour", Control.ControlType.RadialPuppet, "", "Hair/Hue"),
-            Item("Move", Control.ControlType.TwoAxisPuppet, "Move/Open", "Move/X", "Move/Y"), Folder("N4N0", orb), Folder("Clothes again", clothes));
+            Item("Move", Control.ControlType.TwoAxisPuppet, "Move/Open", "Move/X", "Move/Y"), Folder("N4N0", n4n0), Folder("Clothes again", clothes));
         // A loop back to the main menu.
         clothes.controls.Add(Folder("Back", main));
         var parameters = new List<VRCExpressionParameters.Parameter>
@@ -92,10 +92,10 @@ public class AvatarManifestTests
             new VRCExpressionParameters.Parameter { name = "VF12_Clothes/Hoodie", valueType = VRCExpressionParameters.ValueType.Bool, networkSynced = true, saved = true, defaultValue = 1 },
             new VRCExpressionParameters.Parameter { name = "VF13_Nude", valueType = VRCExpressionParameters.ValueType.Bool, networkSynced = true },
             new VRCExpressionParameters.Parameter { name = "Hair/Hue", valueType = VRCExpressionParameters.ValueType.Float, networkSynced = true, defaultValue = .25f },
-            new VRCExpressionParameters.Parameter { name = OrbInstaller.Visible, valueType = VRCExpressionParameters.ValueType.Bool, networkSynced = true, saved = true, defaultValue = 1 },
-            new VRCExpressionParameters.Parameter { name = OrbInstaller.TextPointer, valueType = VRCExpressionParameters.ValueType.Int, networkSynced = true },
+            new VRCExpressionParameters.Parameter { name = N4N0Installer.Visible, valueType = VRCExpressionParameters.ValueType.Bool, networkSynced = true, saved = true, defaultValue = 1 },
+            new VRCExpressionParameters.Parameter { name = N4N0Installer.TextPointer, valueType = VRCExpressionParameters.ValueType.Int, networkSynced = true },
         };
-        for (int i = 0; i < 8; i++) parameters.Add(new VRCExpressionParameters.Parameter { name = OrbInstaller.TextSync(i), valueType = VRCExpressionParameters.ValueType.Float, networkSynced = true });
+        for (int i = 0; i < 8; i++) parameters.Add(new VRCExpressionParameters.Parameter { name = N4N0Installer.TextSync(i), valueType = VRCExpressionParameters.ValueType.Float, networkSynced = true });
         var avatar = new GameObject("Rexouium");
         owned.Add(avatar);
         var descriptor = avatar.AddComponent<VRCAvatarDescriptor>();
@@ -108,7 +108,7 @@ public class AvatarManifestTests
         manifest.WrittenUtc = "2026-10-21T19:04:11Z"; manifest.Generator = "Orbiters Toolkit test";
         var json = JObject.Parse(manifest.ToJson());
         Valid(json);
-        Assert.AreEqual(("avtr_test", "Rexouium", 8), ((string)json["avatar_id"], (string)json["name"], (int)json["orb"]["text_sync"]));
+        Assert.AreEqual(("avtr_test", "Rexouium", 8), ((string)json["avatar_id"], (string)json["name"], (int)json[AvatarManifestTags.N4N0Wire]["text_sync"]));
         var hoodie = json["parameters"].First(p => (string)p["name"] == "VF12_Clothes/Hoodie");
         Assert.AreEqual(("bool", true, true, 1.0), ((string)hoodie["type"], (bool)hoodie["synced"], (bool)hoodie["saved"], (double)hoodie["default"]));
         Assert.AreEqual(.25, (double)json["parameters"].First(p => (string)p["name"] == "Hair/Hue")["default"], 1e-6);
@@ -128,9 +128,9 @@ public class AvatarManifestTests
         Assert.AreEqual(("two_axis", "Move/Open"), ((string)puppet["type"], (string)puppet["parameter"]));
         CollectionAssert.AreEqual(new[] { "Move/X", "Move/Y" }, puppet["sub_parameters"].Select(t => (string)t));
         CollectionAssert.AreEqual(new[] { "Up", "Right", "Down", "Left" }, puppet["labels"].Select(t => (string)t));
-        CollectionAssert.AreEqual(new[] { "orb" }, controls["N4N0"]["tags"].Select(t => (string)t), "A folder of N4N0's controls");
+        CollectionAssert.AreEqual(new[] { AvatarManifestTags.N4N0Wire }, controls["N4N0"]["tags"].Select(t => (string)t), "A folder of N4N0's controls");
         Assert.AreEqual("button", (string)controls["N4N0/Talk"]["type"]);
-        CollectionAssert.Contains(controls["N4N0/Talk"]["tags"].Select(t => (string)t).ToList(), "orb");
+        CollectionAssert.Contains(controls["N4N0/Talk"]["tags"].Select(t => (string)t).ToList(), AvatarManifestTags.N4N0Wire);
 
         // Written in one step under its id's file name; a newer build replaces it.
         string path = AvatarManifestExporter.Write(manifest, "local:sdk_Rexouium");
@@ -142,9 +142,9 @@ public class AvatarManifestTests
         Assert.AreEqual("Rexouium 2", (string)JObject.Parse(File.ReadAllText(path))["name"]);
         CollectionAssert.AreEqual(new[] { "local_sdk_Rexouium-d14e4443.json" }, Directory.GetFiles(folder).Select(Path.GetFileName), "No temporary file left");
 
-        // An avatar without the prop has no orb; one with VRChat's default menu has no controls.
+        // An avatar without the prop has no N4N0; one with VRChat's default menu has no controls.
         descriptor.expressionParameters.parameters = parameters.Take(3).ToArray();
-        Assert.IsNull(JObject.Parse(AvatarManifest.Read(avatar, "avtr_test").ToJson())["orb"]);
+        Assert.IsNull(JObject.Parse(AvatarManifest.Read(avatar, "avtr_test").ToJson())[AvatarManifestTags.N4N0Wire]);
         descriptor.customExpressions = false;
         Valid(JObject.Parse(AvatarManifest.Read(avatar, "avtr_test").ToJson()));
         Assert.AreEqual(0, JObject.Parse(AvatarManifest.Read(avatar, "avtr_test").ToJson())["controls"].Count());
@@ -183,14 +183,14 @@ public class AvatarManifestTests
             Assert.AreEqual(JTokenType.Boolean, p["saved"].Type);
             Assert.That(p["default"].Type, Is.EqualTo(JTokenType.Integer).Or.EqualTo(JTokenType.Float));
         }
-        var tags = new[] { "clothing", "accessory", "hair", "body", "face", "nsfw", "pose", "emote", "locomotion", "prop", "effect", "system", "orb" };
+        var tags = new[] { "clothing", "accessory", "hair", "body", "face", "nsfw", "pose", "emote", "locomotion", "prop", "effect", "system", AvatarManifestTags.N4N0Wire };
         foreach (var c in json["controls"])
         {
             Assert.IsNotEmpty(c["path"]);
             CollectionAssert.Contains(new[] { "toggle", "button", "submenu", "radial", "two_axis", "four_axis" }, (string)c["type"]);
             foreach (var tag in c["tags"] ?? new JArray()) CollectionAssert.Contains(tags, (string)tag);
         }
-        if (json["orb"] != null && json["orb"].Type != JTokenType.Null) CollectionAssert.Contains(new[] { 4, 8, 16 }, (int)json["orb"]["text_sync"]);
+        if (json[AvatarManifestTags.N4N0Wire] != null && json[AvatarManifestTags.N4N0Wire].Type != JTokenType.Null) CollectionAssert.Contains(new[] { 4, 8, 16 }, (int)json[AvatarManifestTags.N4N0Wire]["text_sync"]);
     }
 
     private VRCExpressionsMenu Menu(params Control[] controls)

@@ -747,7 +747,7 @@
     justify-content: center;
 }
 
-.ps-framing__controls .orb-dial__value {
+.ps-framing__controls .orbiters-dial__value {
     width: 58px;
     min-width: 58px;
 }

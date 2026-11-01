@@ -25,11 +25,11 @@ namespace Orbiters.Toolkit.Editor
             this.unlockedTooltip = unlockedTooltip ?? "Lock this Inspector here: selecting files in the Project window won’t replace it, so you can drag them onto it.";
             this.lockedTooltip = lockedTooltip ?? "Locked on this object. Click to follow the selection again.";
             button = new IconButton(IconGlyph.Unlock, "Lock", this.unlockedTooltip, Toggle);
-            button.AddToClassList("orb-icon-button--small");
+            button.AddToClassList("orbiters-icon-button--small");
             Add(button);
             var sheet = AssetDatabase.LoadAssetAtPath<StyleSheet>("Packages/orbiters.toolkit/Editor/UI/icon-button.uss");
             if (sheet) styleSheets.Add(sheet);
-            AddToClassList("orb-inspector-lock");
+            AddToClassList("orbiters-inspector-lock");
             style.display = DisplayStyle.None;
             RegisterCallback<AttachToPanelEvent>(_ => { host = FindHost(); Show(); });
             // The tab's own padlock can change it too.

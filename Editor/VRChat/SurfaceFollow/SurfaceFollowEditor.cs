@@ -20,17 +20,17 @@ namespace Orbiters.Toolkit.Editor.VRChat.SurfaceFollow
             var root = new VisualElement();
             var sheet = AssetDatabase.LoadAssetAtPath<StyleSheet>(StyleSheetPath);
             if (sheet) root.styleSheets.Add(sheet);
-            root.AddToClassList("orb-follow");
+            root.AddToClassList("orbiters-follow");
 
             var head = new VisualElement();
-            head.AddToClassList("orb-follow__head");
+            head.AddToClassList("orbiters-follow__head");
             root.Add(head);
             var title = new Label("Follow body blendshapes");
-            title.AddToClassList("orb-follow__title");
+            title.AddToClassList("orbiters-follow__title");
             head.Add(title);
             head.Add(new StageBadge(FeatureStage.Beta));
             var text = new Label("When a body blendshape changes the skin under an accessory (a piercing on a chest with “Muscles”), the accessory moves and tilts with it. Applied when the avatar is built for upload or Play Mode; the scene is not changed.");
-            text.AddToClassList("orb-follow__text");
+            text.AddToClassList("orbiters-follow__text");
             root.Add(text);
 
             var scope = new PropertyField(serializedObject.FindProperty(nameof(OrbitersSurfaceFollow.scope)), "Follows");
@@ -46,12 +46,12 @@ namespace Orbiters.Toolkit.Editor.VRChat.SurfaceFollow
             scope.RegisterValueChangeCallback(_ => ShowScope());
 
             var check = new Button(() => Check(follow)) { text = "Check", tooltip = "List what will follow the body, and which blendshapes move it. Changes nothing." };
-            check.AddToClassList("orb-follow__check");
-            check.RegisterCallback<PointerDownEvent>(_ => check.AddToClassList("orb-follow__check--pressed"), TrickleDown.TrickleDown);
-            check.RegisterCallback<PointerUpEvent>(_ => check.RemoveFromClassList("orb-follow__check--pressed"), TrickleDown.TrickleDown);
+            check.AddToClassList("orbiters-follow__check");
+            check.RegisterCallback<PointerDownEvent>(_ => check.AddToClassList("orbiters-follow__check--pressed"), TrickleDown.TrickleDown);
+            check.RegisterCallback<PointerUpEvent>(_ => check.RemoveFromClassList("orbiters-follow__check--pressed"), TrickleDown.TrickleDown);
             root.Add(check);
             results = new VisualElement();
-            results.AddToClassList("orb-follow__results");
+            results.AddToClassList("orbiters-follow__results");
             root.Add(results);
             return root;
         }
@@ -62,39 +62,39 @@ namespace Orbiters.Toolkit.Editor.VRChat.SurfaceFollow
             var body = SurfaceFollow.BodyOf(follow);
             if (body == null)
             {
-                results.Add(Line("No body found: set the Body field to the avatar's main skinned mesh.", "orb-follow__line--warning"));
+                results.Add(Line("No body found: set the Body field to the avatar's main skinned mesh.", "orbiters-follow__line--warning"));
                 return;
             }
             var plan = SurfaceFollow.Plan(follow);
-            results.Add(Line("Body: " + body.name + " · " + body.sharedMesh.blendShapeCount + " blendshapes", "orb-follow__line--muted"));
+            results.Add(Line("Body: " + body.name + " · " + body.sharedMesh.blendShapeCount + " blendshapes", "orbiters-follow__line--muted"));
             if (plan.Count == 0)
             {
-                results.Add(Line(follow.scope == OrbitersSurfaceFollow.Scope.SmallAccessories ? "No small accessory sits on the skin." : "This object has no mesh to move.", "orb-follow__line--warning"));
+                results.Add(Line(follow.scope == OrbitersSurfaceFollow.Scope.SmallAccessories ? "No small accessory sits on the skin." : "This object has no mesh to move.", "orbiters-follow__line--warning"));
                 return;
             }
             int index = 0;
             foreach (var target in plan)
             {
                 var card = new VisualElement();
-                card.AddToClassList("orb-follow__card");
-                card.AddToClassList("orb-follow__card--enter");
+                card.AddToClassList("orbiters-follow__card");
+                card.AddToClassList("orbiters-follow__card--enter");
                 int delay = 20 + Mathf.Min(index++, 10) * 30;
-                card.schedule.Execute(() => card.RemoveFromClassList("orb-follow__card--enter")).StartingIn(delay);
+                card.schedule.Execute(() => card.RemoveFromClassList("orbiters-follow__card--enter")).StartingIn(delay);
                 var name = new Label(target.Renderer.name);
-                name.AddToClassList("orb-follow__card-title");
+                name.AddToClassList("orbiters-follow__card-title");
                 name.RegisterCallback<PointerDownEvent>(_ => EditorGUIUtility.PingObject(target.Renderer));
                 card.Add(name);
                 if (target.Skipped != null)
                 {
-                    card.Add(Line("Stays as it is: " + target.Skipped + ".", "orb-follow__line--muted"));
+                    card.Add(Line("Stays as it is: " + target.Skipped + ".", "orbiters-follow__line--muted"));
                 }
                 else
                 {
                     var shapes = target.Shapes.GroupBy(s => s.Name).Select(g => g.OrderByDescending(s => s.Move.magnitude).First()).OrderByDescending(s => s.Move.magnitude).ToList();
-                    card.Add(Line(shapes.Count + " blendshape" + (shapes.Count == 1 ? "" : "s") + " move it · " + Distance(target.Gap) + " from the skin", "orb-follow__line--muted"));
+                    card.Add(Line(shapes.Count + " blendshape" + (shapes.Count == 1 ? "" : "s") + " move it · " + Distance(target.Gap) + " from the skin", "orbiters-follow__line--muted"));
                     foreach (var shape in shapes.Take(6))
-                        card.Add(Line(shape.Name + ": " + Distance(shape.Move.magnitude) + (shape.TurnDegrees >= 0.5f ? ", " + shape.TurnDegrees.ToString("0") + "°" : ""), "orb-follow__line"));
-                    if (shapes.Count > 6) card.Add(Line("and " + (shapes.Count - 6) + " more", "orb-follow__line--muted"));
+                        card.Add(Line(shape.Name + ": " + Distance(shape.Move.magnitude) + (shape.TurnDegrees >= 0.5f ? ", " + shape.TurnDegrees.ToString("0") + "°" : ""), "orbiters-follow__line"));
+                    if (shapes.Count > 6) card.Add(Line("and " + (shapes.Count - 6) + " more", "orbiters-follow__line--muted"));
                 }
                 results.Add(card);
             }

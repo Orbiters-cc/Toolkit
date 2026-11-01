@@ -36,15 +36,15 @@ namespace Orbiters.Toolkit.Editor
             this.maxTilt = maxTilt; this.changed = changed; this.began = began; this.reset = reset;
             var sheet = AssetDatabase.LoadAssetAtPath<StyleSheet>(StyleSheetPath);
             if (sheet) styleSheets.Add(sheet);
-            AddToClassList("orb-sphere");
+            AddToClassList("orbiters-sphere");
             ball = new VisualElement { focusable = true, tabIndex = 0 };
-            ball.AddToClassList("orb-sphere__ball");
+            ball.AddToClassList("orbiters-sphere__ball");
             ball.generateVisualContent += Draw;
             Add(ball);
             readout = new Label();
-            readout.AddToClassList("orb-sphere__readout");
+            readout.AddToClassList("orbiters-sphere__readout");
             Add(readout);
-            drag = new PointerDragCapture(ball, () => RemoveFromClassList("orb-sphere--active"));
+            drag = new PointerDragCapture(ball, () => RemoveFromClassList("orbiters-sphere--active"));
             ball.RegisterCallback<PointerDownEvent>(OnDown);
             ball.RegisterCallback<PointerMoveEvent>(OnMove);
             ball.RegisterCallback<KeyDownEvent>(OnKey);
@@ -70,7 +70,7 @@ namespace Orbiters.Toolkit.Editor
             last = evt.position;
             began?.Invoke();
             drag.Begin(evt.pointerId);
-            AddToClassList("orb-sphere--active");
+            AddToClassList("orbiters-sphere--active");
             evt.StopPropagation();
         }
 
