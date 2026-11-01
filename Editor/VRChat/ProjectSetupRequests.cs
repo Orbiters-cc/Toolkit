@@ -237,7 +237,7 @@ namespace Orbiters.Toolkit.Editor.VRChat
                 if (avatar == null || ++tries > 600) { EditorApplication.update -= Select; return; }
                 if (!VRCSdkControlPanel.TryGetBuilder<IVRCSdkAvatarBuilderApi>(out var builder)) return;
                 EditorApplication.update -= Select;
-                try { builder.SelectAvatar(avatar); }
+                try { VrcSdkAvatarBuilder.Select(builder, avatar); }
                 catch (Exception ex) { Debug.LogWarning("Orbiters Toolkit could not select the avatar in the VRChat SDK panel: " + ex.Message); }
             }
             EditorApplication.update += Select;

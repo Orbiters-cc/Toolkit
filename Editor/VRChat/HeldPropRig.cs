@@ -115,7 +115,14 @@ namespace Orbiters.Toolkit.Editor.VRChat
             phys.maxStretch = 1000; phys.maxSquish = 1; phys.grabMovement = 1;
             phys.allowCollision = VRCPhysBoneBase.AdvancedBool.False;
             phys.allowGrabbing = othersGrab ? VRCPhysBoneBase.AdvancedBool.True : VRCPhysBoneBase.AdvancedBool.Other;
-            if (!othersGrab) phys.grabFilter = new VRCPhysBoneBase.PermissionFilter { allowSelf = true, allowOthers = false, contentTypes = DynamicsUsageFlags.Everything };
+            if (!othersGrab)
+            {
+                var filter = new VRCPhysBoneBase.PermissionFilter { allowSelf = true, allowOthers = false };
+#if ORBITERS_VRCSDK_3_10_1_OR_NEWER
+                filter.contentTypes = DynamicsUsageFlags.Everything;
+#endif
+                phys.grabFilter = filter;
+            }
             phys.allowPosing = VRCPhysBoneBase.AdvancedBool.False;
             phys.snapToHand = false; phys.resetWhenDisabled = true; phys.parameter = parameter;
             return phys;
@@ -466,6 +473,26 @@ namespace Orbiters.Toolkit.Editor.VRChat
         { var t = new GameObject(name).transform; t.SetParent(parent, false); return t; }
 
         /// <summary>A receiver telling when the owner's left (or right) hand is within <paramref name="radius"/>.</summary>
+        /// <summary>Whether this project's VRChat SDK (3.7.6 or newer) has local-only contact senders.</summary>
+        internal static readonly bool SendersCanBeLocalOnly =
+#if ORBITERS_VRCSDK_3_7_6_OR_NEWER
+            true;
+#else
+            false;
+#endif
+
+        /// <summary>
+        /// Makes a contact sender local only: only its owner's receivers see it. VRChat SDK 3.7.6 moved localOnly from
+        /// ContactReceiver to ContactBase; on an older SDK a sender is always seen by everyone, so this does nothing (the
+        /// N4N0 prefab, which needs it, is only built with 3.7.6 or newer, <see cref="SendersCanBeLocalOnly"/>).
+        /// </summary>
+        internal static void LocalOnlySender(VRCContactSender sender, bool localOnly)
+        {
+#if ORBITERS_VRCSDK_3_7_6_OR_NEWER
+            sender.localOnly = localOnly;
+#endif
+        }
+
         internal static void HandContact(Transform body, string name, string parameter, bool left, float radius, bool localOnly)
         {
             var receiver = Child(body, name).gameObject.AddComponent<VRCContactReceiver>();

@@ -184,9 +184,14 @@ namespace Orbiters.Toolkit.Editor.VRChat.Checks
 
         private static bool IsMobile(BuildTarget platform) => platform == BuildTarget.Android || platform == BuildTarget.iOS;
 
+        // Per-platform overrides came with VRChat SDK 3.8.1: before, an avatar has none.
         private static List<(GameObject Avatar, BuildTarget Platform)> Overrides(GameObject root) =>
+#if ORBITERS_VRCSDK_3_8_1_OR_NEWER
             (PerPlatformOverrides.GetPlatformOverrides(root) ?? new List<PerPlatformOverrides.Option>())
             .Where(o => o.avatar != null && o.avatar.gameObject != root).Select(o => (o.avatar.gameObject, o.platform)).ToList();
+#else
+            new List<(GameObject Avatar, BuildTarget Platform)>();
+#endif
 
         // The avatars of the open scenes in hierarchy order, without hidden objects (build copies) and VRCFury's test copies.
         private static IEnumerable<GameObject> OpenAvatars()

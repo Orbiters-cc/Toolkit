@@ -73,7 +73,7 @@ namespace Orbiters.Toolkit.Editor.VRChat
         private static void Sender(GameObject at, string tag)
         {
             var sender = at.AddComponent<VRCContactSender>();
-            sender.shapeType = ContactBase.ShapeType.Sphere; sender.radius = PointRadius; sender.localOnly = true;
+            sender.shapeType = ContactBase.ShapeType.Sphere; sender.radius = PointRadius; HeldPropRig.LocalOnlySender(sender, true);
             sender.collisionTags.Add(tag);
         }
 

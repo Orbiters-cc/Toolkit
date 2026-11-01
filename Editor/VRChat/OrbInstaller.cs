@@ -96,6 +96,8 @@ namespace Orbiters.Toolkit.Editor.VRChat
         /// </summary>
         public static string CreatePrefab(string folder, int textSync = DefaultTextSync, int thumbnailBytes = DefaultThumbnailBytes)
         {
+            if (!HeldPropRig.SendersCanBeLocalOnly)
+                throw new InvalidOperationException("N4N0 needs VRChat SDK 3.7.6 or newer (its contact senders are local only): update the VRChat SDK packages of this project.");
             if (!TextSyncCounts.Contains(textSync)) throw new ArgumentOutOfRangeException(nameof(textSync), "N4N0 has 4, 8 or 16 text sync values.");
             if (!OfferedThumbnailBytes.Contains(thumbnailBytes) || !ScreenFits(textSync, thumbnailBytes))
                 throw new ArgumentOutOfRangeException(nameof(thumbnailBytes), "N4N0's thumbnails are 72 or 128 bytes, 128 with 8 text sync values or more.");
@@ -184,7 +186,7 @@ namespace Orbiters.Toolkit.Editor.VRChat
             foreach (var (at, tag) in new[] { (gaze, EyeTag), (point, GazeTag) })
             {
                 var sender = at.gameObject.AddComponent<VRCContactSender>();
-                sender.shapeType = ContactBase.ShapeType.Sphere; sender.radius = GazeRadius; sender.localOnly = true;
+                sender.shapeType = ContactBase.ShapeType.Sphere; sender.radius = GazeRadius; HeldPropRig.LocalOnlySender(sender, true);
                 sender.collisionTags.Add(tag);
             }
             var dot = Child(point, "Dot");

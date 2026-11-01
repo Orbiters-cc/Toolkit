@@ -241,6 +241,9 @@ namespace Orbiters.Toolkit.Editor.Photoshoot
             float fontSize = Mathf.Max(8f, t.size * frame.height);
             editor.style.fontSize = fontSize;
             editor.style.color = t.color;
+            // The theme gives the field's input a size and colour of its own (USS has no "inherit"): the text's go there too.
+            var input = editor.Q(TextField.textInputUssName);
+            if (input != null) { input.style.fontSize = fontSize; input.style.color = t.color; }
             editor.style.left = frame.x;
             editor.style.width = frame.width;
             editor.style.top = frame.y + t.center.y * frame.height - fontSize * .75f;

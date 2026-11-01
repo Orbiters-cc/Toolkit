@@ -127,7 +127,7 @@ namespace Orbiters.Toolkit.Editor.VRChat
                 var sphere = Child(gaze, "View " + i);
                 sphere.localPosition = Vector3.forward * ViewDistances[i];
                 var sender = sphere.gameObject.AddComponent<VRCContactSender>();
-                sender.shapeType = ContactBase.ShapeType.Sphere; sender.radius = ViewDistances[i] * ViewWidth; sender.localOnly = true;
+                sender.shapeType = ContactBase.ShapeType.Sphere; sender.radius = ViewDistances[i] * ViewWidth; HeldPropRig.LocalOnlySender(sender, true);
                 sender.collisionTags.Add(ViewTag);
             }
             return glide;

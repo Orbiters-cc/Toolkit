@@ -141,7 +141,7 @@ namespace Orbiters.Toolkit.Editor.VRChat
             var sender = Child(model, "Sender").gameObject.AddComponent<VRCContactSender>();
             sender.shapeType = ContactBase.ShapeType.Capsule;
             sender.radius = ScreenHeight / 2; sender.height = ScreenWidth; sender.rotation = Quaternion.Euler(0, 0, 90);
-            sender.localOnly = false;
+            HeldPropRig.LocalOnlySender(sender, false);
             sender.collisionTags.Add(CardTag);
             HandContact(model, "Left hand", CardHandL, true, .25f, localOnly: true);
             HandContact(model, "Right hand", CardHandR, false, .25f, localOnly: true);
