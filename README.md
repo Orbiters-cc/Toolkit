@@ -1,5 +1,22 @@
 # Orbiters Toolkit
 
+## 0.4.11 — 2026-11-01
+
+- **Compiles with every VRChat SDK from 3.7.0.** A project on SDK 3.7.5 failed to compile Toolkit's VRChat part (and
+  with it My Avatar's editor, the Mixer's VRChat parts and the Avatar Gizmos' clothing button). APIs that came later
+  are behind version defines with the older SDK's equivalent: contact senders' local-only switch (3.7.6,
+  `ORBITERS_VRCSDK_3_7_6_OR_NEWER`), the SDK panel's selected avatar and per-platform overrides (3.8.1,
+  `ORBITERS_VRCSDK_3_8_1_OR_NEWER`; `VrcSdkAvatarBuilder` reads and sets the panel's avatar on every SDK), and
+  `DynamicsComponent` and PhysBone grab content types (3.10.0, `ORBITERS_VRCSDK_3_10_OR_NEWER`). Building the N4N0
+  prefab needs SDK 3.7.6 or newer (its contact senders are local only) and says so.
+- **N4N0's name everywhere.** The installer is `N4N0Installer` (`N4N0Installer*.cs`, `N4N0State`, `N4N0*Hook`), its
+  templates and pictures are `N4N0*.shader.txt` / `N4N0*.png.bytes`, the shared UI classes are `orbiters-*`. The avatar
+  manifest's key and tag are `n4n0`, a project preview starts with `N4N0PRV` and N4N0's menu pages are drawn with
+  `--n4n0-menu`: Orbiters - N4N0 0.3.4-dev.9 or later reads them (and the former names of older files).
+- The Scene view's Avatar Gizmos only ask for toolbar elements that are registered: no more "Failed to load EditorToolbar
+  ID 'Orbiters/XRayGizmos/Clothing'" when the VRChat part is missing.
+- Photoshoot's text editor gets the text's size and colour in code (USS has no `inherit`, which logged a warning).
+
 ## 0.4.10 — 2026-10-29
 
 - **Controller input for avatars** (contracts' Docs/n4n0-input.md): N4N0 declares each hand's touchpad and thumbstick
