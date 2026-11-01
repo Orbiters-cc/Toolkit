@@ -20,14 +20,25 @@ namespace Orbiters.Toolkit.Editor.XRay
     internal sealed class XRayGizmosSceneToolbarOverlay : ToolbarOverlay
     {
         public XRayGizmosSceneToolbarOverlay()
-            : base(
-                XRayBonesToolbarToggle.Id,
-                XRayMirrorToolbarToggle.Id,
-                XRayPosingExtensions.ClothingToolbarId,
-                XRayWeightPaintToolbarToggle.Id,
-                XRayMeshEdgesToolbarToggle.Id,
-                XRayExtraToolbarToggle.Id)
+            : base(ElementIds())
         {
+        }
+
+        // The clothing toggle lives in the VRChat part (Orbiters.Toolkit.Editor.VRChat): without the VRChat SDK, or while
+        // that part does not compile, asking for its ID makes Unity log "Failed to load EditorToolbar ID" on every layout
+        // load. Only elements that are registered are asked for.
+        private static string[] ElementIds()
+        {
+            var registered = new System.Collections.Generic.HashSet<string>(System.StringComparer.Ordinal);
+            foreach (var type in TypeCache.GetTypesWithAttribute<EditorToolbarElementAttribute>())
+                foreach (EditorToolbarElementAttribute attribute in type.GetCustomAttributes(typeof(EditorToolbarElementAttribute), false))
+                    registered.Add(attribute.id);
+            var ids = new System.Collections.Generic.List<string> { XRayBonesToolbarToggle.Id, XRayMirrorToolbarToggle.Id };
+            if (registered.Contains(XRayPosingExtensions.ClothingToolbarId)) ids.Add(XRayPosingExtensions.ClothingToolbarId);
+            ids.Add(XRayWeightPaintToolbarToggle.Id);
+            ids.Add(XRayMeshEdgesToolbarToggle.Id);
+            ids.Add(XRayExtraToolbarToggle.Id);
+            return ids.ToArray();
         }
     }
 

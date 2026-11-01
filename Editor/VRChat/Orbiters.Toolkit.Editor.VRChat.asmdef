@@ -35,8 +35,8 @@
     },
     {
       "name": "com.vrchat.base",
-      "expression": "3.10.1",
-      "define": "ORBITERS_VRCSDK_3_10_1_OR_NEWER"
+      "expression": "3.10.0",
+      "define": "ORBITERS_VRCSDK_3_10_OR_NEWER"
     }
   ]
 }

@@ -188,10 +188,10 @@ namespace Orbiters.Toolkit.Editor.VRChat.Optimization
             from is VRCPhysBoneBase && property.StartsWith("colliders.", StringComparison.Ordinal);
 
         private static bool Removable(Component component) =>
-#if ORBITERS_VRCSDK_3_10_1_OR_NEWER
+#if ORBITERS_VRCSDK_3_10_OR_NEWER
             component is DynamicsComponent ||
 #else
-            // VRChat SDK 3.10 gave PhysBones, their colliders and contacts the DynamicsComponent base.
+            // VRChat SDK 3.10.0 gave PhysBones, their colliders and contacts the DynamicsComponent base.
             component is VRCPhysBoneBase || component is VRCPhysBoneColliderBase || component is ContactBase ||
 #endif
             component is IConstraint || component is Light ||

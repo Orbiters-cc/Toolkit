@@ -118,7 +118,7 @@ namespace Orbiters.Toolkit.Editor.VRChat
             if (!othersGrab)
             {
                 var filter = new VRCPhysBoneBase.PermissionFilter { allowSelf = true, allowOthers = false };
-#if ORBITERS_VRCSDK_3_10_1_OR_NEWER
+#if ORBITERS_VRCSDK_3_10_OR_NEWER
                 filter.contentTypes = DynamicsUsageFlags.Everything;
 #endif
                 phys.grabFilter = filter;
