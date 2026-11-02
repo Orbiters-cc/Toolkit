@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- **Checks: Lazy Optimiser.** Installed and on, it deletes at upload the objects an animation switches on through a
+  component (it follows `m_IsActive` only), such as N4N0's capture rig and kit: the "Other tools" check warns,
+  naming the Orbiters items, and says how to turn it off.
 - **Short names keep siblings of one name.** Two objects named alike under one parent stopped an upload at
   Optimization Big ("An item with the same key has already been added"); they, and what is under them, keep their
   names now, as animations only ever find the first of them.

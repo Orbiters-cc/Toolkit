@@ -46,7 +46,25 @@ namespace Orbiters.Toolkit.Editor.VRChat.Checks
                 issues.Add(new AvatarIssue(IssueLevel.Note, Join(menus) + (menus.Count == 1 ? " adds" : " add") + " menu items at upload",
                     "My Avatar's menu editor shows what VRCFury and Modular Avatar build, not these: its “Show the real build” button builds a hidden copy and shows the whole menu, read only.",
                     "Menu"));
+            LazyOptimiser(root, issues);
             return issues;
+        }
+
+        // Lazy Optimiser (net.euan.lazyoptimiser) deletes at every upload, unless it is turned off, the objects it finds no
+        // animation showing. It only follows m_IsActive (and a lowercase "m_enabled", which no binding has): an object an
+        // animation switches on through its component's m_Enabled is deleted with its children. Orbiters' items stay as
+        // they are; the check says what breaks.
+        private static void LazyOptimiser(GameObject root, List<AvatarIssue> issues)
+        {
+            const string id = "net.euan.lazyoptimiser";
+            if (!InstalledTools.Has(id) || PlayerPrefs.GetInt("lazyoptimiser.shouldOptimise", 1) != 1) return;
+            var items = root.GetComponentsInChildren<Orbiters.Toolkit.VRChat.OrbitersAttachment>(true).Select(a => a.name).Distinct().ToList();
+            issues.Add(new AvatarIssue(items.Count > 0 ? IssueLevel.Warning : IssueLevel.Note,
+                "Lazy Optimiser deletes objects that animations switch on through a component",
+                "At upload it removes what it thinks no animation shows, and it misses an object an animation turns on through its " +
+                "renderer or another component, as N4N0's capture rig and kit: they're deleted and what they do stops working in VRChat. " +
+                "Turn it off before uploading (Tools > Lazy Optimiser > Toggle Optimiser), or remove the package.",
+                items.Count > 0 ? string.Join(", ", items.Take(4)) + (items.Count > 4 ? "..." : "") : null));
         }
 
         private static IEnumerable<Tool> On(GameObject root)
