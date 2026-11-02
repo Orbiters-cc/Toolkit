@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- **Installed tools by package, not by type (VRCFury Stub).** `InstalledTools` answers whether VRCFury, Modular Avatar,
+  NDMF, AAO, d4rkAvatarOptimizer, TexTransTool and Meshia (or one of its forks) are installed from Unity's registered
+  packages (the Creator Companion's included), with their version and source, read again when the project's packages
+  change. VRCFury counts only without VRCFury Stub (`net.nrzk.vfstub`), which keeps VRCFury's component types and GUIDs
+  but builds none of them: `VrcFury.Installed` and `VrcFury.Builds` follow it, so no tool sets up VRCFury toggles,
+  armature links or parameter compression for a build that never happens, and the parameter budget counts none of
+  their bits. Reflection into a tool still finds its types (`VrcFury.Find`); components are still recognised by type.
+  `InstalledTools.Pretend(...)` lets tests decide each case. New Checks group **Other tools**
+  (`Checks/ToolConflicts.Find`): VRCFury components on an avatar that VRCFury Stub (or no VRCFury) leaves unbuilt.
 - **3D previews carry each material's look (schema 2).** Orbiters - N4N0 drew every material with the same glossy
   highlight. `Preview.PreviewLook` now reads how the shader takes the light (lilToon, Poiyomi by its lighting type,
   MToon, Unity Toon Shader, unlit shaders, else Standard and its look-alikes such as VRChat's Standard Lite): `lit`,

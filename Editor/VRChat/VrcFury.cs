@@ -39,7 +39,12 @@ namespace Orbiters.Toolkit.Editor.VRChat
         }
 
         public static IWriter Writer { get; set; }
-        public static bool Installed => Component != null;
+
+        /// <summary>
+        /// VRCFury's package is installed and its types are loaded: it builds what its components hold at upload. Not with
+        /// VRCFury Stub, which has the same component types and builds nothing (<see cref="InstalledTools.VrcFury"/>).
+        /// </summary>
+        public static bool Installed => InstalledTools.VrcFury && Component != null;
 
         public static Type Component => Find("VF.Model.VRCFury");
 
@@ -78,12 +83,13 @@ namespace Orbiters.Toolkit.Editor.VRChat
         public static object Content(Component vrcFury) => vrcFury != null ? Component?.GetField("content")?.GetValue(vrcFury) : null;
 
         /// <summary>
-        /// Whether VRCFury builds this avatar (it has a VRCFury component other than debug info, VRCFuryBuilder.ShouldRun):
+        /// Whether VRCFury builds this avatar (VRCFury is installed and the avatar has a VRCFury component other than debug
+        /// info, VRCFuryBuilder.ShouldRun; VRCFury Stub's components build nothing):
         /// VRCFury then also rewrites the animation paths of objects moved earlier in the build.
         /// </summary>
         public static bool Builds(GameObject avatarRoot)
         {
-            var type = avatarRoot != null ? Find("VF.Component.VRCFuryComponent") : null;
+            var type = avatarRoot != null && Installed ? Find("VF.Component.VRCFuryComponent") : null;
             if (type == null) return false;
             var debug = Find("VF.Model.VRCFuryDebugInfo");
             return avatarRoot.GetComponentsInChildren(type, true).Any(c => debug == null || !debug.IsInstanceOfType(c));

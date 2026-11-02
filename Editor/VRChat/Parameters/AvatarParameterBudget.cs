@@ -105,7 +105,8 @@ namespace Orbiters.Toolkit.Editor.VRChat.Parameters
             }
             budget.TotalBeforeCompression = budget.DescriptorBits;
             ResolveVrcFury();
-            if (vrcFuryType == null) return budget;
+            // VRCFury Stub has VRCFury's components without building them: their toggles add no parameters.
+            if (vrcFuryType == null || !VrcFury.Installed) return budget;
             budget.VrcFuryPresent = true;
 
             bool IsFaceTracking(GameObject go) => go != null && IsFaceTrackingOwner(go);
