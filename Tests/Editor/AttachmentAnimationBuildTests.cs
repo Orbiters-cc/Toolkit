@@ -253,6 +253,20 @@ public sealed class AttachmentAnimationBuildTests
 
     // A tool moved a bone before the build (MCB applying a version's skeleton): clips written for the original hierarchy
     // keep animating it and its children, and the authored clip keeps its path.
+    // Found by the compatibility project (Modular Avatar without VRCFury, Optimization Big): a menu item left out of the
+    // upload took its clip copy with it, then short names rewrote the moved objects' paths and met the destroyed copy.
+    [Test] public void ACopyDestroyedByAnEarlierStepIsLeftOutOfLaterRewrites()
+    {
+        var copy = Object.Instantiate(avatar);
+        SceneManager.MoveGameObjectToScene(copy, scene);
+        builds.Add(copy);
+        var build = AttachmentAnimationBuild.Prepare(copy);
+        Object.DestroyImmediate(Clip(copy));
+        Assert.DoesNotThrow(() => build.Moved(new[] { (copy.transform.Find("Coat"), "Old/Coat") }));
+        CollectionAssert.IsEmpty(build.Clips, "only live clips are listed");
+        using (build.Edits()) { }
+    }
+
     [Test] public void AnimationsOfABoneMovedBeforeTheBuildFollowItsFormerPath()
     {
         Child(bone, "Tip");

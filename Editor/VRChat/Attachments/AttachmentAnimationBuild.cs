@@ -204,7 +204,7 @@ namespace Orbiters.Toolkit.Editor.VRChat.Attachments
 
         /// <summary>The build's copies of the clips, each with the object its paths start from (the avatar's, or a nested Animator's).</summary>
         public IEnumerable<(AnimationClip Clip, Transform AnimatorRoot)> Clips =>
-            graphs.SelectMany(g => g.Copies.Values.OfType<AnimationClip>().Select(c => (c, g.AnimatorRoot))).Distinct();
+            graphs.SelectMany(g => g.Live<AnimationClip>().Select(c => (c, g.AnimatorRoot))).Distinct();
 
         /// <summary>
         /// <see cref="Owned"/>, each with the object the animator it plays in starts from (paths in clips, masks and state
@@ -217,7 +217,7 @@ namespace Orbiters.Toolkit.Editor.VRChat.Attachments
         /// Many edits to the build's animations at once (clips, states, transitions, masks): the build's controllers are
         /// detached while the returned scope lasts (<see cref="ControllerEdits.Batch"/>), so each edit doesn't rebuild them.
         /// </summary>
-        public IDisposable Edits() => ControllerEdits.Batch(graphs.SelectMany(g => g.Copies.Values.OfType<AnimatorController>()).ToList());
+        public IDisposable Edits() => ControllerEdits.Batch(graphs.SelectMany(g => g.Live<AnimatorController>()).ToList());
 
         /// <summary>
         /// Animations written before a tool moved these transforms keep animating them: bindings to each former path
@@ -540,6 +540,10 @@ namespace Orbiters.Toolkit.Editor.VRChat.Attachments
                 paths.Alias(target, formerPath.Substring(prefix.Length));
             }
 
+            // The copies still alive: a later build step may have destroyed one it no longer needed (a state and its clip
+            // removed with a menu item left out of the upload), and a destroyed copy has nothing left to rewrite.
+            internal IEnumerable<T> Live<T>() where T : Object => Copies.Values.OfType<T>().Where(v => v != null);
+
             private string NewPath(string path)
             {
                 if (!paths.TryGet(path, out var target) || target == null) return path;
@@ -549,20 +553,20 @@ namespace Orbiters.Toolkit.Editor.VRChat.Attachments
             }
             internal IEnumerable<Transform> AnimatedActiveTargets()
             {
-                foreach (var clip in Copies.Values.OfType<AnimationClip>())
+                foreach (var clip in Live<AnimationClip>())
                     foreach (var binding in AnimationUtility.GetCurveBindings(clip))
                         if (binding.type == typeof(GameObject) && binding.propertyName == "m_IsActive" && paths.TryGet(binding.path, out var target))
                             yield return target;
             }
             internal IEnumerable<Transform> AnimatedTransformTargets()
             {
-                foreach (var clip in Copies.Values.OfType<AnimationClip>())
+                foreach (var clip in Live<AnimationClip>())
                     foreach (var binding in AnimationUtility.GetCurveBindings(clip))
                         if (binding.type == typeof(Transform) && paths.TryGet(binding.path, out var target)) yield return target;
             }
             internal void Rewrite(Dictionary<Transform, List<Transform>> activationCopies)
             {
-                foreach (var clip in Copies.Values.OfType<AnimationClip>())
+                foreach (var clip in Live<AnimationClip>())
                 {
                     // Only the curves of moved objects change: setting curves one by one rebuilds the clip each time, and
                     // most clips (locomotion, humanoid muscles) animate nothing that moved.
@@ -604,7 +608,7 @@ namespace Orbiters.Toolkit.Editor.VRChat.Attachments
                     foreach (var entry in objects) AnimationUtility.SetObjectReferenceCurve(clip, entry.to, entry.keys);
                     EditorUtility.SetDirty(clip);
                 }
-                foreach (var mask in Copies.Values.OfType<AvatarMask>())
+                foreach (var mask in Live<AvatarMask>())
                 {
                     var additions = new Dictionary<string, bool>(StringComparer.Ordinal);
                     for (int i = 0; i < mask.transformCount; i++)

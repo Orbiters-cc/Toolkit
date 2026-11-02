@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- **A build no longer stops on a clip a later step destroyed.** With Modular Avatar and no VRCFury, an upload at
+  Optimization Big whose menu leaves items out stopped in short names ("Value cannot be null. Parameter name: clip"):
+  the build's animation copies kept listing a clip removed with a left-out item. Only live copies are rewritten now.
 - **The menu preview sorts an item's toggle where the build puts the item.** `Attachments.AttachmentBuild.Reparented(avatar)`
   lists what the build moves onto its bone before VRCFury reads its components (each becomes its bone's last child),
   without changing the avatar; `Apply` uses the same selection.
