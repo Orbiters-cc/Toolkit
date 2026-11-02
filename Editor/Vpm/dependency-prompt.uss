@@ -16,6 +16,8 @@
 .orbiters-plan__dot { width: 8px; height: 8px; border-radius: 4px; margin: 4px 8px 0 2px; flex-shrink: 0; background-color: #6f6f6f; }
 .orbiters-plan__dot--install { background-color: #00DA6D; }
 .orbiters-plan__dot--upgrade { background-color: #8a7dff; }
+.orbiters-plan__dot--downgrade { background-color: #ffb020; }
+.orbiters-plan__dot--remove { background-color: #ff6b6b; }
 .orbiters-plan__dot--blocked, .orbiters-plan__dot--missing { background-color: #ff6b6b; }
 .orbiters-plan__texts { flex-grow: 1; flex-shrink: 1; min-width: 0; }
 .orbiters-plan__name { margin: 0; padding: 0; font-size: 11px; color: #e6e6e6; white-space: normal; }

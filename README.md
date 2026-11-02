@@ -1,5 +1,27 @@
 # Orbiters Toolkit
 
+## Unreleased
+
+- **Plans the user approves may change the VRChat SDK and the tools pinning it.** `VpmDependencyPlan.Resolve` takes a
+  `VpmPlanScope`: `Requested` (as before: never the SDK, never a package nothing asked for), `Sdk` (com.vrchat.* may be
+  updated or downgraded), `InstalledTools` (an installed tool whose range does not allow a version the plan chooses is
+  updated or downgraded to one that does) and `Removal` (last resort: such a tool is removed when none of its versions
+  works; never Orbiters' own packages, never a developed one, never one something else needs).
+  `ResolveForApproval` widens through them, least disruptive first, and where tools may change, versions that leave
+  more of them as they are come first: an asset needing SDK 3.7.6 on a 3.7.5 project moves the SDK to 3.7.6 and touches
+  no tool. New step actions `Downgrade` and `Remove`; `VpmPlanStep.Approval` marks the changes only an approved plan makes
+  and `VpmPlanStep.Limiting` the tools changed because they limit another package (its `Reason`: "3.9.3 works only with
+  VRChat SDK - Avatars >=3.5.2 <3.8.X; 3.9.9 works with VRChat SDK - Avatars 3.10.6."). `VpmDependencyPlan.Blocker` is the
+  step that keeps a plan from applying.
+- **`VpmApprovalPlanner.PlanAsync`**: that plan, and when it needs a removal or finds none, the installed tools no
+  configured repository offers another version of are looked up in the repositories this computer's Creator Companion
+  read before (`VpmRepositoryHistory`, its Repos cache: removed and community repositories too; only https URLs), their
+  versions read live, and the plan solved again (the repository is added when the plan is applied, as it shows).
+- **`VpmPlanInstaller.ApplyAsync`** applies a plan with the editor responsive: each step (repositories, removals first,
+  installs, updates, downgrades, VPM's resolve and the check of what VPM installed) runs off the main thread and reports
+  `VpmApplyProgress`; Unity imports nothing until it ends, and with `reload: false` the caller saves what must survive
+  the reload before `VpmPlanInstaller.Reload()`. `Apply` handles removals and downgrades too.
+
 ## 0.4.11 — 2026-11-01
 
 - **Compiles with every VRChat SDK from 3.7.0.** A project on SDK 3.7.5 failed to compile Toolkit's VRChat part (and

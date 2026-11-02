@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Net.Http;
 using System.Threading;
@@ -62,6 +63,45 @@ namespace Orbiters.Toolkit.Editor.Vpm
                 }
             }
             return VpmCandidates.Newest(result);
+        }
+    }
+
+    /// <summary>
+    /// The VPM repositories this computer's Creator Companion has read before, from its cache (also repositories removed
+    /// since, and community ones): where a package installed from a repository no longer listed in its settings came
+    /// from. Only the URL is taken from the cache; the versions are read from the repository itself.
+    /// </summary>
+    public static class VpmRepositoryHistory
+    {
+        /// <summary>The Creator Companion's repository cache (%LOCALAPPDATA%\VRChatCreatorCompanion\Repos).</summary>
+        public static string Folder => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "VRChatCreatorCompanion", "Repos");
+
+        /// <summary>For each package id, the https URLs of the cached listings offering it (the most recently read first).</summary>
+        public static Dictionary<string, List<string>> Offering(IEnumerable<string> ids, string folder = null)
+        {
+            var wanted = new HashSet<string>(ids ?? Enumerable.Empty<string>(), StringComparer.OrdinalIgnoreCase);
+            var found = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
+            folder ??= Folder;
+            if (wanted.Count == 0 || !Directory.Exists(folder)) return found;
+            foreach (var file in new DirectoryInfo(folder).GetFiles("*.json").OrderByDescending(f => f.LastWriteTimeUtc))
+            {
+                try
+                {
+                    var listing = JObject.Parse(File.ReadAllText(file.FullName));
+                    // VCC keeps { "repo": listing, ... }; a bare listing is read the same.
+                    var repo = listing["repo"] as JObject ?? listing;
+                    string url = repo.Value<string>("url");
+                    if (!Uri.TryCreate(url, UriKind.Absolute, out var uri) || uri.Scheme != Uri.UriSchemeHttps || !(repo["packages"] is JObject packages)) continue;
+                    foreach (var package in packages.Properties())
+                    {
+                        if (!wanted.Contains(package.Name)) continue;
+                        if (!found.TryGetValue(package.Name, out var urls)) found[package.Name] = urls = new List<string>();
+                        if (!urls.Contains(url, StringComparer.OrdinalIgnoreCase)) urls.Add(url);
+                    }
+                }
+                catch (Exception e) when (e is IOException || e is UnauthorizedAccessException || e is Newtonsoft.Json.JsonException) { }
+            }
+            return found;
         }
     }
 

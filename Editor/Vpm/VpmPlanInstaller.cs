@@ -116,61 +116,78 @@ namespace Orbiters.Toolkit.Editor.Vpm
         internal static string ProjectPath => Path.GetFullPath(Path.Combine(Application.dataPath, ".."));
     }
 
-    public static class VpmPlanInstaller
+    /// <summary>Where an applied plan is: the step running (1-based) of how many, what it does, and 0..1 overall.</summary>
+    public sealed class VpmApplyProgress
+    {
+        public int Step, Count;
+        public string Text;
+        public float Fraction;
+    }
+
+    public static class VpmApprovalPlanner
     {
         /// <summary>
-        /// Applies an accepted plan: adds the repositories it needs, installs and updates its packages (dependencies first),
-        /// then resolves the project. Synchronous with a progress bar; Unity reloads its scripts afterwards.
+        /// The plan a user approves before anything changes (<see cref="VpmDependencyPlan.ResolveForApproval"/>): the VRChat
+        /// SDK and the tools limiting it may change. When that needs a removal or finds no plan, the installed tools that no
+        /// configured repository offers another version of are looked up in the repositories this computer read before
+        /// (<see cref="VpmRepositoryHistory"/>), their versions read from those repositories, and the plan solved again; the
+        /// one with fewer removals wins (the repository is then added when the plan is applied, as the plan shows).
+        /// </summary>
+        public static async System.Threading.Tasks.Task<VpmDependencyPlan> PlanAsync(IEnumerable<VpmDependencyPlan.Requirement> requirements,
+            IEnumerable<VpmCandidate> known = null, System.Threading.CancellationToken cancellation = default)
+        {
+            var list = (requirements ?? Enumerable.Empty<VpmDependencyPlan.Requirement>()).ToList();
+            var candidates = new List<VpmCandidate>(known ?? Enumerable.Empty<VpmCandidate>());
+            var catalog = new VpmProjectCatalog(candidates);
+            var plan = VpmDependencyPlan.ResolveForApproval(list, catalog);
+            if (plan.CanApply && Removals(plan) == 0) return plan;
+            var stranded = catalog.InstalledPackages()
+                .Where(id => !catalog.Developed(id) && !VpmDependencyPlan.Protected(id) && !catalog.Versions(id).Any(c => c.Version != catalog.Installed(id)))
+                .ToList();
+            if (stranded.Count == 0) return plan;
+            var offering = await System.Threading.Tasks.Task.Run(() => VpmRepositoryHistory.Offering(stranded), cancellation);
+            var extra = new List<VpmCandidate>();
+            foreach (string url in offering.Values.SelectMany(u => u).Distinct(StringComparer.OrdinalIgnoreCase))
+                extra.AddRange((await VpmListingReader.ReadAsync(url, cancellation))
+                    .Where(c => offering.TryGetValue(c.Id, out var urls) && urls.Contains(url, StringComparer.OrdinalIgnoreCase)));
+            if (extra.Count == 0) return plan;
+            var wider = VpmDependencyPlan.ResolveForApproval(list, new VpmProjectCatalog(candidates.Concat(extra)));
+            return wider.CanApply && (!plan.CanApply || Removals(wider) < Removals(plan)) ? wider : plan;
+        }
+
+        private static int Removals(VpmDependencyPlan plan) => plan.Changes.Count(s => s.Action == VpmStepAction.Remove);
+    }
+
+    public static class VpmPlanInstaller
+    {
+        // One piece of work of an applied plan; it reports a failure by adding to the result's errors.
+        private sealed class Work
+        {
+            public string Text;
+            public float At;
+            public Action<VpmDependencyInstallResult> Run;
+        }
+
+        /// <summary>
+        /// Applies an accepted plan: adds the repositories it needs, removes what it removes, installs, updates and downgrades
+        /// its packages (dependencies first), then resolves the project. Synchronous with a progress bar; Unity reloads its
+        /// scripts afterwards.
         /// </summary>
         public static VpmDependencyInstallResult Apply(VpmDependencyPlan plan)
         {
-            var result = new VpmDependencyInstallResult();
-            if (plan == null || !plan.CanApply) { result.Errors.Add("This dependency plan cannot be applied."); return result; }
-            var changes = plan.Changes.ToList();
-            if (changes.Count == 0) { result.Success = true; return result; }
-            if (VpmDependencies.IsInstalling) { result.Errors.Add("A package install is already running."); return result; }
-            if (EditorApplication.isCompiling || EditorApplication.isUpdating) { result.Errors.Add("Unity is compiling or importing assets. Wait for it to finish, then try again."); return result; }
+            var result = Check(plan, out var work);
+            if (work == null) return result;
             try
             {
                 VpmDependencies.BeginInstall();
-                var urls = plan.Repositories.ToList();
-                for (int i = 0; i < urls.Count; i++)
+                foreach (var piece in work)
                 {
-                    EditorUtility.DisplayProgressBar("Installing packages", "Adding VPM repository…", 0.05f + 0.2f * (i + 1f) / urls.Count);
-                    if (!Uri.TryCreate(urls[i], UriKind.Absolute, out var uri)) { result.Errors.Add("Invalid VPM repository URL: " + urls[i]); continue; }
-                    if (Repos.UserRepoExists(uri)) continue;
-                    if (!Repos.AddRepo(uri, new Dictionary<string, string>())) { result.Errors.Add("VPM could not add repository: " + urls[i]); continue; }
-                    result.AddedRepositoryUrls.Add(urls[i]);
-                }
-                foreach (var provider in Repos.GetAll) (provider as VPMPackageProvider)?.Refresh();
-                var project = new UnityProject(VpmProjectCatalog.ProjectPath);
-                for (int i = 0; i < changes.Count && result.Errors.Count == 0; i++)
-                {
-                    var step = changes[i];
-                    EditorUtility.DisplayProgressBar("Installing packages", VpmDependencyPlan.Describe(step) + "…", Mathf.Lerp(0.3f, 0.85f, (i + 1f) / changes.Count));
-                    if (Repos.GetPackageWithVersionMatch(step.Id, step.To) == null) { result.Errors.Add($"{step.DisplayName} {step.To} is not available from its repository."); break; }
-                    if (!project.AddVPMPackage(step.Id, step.To, Repos.GetAll)) { result.Errors.Add($"VPM could not install {step.DisplayName} {step.To}."); break; }
-                    result.InstalledPackageIds.Add(step.Id);
-                }
-                if (result.Errors.Count == 0)
-                {
-                    EditorUtility.DisplayProgressBar("Installing packages", "Resolving project packages…", 0.92f);
-                    if (!VPMProjectManifest.Resolve(VpmProjectCatalog.ProjectPath, Repos.GetAll)) result.Errors.Add("The VPM resolver could not finish resolving the project packages.");
-                }
-                if (result.Errors.Count == 0)
-                {
-                    // The project must have what was reviewed: the resolver may not pick other versions on its own.
-                    var now = new UnityProject(VpmProjectCatalog.ProjectPath).GetInstalledVersions() ?? new Dictionary<string, string>();
-                    foreach (var step in changes)
-                        if (!now.TryGetValue(step.Id, out string version) || version != step.To)
-                            result.Errors.Add($"{step.DisplayName} is {version ?? "not installed"} after installing, not the {step.To} the plan showed.");
-                }
-                if (result.Errors.Count == 0)
-                {
-                    UnityEditor.PackageManager.Client.Resolve();
-                    AssetDatabase.Refresh();
+                    EditorUtility.DisplayProgressBar("Installing packages", piece.Text, piece.At);
+                    piece.Run(result);
+                    if (result.Errors.Count > 0) break;
                 }
                 result.Success = result.Errors.Count == 0;
+                if (result.Success) Reload();
             }
             catch (Exception ex)
             {
@@ -182,6 +199,113 @@ namespace Orbiters.Toolkit.Editor.Vpm
                 EditorUtility.ClearProgressBar();
                 VpmDependencies.EndInstall();
             }
+            return result;
+        }
+
+        /// <summary>
+        /// The same as <see cref="Apply"/> with the editor responsive: each step (downloads, VPM's resolver) runs off the main
+        /// thread and reports to <paramref name="progress"/> on it, Unity does not import anything until it ends, and nothing
+        /// reloads unless <paramref name="reload"/> (otherwise call <see cref="Reload"/> once what must survive the reload is saved).
+        /// </summary>
+        public static async System.Threading.Tasks.Task<VpmDependencyInstallResult> ApplyAsync(VpmDependencyPlan plan, Action<VpmApplyProgress> progress, bool reload = true)
+        {
+            var result = Check(plan, out var work);
+            if (work == null) return result;
+            VpmDependencies.BeginInstall();
+            AssetDatabase.DisallowAutoRefresh();
+            try
+            {
+                for (int i = 0; i < work.Count; i++)
+                {
+                    var piece = work[i];
+                    progress?.Invoke(new VpmApplyProgress { Step = i + 1, Count = work.Count, Text = piece.Text, Fraction = piece.At });
+                    await System.Threading.Tasks.Task.Run(() => piece.Run(result));
+                    if (result.Errors.Count > 0) break;
+                }
+                result.Success = result.Errors.Count == 0;
+            }
+            catch (Exception ex)
+            {
+                result.Errors.Add(ex.Message);
+                Debug.LogError("[Orbiters] Package installation failed: " + ex);
+            }
+            finally
+            {
+                AssetDatabase.AllowAutoRefresh();
+                VpmDependencies.EndInstall();
+            }
+            if (result.Success && reload) Reload();
+            return result;
+        }
+
+        /// <summary>Unity takes in the changed packages (its scripts reload afterwards).</summary>
+        public static void Reload()
+        {
+            UnityEditor.PackageManager.Client.Resolve();
+            AssetDatabase.Refresh();
+        }
+
+        // What applying the plan does, in order; null (with the reason in the result) when it cannot start.
+        private static VpmDependencyInstallResult Check(VpmDependencyPlan plan, out List<Work> work)
+        {
+            work = null;
+            var result = new VpmDependencyInstallResult();
+            if (plan == null || !plan.CanApply) { result.Errors.Add("This dependency plan cannot be applied."); return result; }
+            // Removals first: a removed tool's range no longer holds the packages updated after it.
+            var changes = plan.Changes.OrderBy(s => s.Action == VpmStepAction.Remove ? 0 : 1).ToList();
+            if (changes.Count == 0) { result.Success = true; return result; }
+            if (VpmDependencies.IsInstalling) { result.Errors.Add("A package install is already running."); return result; }
+            if (EditorApplication.isCompiling || EditorApplication.isUpdating) { result.Errors.Add("Unity is compiling or importing assets. Wait for it to finish, then try again."); return result; }
+            string path = VpmProjectCatalog.ProjectPath;
+            work = new List<Work>();
+            var urls = plan.Repositories.ToList();
+            for (int i = 0; i < urls.Count; i++)
+            {
+                string url = urls[i];
+                work.Add(new Work { Text = "Adding the VPM repository " + url + "…", At = 0.05f + 0.15f * i / urls.Count, Run = r =>
+                {
+                    if (!Uri.TryCreate(url, UriKind.Absolute, out var uri)) { r.Errors.Add("Invalid VPM repository URL: " + url); return; }
+                    if (Repos.UserRepoExists(uri)) return;
+                    if (!Repos.AddRepo(uri, new Dictionary<string, string>())) { r.Errors.Add("VPM could not add the repository " + url + "."); return; }
+                    r.AddedRepositoryUrls.Add(url);
+                } });
+            }
+            UnityProject project = null;
+            work.Add(new Work { Text = "Reading the VPM repositories…", At = 0.22f, Run = _ =>
+            {
+                foreach (var provider in Repos.GetAll) (provider as VPMPackageProvider)?.Refresh();
+                project = new UnityProject(path);
+            } });
+            for (int i = 0; i < changes.Count; i++)
+            {
+                var step = changes[i];
+                work.Add(new Work { Text = VpmDependencyPlan.Describe(step) + "…", At = Mathf.Lerp(0.25f, 0.85f, (float)i / changes.Count), Run = r =>
+                {
+                    if (step.Action == VpmStepAction.Remove)
+                    {
+                        if (!project.RemoveVPMPackage(step.Id)) r.Errors.Add($"VPM could not remove {step.DisplayName} {step.From}.");
+                        return;
+                    }
+                    if (Repos.GetPackageWithVersionMatch(step.Id, step.To) == null) { r.Errors.Add($"{step.DisplayName} {step.To} is not available from its repository."); return; }
+                    if (!project.AddVPMPackage(step.Id, step.To, Repos.GetAll)) { r.Errors.Add($"VPM could not install {step.DisplayName} {step.To}."); return; }
+                    r.InstalledPackageIds.Add(step.Id);
+                } });
+            }
+            work.Add(new Work { Text = "Resolving the project's packages…", At = 0.9f, Run = r =>
+            {
+                if (!VPMProjectManifest.Resolve(path, Repos.GetAll)) { r.Errors.Add("The VPM resolver could not finish resolving the project packages."); return; }
+                // The project must have what was reviewed: the resolver may not pick other versions on its own.
+                var now = new UnityProject(path).GetInstalledVersions() ?? new Dictionary<string, string>();
+                foreach (var step in changes)
+                {
+                    now.TryGetValue(step.Id, out string version);
+                    if (step.Action == VpmStepAction.Remove)
+                    {
+                        if (version != null) r.Errors.Add($"{step.DisplayName} {version} is still installed after removing it.");
+                    }
+                    else if (version != step.To) r.Errors.Add($"{step.DisplayName} is {version ?? "not installed"} after installing, not the {step.To} the plan showed.");
+                }
+            } });
             return result;
         }
     }
