@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **3D previews record the scene's lighting.** `Preview.PreviewLighting` writes the loaded scenes' directional lights
+  (the sun first, at most four: direction, the colour shaders receive, shadows), the ambient light facing up, round the
+  horizon and down, and the reflection intensity into the preview (contracts' Docs/project-preview.md, `lighting`,
+  optional within schema 2). Orbiters - N4N0 draws the preview in it by default, with a switch to its studio light; a
+  project shows it after its next scene save.
 - **An upload resets VRChat's OSC config of the avatar.** VRChat writes an avatar's OSC config
   (`%USERPROFILE%\AppData\LocalLow\VRChat\VRChat\OSC\<account>\Avatars\<avatar id>.json`) the first time it loads the
   avatar and keeps reading it after the avatar is uploaded again with other parameters, so OSC apps (face tracking,
