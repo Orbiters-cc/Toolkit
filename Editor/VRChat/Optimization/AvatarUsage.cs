@@ -118,6 +118,12 @@ namespace Orbiters.Toolkit.Editor.VRChat.Optimization
             if (binding.type == typeof(Transform)) transformPaths.Add(path);
         }
 
+        /// <summary>
+        /// An animation a build step added after this was read (<paramref name="path"/> from the avatar's root): the steps
+        /// after it see what it animates, as if it had been there (a bone it scales is not folded away, its object stays).
+        /// </summary>
+        internal void Animates(string path, EditorCurveBinding binding, bool on = false) => Add(path, binding, on);
+
         // An override controller reads the parameters of the controller it overrides.
         private static IEnumerable<string> Parameters(RuntimeAnimatorController controller)
         {

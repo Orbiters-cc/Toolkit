@@ -1,5 +1,29 @@
 # Orbiters Toolkit
 
+## Unreleased
+
+- **Meshes toggled on their own merge too, their toggles kept.** `VRChat.Optimization.MeshMerge.MergeToggled(usage,
+  build, policy)`, run after `MergeTogether`, merges skinned meshes and props that one toggle each shows and hides
+  (an object's `m_IsActive`, or the renderer's own `m_Enabled`) into a skinned mesh that is always shown and drawn the
+  same way. The toggle then hides its part of the merged mesh: a part that follows one bone (a rigid accessory, a prop)
+  follows a new `Orbiters hide <toggle>` bone scaled 1 ↔ 0 (exact in every pose, one bone more); any other part gets an
+  `Orbiters hidden <toggle>` blendshape 0 ↔ 100 that folds each vertex onto a joint of its bones (flat in every pose for
+  vertices on one bone or a parent and its child). The toggle's own curves stay (PhysBones, contacts and lights under its
+  object still stop while hidden) and get the same keys, stepped, on the bone or the blendshape in every clip that sets
+  them; the rest state is the toggle's, so Write Defaults on and off layers behave as before. It only merges when
+  `ToggledPolicy` finds a better rating for skinned meshes or meshes (the SDK's limits for the platform built: the best
+  level the candidates can reach, cheapest first), with at most 256 KB of blendshape download per toggle and 1 MB in all,
+  and never a bone more that would rate the bones worse (that part gets a blendshape instead). Every blocker of the
+  other merges stays (pointed at, materials swapped, other properties animated, `Crosses`, draw and skinning settings,
+  pending build tools, particle emitters), plus two toggles above one mesh, constraints moving it (a dropped prop),
+  and, on an estimate, animated blendshapes. `Result.Skipped` says why each toggled mesh stayed apart.
+  `AvatarUsage.Animates` lets the later steps see the new animations (bones that never move leave the hide bones alone;
+  short names keep them bound). Measured on MasculineCanine (compatibility project, `base`, real SDK preprocess): nothing
+  merges — 9 skinned meshes, Very Poor / Very Poor, 15.74 MB at Big before and after, 16 unresolved bindings as before:
+  its always-shown meshes animate Poiyomi properties every candidate has, and N4N0's parts have two toggles or material
+  animations. On the control avatar a toggled band (hide bone) or scarf (blendshape) joins the body: 2 → 1 skinned mesh,
+  toggles sampled and driven in Gesture Manager and Av3Emulator.
+
 ## 0.4.13 — 2026-11-02
 
 - **Checks: AAO's Trace and Optimize.** With its component on the avatar it also merges and removes Orbiters items'

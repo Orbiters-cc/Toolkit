@@ -22,9 +22,11 @@ namespace Orbiters.Toolkit.Editor.VRChat.Optimization
     /// Their blendshapes, which nothing animates, are baked in at their weight.</item>
     /// <item><see cref="MergeTogether"/>: meshes every animation shows and hides together (an outfit's pieces under one
     /// toggle). Their animated blendshapes join the merged mesh, and the animations follow them there.</item>
+    /// <item><see cref="MergeToggled"/>: meshes toggled on their own join one that is always shown, when that lowers a rank;
+    /// each toggle then hides its part of the merged mesh (a bone scaled to nothing, or a blendshape folding it away).</item>
     /// </list>
     /// </summary>
-    public static class MeshMerge
+    public static partial class MeshMerge
     {
         public sealed class Result
         {
@@ -32,6 +34,13 @@ namespace Orbiters.Toolkit.Editor.VRChat.Optimization
             public readonly List<Mesh> Meshes = new List<Mesh>();
             /// <summary>How many renderers joined another.</summary>
             public int Merged;
+            /// <summary><see cref="MergeToggled"/>: how many renderers took the toggled ones in.</summary>
+            public int Into;
+            /// <summary><see cref="MergeToggled"/>: the bones and blendshapes added to hide the parts, and the download they add (the policy's estimate).</summary>
+            public int HideBones, CollapseShapes;
+            public long AddedBytes;
+            /// <summary><see cref="MergeToggled"/>: the toggled meshes left apart, each with why.</summary>
+            public readonly List<string> Skipped = new List<string>();
         }
 
         public static Result MergeStill(AvatarUsage usage)
@@ -285,6 +294,8 @@ namespace Orbiters.Toolkit.Editor.VRChat.Optimization
             public Mesh Mesh;
             /// <summary>Each joining mesh's blendshapes kept, by their name in it and in the merged mesh.</summary>
             public readonly List<(Transform Source, Dictionary<string, string> Names)> Shapes = new List<(Transform, Dictionary<string, string>)>();
+            /// <summary>Where each joining renderer's vertices are in the merged mesh.</summary>
+            public readonly Dictionary<Renderer, (int Offset, int Count)> Ranges = new Dictionary<Renderer, (int, int)>();
         }
 
         // A skinned part brings its bones; a prop is skinned whole to its own transform, in its own space (bind pose identity).
@@ -292,7 +303,8 @@ namespace Orbiters.Toolkit.Editor.VRChat.Optimization
             ? new Part { Renderer = renderer, Mesh = skinned.sharedMesh, Bones = skinned.bones, Poses = skinned.sharedMesh.bindposes }
             : new Part { Renderer = renderer, Mesh = MeshOptimization.MeshOf(renderer), Bones = new[] { renderer.transform }, Poses = new[] { Matrix4x4.identity } };
 
-        private static Merged Merge(SkinnedMeshRenderer target, List<Renderer> sources, bool keepShapes)
+        // hides: a source whose one bone (a prop's own transform) a hide bone takes the place of: its vertices follow that.
+        private static Merged Merge(SkinnedMeshRenderer target, List<Renderer> sources, bool keepShapes, IReadOnlyDictionary<Renderer, Transform> hides = null)
         {
             var result = new Merged();
             var bones = target.bones.ToList();
@@ -303,8 +315,10 @@ namespace Orbiters.Toolkit.Editor.VRChat.Optimization
             foreach (var source in sources)
             {
                 var part = PartOf(source);
+                if (hides != null && hides.TryGetValue(source, out var hide)) Rebone(part, hide);
                 part.Flip = Mirrored(source) != Mirrored(target);
                 part.Offset = vertices;
+                result.Ranges[source] = (vertices, part.Mesh.vertexCount);
                 vertices += part.Mesh.vertexCount;
                 Map(part, bones, poses);
                 parts.Add(part);
