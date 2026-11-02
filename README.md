@@ -1,5 +1,12 @@
 # Orbiters Toolkit
 
+## Unreleased
+
+- **Uploads tell Orbiters - N4N0, which makes VRChat wear the new version.** After every successful upload of an
+  `avtr_` avatar, for whichever platform, `AvatarManifestExporter` (its existing `OnSdkUploadSuccess` handler) replaces
+  `%LOCALAPPDATA%\Orbiters\Avatars\uploaded.json` in one step: `schema` 1, `avatarId`, `platform` (`windows`,
+  `android`, `ios`), `name`, `project`, `uploadedAt` (UTC, milliseconds), `unityPid` (contracts' `Docs/avatar-upload.md`).
+
 ## 0.4.12 — 2026-11-02
 
 - **Plans the user approves may change the VRChat SDK and the tools pinning it.** `VpmDependencyPlan.Resolve` takes a

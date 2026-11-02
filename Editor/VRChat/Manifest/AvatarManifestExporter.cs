@@ -2,6 +2,7 @@ using System;
 using System.Globalization;
 using System.IO;
 using System.Reflection;
+using Newtonsoft.Json;
 using Orbiters.Toolkit.Storage;
 using UnityEditor;
 using UnityEngine;
@@ -21,6 +22,7 @@ namespace Orbiters.Toolkit.Editor.VRChat.Manifest
     /// under the id the SDK lists such a test avatar by (local:sdk_&lt;avatar name&gt;). An avatar uploaded for the first time
     /// by an SDK that only gives it its id once uploaded gets its file when the upload succeeds. Anything that goes wrong is
     /// said in the Console: the build goes on. Android and iOS builds, Play Mode and Orbiters' hidden builds write nothing.
+    /// Every successful upload, whatever its platform, is also noted in uploaded.json there (<see cref="NoteUpload"/>).
     /// </summary>
     [InitializeOnLoad]
     internal sealed class AvatarManifestExporter : IVRCSDKPreprocessAvatarCallback
@@ -30,7 +32,12 @@ namespace Orbiters.Toolkit.Editor.VRChat.Manifest
         private static IVRCSdkAvatarBuilderApi builder;
         // What the last build wrote, for its upload.
         private static AvatarManifest built;
+        // The avatar the last build started with, for an upload that wrote no manifest (Android, iOS).
+        private static string builtName;
         private static string generator;
+
+        /// <summary>The upload record's file in <see cref="AvatarManifest.Folder"/> (contracts' Docs/avatar-upload.md).</summary>
+        internal const string UploadFileName = "uploaded.json";
 
         static AvatarManifestExporter()
         {
@@ -57,8 +64,7 @@ namespace Orbiters.Toolkit.Editor.VRChat.Manifest
             var manifest = AvatarManifest.Read(avatar, id);
             // N4N0's own version, noted as the build started (its gallery folder is no longer known by now).
             if (manifest.N4N0TextSync.HasValue) manifest.N4N0Version = N4N0Installer.BuiltVersion(avatar);
-            // The SDK builds a copy named after the avatar.
-            if (manifest.Name.EndsWith("(Clone)", StringComparison.Ordinal)) manifest.Name = manifest.Name.Substring(0, manifest.Name.Length - "(Clone)".Length).TrimEnd();
+            manifest.Name = WithoutClone(manifest.Name);
             manifest.WrittenUtc = DateTime.UtcNow.ToString("yyyy-MM-dd'T'HH:mm:ss'Z'", CultureInfo.InvariantCulture);
             manifest.Generator = Generator();
             manifest.Project = Path.GetDirectoryName(Path.GetFullPath(Application.dataPath));
@@ -78,6 +84,10 @@ namespace Orbiters.Toolkit.Editor.VRChat.Manifest
             SafePaths.ReplaceFile(path, manifest.ToJson());
             return path;
         }
+
+        // The SDK builds a copy named after the avatar.
+        private static string WithoutClone(string name) =>
+            name != null && name.EndsWith("(Clone)", StringComparison.Ordinal) ? name.Substring(0, name.Length - "(Clone)".Length).TrimEnd() : name;
 
         private static string Generator()
         {
@@ -102,7 +112,11 @@ namespace Orbiters.Toolkit.Editor.VRChat.Manifest
             builder.OnSdkUploadSuccess += Uploaded;
         }
 
-        private static void BuildStart(object sender, object target) => built = null;
+        private static void BuildStart(object sender, object target)
+        {
+            built = null;
+            builtName = WithoutClone((target as GameObject)?.name);
+        }
 
         // The id the upload ended with, when the build had none (or another).
         private static void Uploaded(object sender, string avatarId)
@@ -112,9 +126,59 @@ namespace Orbiters.Toolkit.Editor.VRChat.Manifest
                 if (built != null && !string.IsNullOrEmpty(avatarId) && built.AvatarId != avatarId) Write(built, avatarId);
             }
             catch (Exception ex) { Debug.LogWarning("Orbiters Toolkit could not write the avatar manifest Orbiters - N4N0 reads: " + ex.Message); }
+            NoteUpload(avatarId);
             if (!string.IsNullOrEmpty(avatarId)) SaveThumbnail(avatarId);
             // The scene as uploaded, for Orbiters - N4N0's 3D preview of the project.
             Orbiters.Toolkit.Editor.Preview.ProjectPreview.RequestActiveScene("upload");
+        }
+
+        /// <summary>
+        /// Notes the upload of <paramref name="avatarId"/> in %LOCALAPPDATA%\Orbiters\Avatars\uploaded.json, replaced in one
+        /// step, for whichever platform was built and whether or not its manifest changed (contracts' Docs/avatar-upload.md):
+        /// Orbiters - N4N0 then makes VRChat wear the new version. Only uploaded avatars' ids (avtr_).
+        /// </summary>
+        internal static void NoteUpload(string avatarId)
+        {
+            if (string.IsNullOrEmpty(avatarId) || !avatarId.StartsWith("avtr_", StringComparison.Ordinal)) return;
+            try
+            {
+                string project = Path.GetDirectoryName(Path.GetFullPath(Application.dataPath));
+                int pid;
+                using (var unity = System.Diagnostics.Process.GetCurrentProcess()) pid = unity.Id;
+                string record = UploadRecord(avatarId, Platform(EditorUserBuildSettings.activeBuildTarget), built?.Name ?? builtName, project, DateTime.UtcNow, pid);
+                SafePaths.ReplaceFile(Path.Combine(AvatarManifest.Folder, UploadFileName), record);
+            }
+            catch (Exception ex) { Debug.LogWarning("Orbiters Toolkit could not tell Orbiters - N4N0 about the upload: " + ex.Message); }
+        }
+
+        /// <summary>The upload record as contracts' Docs/avatar-upload.md shows it (schema 1).</summary>
+        internal static string UploadRecord(string avatarId, string platform, string name, string project, DateTime uploadedUtc, int unityPid)
+        {
+            var text = new StringWriter(CultureInfo.InvariantCulture);
+            using (var json = new JsonTextWriter(text) { Formatting = Formatting.Indented, Indentation = 2 })
+            {
+                json.WriteStartObject();
+                json.WritePropertyName("schema"); json.WriteValue(1);
+                json.WritePropertyName("avatarId"); json.WriteValue(avatarId);
+                json.WritePropertyName("platform"); json.WriteValue(platform);
+                json.WritePropertyName("name"); json.WriteValue(name ?? "");
+                json.WritePropertyName("project"); json.WriteValue(project ?? "");
+                json.WritePropertyName("uploadedAt"); json.WriteValue(uploadedUtc.ToUniversalTime().ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'", CultureInfo.InvariantCulture));
+                json.WritePropertyName("unityPid"); json.WriteValue(unityPid);
+                json.WriteEndObject();
+            }
+            return text.ToString();
+        }
+
+        /// <summary>The record's platform for a build target: the platform VRChat wears the build on.</summary>
+        internal static string Platform(BuildTarget target)
+        {
+            switch (target)
+            {
+                case BuildTarget.Android: return "android";
+                case BuildTarget.iOS: return "ios";
+                default: return "windows";
+            }
         }
 
         /// <summary>
