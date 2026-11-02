@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **Checks: "Other tools".** `VRChat.Checks.ToolConflicts.Find(avatar)` turns what the compatibility matrix found about
+  other avatar tools into notes and warnings, read on the avatar itself (their components leave a built copy).
+  `ToolConflicts.MenuTools(avatar)` names the tools on it whose menus are added at upload by their own build pass
+  (lilycalInventory, FaceEmo, Avatar Menu Creator for MA, AvatarPoseLibrary, EmotePrefab, Bavi Motion Patcher):
+  My Avatar's menu preview doesn't model them and offers the menu of a real build instead.
 - **One listener for the SDK's builds.** `VrcSdkBuilds.Succeeded` / `Last`: which avatar the VRChat SDK built, its bundle
   and that file's size, the platform and time. My Avatar keeps the real size from it; Mixer Git takes its bundle from it
   instead of subscribing itself (Mixer's console keeps its own timing hooks: it depends on no package).
