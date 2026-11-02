@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- **One listener for the SDK's builds.** `VrcSdkBuilds.Succeeded` / `Last`: which avatar the VRChat SDK built, its bundle
+  and that file's size, the platform and time. My Avatar keeps the real size from it; Mixer Git takes its bundle from it
+  instead of subscribing itself (Mixer's console keeps its own timing hooks: it depends on no package).
 - **Rank plans (`Budget/RankPlan`).** `RankStats.Of` keeps one platform's SDK stats as plain data (every category's value
   and rating); `RankPlan.For(now, upload, target, mobile)` gives, per category, the value at upload against the target
   rank's limit with the SDK's own PC or mobile levels, the overshoot (absolute and share), every rank's limit and
