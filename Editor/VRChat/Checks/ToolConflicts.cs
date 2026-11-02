@@ -46,6 +46,7 @@ namespace Orbiters.Toolkit.Editor.VRChat.Checks
                 issues.Add(new AvatarIssue(IssueLevel.Note, Join(menus) + (menus.Count == 1 ? " adds" : " add") + " menu items at upload",
                     "My Avatar's menu editor shows what VRCFury and Modular Avatar build, not these: its “Show the real build” button builds a hidden copy and shows the whole menu, read only.",
                     "Menu"));
+            StubComponents(root, issues);
             LazyOptimiser(root, issues);
             AaoTraceAndOptimize(root, issues);
             return issues;
@@ -81,6 +82,22 @@ namespace Orbiters.Toolkit.Editor.VRChat.Checks
                 "It merges and removes the renderers it judges safe to, those of Orbiters items too (N4N0's orb and capture parts in a test build). " +
                 "If an item misbehaves in VRChat, add it to the component's Exclusions.",
                 string.Join(", ", items.Take(4)) + (items.Count > 4 ? "..." : "")));
+        }
+
+        // VRCFury Stub keeps VRCFury's component types (so avatars made with VRCFury open without missing scripts) but builds
+        // none of them: toggles, armature links, full controllers and the rest do nothing in VRChat.
+        private static void StubComponents(GameObject root, List<AvatarIssue> issues)
+        {
+            if (InstalledTools.VrcFury) return;
+            var components = root.GetComponentsInChildren<Component>(true).Where(VrcFury.IsComponent).ToList();
+            if (components.Count == 0) return;
+            string objects = string.Join(", ", components.Select(c => c.name).Distinct().Take(4)) + (components.Select(c => c.name).Distinct().Count() > 4 ? "..." : "");
+            issues.Add(InstalledTools.VrcFuryStub
+                ? new AvatarIssue(IssueLevel.Warning, $"{components.Count} VRCFury component{(components.Count == 1 ? "" : "s")} won't build: VRCFury Stub is installed, not VRCFury",
+                    "VRCFury Stub keeps VRCFury's components without building them: their toggles, armature links and controllers do nothing in VRChat. " +
+                    "Install VRCFury instead (the two can't be installed together) to keep them.", objects)
+                : new AvatarIssue(IssueLevel.Warning, $"{components.Count} VRCFury component{(components.Count == 1 ? "" : "s")} won't build: VRCFury is not installed",
+                    "Add VRCFury to the project with the Creator Companion: until then their toggles, armature links and controllers do nothing in VRChat.", objects));
         }
 
         private static IEnumerable<Tool> On(GameObject root)
