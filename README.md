@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- **Lazy Optimiser is off for the uploads of Orbiters avatars.** It deletes objects an animation switches on through a
+  component (N4N0's capture rig and kit): `Optimization.LazyOptimiser` turns it off just around its passes (−101 to
+  −89) for avatars holding Orbiters components, in memory only (its setting doesn't change, other avatars keep it);
+  the "Other tools" check says so.
+- **Checks: VRCFury's Write Defaults question with NDMF.** With NDMF in the project the SDK's default layers are filled
+  in before VRCFury looks; next to an avatar whose own layers are mostly Write Defaults on, VRCFury asks at every
+  upload whether to fix the mix: a note says why.
 - **3D previews record the scene's lighting.** `Preview.PreviewLighting` writes the loaded scenes' directional lights
   (the sun first, at most four: direction, the colour shaders receive, shadows), the ambient light facing up, round the
   horizon and down, and the reflection intensity into the preview (contracts' Docs/project-preview.md, `lighting`,

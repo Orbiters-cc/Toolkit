@@ -49,24 +49,63 @@ namespace Orbiters.Toolkit.Editor.VRChat.Checks
             StubComponents(root, issues);
             LazyOptimiser(root, issues);
             AaoTraceAndOptimize(root, issues);
+            WriteDefaultsQuestion(root, issues);
             return issues;
         }
 
         // Lazy Optimiser (net.euan.lazyoptimiser) deletes at every upload, unless it is turned off, the objects it finds no
         // animation showing. It only follows m_IsActive (and a lowercase "m_enabled", which no binding has): an object an
-        // animation switches on through its component's m_Enabled is deleted with its children. Orbiters' items stay as
-        // they are; the check says what breaks.
+        // animation switches on through its component's m_Enabled is deleted with its children. Orbiters turns it off for
+        // the uploads of its avatars (Optimization.LazyOptimiser); other avatars only get the note.
         private static void LazyOptimiser(GameObject root, List<AvatarIssue> issues)
         {
-            const string id = "net.euan.lazyoptimiser";
-            if (!InstalledTools.Has(id) || PlayerPrefs.GetInt("lazyoptimiser.shouldOptimise", 1) != 1) return;
-            var items = root.GetComponentsInChildren<Orbiters.Toolkit.VRChat.OrbitersAttachment>(true).Select(a => a.name).Distinct().ToList();
-            issues.Add(new AvatarIssue(items.Count > 0 ? IssueLevel.Warning : IssueLevel.Note,
-                "Lazy Optimiser deletes objects that animations switch on through a component",
-                "At upload it removes what it thinks no animation shows, and it misses an object an animation turns on through its " +
-                "renderer or another component, as N4N0's capture rig and kit: they're deleted and what they do stops working in VRChat. " +
-                "Turn it off before uploading (Tools > Lazy Optimiser > Toggle Optimiser), or remove the package.",
-                items.Count > 0 ? string.Join(", ", items.Take(4)) + (items.Count > 4 ? "..." : "") : null));
+            if (!InstalledTools.Has(Optimization.LazyOptimiser.PackageId) || PlayerPrefs.GetInt("lazyoptimiser.shouldOptimise", 1) != 1) return;
+            const string why = "At upload it deletes what it thinks no animation shows, and it misses an object an animation turns on through its " +
+                               "renderer or another component, as N4N0's capture rig and kit.";
+            if (Optimization.LazyOptimiser.Holds(root))
+                issues.Add(new AvatarIssue(IssueLevel.Note, "Orbiters turns Lazy Optimiser off for this avatar's uploads",
+                    why + " Orbiters turns it off just around its passes when this avatar uploads, so its items keep working; its own setting " +
+                    "doesn't change and it still optimises your other avatars.", "Upload"));
+            else
+                issues.Add(new AvatarIssue(IssueLevel.Note, "Lazy Optimiser deletes objects that animations switch on through a component",
+                    why + " If something stops showing in VRChat, turn it off before uploading (Tools > Lazy Optimiser > Toggle Optimiser).", "Upload"));
+        }
+
+        // With NDMF in the project, the VRChat SDK's default playable layers are filled in before VRCFury looks at the avatar
+        // (Base, Additive and Gesture with Write Defaults off): next to an avatar whose own layers have Write Defaults on,
+        // VRCFury sees a mix and asks at every upload whether to fix it (MasculineCanine, compatibility project). VRCFury's
+        // question and its fix are its own: a note.
+        private static void WriteDefaultsQuestion(GameObject root, List<AvatarIssue> issues)
+        {
+            if (!InstalledTools.Ndmf || !InstalledTools.VrcFury || !root.GetComponentsInChildren<Component>(true).Any(VrcFury.IsComponent)) return;
+            var descriptor = root.GetComponent<VRC.SDK3.Avatars.Components.VRCAvatarDescriptor>();
+            if (descriptor == null) return;
+            var layers = (descriptor.baseAnimationLayers ?? Array.Empty<VRC.SDK3.Avatars.Components.VRCAvatarDescriptor.CustomAnimLayer>()).ToList();
+            bool defaultsOff = layers.Any(l => l.isDefault && (l.type == VRC.SDK3.Avatars.Components.VRCAvatarDescriptor.AnimLayerType.Base ||
+                                                              l.type == VRC.SDK3.Avatars.Components.VRCAvatarDescriptor.AnimLayerType.Additive ||
+                                                              l.type == VRC.SDK3.Avatars.Components.VRCAvatarDescriptor.AnimLayerType.Gesture));
+            int on = 0, off = 0;
+            foreach (var layer in layers.Where(l => !l.isDefault && l.animatorController is UnityEditor.Animations.AnimatorController))
+                foreach (var state in States(((UnityEditor.Animations.AnimatorController)layer.animatorController).layers.Select(l => l.stateMachine)))
+                    if (state.writeDefaultValues) on++; else off++;
+            if (!defaultsOff || on <= off) return;
+            issues.Add(new AvatarIssue(IssueLevel.Note, "VRCFury may ask about Write Defaults at every upload",
+                "With NDMF in the project, the VRChat SDK's default layers (Write Defaults off) are filled in before VRCFury looks, next to this " +
+                "avatar's own layers (mostly Write Defaults on): VRCFury sees a mix and asks whether to fix it. That question and its fix are VRCFury's; " +
+                "answering yes adds a Fix Write Defaults component to the avatar.", "Upload"));
+        }
+
+        private static IEnumerable<UnityEditor.Animations.AnimatorState> States(IEnumerable<UnityEditor.Animations.AnimatorStateMachine> machines)
+        {
+            var seen = new HashSet<UnityEditor.Animations.AnimatorStateMachine>();
+            var stack = new Stack<UnityEditor.Animations.AnimatorStateMachine>(machines.Where(m => m != null));
+            while (stack.Count > 0)
+            {
+                var machine = stack.Pop();
+                if (!seen.Add(machine)) continue;
+                foreach (var child in machine.states) if (child.state != null) yield return child.state;
+                foreach (var sub in machine.stateMachines) if (sub.stateMachine != null) stack.Push(sub.stateMachine);
+            }
         }
 
         // AAO's Trace and Optimize (an "AAO Trace And Optimize" component on the avatar) merges and removes the renderers
