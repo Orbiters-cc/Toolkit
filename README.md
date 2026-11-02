@@ -1,6 +1,6 @@
 # Orbiters Toolkit
 
-## Unreleased
+## 0.4.13 — 2026-11-02
 
 - **Checks: AAO's Trace and Optimize.** With its component on the avatar it also merges and removes Orbiters items'
   renderers (N4N0's orb and capture parts in a test build): a note names the items and points at its Exclusions.
