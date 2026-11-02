@@ -1,6 +1,6 @@
 # Orbiters Toolkit
 
-## Unreleased
+## 0.4.15 — 2026-11-02
 
 - **A switch for noticing renames that break animations.** Orbiters settings > Features > Toolkit: "Notice renames
   that break animations" (on by default, kept in your EditorPrefs). Off, `AnimationPathWatch` holds no notice and drops
