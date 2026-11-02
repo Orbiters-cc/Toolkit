@@ -410,6 +410,9 @@ namespace Orbiters.Toolkit.Editor.Animations
             var guesses = new Dictionary<Transform, Dictionary<string, List<Transform>>>();
             foreach (var refs in Refs(avatarRoot, sources, cached))
             {
+                // The VRChat SDK's own placeholder clips (proxy_stand_still, proxy_hands_idle…) animate a generic humanoid
+                // that no avatar has: they are swapped at runtime, never broken, and Modular Avatar/NDMF bring 57 paths of them.
+                if (VrchatPlaceholder(refs.Asset)) continue;
                 RepathAsset entry = null;
                 foreach (var original in refs.Refs)
                 {
@@ -438,6 +441,14 @@ namespace Orbiters.Toolkit.Editor.Animations
 
         /// <summary>How many paths the avatar's animations hold (curves, mask entries, behaviours' paths), each asset once per root.</summary>
         public static int CountPaths(GameObject avatarRoot) => avatarRoot == null ? 0 : Refs(avatarRoot, Sources(avatarRoot), false).Sum(r => r.Refs.Count);
+
+        /// <summary>A clip of the VRChat SDK's packages named proxy_*: a placeholder VRChat replaces with its own animation.</summary>
+        internal static bool VrchatPlaceholder(UnityEngine.Object asset)
+        {
+            if (!(asset is AnimationClip clip) || !clip.name.StartsWith("proxy_", StringComparison.Ordinal)) return false;
+            string path = AssetDatabase.GetAssetPath(clip);
+            return path.StartsWith("Packages/com.vrchat.", StringComparison.Ordinal);
+        }
 
         /// <summary>The bindings under the avatar that reach no object now, each with the one object it most likely meant.</summary>
         public static RepathPlan Broken(GameObject avatarRoot, bool cached = false) => Plan(avatarRoot, (PathSnapshot)null, null, true, cached);
