@@ -1,6 +1,6 @@
 # Orbiters Toolkit
 
-## Unreleased
+## 0.4.14 — 2026-11-02
 
 - **Meshes toggled on their own merge too, their toggles kept.** `VRChat.Optimization.MeshMerge.MergeToggled(usage,
   build, policy)`, run after `MergeTogether`, merges skinned meshes and props that one toggle each shows and hides
