@@ -20,8 +20,8 @@
   `AvatarUsage.Animates` lets the later steps see the new animations (bones that never move leave the hide bones alone;
   short names keep them bound). Measured on MasculineCanine (compatibility project, `base`, real SDK preprocess): nothing
   merges — 9 skinned meshes, Very Poor / Very Poor, 15.74 MB at Big before and after, 16 unresolved bindings as before:
-  its always-shown meshes animate Poiyomi properties every candidate has, and N4N0's parts have two toggles or material
-  animations. On the control avatar a toggled band (hide bone) or scarf (blendshape) joins the body: 2 → 1 skinned mesh,
+  its toggled meshes are the drawing pen's parts (a constraint moves them: the pen can be dropped) and N4N0's parts and
+  capture kits (their animations set their own material properties or bounds). On the control avatar a toggled band (hide bone) or scarf (blendshape) joins the body: 2 → 1 skinned mesh,
   toggles sampled and driven in Gesture Manager and Av3Emulator.
 
 ## 0.4.13 — 2026-11-02
