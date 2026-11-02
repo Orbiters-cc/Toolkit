@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **BindingAudit: which animation bindings find nothing to animate.** `Animations.BindingAudit.Of(clips)` reads every
+  curve of each clip from the object it plays from (`AvatarUsage.Clips` on a VRChat avatar) and lists those with no
+  object at their path, no component of their type on it, or no blendshape of their name on its mesh (Unity binds the
+  first child of a name, as an Animator does). The compatibility matrix counts them per tool profile on built copies;
+  repathing reuses it.
 - **Fix clipping, shared by the Orbiters tools.** `RefitPreferences.FixClipping` (ProjectSettings/OrbitersRefit.json,
   off by default like ReFit's own default) asks the refit engine to push the fabric a fit leaves inside the body out of
   it (ReFit's `declipAfterFit`). `RefitBatch.FixClipping` takes it for every mesh and `RefitJob.FixClipping` carries it to
