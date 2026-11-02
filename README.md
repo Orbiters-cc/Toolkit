@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- **3D previews carry each material's look (schema 2).** Orbiters - N4N0 drew every material with the same glossy
+  highlight. `Preview.PreviewLook` now reads how the shader takes the light (lilToon, Poiyomi by its lighting type,
+  MToon, Unity Toon Shader, unlit shaders, else Standard and its look-alikes such as VRChat's Standard Lite): `lit`,
+  `toon`, `flat` or `unlit`, metallic and smoothness as the shader computes with them (with their map), the normal map
+  and emission; normal and metallic-smoothness maps are stored as linear JPEGs at half the colour pictures' side
+  (contracts' Docs/project-preview.md). A project's preview shows it after its next scene save; Orbiters - N4N0
+  releases before this one refuse schema 2 files ("3D preview unreadable") until updated.
 - **BindingAudit: which animation bindings find nothing to animate.** `Animations.BindingAudit.Of(clips)` reads every
   curve of each clip from the object it plays from (`AvatarUsage.Clips` on a VRChat avatar) and lists those with no
   object at their path, no component of their type on it, or no blendshape of their name on its mesh (Unity binds the
