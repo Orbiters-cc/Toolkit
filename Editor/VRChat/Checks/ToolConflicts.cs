@@ -108,18 +108,21 @@ namespace Orbiters.Toolkit.Editor.VRChat.Checks
             }
         }
 
-        // AAO's Trace and Optimize (an "AAO Trace And Optimize" component on the avatar) merges and removes the renderers
-        // it judges safe to, Orbiters items' too: in the compatibility project it merged N4N0's orb and removed its capture
-        // rig and kit, rewriting their animations. Whether N4N0 still works then is unverified in VRChat: a note.
+        // AAO's Trace and Optimize (an "AAO Trace And Optimize" component on the avatar), checked on MasculineCanine's N4N0 in
+        // the compatibility project (AAO 1.9.21, CompatN4N0Tests): every renderer, contact, PhysBone, constraint, camera and
+        // parameter stays, and each of its 3,250 animation curves keeps its keys; it only folds empty parent objects into
+        // their children ("Capture" into "Capture$Kit$43") and rewrites the animations' paths. Nothing to keep out of it:
+        // a note says what changes.
         private static void AaoTraceAndOptimize(GameObject root, List<AvatarIssue> issues)
         {
             if (!InstalledTools.Aao) return;
             if (!root.GetComponentsInChildren<Component>(true).Any(c => c != null && c.GetType().FullName == "Anatawa12.AvatarOptimizer.TraceAndOptimize")) return;
             var items = root.GetComponentsInChildren<Orbiters.Toolkit.VRChat.OrbitersAttachment>(true).Select(a => a.name).Distinct().ToList();
             if (items.Count == 0) return;
-            issues.Add(new AvatarIssue(IssueLevel.Note, "AAO's Trace and Optimize also merges Orbiters items",
-                "It merges and removes the renderers it judges safe to, those of Orbiters items too (N4N0's orb and capture parts in a test build). " +
-                "If an item misbehaves in VRChat, add it to the component's Exclusions.",
+            issues.Add(new AvatarIssue(IssueLevel.Note, "AAO's Trace and Optimize renames some objects of Orbiters items",
+                "It keeps what Orbiters items do (checked on N4N0: every renderer, contact, PhysBone, constraint and animation) and only folds " +
+                "empty parent objects into their children, renamed “Parent$Child$n”, with the animations rewritten to match. Something that " +
+                "finds an item's objects by their path in the uploaded avatar would see the new names.",
                 string.Join(", ", items.Take(4)) + (items.Count > 4 ? "..." : "")));
         }
 

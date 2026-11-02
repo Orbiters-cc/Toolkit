@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- **Checks: AAO's Trace and Optimize keeps Orbiters items working.** Measured on N4N0 (AAO 1.9.21): every renderer,
+  contact, PhysBone, constraint and animation curve stays; AAO only folds empty parent objects into their children
+  (renamed "Parent$Child$n"). The note now says so (0.4.13's "merges and removes" misread those renames).
 - **Lazy Optimiser is off for the uploads of Orbiters avatars.** It deletes objects an animation switches on through a
   component (N4N0's capture rig and kit): `Optimization.LazyOptimiser` turns it off just around its passes (−101 to
   −89) for avatars holding Orbiters components, in memory only (its setting doesn't change, other avatars keep it);
