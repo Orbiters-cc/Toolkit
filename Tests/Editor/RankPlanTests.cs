@@ -31,21 +31,34 @@ public sealed class RankPlanTests
 
     [Test] public void ACategoryOverTheTargetsLimitBlocksIt()
     {
-        float good = Limit(AvatarPerformanceCategory.PolyCount, PerformanceRating.Good, false);
-        var upload = Stats(false, (AvatarPerformanceCategory.PolyCount, good + 1000), (AvatarPerformanceCategory.MaterialCount, 1));
+        float good = Limit(AvatarPerformanceCategory.BoneCount, PerformanceRating.Good, false);
+        Assume.That(Limit(AvatarPerformanceCategory.BoneCount, PerformanceRating.Medium, false), Is.GreaterThan(good + 10));
+        var upload = Stats(false, (AvatarPerformanceCategory.BoneCount, good + 10), (AvatarPerformanceCategory.MaterialCount, 1));
         var plan = RankPlan.For(null, upload, PerformanceRating.Good, false);
-        var polygons = plan.For(AvatarPerformanceCategory.PolyCount);
-        Assert.IsTrue(polygons.Blocks);
-        Assert.AreEqual(PerformanceRating.Medium, polygons.Rating, "just over Good is Medium");
-        Assert.AreEqual(1000f, polygons.Over, 1e-3f);
-        Assert.AreEqual(1000f / good, polygons.OverShare, 1e-5f);
-        Assert.AreEqual(4, polygons.Ticks.Count, "Excellent, Good, Medium and Poor");
+        var bones = plan.For(AvatarPerformanceCategory.BoneCount);
+        Assert.IsTrue(bones.Blocks);
+        Assert.AreEqual(PerformanceRating.Medium, bones.Rating, "just over Good is Medium");
+        Assert.AreEqual(10f, bones.Over, 1e-3f);
+        Assert.AreEqual(10f / good, bones.OverShare, 1e-5f);
+        Assert.AreEqual(4, bones.Ticks.Count, "Excellent, Good, Medium and Poor");
         Assert.IsFalse(plan.Reached);
         Assert.IsNull(plan.For(AvatarPerformanceCategory.MaterialCount), "one material is Excellent: no gap");
 
         var medium = RankPlan.For(null, upload, PerformanceRating.Medium, false);
         Assert.IsTrue(medium.Reached, "Medium allows it");
-        Assert.AreEqual(0f, medium.For(AvatarPerformanceCategory.PolyCount).Over);
+        Assert.AreEqual(0f, medium.For(AvatarPerformanceCategory.BoneCount).Over);
+    }
+
+    // On PC, Good, Medium and Poor share one polygon limit (70,000 in SDK 3.10): one polygon over Good is Very Poor.
+    [Test] public void APolygonOverGoodOnPcIsVeryPoor()
+    {
+        float good = Limit(AvatarPerformanceCategory.PolyCount, PerformanceRating.Good, false);
+        Assume.That(Limit(AvatarPerformanceCategory.PolyCount, PerformanceRating.Poor, false), Is.EqualTo(good));
+        var plan = RankPlan.For(null, Stats(false, (AvatarPerformanceCategory.PolyCount, good + 1000)), PerformanceRating.Poor, false);
+        var polygons = plan.For(AvatarPerformanceCategory.PolyCount);
+        Assert.AreEqual(PerformanceRating.VeryPoor, polygons.Rating);
+        Assert.IsTrue(polygons.Blocks, "even Poor");
+        Assert.AreEqual(1000f, polygons.Over, 1e-3f);
     }
 
     [Test] public void QuestsLimitsBlockWhatPcAllows()
