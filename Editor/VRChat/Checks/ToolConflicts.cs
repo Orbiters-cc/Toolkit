@@ -47,6 +47,7 @@ namespace Orbiters.Toolkit.Editor.VRChat.Checks
                     "My Avatar's menu editor shows what VRCFury and Modular Avatar build, not these: its “Show the real build” button builds a hidden copy and shows the whole menu, read only.",
                     "Menu"));
             LazyOptimiser(root, issues);
+            AaoTraceAndOptimize(root, issues);
             return issues;
         }
 
@@ -65,6 +66,21 @@ namespace Orbiters.Toolkit.Editor.VRChat.Checks
                 "renderer or another component, as N4N0's capture rig and kit: they're deleted and what they do stops working in VRChat. " +
                 "Turn it off before uploading (Tools > Lazy Optimiser > Toggle Optimiser), or remove the package.",
                 items.Count > 0 ? string.Join(", ", items.Take(4)) + (items.Count > 4 ? "..." : "") : null));
+        }
+
+        // AAO's Trace and Optimize (an "AAO Trace And Optimize" component on the avatar) merges and removes the renderers
+        // it judges safe to, Orbiters items' too: in the compatibility project it merged N4N0's orb and removed its capture
+        // rig and kit, rewriting their animations. Whether N4N0 still works then is unverified in VRChat: a note.
+        private static void AaoTraceAndOptimize(GameObject root, List<AvatarIssue> issues)
+        {
+            if (!InstalledTools.Aao) return;
+            if (!root.GetComponentsInChildren<Component>(true).Any(c => c != null && c.GetType().FullName == "Anatawa12.AvatarOptimizer.TraceAndOptimize")) return;
+            var items = root.GetComponentsInChildren<Orbiters.Toolkit.VRChat.OrbitersAttachment>(true).Select(a => a.name).Distinct().ToList();
+            if (items.Count == 0) return;
+            issues.Add(new AvatarIssue(IssueLevel.Note, "AAO's Trace and Optimize also merges Orbiters items",
+                "It merges and removes the renderers it judges safe to, those of Orbiters items too (N4N0's orb and capture parts in a test build). " +
+                "If an item misbehaves in VRChat, add it to the component's Exclusions.",
+                string.Join(", ", items.Take(4)) + (items.Count > 4 ? "..." : "")));
         }
 
         private static IEnumerable<Tool> On(GameObject root)

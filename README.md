@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Checks: AAO's Trace and Optimize.** With its component on the avatar it also merges and removes Orbiters items'
+  renderers (N4N0's orb and capture parts in a test build): a note names the items and points at its Exclusions.
 - **Checks: Lazy Optimiser.** Installed and on, it deletes at upload the objects an animation switches on through a
   component (it follows `m_IsActive` only), such as N4N0's capture rig and kit: the "Other tools" check warns,
   naming the Orbiters items, and says how to turn it off.
