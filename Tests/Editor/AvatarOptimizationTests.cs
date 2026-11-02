@@ -412,6 +412,34 @@ public sealed class AvatarOptimizationTests
 
     // ---- Names ----
 
+    // Found by the compatibility project (VRCFury Stub, Optimization Big): two siblings named alike stopped the upload with
+    // "An item with the same key has already been added". Animations find the first of them: both keep their names.
+    [Test] public void ShortNamesKeepSiblingsOfOneName()
+    {
+        var first = Child("Twin object");
+        var firstPart = Child("Part of the twin", first.transform);
+        var second = Child("Twin object");
+        Child("Part of the twin", second.transform);
+        var other = Child("Some other long object name");
+        var clip = Own(new AnimationClip());
+        AnimationUtility.SetEditorCurve(clip, EditorCurveBinding.FloatCurve("Twin object/Part of the twin", typeof(GameObject), "m_IsActive"), AnimationCurve.Constant(0, 1, 0));
+        AnimationUtility.SetEditorCurve(clip, EditorCurveBinding.FloatCurve("Some other long object name", typeof(GameObject), "m_IsActive"), AnimationCurve.Constant(0, 1, 0));
+        fx.layers[0].stateMachine.AddState("Off").motion = clip;
+
+        var build = AttachmentAnimationBuild.Prepare(root);
+        try
+        {
+            ShortNames.Rename(new AvatarUsage(root), build);
+            Assert.That(first.name, Is.EqualTo("Twin object")); Assert.That(second.name, Is.EqualTo("Twin object"));
+            Assert.That(firstPart.name, Is.EqualTo("Part of the twin"));
+            Assert.That(other.name.Length, Is.EqualTo(1), "the others are still shortened");
+            var bindings = AnimationUtility.GetCurveBindings(build.Clips.Single().Clip);
+            Assert.That(bindings.Any(b => b.path == "Twin object/Part of the twin"), "the twin's animation still finds the first twin");
+            Assert.That(bindings.Any(b => b.path == other.name));
+        }
+        finally { AttachmentAnimationBuild.Release(root); }
+    }
+
     [Test] public void ShortNamesKeepWhatIsFoundByName()
     {
         var toggle = Child("Very long toggle object name");

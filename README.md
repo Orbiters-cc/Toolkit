@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- **Short names keep siblings of one name.** Two objects named alike under one parent stopped an upload at
+  Optimization Big ("An item with the same key has already been added"); they, and what is under them, keep their
+  names now, as animations only ever find the first of them.
 - **A build no longer stops on a clip a later step destroyed.** With Modular Avatar and no VRCFury, an upload at
   Optimization Big whose menu leaves items out stopped in short names ("Value cannot be null. Parameter name: clip"):
   the build's animation copies kept listing a clip removed with a left-out item. Only live copies are rewritten now.

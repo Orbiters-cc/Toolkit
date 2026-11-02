@@ -60,10 +60,12 @@ namespace Orbiters.Toolkit.Editor.VRChat.Optimization
             var skeleton = new HashSet<string>(StringComparer.Ordinal);
             foreach (var animator in root.GetComponentsInChildren<Animator>(true))
                 if (animator.avatar != null) skeleton.UnionWith(animator.avatar.humanDescription.skeleton.Select(b => b.name));
-            bool Keeps(Transform t) => t == root || usage.Humanoid(t) || skeleton.Contains(t.name) || t.parent == root && t.name == "Body";
-
             var all = root.GetComponentsInChildren<Transform>(true);
             var former = all.ToDictionary(t => t, t => AnimationUtility.CalculateTransformPath(t, root));
+            // Siblings of one name share a path, which animations resolve to the first of them: renamed, they could take
+            // another object's animations, so they and what is under them keep their names.
+            var shared = new HashSet<string>(former.Values.GroupBy(p => p, StringComparer.Ordinal).Where(g => g.Count() > 1).Select(g => g.Key), StringComparer.Ordinal);
+            bool Keeps(Transform t) => t == root || usage.Humanoid(t) || skeleton.Contains(t.name) || t.parent == root && t.name == "Body" || shared.Contains(former[t]);
             var owned = build.OwnedByAnimator.ToList();
             // The names animations use under each object, missing objects included: a new name never picks up a binding left
             // dangling.
@@ -107,7 +109,9 @@ namespace Orbiters.Toolkit.Editor.VRChat.Optimization
                 rewriting = true;
                 build.Moved(moves);
                 // Audio a state plays names its source by path, from the object its animator starts at.
-                var byFormer = former.ToDictionary(p => p.Value, p => p.Key, StringComparer.Ordinal);
+                // A path names the first object of it, as Unity binds it.
+                var byFormer = new Dictionary<string, Transform>(StringComparer.Ordinal);
+                foreach (var t in all) byFormer.TryAdd(former[t], t);
                 foreach (var (copy, animatorRoot) in owned)
                 {
                     if (!(copy is VRCAnimatorPlayAudio audio) || string.IsNullOrEmpty(audio.SourcePath) || animatorRoot == null) continue;
