@@ -38,6 +38,8 @@ namespace Orbiters.Toolkit.Editor.Refit
         public List<SkinnedMeshRenderer> CoverageLayers = new List<SkinnedMeshRenderer>();
         /// <summary>0: loose, best for accessories; 1: tight, best for clothing.</summary>
         public float Tightness = RefitPreferences.DefaultTightness;
+        /// <summary>After the fit, push the fabric left inside the body out of it (Fit only).</summary>
+        public bool FixClipping = RefitPreferences.DefaultFixClipping;
     }
 
     public enum RefitSeverity { Info, Warning, Error }

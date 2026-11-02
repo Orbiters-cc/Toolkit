@@ -11,12 +11,15 @@ namespace Orbiters.Toolkit.Editor.Refit
     public static class RefitPreferences
     {
         public const float DefaultTightness = 0.5f;
+        /// <summary>ReFit's own default for <see cref="FixClipping"/> (its <c>ReFitSettings.declipAfterFit</c>).</summary>
+        public const bool DefaultFixClipping = false;
         private const string FilePath = "ProjectSettings/OrbitersRefit.json";
 
         [Serializable]
         private sealed class Data
         {
             public float tightness = DefaultTightness;
+            public bool fixClipping = DefaultFixClipping;
         }
 
         private static Data data;
@@ -33,6 +36,19 @@ namespace Orbiters.Toolkit.Editor.Refit
                 value = Mathf.Clamp01(value);
                 if (Mathf.Approximately(Load().tightness, value)) return;
                 data.tightness = value;
+                Save();
+                Changed?.Invoke();
+            }
+        }
+
+        /// <summary>After the fit, push the fabric left inside the body out of it ("Fix clipping").</summary>
+        public static bool FixClipping
+        {
+            get => Load().fixClipping;
+            set
+            {
+                if (Load().fixClipping == value) return;
+                data.fixClipping = value;
                 Save();
                 Changed?.Invoke();
             }

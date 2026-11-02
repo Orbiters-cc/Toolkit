@@ -33,6 +33,8 @@ namespace Orbiters.Toolkit.Editor.VRChat.Refit
         public CustomBaseOriginal Original;
         public string BaseKey, BaseName, Tool;
         public float Tightness = RefitPreferences.Tightness;
+        /// <summary><see cref="RefitJob.FixClipping"/> for every mesh.</summary>
+        public bool FixClipping = RefitPreferences.FixClipping;
         /// <summary>Reuse an identical earlier result instead of computing it again.</summary>
         public bool UseCache = true;
     }
@@ -183,7 +185,7 @@ namespace Orbiters.Toolkit.Editor.VRChat.Refit
 
                 var job = new RefitJob
                 {
-                    Renderer = renderer, Avatar = root.gameObject, Body = batch.Body, Mode = mode, Tightness = batch.Tightness,
+                    Renderer = renderer, Avatar = root.gameObject, Body = batch.Body, Mode = mode, Tightness = batch.Tightness, FixClipping = batch.FixClipping,
                     CoverDifferentBaseBody = batch.CoverageByRenderer.TryGetValue(renderer, out var cover) ? cover : batch.CoverDifferentBaseBody,
                     MadeForAnotherBody = batch.MadeForAnotherBody,
                     SourceAvatar = batch.Original?.Avatar, SourceBody = batch.Original?.Body,

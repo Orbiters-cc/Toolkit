@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- **Fix clipping, shared by the Orbiters tools.** `RefitPreferences.FixClipping` (ProjectSettings/OrbitersRefit.json,
+  off by default like ReFit's own default) asks the refit engine to push the fabric a fit leaves inside the body out of
+  it (ReFit's `declipAfterFit`). `RefitBatch.FixClipping` takes it for every mesh and `RefitJob.FixClipping` carries it to
+  the engine; the refit cache keys results by it.
 - **Uploads tell Orbiters - N4N0, which makes VRChat wear the new version.** After every successful upload of an
   `avtr_` avatar, for whichever platform, `AvatarManifestExporter` (its existing `OnSdkUploadSuccess` handler) replaces
   `%LOCALAPPDATA%\Orbiters\Avatars\uploaded.json` in one step: `schema` 1, `avatarId`, `platform` (`windows`,
