@@ -35,8 +35,13 @@ namespace Orbiters.Toolkit.Editor.Preview
         {
             public int Width, Height;
             public bool Png;
-            /// <summary>RGBA, sRGB, rows from the bottom (as Unity reads textures back).</summary>
+            /// <summary>RGBA, rows from the bottom (as Unity reads textures back): sRGB colours, or the values a normal or
+            /// metallic-smoothness map holds (<see cref="Role"/>).</summary>
             public byte[] Pixels;
+            public PreviewLook.Role Role;
+            /// <summary>A surface picture's sources: channels 0–3, -1 for none (white).</summary>
+            public int MetallicChannel = -1, SmoothnessChannel = -1;
+            public bool InvertMetallic, InvertSmoothness;
         }
 
         public sealed class Material
@@ -46,6 +51,12 @@ namespace Orbiters.Toolkit.Editor.Preview
             public int Texture;
             public Vector2 Tiling, Offset;
             public float Cutoff;
+            /// <summary>How the shader takes the light (<see cref="PreviewLook"/>).</summary>
+            public string Shading = "lit";
+            public float Metallic, Smoothness = 0.2f, NormalScale = 1, ShadeBorder = 0.5f, ShadeBlur = 0.1f;
+            public int SurfaceTexture = -1, NormalTexture = -1, EmissionTexture = -1;
+            /// <summary>Linear RGB: the emission (HDR) and the toon shadow's tint.</summary>
+            public Vector3 Emission, Shade = new Vector3(0.7f, 0.7f, 0.7f);
         }
 
         public sealed class Mesh
@@ -80,14 +91,15 @@ namespace Orbiters.Toolkit.Editor.Preview
 
     /// <summary>
     /// Writes a <see cref="PreviewData"/> as a preview file (contracts' Docs/project-preview.md): <see cref="Magic"/>,
-    /// schema 1, the header's length, the JSON header, then the blobs, each at a multiple of 16 from the data section's
+    /// schema 2, the header's length, the JSON header, then the blobs, each at a multiple of 16 from the data section's
     /// start. Runs on a worker thread: only thread-safe Unity calls (ImageConversion's array encoders).
     /// </summary>
     internal static class PreviewFile
     {
         // The file's first 8 bytes, as the contract defines them (Orbiters - N4N0 also reads the former start of older files).
         private const string Magic = "N4N0PRV\0";
-        private const int Schema = 1;
+        // 2: the materials' look (shading, metallic, smoothness, normal, surface and emission pictures), linear pictures.
+        private const int Schema = 2;
         private const int VertexSize = 20;
 
         public static string Write(PreviewData d, string path)
@@ -109,9 +121,12 @@ namespace Orbiters.Toolkit.Editor.Preview
             {
                 var t = d.Textures[i];
                 if (t.Pixels == null || t.Pixels.Length < t.Width * t.Height * 4) return;
+                if (t.Role == PreviewLook.Role.Normal) Unpack(t.Pixels);
+                else if (t.Role == PreviewLook.Role.Surface) Gather(t);
+                var format = t.Role == PreviewLook.Role.Color ? GraphicsFormat.R8G8B8A8_SRGB : GraphicsFormat.R8G8B8A8_UNorm;
                 encoded[i] = t.Png
-                    ? ImageConversion.EncodeArrayToPNG(t.Pixels, GraphicsFormat.R8G8B8A8_SRGB, (uint)t.Width, (uint)t.Height)
-                    : ImageConversion.EncodeArrayToJPG(t.Pixels, GraphicsFormat.R8G8B8A8_SRGB, (uint)t.Width, (uint)t.Height, 0, 90);
+                    ? ImageConversion.EncodeArrayToPNG(t.Pixels, format, (uint)t.Width, (uint)t.Height)
+                    : ImageConversion.EncodeArrayToJPG(t.Pixels, format, (uint)t.Width, (uint)t.Height, 0, 90);
             });
             var textures = new JArray();
             var textureIndex = new int[d.Textures.Count];
@@ -120,23 +135,42 @@ namespace Orbiters.Toolkit.Editor.Preview
                 if (encoded[i] == null) { textureIndex[i] = -1; continue; }
                 textureIndex[i] = textures.Count;
                 var t = d.Textures[i];
-                textures.Add(new JObject { ["width"] = t.Width, ["height"] = t.Height, ["format"] = t.Png ? "png" : "jpeg", ["data"] = Blob(encoded[i]) });
+                var o = new JObject { ["width"] = t.Width, ["height"] = t.Height, ["format"] = t.Png ? "png" : "jpeg" };
+                if (t.Role != PreviewLook.Role.Color) o["linear"] = true;
+                o["data"] = Blob(encoded[i]);
+                textures.Add(o);
             }
 
             var materials = new JArray();
+            int Index(int t) => t >= 0 ? textureIndex[t] : -1;
             foreach (var m in d.Materials)
             {
-                materials.Add(new JObject
+                var o = new JObject
                 {
                     ["name"] = m.Name,
                     ["color"] = Array(m.Color.r, m.Color.g, m.Color.b, m.Color.a),
-                    ["texture"] = m.Texture >= 0 ? textureIndex[m.Texture] : -1,
+                    ["texture"] = Index(m.Texture),
                     ["tiling"] = Array(m.Tiling.x, m.Tiling.y),
                     ["offset"] = Array(m.Offset.x, m.Offset.y),
                     ["alpha"] = m.Alpha,
                     ["cutoff"] = m.Cutoff,
                     ["cull"] = m.Cull,
-                });
+                    ["shading"] = m.Shading,
+                    ["metallic"] = Round(m.Metallic),
+                    ["smoothness"] = Round(m.Smoothness),
+                    ["surfaceTexture"] = Index(m.SurfaceTexture),
+                    ["normalTexture"] = Index(m.NormalTexture),
+                    ["normalScale"] = Round(m.NormalScale),
+                    ["emission"] = Vec(m.Emission),
+                    ["emissionTexture"] = Index(m.EmissionTexture),
+                };
+                if (m.Shading == "toon")
+                {
+                    o["shade"] = Vec(m.Shade);
+                    o["shadeBorder"] = Round(m.ShadeBorder);
+                    o["shadeBlur"] = Round(m.ShadeBlur);
+                }
+                materials.Add(o);
             }
 
             var meshes = new JArray();
@@ -259,6 +293,38 @@ namespace Orbiters.Toolkit.Editor.Preview
             Prune(Path.GetDirectoryName(path), path);
             return string.Format(CultureInfo.InvariantCulture, "written {0} ({1:0.0} MB, {2} triangles, {3} pictures; main thread {4:0.0} ms over {5} steps, longest {6:0.0} ms; worker {7:0} ms; {8:0} ms in all; {9})",
                 Path.GetFileName(path), file.Length / 1e6, triangles, textures.Count, d.MainThreadMs, d.Steps, d.LongestStepMs, encodeMs, d.TotalMsBeforeWorker + encodeMs, d.Reason);
+        }
+
+        // A normal map as read back (BC5's x in R, or DXT5nm's in A with R white: x = R · A, y = G, as UnpackNormal
+        // reads them) into the plain tangent-space normal the contract stores: x, y, z each 0.5 + 0.5 · c.
+        internal static void Unpack(byte[] px)
+        {
+            for (int i = 0; i + 3 < px.Length; i += 4)
+            {
+                int xb = px[i] * px[i + 3] / 255, yb = px[i + 1];
+                float x = xb / 127.5f - 1, y = yb / 127.5f - 1;
+                float z = (float)Math.Sqrt(Math.Max(0, 1 - x * x - y * y));
+                px[i] = (byte)xb;
+                px[i + 1] = (byte)yb;
+                px[i + 2] = (byte)Math.Round((z * 0.5f + 0.5f) * 255);
+                px[i + 3] = 255;
+            }
+        }
+
+        // A metallic-smoothness picture: R metallic, G smoothness, from the channels the shader reads them (inverted
+        // where it inverts them; white without a channel).
+        internal static void Gather(PreviewData.Picture t)
+        {
+            var px = t.Pixels;
+            for (int i = 0; i + 3 < px.Length; i += 4)
+            {
+                int m = t.MetallicChannel >= 0 ? px[i + t.MetallicChannel] : 255;
+                int s = t.SmoothnessChannel >= 0 ? px[i + t.SmoothnessChannel] : 255;
+                px[i] = (byte)(t.InvertMetallic ? 255 - m : m);
+                px[i + 1] = (byte)(t.InvertSmoothness ? 255 - s : s);
+                px[i + 2] = 0;
+                px[i + 3] = 255;
+            }
         }
 
         // Keeps the newest previews of the project (one per scene).

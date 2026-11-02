@@ -18,7 +18,8 @@ namespace Orbiters.Toolkit.Editor.Preview
 {
     /// <summary>
     /// Keeps a small ready-to-draw copy of the scene last saved, so that Orbiters - N4N0 shows the project in 3D before
-    /// it is opened (contracts' Docs/project-preview.md): posed meshes, base-colour pictures and where everything stands,
+    /// it is opened (contracts' Docs/project-preview.md): posed meshes, their materials' pictures and look
+    /// (<see cref="PreviewLook"/>) and where everything stands,
     /// in &lt;project&gt;/UserSettings/Orbiters/Previews/&lt;scene GUID&gt;.preview. Written a few seconds after a scene is saved,
     /// after an avatar upload, and once after the editor loads when the open scene has none or an older one.
     /// The capture never holds the editor: it reads the scene in steps of a few milliseconds on
@@ -140,7 +141,7 @@ namespace Orbiters.Toolkit.Editor.Preview
             private readonly Dictionary<Transform, int> avatarOf = new Dictionary<Transform, int>();
             private readonly Dictionary<int, int> meshes = new Dictionary<int, int>();
             private readonly Dictionary<int, int> materials = new Dictionary<int, int>();
-            private readonly Dictionary<int, int> textures = new Dictionary<int, int>();
+            private readonly Dictionary<(int, PreviewLook.Role, int, int, bool, bool), int> textures = new Dictionary<(int, PreviewLook.Role, int, int, bool, bool), int>();
             private readonly List<Texture> textureSources = new List<Texture>();
             private readonly List<bool> textureAlpha = new List<bool>();
             private readonly List<Pending> readbacks = new List<Pending>();
@@ -460,21 +461,38 @@ namespace Orbiters.Toolkit.Editor.Preview
                     material.Tiling = m.GetTextureScale(textureName);
                     material.Offset = m.GetTextureOffset(textureName);
                     bool alpha = material.Alpha != "opaque" && GraphicsFormatUtility.HasAlphaChannel(texture.graphicsFormat);
-                    if (!textures.TryGetValue(texture.GetInstanceID(), out int t))
-                    {
-                        t = textureSources.Count;
-                        textures[texture.GetInstanceID()] = t;
-                        textureSources.Add(texture);
-                        textureAlpha.Add(alpha);
-                        data.Textures.Add(new PreviewData.Picture());
-                    }
-                    else if (alpha) textureAlpha[t] = true;
-                    material.Texture = t;
+                    material.Texture = Picture(new PreviewLook.Source { Texture = texture, Role = PreviewLook.Role.Color }, alpha);
                 }
+                else texture = null;
+                PreviewLook.Read(m, material, texture, source => Picture(source, false));
                 index = data.Materials.Count;
                 data.Materials.Add(material);
                 materials[m.GetInstanceID()] = index;
                 return index;
+            }
+
+            // A picture's index, stored once per texture and purpose (a colour picture keeps its alpha when one user needs it).
+            private int Picture(PreviewLook.Source source, bool alpha)
+            {
+                var key = (source.Texture.GetInstanceID(), source.Role, source.Metallic, source.Smoothness, source.InvertMetallic, source.InvertSmoothness);
+                if (textures.TryGetValue(key, out int t))
+                {
+                    if (alpha) textureAlpha[t] = true;
+                    return t;
+                }
+                t = textureSources.Count;
+                textures[key] = t;
+                textureSources.Add(source.Texture);
+                textureAlpha.Add(alpha);
+                data.Textures.Add(new PreviewData.Picture
+                {
+                    Role = source.Role,
+                    MetallicChannel = source.Metallic,
+                    SmoothnessChannel = source.Smoothness,
+                    InvertMetallic = source.InvertMetallic,
+                    InvertSmoothness = source.InvertSmoothness,
+                });
+                return t;
             }
 
             private static string Flagged(Shader shader, ShaderPropertyFlags flag)
@@ -486,18 +504,21 @@ namespace Orbiters.Toolkit.Editor.Preview
                 return null;
             }
 
-            // A picture drawn through the GPU at the preview's size (its aspect kept, never larger than it is) into an
-            // sRGB target: the bytes come back as Unity shows the colours. Read back without waiting.
+            // A picture drawn through the GPU at the preview's size (its aspect kept, never larger than it is; normal and
+            // metallic-smoothness maps at half of it) into an sRGB target for colours (the bytes come back as Unity shows
+            // them) or a linear one for data (the values the shader reads). Read back without waiting.
             private void Draw(int index)
             {
                 var source = textureSources[index];
                 var picture = data.Textures[index];
-                float scale = Mathf.Min(1f, textureSide / (float)Mathf.Max(source.width, source.height));
+                bool color = picture.Role == PreviewLook.Role.Color;
+                int side = color ? textureSide : Mathf.Max(128, textureSide / 2);
+                float scale = Mathf.Min(1f, side / (float)Mathf.Max(source.width, source.height));
                 int w = Mathf.Max(1, Mathf.RoundToInt(source.width * scale)), h = Mathf.Max(1, Mathf.RoundToInt(source.height * scale));
                 picture.Width = w;
                 picture.Height = h;
-                picture.Png = textureAlpha[index];
-                var target = RenderTexture.GetTemporary(w, h, 0, RenderTextureFormat.ARGB32, RenderTextureReadWrite.sRGB);
+                picture.Png = color && textureAlpha[index];
+                var target = RenderTexture.GetTemporary(w, h, 0, RenderTextureFormat.ARGB32, color ? RenderTextureReadWrite.sRGB : RenderTextureReadWrite.Linear);
                 Graphics.Blit(source, target);
                 if (SystemInfo.supportsAsyncGPUReadback)
                 {
