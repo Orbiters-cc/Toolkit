@@ -392,19 +392,14 @@ namespace Orbiters.Toolkit.Editor.VRChat.Attachments
             private readonly AttachmentAnimationBuild owner;
             private readonly Transform animatorRoot;
             internal Transform AnimatorRoot => animatorRoot;
-            private readonly Dictionary<string, Transform> paths;
+            // The paths as the copy was before any step moved something (AnimationPaths' snapshot).
+            private readonly PathSnapshot paths;
             private readonly Dictionary<AnimationClip, AnimationClip> overrides = new Dictionary<AnimationClip, AnimationClip>();
             internal readonly Dictionary<Object, Object> Copies = new Dictionary<Object, Object>();
             internal Graph(AttachmentAnimationBuild owner, Transform animatorRoot)
             {
                 this.owner = owner; this.animatorRoot = animatorRoot;
-                paths = new Dictionary<string, Transform>(StringComparer.Ordinal);
-                foreach (var t in animatorRoot.GetComponentsInChildren<Transform>(true))
-                {
-                    var path = AnimationUtility.CalculateTransformPath(t, animatorRoot);
-                    // Unity itself resolves duplicate sibling paths to the first transform.
-                    if (!paths.ContainsKey(path)) paths.Add(path, t);
-                }
+                paths = PathSnapshot.Of(animatorRoot);
             }
             internal Object Clone(Object source)
             {
@@ -542,17 +537,12 @@ namespace Orbiters.Toolkit.Editor.VRChat.Attachments
             {
                 string prefix = animatorRoot == avatarRoot ? "" : AnimationUtility.CalculateTransformPath(animatorRoot, avatarRoot) + "/";
                 if (!formerPath.StartsWith(prefix, StringComparison.Ordinal)) return;
-                string former = formerPath.Substring(prefix.Length);
-                foreach (var t in target.GetComponentsInChildren<Transform>(true))
-                {
-                    string path = t == target ? former : former + "/" + AnimationUtility.CalculateTransformPath(t, target);
-                    if (!paths.ContainsKey(path)) paths.Add(path, t);
-                }
+                paths.Alias(target, formerPath.Substring(prefix.Length));
             }
 
             private string NewPath(string path)
             {
-                if (!paths.TryGetValue(path, out var target) || target == null) return path;
+                if (!paths.TryGet(path, out var target) || target == null) return path;
                 if (!(target == animatorRoot || target.IsChildOf(animatorRoot)))
                     throw new InvalidOperationException("An attachment moved an animated object outside its nested Animator. Put this accessory's animations in the avatar's playable layers before building.");
                 return AnimationUtility.CalculateTransformPath(target, animatorRoot);
@@ -561,14 +551,14 @@ namespace Orbiters.Toolkit.Editor.VRChat.Attachments
             {
                 foreach (var clip in Copies.Values.OfType<AnimationClip>())
                     foreach (var binding in AnimationUtility.GetCurveBindings(clip))
-                        if (binding.type == typeof(GameObject) && binding.propertyName == "m_IsActive" && paths.TryGetValue(binding.path, out var target))
+                        if (binding.type == typeof(GameObject) && binding.propertyName == "m_IsActive" && paths.TryGet(binding.path, out var target))
                             yield return target;
             }
             internal IEnumerable<Transform> AnimatedTransformTargets()
             {
                 foreach (var clip in Copies.Values.OfType<AnimationClip>())
                     foreach (var binding in AnimationUtility.GetCurveBindings(clip))
-                        if (binding.type == typeof(Transform) && paths.TryGetValue(binding.path, out var target)) yield return target;
+                        if (binding.type == typeof(Transform) && paths.TryGet(binding.path, out var target)) yield return target;
             }
             internal void Rewrite(Dictionary<Transform, List<Transform>> activationCopies)
             {
@@ -584,7 +574,7 @@ namespace Orbiters.Toolkit.Editor.VRChat.Attachments
                         var moved = binding;
                         moved.path = NewPath(binding.path);
                         var proxies = (binding.type == typeof(Transform) || binding.type == typeof(GameObject) && binding.propertyName == "m_IsActive") &&
-                                      paths.TryGetValue(binding.path, out var target) && activationCopies.TryGetValue(target, out var copies)
+                                      paths.TryGet(binding.path, out var target) && activationCopies.TryGetValue(target, out var copies)
                             ? copies.Where(p => p.IsChildOf(animatorRoot)).ToList() : null;
                         if (moved.path == binding.path && (proxies == null || proxies.Count == 0)) continue;
                         var curve = AnimationUtility.GetEditorCurve(clip, binding);
@@ -620,7 +610,7 @@ namespace Orbiters.Toolkit.Editor.VRChat.Attachments
                     for (int i = 0; i < mask.transformCount; i++)
                     {
                         var oldPath = mask.GetTransformPath(i);
-                        if (paths.TryGetValue(oldPath, out var target) && activationCopies.TryGetValue(target, out var proxies))
+                        if (paths.TryGet(oldPath, out var target) && activationCopies.TryGetValue(target, out var proxies))
                             foreach (var proxy in proxies.Where(p => p.IsChildOf(animatorRoot)))
                                 additions[AnimationUtility.CalculateTransformPath(proxy, animatorRoot)] = mask.GetTransformActive(i);
                         mask.SetTransformPath(i, NewPath(oldPath));

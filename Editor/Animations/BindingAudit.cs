@@ -40,6 +40,12 @@ namespace Orbiters.Toolkit.Editor.Animations
             public readonly List<Miss> Missing = new List<Miss>();
         }
 
+        /// <summary>
+        /// Every clip the avatar plays, from the object it plays from (<see cref="AnimationPaths.Clips"/>: playable layers,
+        /// Animator and legacy Animation components, VRCFury and Modular Avatar components' clips from where they merge).
+        /// </summary>
+        public static Result Of(GameObject avatarRoot) => Of(AnimationPaths.Clips(avatarRoot));
+
         public static Result Of(IEnumerable<(AnimationClip Clip, Transform AnimatorRoot)> clips)
         {
             var result = new Result();

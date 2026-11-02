@@ -29,6 +29,19 @@
   their bits. Reflection into a tool still finds its types (`VrcFury.Find`); components are still recognised by type.
   `InstalledTools.Pretend(...)` lets tests decide each case. New Checks group **Other tools**
   (`Checks/ToolConflicts.Find`): VRCFury components on an avatar that VRCFury Stub (or no VRCFury) leaves unbuilt.
+- **Animations follow renamed and moved objects (`Animations.AnimationPaths`).** `Plan(avatar, moves)` is a dry run:
+  per clip, mask and state audio (`VRCAnimatorPlayAudio.SourcePath`) of the avatar (playable layers, Animator and legacy
+  Animation components, VRCFury components from their object looking further up as VRCFury does, Modular Avatar merges
+  from their path root or the avatar in absolute mode), each path that would stop reaching its object and the one that
+  does, plus paths broken already with the one object of that name they most likely meant. `Apply` rewrites the
+  project's assets in one Undo step; assets in packages, read-only files and model files are listed, never changed; a
+  clip another avatar, object or controller uses too is copied for this avatar (its controllers and components point
+  at the copy) unless fixed everywhere. `PathSnapshot` is the path map `AttachmentAnimationBuild` resolves with too.
+  `AnimationPathWatch` notices when a rename or move in Unity's Hierarchy breaks an open scene's avatar's animations
+  and holds a notice until Fix or Leave (never fixing by itself); tools call `Check` after their own moves, and a fix
+  confirmed right after joins the move's Undo step (`UndoStep`). `BindingAudit.Of(avatar)` reads the avatar's clips
+  through it. New check `Checks.BrokenBindings`: paths that reach nothing both on the avatar and on the copy built as
+  an upload builds it, with a Fix when one object matches (`AvatarIssue.Fix`). Tests: AnimationPathsTests.
 - **3D previews carry each material's look (schema 2).** Orbiters - N4N0 drew every material with the same glossy
   highlight. `Preview.PreviewLook` now reads how the shader takes the light (lilToon, Poiyomi by its lighting type,
   MToon, Unity Toon Shader, unlit shaders, else Standard and its look-alikes such as VRChat's Standard Lite): `lit`,
