@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- **The menu preview sorts an item's toggle where the build puts the item.** `Attachments.AttachmentBuild.Reparented(avatar)`
+  lists what the build moves onto its bone before VRCFury reads its components (each becomes its bone's last child),
+  without changing the avatar; `Apply` uses the same selection.
 - **Checks: "Other tools".** `VRChat.Checks.ToolConflicts.Find(avatar)` turns what the compatibility matrix found about
   other avatar tools into notes and warnings, read on the avatar itself (their components leave a built copy).
   `ToolConflicts.MenuTools(avatar)` names the tools on it whose menus are added at upload by their own build pass
