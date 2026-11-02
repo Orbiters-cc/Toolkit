@@ -1,6 +1,6 @@
 # Orbiters Toolkit
 
-## Unreleased
+## 0.4.12 — 2026-11-02
 
 - **Plans the user approves may change the VRChat SDK and the tools pinning it.** `VpmDependencyPlan.Resolve` takes a
   `VpmPlanScope`: `Requested` (as before: never the SDK, never a package nothing asked for), `Sdk` (com.vrchat.* may be
