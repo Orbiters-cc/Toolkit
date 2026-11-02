@@ -19,7 +19,8 @@ namespace Orbiters.Toolkit.Editor.VRChat.Optimization
     /// slots stay first), and only renderers nothing else animates or points at join it.
     /// <list type="bullet">
     /// <item><see cref="MergeStill"/>: meshes always shown, static props (mesh renderers) too, skinned to their own transform.
-    /// Their blendshapes, which nothing animates, are baked in at their weight.</item>
+    /// Their blendshapes, which nothing animates, are baked in at their weight. Meshes whose only animations set material
+    /// properties exactly as another's do join that one.</item>
     /// <item><see cref="MergeTogether"/>: meshes every animation shows and hides together (an outfit's pieces under one
     /// toggle). Their animated blendshapes join the merged mesh, and the animations follow them there.</item>
     /// <item><see cref="MergeToggled"/>: meshes toggled on their own join one that is always shown, when that lowers a rank;
@@ -43,13 +44,21 @@ namespace Orbiters.Toolkit.Editor.VRChat.Optimization
             public readonly List<string> Skipped = new List<string>();
         }
 
-        public static Result MergeStill(AvatarUsage usage)
+        /// <summary>
+        /// Merges the meshes always shown (props too) into the largest one animations use or something points at; the others
+        /// that something animates stay apart, unless all they animate is material properties with the same keys, in the same
+        /// clips, as another of them: those join that one, whose animations then set their materials as their own did.
+        /// <paramref name="animations"/> gives the build's copies of the animations (null on an estimate, which nothing plays):
+        /// the joining meshes' own copies of those curves leave them.
+        /// </summary>
+        public static Result MergeStill(AvatarUsage usage, Func<AttachmentAnimationBuild> animations = null)
         {
             var result = new Result();
             // What a build tool still works on stays as it is, merged into nothing and taking nothing in.
             var skinned = usage.Root.GetComponentsInChildren<SkinnedMeshRenderer>(true)
                 .Where(r => usage.AlwaysShown(r) && Mergeable(r) && !Emits(r, usage) && !usage.Pending(r.transform)).ToList();
             var props = usage.Root.GetComponentsInChildren<MeshRenderer>(true).Where(r => usage.AlwaysShown(r) && Prop(r) && Movable(r, usage)).ToList();
+            Dictionary<(string Path, string Property), string> curves = null;
             // The largest groups first: a prop drawn like several of them joins the one with the most to share.
             foreach (var group in skinned.GroupBy(r => (Drawn(r), Skinning(r))).OrderByDescending(g => g.Sum(r => r.sharedMesh.vertexCount)))
             {
@@ -57,27 +66,120 @@ namespace Orbiters.Toolkit.Editor.VRChat.Optimization
                 var joining = props.Where(p => Drawn(p).Equals(group.Key.Item1)).ToList();
                 if (members.Count + joining.Count < 2) continue;
                 props.RemoveAll(joining.Contains);
-                // Renderers something animates or points at stay where they are; one of them can take the others in.
-                var pinned = members.Where(r => !Movable(r, usage)).ToList();
-                var sources = members.Except(pinned).Cast<Renderer>().ToList();
-                var target = pinned.OrderByDescending(r => r.sharedMesh.vertexCount).FirstOrDefault();
-                if (target == null)
+                // Renderers something animates or points at stay where they are; one of them can take the others in. Those
+                // whose only animations set material properties as another's do join that one: the ones that can't follow
+                // come first (the largest first), then the others, each joining the first that is animated the same way.
+                var pinned = members.Where(r => !Movable(r, usage)).OrderBy(r => Follows(r, usage)).ThenByDescending(r => r.sharedMesh.vertexCount).ToList();
+                var heads = new List<(SkinnedMeshRenderer Head, List<Renderer> Joining)>();
+                var followers = new HashSet<Renderer>();
+                foreach (var other in pinned)
                 {
-                    target = members.Except(pinned).OrderByDescending(r => r.sharedMesh.vertexCount).First();
-                    sources.Remove(target);
+                    if (Follows(other, usage) && heads.Count > 0)
+                    {
+                        curves = curves ?? MaterialCurves(usage);
+                        var head = heads.FirstOrDefault(h => SameMaterialAnimations(h.Head, other, usage, curves));
+                        if (head.Head != null) { head.Joining.Add(other); followers.Add(other); continue; }
+                    }
+                    heads.Add((other, new List<Renderer>()));
                 }
-                sources.AddRange(joining);
-                // Blendshapes of the joining meshes are baked first; one whose shapes something still uses stays apart.
-                sources = sources.Where(s => !(s is SkinnedMeshRenderer source) || source.sharedMesh.blendShapeCount == 0 || Bake(usage, source, result))
-                    .Where(s => !Crosses(target, s, usage)).ToList();
-                if (sources.Count == 0) continue;
-                var merged = Merge(target, sources, false);
-                if (merged == null) continue;
-                result.Meshes.Add(merged.Mesh);
-                result.Merged += sources.Count;
-                foreach (var source in sources) Remove(source, target, usage);
+                // The rest joins the first of them, or the largest of the rest when nothing is pinned.
+                var sources = members.Except(pinned).Cast<Renderer>().ToList();
+                if (heads.Count == 0)
+                {
+                    var largest = members.Except(pinned).OrderByDescending(r => r.sharedMesh.vertexCount).First();
+                    sources.Remove(largest);
+                    heads.Add((largest, new List<Renderer>()));
+                }
+                heads[0].Joining.AddRange(sources);
+                heads[0].Joining.AddRange(joining);
+                foreach (var (head, joined) in heads)
+                {
+                    // Blendshapes of the joining meshes are baked first; one whose shapes something still uses stays apart.
+                    var merging = joined.Where(s => !(s is SkinnedMeshRenderer source) || source.sharedMesh.blendShapeCount == 0 || Bake(usage, source, result))
+                        .Where(s => followers.Contains(s) || !Crosses(head, s, usage)).ToList();
+                    if (merging.Count == 0) continue;
+                    var merged = Merge(head, merging, false);
+                    if (merged == null) continue;
+                    result.Meshes.Add(merged.Mesh);
+                    result.Merged += merging.Count;
+                    // The renderers go even when their animations could not follow: never drawn twice.
+                    try
+                    {
+                        var joinedFollowers = merging.Where(followers.Contains).ToList();
+                        if (joinedFollowers.Count > 0) DropMaterialCurves(animations?.Invoke(), usage, joinedFollowers);
+                    }
+                    finally { foreach (var source in merging) Remove(source, head, usage); }
+                }
             }
             return result;
+        }
+
+        // A mesh always shown that may join another animated the same way: nothing points at it, and every animation it has
+        // sets a property of its materials.
+        private static bool Follows(SkinnedMeshRenderer renderer, AvatarUsage usage) =>
+            !usage.Used(renderer) && !usage.Used(renderer.gameObject) &&
+            usage.AnimatedAt(renderer.transform).All(p => p.StartsWith("material.", StringComparison.Ordinal));
+
+        // Whether head's animations set other's materials as other's own do: other's animated properties are animated on head
+        // with the same keys in every clip, each property head animates that other's materials have is one of them, head's
+        // animations set nothing else of the whole renderer (shadows, bounds...), and no material renames a shared property
+        // when Poiyomi locks it (a name of its own would leave the other material out).
+        private static bool SameMaterialAnimations(SkinnedMeshRenderer head, SkinnedMeshRenderer other, AvatarUsage usage,
+            Dictionary<(string Path, string Property), string> curves)
+        {
+            var headProperties = usage.AnimatedAt(head.transform, head.GetType());
+            if (headProperties.Any(p => p != "m_Enabled" && !p.StartsWith("blendShape.", StringComparison.Ordinal) && !p.StartsWith("material.", StringComparison.Ordinal) &&
+                                        !p.StartsWith("m_Materials", StringComparison.Ordinal))) return false;
+            string headPath = usage.PathOf(head.transform), otherPath = usage.PathOf(other.transform);
+            var own = usage.AnimatedAt(other.transform);
+            if (own.Count == 0) return false;
+            foreach (var property in own)
+                if (!curves.TryGetValue((headPath, property), out var keys) || !curves.TryGetValue((otherPath, property), out var otherKeys) || keys != otherKeys) return false;
+            string Base(string property) => property.Substring("material.".Length).Split('.')[0];
+            foreach (var property in headProperties.Where(p => p.StartsWith("material.", StringComparison.Ordinal)))
+                if (!own.Contains(property) && other.sharedMaterials.Any(m => m != null && m.HasProperty(Base(property)))) return false;
+            var materials = head.sharedMaterials.Concat(other.sharedMaterials).Where(m => m != null).ToList();
+            return own.Select(Base).Distinct().All(b => !materials.Any(m => m.HasProperty(b + "Animated") && m.GetFloat(b + "Animated") > 1.5f));
+        }
+
+        // Every material property curve, by the path from the avatar's root and the property: its keys in every clip, in a
+        // fixed order. Two renderers with the same text are set to the same values at the same moments.
+        private static Dictionary<(string Path, string Property), string> MaterialCurves(AvatarUsage usage)
+        {
+            var clips = AvatarUsage.Clips(usage.Root).ToList();
+            var keys = new Dictionary<(string, string), StringBuilder>();
+            for (int i = 0; i < clips.Count; i++)
+                foreach (var binding in AnimationUtility.GetCurveBindings(clips[i].Clip))
+                {
+                    if (!binding.propertyName.StartsWith("material.", StringComparison.Ordinal)) continue;
+                    var curve = AnimationUtility.GetEditorCurve(clips[i].Clip, binding);
+                    if (curve == null) continue;
+                    var key = (usage.PathOf(clips[i].AnimatorRoot, binding.path), binding.propertyName);
+                    if (!keys.TryGetValue(key, out var text)) keys[key] = text = new StringBuilder();
+                    text.Append(i).Append('[');
+                    foreach (var k in curve.keys)
+                        text.Append(k.time.ToString("R")).Append(':').Append(k.value.ToString("R")).Append(':')
+                            .Append(k.inTangent.ToString("R")).Append(':').Append(k.outTangent.ToString("R")).Append(' ');
+                    text.Append(']');
+                }
+            return keys.ToDictionary(p => p.Key, p => p.Value.ToString());
+        }
+
+        // The joined meshes' material curves, the same as the merged renderer's: they would point at a renderer gone.
+        private static void DropMaterialCurves(AttachmentAnimationBuild build, AvatarUsage usage, List<Renderer> joined)
+        {
+            if (build == null) return;
+            var paths = new HashSet<string>(joined.Select(r => usage.PathOf(r.transform)), StringComparer.Ordinal);
+            using var edits = build.Edits();
+            foreach (var (clip, animatorRoot) in build.Clips)
+            {
+                if (clip == null || animatorRoot == null) continue;
+                var removed = AnimationUtility.GetCurveBindings(clip)
+                    .Where(b => b.propertyName.StartsWith("material.", StringComparison.Ordinal) && paths.Contains(usage.PathOf(animatorRoot, b.path))).ToArray();
+                if (removed.Length == 0) continue;
+                AnimationUtility.SetEditorCurves(clip, removed, new AnimationCurve[removed.Length]);
+                EditorUtility.SetDirty(clip);
+            }
         }
 
         /// <summary>

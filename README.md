@@ -2,6 +2,27 @@
 
 ## Unreleased
 
+- **Meshes always shown that animate only their materials, the same way, merge.** `MeshMerge.MergeStill(usage,
+  animations)`: an always-shown mesh whose every animation sets material properties exactly as another's do (the same
+  properties, the same keys in the same clips) joins that one. That one's animations must set nothing else the joining
+  materials have, and no material may rename the property when Poiyomi locks it (`<property>Animated` 2). At upload the
+  joining mesh's duplicate curves leave the build's animations. Meshes that can't follow (an animated blendshape,
+  something pointing at them) take the others in, whatever their size. MasculineCanine at Big (compatibility project,
+  real SDK preprocess): Tail2 joins MohawkHair ("Shininess 0"). Skinned meshes 9 → 8 (10 → 9 with the fixture items),
+  PC's skinned-mesh category Poor → Medium; overall still Very Poor / Very Poor (polygons, texture memory...), download
+  15.74 MB, unresolved bindings 16 → 16.
+- **A toggled part on several bones folds onto one point (fix).** `MergeToggled`'s blendshape now folds the whole part onto
+  the origin of the bone it follows most: faces on one or two bones go flat in every pose, faces between three keep a
+  sliver near that point. Measured on MasculineCanine's body weights (89,166 vertices, rest, arms down, elbows bent,
+  sitting, twist and bend): 0.15–0.17% of its area stays, the largest face under 1 cm². 0.4.14's fold onto each
+  vertex's own joints kept 12–18%, faces up to 137 cm² between joints.
+- **No NaN-scaled hide bones.** Tried for parts on several bones (as d4rkAvatarOptimizer's NaNimation): Unity refuses a NaN
+  scale from scripts and editor sampling turns it into 0, so it can't be stored at rest (an avatar whose animations are
+  blocked would show hidden parts) nor checked outside VRChat. d4rk documents that it depends on each shader keeping
+  the NaN and can move the nameplate. The blendshape stays.
+- **What a hiding blendshape may add, by platform.** `ToggledPolicy.For(mobile)`: PC 256 KB per toggle and 1 MB in all
+  (about 32,000 and 130,000 vertices), mobile 64 KB and 256 KB (2.5% of its 10 MB download limit). Measured per hidden
+  vertex: 40 B of offsets in video memory, 8 B of download, 2–11 ns per frame on Unity's CPU path while hidden.
 - **Checks: AAO's Trace and Optimize keeps Orbiters items working.** Measured on N4N0 (AAO 1.9.21): every renderer,
   contact, PhysBone, constraint and animation curve stays; AAO only folds empty parent objects into their children
   (renamed "Parent$Child$n"). The note now says so (0.4.13's "merges and removes" misread those renames).

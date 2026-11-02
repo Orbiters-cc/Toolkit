@@ -30,8 +30,15 @@ namespace Orbiters.Toolkit.Editor.VRChat.Optimization
             public int[] SkinnedLimits, MeshLimits, BoneLimits;
             /// <summary>What a blendshape moving this many vertices adds to the download (My Avatar's download estimate).</summary>
             public Func<int, long> CollapseBytes = DefaultCollapseBytes;
-            /// <summary>The most one toggle's blendshape may add to the download, and all of them together.</summary>
-            public long MaxBytes = 256 * 1024, MaxTotalBytes = 1024 * 1024;
+            /// <summary>
+            /// The most one toggle's blendshape may add to the download, and all of them together: on PC 256 KB and 1 MB
+            /// (about 32,000 and 130,000 vertices, 1.3 and 5 MB of video memory, half a percent of PC's 200 MB download limit at
+            /// most); on mobile 64 KB and 256 KB (2.5% of its 10 MB limit). A hidden part's blendshape costs about 40 bytes of
+            /// video memory and, on the CPU path, 2 to 11 ns per vertex each frame (measured 2026-11-02).
+            /// </summary>
+            public long MaxBytes = PcMaxBytes, MaxTotalBytes = PcMaxTotalBytes;
+
+            public const long PcMaxBytes = 256 * 1024, PcMaxTotalBytes = 1024 * 1024, MobileMaxBytes = 64 * 1024, MobileMaxTotalBytes = 256 * 1024;
 
             /// <summary>A blendshape's stored offsets (40 bytes per vertex it moves and 64 per frame) as compressed in a bundle.</summary>
             public static long DefaultCollapseBytes(int moved) => (long)((moved * 40L + 64) * .2f);
@@ -45,6 +52,7 @@ namespace Orbiters.Toolkit.Editor.VRChat.Optimization
                 {
                     SkinnedLimits = Limits(l => l.skinnedMeshCount), MeshLimits = Limits(l => l.meshCount), BoneLimits = Limits(l => l.boneCount),
                     CollapseBytes = collapseBytes ?? DefaultCollapseBytes,
+                    MaxBytes = mobile ? MobileMaxBytes : PcMaxBytes, MaxTotalBytes = mobile ? MobileMaxTotalBytes : PcMaxTotalBytes,
                 };
             }
 
@@ -114,8 +122,9 @@ namespace Orbiters.Toolkit.Editor.VRChat.Optimization
         /// <list type="bullet">
         /// <item>A part whose vertices all follow one bone (a rigid accessory, a prop) follows a new bone under it instead,
         /// scaled to nothing while hidden: exact in every pose, one bone more.</item>
-        /// <item>Any other part gets a blendshape that folds each vertex onto a joint of the bones it follows: nothing is
-        /// drawn while hidden. It adds that blendshape to the download, and Unity evaluates it while the part is hidden.</item>
+        /// <item>Any other part gets a blendshape that folds it onto the origin of the bone it follows most: faces on one or
+        /// two bones go flat in every pose, faces between three keep a sliver there. It adds that blendshape to the download,
+        /// and Unity evaluates it while the part is hidden.</item>
         /// </list>
         /// The animations of the toggle keep their curves (the object may hold more than the mesh: PhysBones and contacts
         /// under it still stop while it is hidden) and get the same keys on the bone's scale or the blendshape, so the merged
@@ -386,9 +395,11 @@ namespace Orbiters.Toolkit.Editor.VRChat.Optimization
 
         private static readonly string[] Axes = { "x", "y", "z" };
 
-        // A blendshape folding each of the unit's vertices onto a joint of the bones it follows: the origin of the one all
-        // its other bones are above (each parent carries its child's origin), else of the bone it follows most. A vertex
-        // following one bone, or a parent and its child, lands there in every pose; the faces of a part go flat.
+        // A blendshape folding the unit's vertices onto one point: the origin, at rest, of the bone they follow most. Skinned,
+        // a vertex on one bone lands where that bone carries the point, one on two bones on the line between where each
+        // carries it: faces on one or two bones go flat in every pose, and only faces between three bones keep a sliver near
+        // the point (MasculineCanine's body: 0.15-0.17% of its area in any pose, the largest face under 1 cm2; folding each
+        // vertex onto a joint of its own bones instead kept 12-18%, faces up to 137 cm2 between joints).
         private static string Collapse(SkinnedMeshRenderer target, Merged merged, Unit unit)
         {
             var mesh = target.sharedMesh;
@@ -396,39 +407,22 @@ namespace Orbiters.Toolkit.Editor.VRChat.Optimization
             var counts = mesh.GetBonesPerVertex();
             var weights = mesh.GetAllBoneWeights();
             var poses = mesh.bindposes;
-            var bones = target.bones;
             var starts = new int[counts.Length];
             for (int v = 0, k = 0; v < counts.Length; k += counts[v], v++) starts[v] = k;
-            var origins = new Dictionary<int, Vector3>();
-            var deltas = new Vector3[vertices.Length];
+            var total = new Dictionary<int, float>();
             foreach (var member in unit.Members)
             {
                 var (offset, count) = merged.Ranges[member.Renderer];
                 for (int v = offset; v < offset + count; v++)
-                {
-                    int land = -1, most = -1;
                     for (int i = starts[v]; i < starts[v] + counts[v]; i++)
-                    {
-                        var w = weights[i];
-                        if (w.weight <= 0f) continue;
-                        if (most < 0 || w.weight > weights[most].weight) most = i;
-                        var bone = w.boneIndex < bones.Length ? bones[w.boneIndex] : null;
-                        if (bone == null) continue;
-                        bool below = true;
-                        for (int j = starts[v]; j < starts[v] + counts[v] && below; j++)
-                        {
-                            if (j == i || weights[j].weight <= 0f) continue;
-                            var other = weights[j].boneIndex < bones.Length ? bones[weights[j].boneIndex] : null;
-                            below = other == null || bone.IsChildOf(other);
-                        }
-                        if (below && (land < 0 || bone.IsChildOf(bones[weights[land].boneIndex]))) land = i;
-                    }
-                    if (land < 0) land = most;
-                    if (land < 0) continue;
-                    int index = weights[land].boneIndex;
-                    if (!origins.TryGetValue(index, out var origin)) origins[index] = origin = poses[index].inverse.MultiplyPoint3x4(Vector3.zero);
-                    deltas[v] = origin - vertices[v];
-                }
+                        total[weights[i].boneIndex] = (total.TryGetValue(weights[i].boneIndex, out float sum) ? sum : 0f) + weights[i].weight;
+            }
+            var point = total.Count > 0 ? poses[total.OrderByDescending(p => p.Value).First().Key].inverse.MultiplyPoint3x4(Vector3.zero) : Vector3.zero;
+            var deltas = new Vector3[vertices.Length];
+            foreach (var member in unit.Members)
+            {
+                var (offset, count) = merged.Ranges[member.Renderer];
+                for (int v = offset; v < offset + count; v++) deltas[v] = point - vertices[v];
             }
             string name = HiddenShapePrefix + unit.Toggle.Name, unique = name;
             for (int n = 2; mesh.GetBlendShapeIndex(unique) >= 0; n++) unique = name + " " + n;

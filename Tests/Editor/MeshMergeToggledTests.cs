@@ -161,7 +161,8 @@ public sealed class MeshMergeToggledTests
         Assert.That(AnimationUtility.GetCurveBindings(OwnClip("Ring on")).Any(b => b.path == "Ring" && b.propertyName == "m_Enabled"), "The avatar's own clips are untouched.");
     }
 
-    // A vertex following a parent and its child lands where they meet: the sleeve hidden is flat in any pose.
+    // The sleeve folds onto one point, the origin of the bone it follows most (Bone1): a vertex on that bone lands on it, one
+    // on two bones on the line between where each carries it, so the hidden sleeve is flat in any pose.
     [Test] public void APartHiddenByItsBlendshapeIsFlatInAnyPose()
     {
         var build = AttachmentAnimationBuild.Prepare(root);
@@ -179,8 +180,8 @@ public sealed class MeshMergeToggledTests
                 var a = baked[indices[t]]; var b = baked[indices[t + 1]]; var c = baked[indices[t + 2]];
                 Assert.That(Vector3.Cross(b - a, c - a).magnitude, Is.LessThan(1e-6f), "A face of the hidden sleeve has an area at " + angle + "°.");
             }
-            foreach (var i in indices)
-                Assert.That(Mathf.Min(Vector3.Distance(baked[i], bones[1].position), Vector3.Distance(baked[i], bones[2].position)), Is.LessThan(1e-4f), "It folds onto its bones' joints.");
+            int onBone = indices.Distinct().Count(i => Vector3.Distance(baked[i], bones[1].position) < 1e-4f);
+            Assert.That(onBone, Is.GreaterThanOrEqualTo(2), "Its two vertices on Bone1 alone land on Bone1's origin (all four at rest).");
         }
     }
 
@@ -254,6 +255,17 @@ public sealed class MeshMergeToggledTests
         Assert.That(result.Merged, Is.EqualTo(3), string.Join("\n", result.Skipped));
         Assert.That(root.GetComponentsInChildren<SkinnedMeshRenderer>(true), Is.EqualTo(new[] { body }));
         Assert.That(AnimationUtility.GetCurveBindings(OwnClip("Ring on")).Any(b => b.path == "Ring" && b.propertyName == "m_Enabled"));
+    }
+
+    // What a hiding blendshape may add, by platform (ToggledPolicy.For with the SDK's limits).
+    [Test] public void MobileCapsAreAQuarterOfPcs()
+    {
+        var pc = MeshMerge.ToggledPolicy.For(false);
+        var mobile = MeshMerge.ToggledPolicy.For(true);
+        if (pc == null || mobile == null) Assert.Inconclusive("The VRChat SDK has not loaded its performance levels yet.");
+        Assert.That((pc.MaxBytes, pc.MaxTotalBytes), Is.EqualTo((256 * 1024L, 1024 * 1024L)));
+        Assert.That((mobile.MaxBytes, mobile.MaxTotalBytes), Is.EqualTo((64 * 1024L, 256 * 1024L)));
+        Assert.That(mobile.SkinnedLimits[2], Is.LessThan(pc.SkinnedLimits[2]), "Mobile's own limits.");
     }
 
     // ---- Helpers ----
