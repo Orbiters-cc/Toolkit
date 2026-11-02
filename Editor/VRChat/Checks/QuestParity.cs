@@ -182,6 +182,14 @@ namespace Orbiters.Toolkit.Editor.VRChat.Checks
 
         private static HashSet<string> MobileShaders() => new HashSet<string>(AvatarValidation.ShaderWhiteList, StringComparer.Ordinal);
 
+        private static HashSet<string> mobileShaders;
+
+        /// <summary>Whether Quest (and other phones) shows this shader: VRChat's mobile shaders only.</summary>
+        public static bool QuestShows(Shader shader) => shader != null && (mobileShaders ??= MobileShaders()).Contains(shader.name);
+
+        /// <summary>A shader's name as people know it: a locked Poiyomi shader by its own name.</summary>
+        public static string DisplayName(Shader shader) => shader != null ? ShaderName(shader) : "";
+
         private static bool IsMobile(BuildTarget platform) => platform == BuildTarget.Android || platform == BuildTarget.iOS;
 
         // Per-platform overrides came with VRChat SDK 3.8.1: before, an avatar has none.

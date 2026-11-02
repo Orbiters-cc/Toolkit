@@ -177,10 +177,12 @@ namespace Orbiters.Toolkit.Editor.VRChat.XRay
 
         private VisualElement Rated(string name, BudgetCount count, Func<AvatarPerformanceStatsLevel, int> stat, string note)
         {
-            var rating = AvatarBudget.Rate(stat, count.Total);
-            int poor = AvatarBudget.Limit(stat, PerformanceRating.Poor);
-            var limits = AvatarBudget.Limits(stat).ToList();
-            string tooltip = "VRChat PC ranks: " + string.Join(" · ", limits.Select(l => RatingName(l.rating) + " ≤ " + l.limit)) + ".";
+            // The platform the project builds for: PC, or mobile (Quest, iOS) when it builds for Android or iOS.
+            bool mobile = AvatarPlatform.Mobile;
+            var rating = AvatarBudget.Rate(stat, count.Total, mobile);
+            int poor = AvatarBudget.Limit(stat, PerformanceRating.Poor, mobile);
+            var limits = AvatarBudget.Limits(stat, mobile).ToList();
+            string tooltip = "VRChat " + (mobile ? AvatarPlatform.ShortLabel(AvatarPlatform.Current) : "PC") + " ranks: " + string.Join(" · ", limits.Select(l => RatingName(l.rating) + " ≤ " + l.limit)) + ".";
             if (rating == PerformanceRating.VeryPoor && (name == "PhysBones" || name == "Contacts"))
                 tooltip += " Players who hide Very Poor avatars see none of its PhysBones, colliders and contacts.";
             return Metric(name, count.Total, null, RatingName(rating), RatingClass(rating), tooltip, count, Mathf.Max(poor, count.Total),

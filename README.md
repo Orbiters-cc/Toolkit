@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- **Rank plans (`Budget/RankPlan`).** `RankStats.Of` keeps one platform's SDK stats as plain data (every category's value
+  and rating); `RankPlan.For(now, upload, target, mobile)` gives, per category, the value at upload against the target
+  rank's limit with the SDK's own PC or mobile levels, the overshoot (absolute and share), every rank's limit and
+  whether it blocks the target; pure arithmetic. `RankContributors` reads what costs most in each category (polygons,
+  material slots and bones per renderer, each skinned mesh and mesh, transforms and collision checks per PhysBone,
+  colliders, contacts, constraints, lights, particles, sounds, cloth, texture memory per texture) and what each Orbiters
+  item adds; `ItemLookup` finds an object's item on a copy through the avatar it was copied from.
+- **Avatar budget limits for PC or mobile.** `AvatarBudget.Limit/Rate/Limits` take the platform (they were PC only); the
+  XRay budget overlay rates with the limits of the platform the project builds for.
+- `QuestParity.QuestShows(shader)` and `QuestParity.DisplayName(shader)`.
 - **Installed tools by package, not by type (VRCFury Stub).** `InstalledTools` answers whether VRCFury, Modular Avatar,
   NDMF, AAO, d4rkAvatarOptimizer, TexTransTool and Meshia (or one of its forks) are installed from Unity's registered
   packages (the Creator Companion's included), with their version and source, read again when the project's packages

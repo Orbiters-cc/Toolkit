@@ -107,13 +107,18 @@ public sealed class AvatarBudgetTests
         Assert.AreEqual((1, 0), (budget.PhysBones.Avatar, budget.PhysBones.CustomBase));
     }
 
-    [Test] public void RatesWithTheSdksPcLimits()
+    [Test] public void RatesWithTheSdksPcAndMobileLimits()
     {
-        int excellent = AvatarBudget.Limit(l => l.boneCount, PerformanceRating.Excellent);
-        int poor = AvatarBudget.Limit(l => l.boneCount, PerformanceRating.Poor);
-        Assert.AreEqual(PerformanceRating.Excellent, AvatarBudget.Rate(l => l.boneCount, excellent));
-        Assert.AreEqual(PerformanceRating.Good, AvatarBudget.Rate(l => l.boneCount, excellent + 1));
-        Assert.AreEqual(PerformanceRating.VeryPoor, AvatarBudget.Rate(l => l.boneCount, poor + 1));
+        foreach (bool mobile in new[] { false, true })
+        {
+            int excellent = AvatarBudget.Limit(l => l.boneCount, PerformanceRating.Excellent, mobile);
+            int poor = AvatarBudget.Limit(l => l.boneCount, PerformanceRating.Poor, mobile);
+            Assert.AreEqual(PerformanceRating.Excellent, AvatarBudget.Rate(l => l.boneCount, excellent, mobile));
+            Assert.AreEqual(PerformanceRating.Good, AvatarBudget.Rate(l => l.boneCount, excellent + 1, mobile));
+            Assert.AreEqual(PerformanceRating.VeryPoor, AvatarBudget.Rate(l => l.boneCount, poor + 1, mobile));
+        }
+        Assert.Less(AvatarBudget.Limit(l => l.polyCount, PerformanceRating.Good, true), AvatarBudget.Limit(l => l.polyCount, PerformanceRating.Good, false),
+            "Quest's limits are lower");
     }
 
     // Worked out from VRCFury's solver: 40 radial floats are 320 bits; 31 number slots in 2 batches with a 2-bit index fit.

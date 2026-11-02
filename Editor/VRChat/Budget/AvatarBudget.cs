@@ -84,24 +84,27 @@ namespace Orbiters.Toolkit.Editor.VRChat.Budget
             }
         }
 
-        /// <summary>VRChat's PC limit of a stat for a rating, from the SDK's own performance levels.</summary>
+        /// <summary>
+        /// VRChat's limit of a stat for a rating on PC, or on mobile (Quest, Android and iOS), from the SDK's own performance
+        /// levels.
+        /// </summary>
         /// <exception cref="InvalidOperationException">The SDK has not loaded its levels yet, as early in an editor reload.</exception>
-        public static int Limit(Func<AvatarPerformanceStatsLevel, int> stat, PerformanceRating rating)
+        public static int Limit(Func<AvatarPerformanceStatsLevel, int> stat, PerformanceRating rating, bool mobile)
         {
-            var level = AvatarPerformanceStats.GetStatLevelForRating(rating, false)
+            var level = AvatarPerformanceStats.GetStatLevelForRating(rating, mobile)
                 ?? throw new InvalidOperationException("The VRChat SDK has not loaded its performance levels yet.");
             return stat(level);
         }
 
-        /// <summary>The PC rating a value gets: the best rating whose limit it does not exceed.</summary>
-        public static PerformanceRating Rate(Func<AvatarPerformanceStatsLevel, int> stat, int value)
+        /// <summary>The rating a value gets on PC or on mobile: the best rating whose limit it does not exceed.</summary>
+        public static PerformanceRating Rate(Func<AvatarPerformanceStatsLevel, int> stat, int value, bool mobile)
         {
             foreach (var rating in Ratings)
-                if (value <= Limit(stat, rating)) return rating;
+                if (value <= Limit(stat, rating, mobile)) return rating;
             return PerformanceRating.VeryPoor;
         }
 
-        public static IEnumerable<(PerformanceRating rating, int limit)> Limits(Func<AvatarPerformanceStatsLevel, int> stat) =>
-            Ratings.Select(r => (r, Limit(stat, r)));
+        public static IEnumerable<(PerformanceRating rating, int limit)> Limits(Func<AvatarPerformanceStatsLevel, int> stat, bool mobile) =>
+            Ratings.Select(r => (r, Limit(stat, r, mobile)));
     }
 }
