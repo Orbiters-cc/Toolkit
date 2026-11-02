@@ -1,5 +1,17 @@
 # Orbiters Toolkit
 
+## Unreleased
+
+- **An upload resets VRChat's OSC config of the avatar.** VRChat writes an avatar's OSC config
+  (`%USERPROFILE%\AppData\LocalLow\VRChat\VRChat\OSC\<account>\Avatars\<avatar id>.json`) the first time it loads the
+  avatar and keeps reading it after the avatar is uploaded again with other parameters, so OSC apps (face tracking,
+  Orbiters - N4N0) miss new parameters or send to gone ones. After every successful upload of an `avtr_` avatar, for
+  any platform, `AvatarManifestExporter`'s upload handler deletes that file in every account's folder
+  (`VRChat.VrchatOscConfig.Reset`) and says so in one Console line; VRChat writes it again the next time it loads the
+  avatar. Not when Haï's Auto-reset OSC config (`dev.hai-vr.fuck-osc-config`, whose idea this is) is installed.
+- **Uploads no longer write `uploaded.json`** (0.4.13): Orbiters - N4N0 dropped switching VRChat to an avatar just
+  uploaded.
+
 ## 0.4.14 — 2026-11-02
 
 - **Meshes toggled on their own merge too, their toggles kept.** `VRChat.Optimization.MeshMerge.MergeToggled(usage,
