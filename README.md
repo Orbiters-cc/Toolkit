@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- **A switch for noticing renames that break animations.** Orbiters settings > Features > Toolkit: "Notice renames
+  that break animations" (on by default, kept in your EditorPrefs). Off, `AnimationPathWatch` holds no notice and drops
+  the ones it held; tools that rename or move objects themselves (Mixer) still ask. Tests: AnimationPathWatchSwitchTests.
 - **Meshes always shown that animate only their materials, the same way, merge.** `MeshMerge.MergeStill(usage,
   animations)`: an always-shown mesh whose every animation sets material properties exactly as another's do (the same
   properties, the same keys in the same clips) joins that one. That one's animations must set nothing else the joining

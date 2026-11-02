@@ -4,11 +4,10 @@ using UnityEngine;
 namespace nadena.dev.modular_avatar.core.tests
 {
     /// <summary>
-    /// Stands in for Modular Avatar's Merge Animator in tests (Modular Avatar isn't installed here): its namespace makes it
-    /// one of Modular Avatar's components, its fields have Merge Animator's names.
+    /// Stands in for Modular Avatar's Merge Animator's data in tests (Modular Avatar isn't installed here): its fields have
+    /// Merge Animator's names. A ScriptableObject, as Unity puts no MonoBehaviour of an editor assembly on an object.
     /// </summary>
-    [AddComponentMenu("")]
-    public sealed class FakeModularAvatarMerge : MonoBehaviour
+    public sealed class FakeModularAvatarMerge : ScriptableObject
     {
         public enum MergeAnimatorPathMode { Relative, Absolute }
 

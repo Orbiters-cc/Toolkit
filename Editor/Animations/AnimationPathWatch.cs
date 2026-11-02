@@ -46,15 +46,39 @@ namespace Orbiters.Toolkit.Editor.Animations
 
         public static IReadOnlyCollection<Notice> Notices => Pending.Values;
 
-        /// <summary>Whether the watcher follows hierarchy changes (the user's setting; on by default).</summary>
+        /// <summary>The switch in the Orbiters settings window (Features, Toolkit), also in Mixer's Hierarchy menu and on the notice.</summary>
+        public const string Feature = "toolkit.animation-path-watch";
+        private const string Label = "Notice renames that break animations";
+
+        /// <summary>
+        /// Whether the watcher follows renames and moves in Unity's Hierarchy and other tools (the user's switch, on by
+        /// default). Off, it holds no notice; tools that rename or move objects themselves still ask (<see cref="Check"/>).
+        /// </summary>
         public static bool Enabled
         {
-            get => EditorPrefs.GetBool("Orbiters.Toolkit.AnimationPathWatch", true);
-            set { EditorPrefs.SetBool("Orbiters.Toolkit.AnimationPathWatch", value); if (!value) Clear(); else rescan = true; }
+            get => enabled;
+            set => OrbitersFeatures.SetEnabled(Feature, value);
         }
+
+        private static bool enabled;
 
         static AnimationPathWatch()
         {
+            OrbitersFeatures.Register(new OrbitersFeature
+            {
+                Key = Feature, Product = "Toolkit", Label = Label, PrefKey = "Orbiters.Toolkit.AnimationPathWatch",
+                Description = "When renaming or moving objects in Unity's Hierarchy (or any tool) stops an avatar's animations reaching them, " +
+                              "My Avatar's card and Mixer's Hierarchy say so, with Fix and Leave. Nothing changes until you press Fix.",
+                Stage = FeatureStage.Stable, Default = true,
+            });
+            enabled = OrbitersFeatures.IsEnabled(Feature);
+            OrbitersFeatures.Changed += key =>
+            {
+                if (key != Feature) return;
+                enabled = OrbitersFeatures.IsEnabled(Feature);
+                // Off: no notice is held; on again: the avatars' paths as they are now.
+                Clear();
+            };
             ObjectChangeEvents.changesPublished += OnChanges;
             EditorApplication.update += Tick;
             // Avatars added or loaded get their snapshot a moment later (not on every frame of a drag).

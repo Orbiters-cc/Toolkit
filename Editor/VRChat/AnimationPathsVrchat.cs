@@ -68,17 +68,18 @@ namespace Orbiters.Toolkit.Editor.VRChat
                 if (component == null || component is Transform) continue;
                 bool fury = VrcFury.IsComponent(component), ma = !fury && ModularAvatar.IsComponent(component);
                 if (!fury && !ma) continue;
-                foreach (var source in ToolSources(component, fury)) yield return source;
+                foreach (var source in ToolSources(component, component.transform, fury)) yield return source;
             }
         }
 
-        // What a VRCFury or Modular Avatar component plays, from where its tool merges it.
-        private static List<AnimationSource> ToolSources(Component component, bool fury)
+        // What a VRCFury or Modular Avatar component (its serialized data, on the object on) plays, from where its tool
+        // merges it. Tests give it a stand-in holding the same fields.
+        internal static List<AnimationSource> ToolSources(Object component, Transform on, bool fury)
         {
             var found = new List<AnimationSource>();
             using (var serialized = new SerializedObject(component))
             {
-                Transform from = component.transform;
+                Transform from = on;
                 string unknown = null;
                 bool any = false;
                 var assets = new List<Object>();
@@ -103,7 +104,7 @@ namespace Orbiters.Toolkit.Editor.VRChat
                     // Modular Avatar: relative to its path root (its own object by default), or to the avatar in absolute mode.
                     var mode = serialized.FindProperty("pathMode");
                     if (mode == null) return found;
-                    var avatar = Descriptor(component.transform) ?? component.transform.root;
+                    var avatar = Descriptor(on) ?? on.root;
                     if (mode.enumValueIndex == 1) from = avatar;
                     else
                     {

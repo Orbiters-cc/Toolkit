@@ -265,16 +265,29 @@ public sealed class AnimationPathsTests
         Curve(propClip, "Light", typeof(GameObject), "m_IsActive");
         merged.layers[0].stateMachine.AddState("Prop").motion = propClip;
         var holder = Child(avatar.transform, "Merge");
-        var merge = holder.gameObject.AddComponent<nadena.dev.modular_avatar.core.tests.FakeModularAvatarMerge>();
+        // Unity adds no MonoBehaviour of an editor assembly to an object: the stand-in holds Merge Animator's fields, and
+        // the VRChat part reads it as it reads the component on the holder.
+        var merge = ScriptableObject.CreateInstance<nadena.dev.modular_avatar.core.tests.FakeModularAvatarMerge>();
         merge.animator = merged;
         merge.relativePathRoot = new nadena.dev.modular_avatar.core.tests.FakeModularAvatarMerge.Reference { referencePath = "Prop" };
-        Assert.AreEqual(0, AnimationPaths.Broken(avatar).Changes.Count(c => c.From == "Light"));
-        string former = AnimationUtility.CalculateTransformPath(light, avatar.transform);
-        light.name = "Lamp";
-        AnimationPaths.Apply(AnimationPaths.Plan(avatar, new[] { (light, former) }, broken: false));
-        CollectionAssert.AreEqual(new[] { "Lamp" }, Paths(propClip));
-        merge.pathMode = nadena.dev.modular_avatar.core.tests.FakeModularAvatarMerge.MergeAnimatorPathMode.Absolute;
-        Assert.AreEqual(1, AnimationPaths.Broken(avatar).Changes.Count(c => c.From == "Lamp"), "absolute: from the avatar's root");
+        Func<GameObject, IEnumerable<AnimationSource>> provider = root =>
+            root == avatar ? Orbiters.Toolkit.Editor.VRChat.AnimationPathsVrchat.ToolSources(merge, holder, false) : Enumerable.Empty<AnimationSource>();
+        AnimationPaths.AddSources(provider);
+        try
+        {
+            Assert.AreEqual(0, AnimationPaths.Broken(avatar).Changes.Count(c => c.From == "Light"));
+            string former = AnimationUtility.CalculateTransformPath(light, avatar.transform);
+            light.name = "Lamp";
+            AnimationPaths.Apply(AnimationPaths.Plan(avatar, new[] { (light, former) }, broken: false));
+            CollectionAssert.AreEqual(new[] { "Lamp" }, Paths(propClip));
+            merge.pathMode = nadena.dev.modular_avatar.core.tests.FakeModularAvatarMerge.MergeAnimatorPathMode.Absolute;
+            Assert.AreEqual(1, AnimationPaths.Broken(avatar).Changes.Count(c => c.From == "Lamp"), "absolute: from the avatar's root");
+        }
+        finally
+        {
+            AnimationPaths.RemoveSources(provider);
+            Object.DestroyImmediate(merge);
+        }
     }
 
     [Test] public void AJoinMovesShapesSwitchesAndTogglesToTheJoinedRenderer()

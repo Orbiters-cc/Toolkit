@@ -155,6 +155,11 @@ namespace Orbiters.Toolkit.Editor.Animations
             Invalidate();
         }
 
+        public static void RemoveSources(Func<GameObject, IEnumerable<AnimationSource>> provider)
+        {
+            if (provider != null && Providers.Remove(provider)) Invalidate();
+        }
+
         /// <summary>A state machine behaviour's string field holding a path from its animator's object (VRChat's state audio).</summary>
         public static void AddPathProperty(Type behaviour, string property, Type target = null)
         {
