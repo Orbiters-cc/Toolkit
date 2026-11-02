@@ -261,10 +261,18 @@ public sealed class AttachmentAnimationBuildTests
         SceneManager.MoveGameObjectToScene(copy, scene);
         builds.Add(copy);
         var build = AttachmentAnimationBuild.Prepare(copy);
-        Object.DestroyImmediate(Clip(copy));
-        Assert.DoesNotThrow(() => build.Moved(new[] { (copy.transform.Find("Coat"), "Old/Coat") }));
-        CollectionAssert.IsEmpty(build.Clips, "only live clips are listed");
-        using (build.Edits()) { }
+        // A first move rewrites the clip: the build now holds a copy of it.
+        var coat = copy.transform.Find("Coat");
+        coat.SetParent(copy.transform.Find("Bone"), true);
+        build.Moved(new[] { (coat, "Coat") });
+        var copied = build.Clips.Select(c => c.Clip).Single(c => c != clip);
+        // A later step removes it (the build's copies are kept in its cache asset).
+        Object.DestroyImmediate(copied, true);
+        var bone = copy.transform.Find("Bone");
+        bone.name = "Renamed bone";
+        Assert.DoesNotThrow(() => build.Moved(new[] { (bone, "Bone") }));
+        CollectionAssert.IsEmpty(build.Clips.Where(c => c.Clip == copied), "only live clips are listed");
+        Assert.DoesNotThrow(() => { using (build.Edits()) { } });
     }
 
     [Test] public void AnimationsOfABoneMovedBeforeTheBuildFollowItsFormerPath()
