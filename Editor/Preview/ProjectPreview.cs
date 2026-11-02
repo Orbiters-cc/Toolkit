@@ -306,6 +306,7 @@ namespace Orbiters.Toolkit.Editor.Preview
                     var t = view.camera.transform;
                     data.Camera = new PreviewData.SceneCamera { Position = t.position, Rotation = t.rotation, Pivot = view.pivot, FovY = view.camera.fieldOfView };
                 }
+                data.Lighting = PreviewLighting.Read(loaded, t => EditorOnly(t, editorOnly));
             }
 
             private static float Volume(Bounds b) => Mathf.Max(b.size.x, 0.01f) * Mathf.Max(b.size.y, 0.01f) * Mathf.Max(b.size.z, 0.01f);

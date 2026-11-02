@@ -74,8 +74,27 @@ namespace Orbiters.Toolkit.Editor.Preview
             public bool Shadows;
         }
 
+        /// <summary>The light the scene gives shaders (<see cref="PreviewLighting"/>).</summary>
+        public sealed class SceneLighting
+        {
+            public sealed class Directional
+            {
+                /// <summary>The way it travels; linear colour as shaders receive it, the intensity included.</summary>
+                public Vector3 Direction, Color;
+                public float Intensity, ShadowStrength;
+                public bool Shadows;
+            }
+
+            public readonly List<Directional> Lights = new List<Directional>();
+            public string AmbientMode;
+            /// <summary>The ambient light facing up, round the horizon, facing down (linear); null when unknown.</summary>
+            public Vector3? Sky, Equator, Ground;
+            public float ReflectionIntensity = 1;
+        }
+
         public string Reason, SceneName, ScenePath, SceneGuid, Unity, Generator, Kind;
         public SceneCamera Camera;
+        public SceneLighting Lighting;
         public readonly List<AvatarPlace> Avatars = new List<AvatarPlace>();
         public readonly List<Picture> Textures = new List<Picture>();
         public readonly List<Material> Materials = new List<Material>();
@@ -269,6 +288,7 @@ namespace Orbiters.Toolkit.Editor.Preview
                     ["skipped"] = new JObject(d.Skipped.Select(s => new JProperty(s.Key, s.Value))),
                 },
             };
+            if (d.Lighting != null) header.Property("stats").AddBeforeSelf(new JProperty("lighting", Lighting(d.Lighting)));
             double encodeMs = watch.Elapsed.TotalMilliseconds;
             header["cost"] = new JObject
             {
@@ -325,6 +345,27 @@ namespace Orbiters.Toolkit.Editor.Preview
                 px[i + 2] = 0;
                 px[i + 3] = 255;
             }
+        }
+
+        // The scene's lights and ambient light (contracts' Docs/project-preview.md, lighting).
+        private static JObject Lighting(PreviewData.SceneLighting l)
+        {
+            var o = new JObject
+            {
+                ["lights"] = new JArray(l.Lights.Select(x => new JObject
+                {
+                    ["direction"] = Vec(x.Direction),
+                    ["color"] = Vec(x.Color),
+                    ["intensity"] = Round(x.Intensity),
+                    ["shadows"] = x.Shadows,
+                    ["shadowStrength"] = Round(x.ShadowStrength),
+                })),
+                ["ambient"] = l.Sky.HasValue && l.Equator.HasValue && l.Ground.HasValue
+                    ? new JObject { ["mode"] = l.AmbientMode, ["sky"] = Vec(l.Sky.Value), ["equator"] = Vec(l.Equator.Value), ["ground"] = Vec(l.Ground.Value) }
+                    : (JToken)JValue.CreateNull(),
+                ["reflectionIntensity"] = Round(l.ReflectionIntensity),
+            };
+            return o;
         }
 
         // Keeps the newest previews of the project (one per scene).
