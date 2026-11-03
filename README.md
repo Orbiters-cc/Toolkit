@@ -1,5 +1,16 @@
 # Orbiters Toolkit
 
+## 0.4.16 — 2026-11-03
+
+- **A 3D preview's ambient light is computed before it is read.** Unity leaves the ambient probe black until an editor
+  update after it opened a scene, so the preview written once after the editor loads could record a sunless scene with
+  no ambient light (`ambient: null`), and Orbiters - N4N0 drew its avatars unlit. `PreviewLighting` now asks the editor
+  for it (`DynamicGI.UpdateEnvironment`, filled in the same call, the scene unchanged) when the probe reads black, and
+  writes `null` only when it stays black; an ambient intensity of 0 is written as black. Measured in Unity 2022.3.22f1:
+  the default sky without a sun gives about 0.17 facing up, no skybox the Lighting window's Ambient Color (0.055).
+  Orbiters - N4N0 (after 0.3.4-dev.19) draws a scene whose light shows nothing in its studio light. Lights are read
+  from the loaded scenes' own objects. Tests: PreviewLightingTests.
+
 ## 0.4.15 — 2026-11-02
 
 - **A switch for noticing renames that break animations.** Orbiters settings > Features > Toolkit: "Notice renames

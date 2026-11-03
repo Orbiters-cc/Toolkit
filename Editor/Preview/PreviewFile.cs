@@ -348,7 +348,7 @@ namespace Orbiters.Toolkit.Editor.Preview
         }
 
         // The scene's lights and ambient light (contracts' Docs/project-preview.md, lighting).
-        private static JObject Lighting(PreviewData.SceneLighting l)
+        internal static JObject Lighting(PreviewData.SceneLighting l)
         {
             var o = new JObject
             {

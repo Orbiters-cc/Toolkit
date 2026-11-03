@@ -4,7 +4,6 @@ using System.Linq;
 using UnityEngine;
 using UnityEngine.Rendering;
 using UnityEngine.SceneManagement;
-using Object = UnityEngine.Object;
 
 namespace Orbiters.Toolkit.Editor.Preview
 {
@@ -23,8 +22,10 @@ namespace Orbiters.Toolkit.Editor.Preview
         {
             var lighting = new PreviewData.SceneLighting();
             var sun = RenderSettings.sun;
-            var lights = Object.FindObjectsByType<Light>(FindObjectsInactive.Exclude, FindObjectsSortMode.None)
-                .Where(l => l.type == LightType.Directional && l.isActiveAndEnabled && loaded.Contains(l.gameObject.scene) &&
+            // The loaded scenes' own active objects (the same as FindObjectsByType's in the editor, and a test's preview
+            // scene too, which FindObjectsByType does not search).
+            var lights = loaded.SelectMany(s => s.GetRootGameObjects()).SelectMany(r => r.GetComponentsInChildren<Light>(false))
+                .Where(l => l.type == LightType.Directional && l.isActiveAndEnabled &&
                             (l.gameObject.hideFlags & (HideFlags.HideInHierarchy | HideFlags.DontSave)) == 0 && !editorOnly(l.transform))
                 .OrderBy(l => l == sun ? 0 : 1)
                 .ThenByDescending(l => l.intensity * l.color.maxColorComponent)
@@ -77,20 +78,53 @@ namespace Orbiters.Toolkit.Editor.Preview
                     lighting.Sky = lighting.Equator = lighting.Ground = V(RenderSettings.ambientLight);
                     return;
                 default:
-                    // The skybox's, as the editor computed it into the ambient probe (intensity included; already linear).
                     lighting.AmbientMode = "skybox";
-                    var directions = new[] { Vector3.up, Vector3.right, Vector3.left, Vector3.forward, Vector3.back, Vector3.down };
-                    var results = new Color[directions.Length];
-                    RenderSettings.ambientProbe.Evaluate(directions, results);
-                    var equator = (results[1] + results[2] + results[3] + results[4]) * 0.25f;
-                    var all = results.Aggregate(0f, (m, c) => Mathf.Max(m, c.maxColorComponent));
-                    // A probe never computed is black: unknown, not a dark scene.
-                    if (all <= 1e-5f) return;
-                    lighting.Sky = Positive(results[0]);
-                    lighting.Equator = Positive(equator);
-                    lighting.Ground = Positive(results[5]);
+                    SkyboxAmbient(lighting, RenderSettings.ambientIntensity, () => RenderSettings.ambientProbe, DynamicGI.UpdateEnvironment);
                     return;
             }
+        }
+
+        /// <summary>
+        /// The skybox's ambient light, as the editor computes it into the ambient probe (intensity included; already
+        /// linear). Measured in Unity 2022.3.22f1 (3 November 2026): the probe is black (every coefficient 0) until the
+        /// editor computes it, which it does in an update after it opened the scene, not in the one that opened it (the
+        /// capture once after the editor loads can run before), and <c>DynamicGI.UpdateEnvironment</c> computes it at
+        /// once (a few milliseconds; nothing in the scene changes). A scene never baked gets it from its skybox (the
+        /// default sky without a sun: about 0.17 facing up), one without a skybox from the Lighting window's Ambient
+        /// Color. So a black probe is computed first (<paramref name="compute"/>), and stays unknown (no ambient light
+        /// written, <c>ambient: null</c>) only when it is still black. An intensity of 0 makes it black for real: black,
+        /// known. Orbiters - N4N0 draws a scene whose light shows nothing (no sun, an ambient light black or unknown)
+        /// in its studio light.
+        /// </summary>
+        internal static void SkyboxAmbient(PreviewData.SceneLighting lighting, float intensity, Func<SphericalHarmonicsL2> probe, Action compute)
+        {
+            if (intensity <= 0)
+            {
+                lighting.Sky = lighting.Equator = lighting.Ground = Vector3.zero;
+                return;
+            }
+            var sh = probe();
+            if (Black(sh))
+            {
+                compute();
+                sh = probe();
+                if (Black(sh)) return;
+            }
+            var directions = new[] { Vector3.up, Vector3.right, Vector3.left, Vector3.forward, Vector3.back, Vector3.down };
+            var results = new Color[directions.Length];
+            sh.Evaluate(directions, results);
+            lighting.Sky = Positive(results[0]);
+            lighting.Equator = Positive((results[1] + results[2] + results[3] + results[4]) * 0.25f);
+            lighting.Ground = Positive(results[5]);
+        }
+
+        // Never computed: every coefficient 0 (a computed probe of a black sky is too, which reads the same).
+        private static bool Black(SphericalHarmonicsL2 sh)
+        {
+            for (int c = 0; c < 3; c++)
+                for (int k = 0; k < 9; k++)
+                    if (Mathf.Abs(sh[c, k]) > 1e-6f) return false;
+            return true;
         }
 
         // Spherical harmonics can ring below zero.
