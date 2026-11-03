@@ -7,7 +7,7 @@ namespace Orbiters.Toolkit.Editor.Tests
 {
     public sealed class OrbitersFeaturesTests
     {
-        private const string Base = "tests.orbiters-features.base", Child = "tests.orbiters-features.child";
+        private const string Base = "tests.orbiters-features.base", Child = "tests.orbiters-features.child", Last = "tests.orbiters-features.last";
         private readonly List<string> changed = new List<string>();
 
         [SetUp]
@@ -27,7 +27,7 @@ namespace Orbiters.Toolkit.Editor.Tests
         private void Cleanup()
         {
             changed.Clear();
-            foreach (var key in new[] { Base, Child })
+            foreach (var key in new[] { Base, Child, Last })
             {
                 EditorPrefs.DeleteKey("Orbiters.Feature." + key);
                 OrbitersFeatures.Unregister(key);
@@ -44,6 +44,18 @@ namespace Orbiters.Toolkit.Editor.Tests
             Assert.AreEqual("Orbiters.Feature." + Base, first.PrefKey);
             Assert.AreEqual(1, CountRegistered(Base));
             Assert.IsFalse(OrbitersFeatures.IsEnabled(Base));
+        }
+
+        // A setting hardly anyone changes registers first and still shows last in its product (the settings window's order).
+        [Test]
+        public void ProductsListTheirFeaturesByOrder()
+        {
+            OrbitersFeatures.Register(new OrbitersFeature { Key = Last, Product = "Tests ordered", Order = 1000 });
+            OrbitersFeatures.Register(new OrbitersFeature { Key = Base, Product = "Tests ordered" });
+            OrbitersFeatures.Register(new OrbitersFeature { Key = Child, Product = "Tests ordered" });
+
+            var group = System.Linq.Enumerable.Single(OrbitersFeatures.ByProduct(), p => p.Product == "Tests ordered");
+            CollectionAssert.AreEqual(new[] { Base, Child, Last }, System.Linq.Enumerable.Select(group.Features, f => f.Key));
         }
 
         [Test]

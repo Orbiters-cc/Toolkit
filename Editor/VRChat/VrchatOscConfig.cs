@@ -11,12 +11,19 @@ namespace Orbiters.Toolkit.Editor.VRChat
     /// parameters: OSC apps (face tracking, Orbiters - N4N0) then send to parameters VRChat no longer maps, or never reach new
     /// ones. Deleting the file after an upload makes VRChat write it again from the new avatar the next time it loads it.
     /// The idea is Haï's Auto-reset OSC config (dev.hai-vr.fuck-osc-config, MIT), which deletes the signed-in account's file;
-    /// this deletes every account's on this computer, as an avatar can be worn by any of them.
+    /// this deletes every account's on this computer, as an avatar can be worn by any of them (with Haï's installed too: it
+    /// leaves the other accounts' files).
     /// </summary>
     public static class VrchatOscConfig
     {
-        /// <summary>Haï's package, which resets the signed-in account's file itself: Toolkit then leaves it the job.</summary>
-        public const string HaiPackageId = "dev.hai-vr.fuck-osc-config";
+        /// <summary>
+        /// The switch My Avatar shows in the Orbiters settings window (Features, My Avatar), on by default. Where nothing
+        /// registers it (Toolkit without My Avatar) the reset stays on.
+        /// </summary>
+        public const string Feature = "toolkit.reset-osc-config";
+
+        /// <summary>Whether an upload resets the avatar's OSC config (<see cref="Feature"/>).</summary>
+        public static bool Enabled => OrbitersFeatures.Find(Feature) == null || OrbitersFeatures.IsEnabled(Feature);
 
         /// <summary>What a reset did: the accounts whose file went, and the files that could not be deleted (with why).</summary>
         public sealed class Result
@@ -60,6 +67,12 @@ namespace Orbiters.Toolkit.Editor.VRChat
             }
             return result;
         }
+
+        /// <summary>
+        /// The reset an upload of <paramref name="avatarId"/> does: <see cref="Reset"/> in every account's folder, or null
+        /// when the switch is off (nothing is deleted).
+        /// </summary>
+        public static Result AfterUpload(string oscFolder, string avatarId) => Enabled ? Reset(oscFolder, avatarId) : null;
 
         /// <summary>avtr_ followed by letters, digits and dashes (no path separator or dot can reach the file name).</summary>
         public static bool IsAvatarId(string id)

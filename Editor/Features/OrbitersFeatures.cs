@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Runtime.CompilerServices;
 using UnityEditor;
 
@@ -17,6 +18,11 @@ namespace Orbiters.Toolkit.Editor
         public bool Default;
         /// <summary>Key of a feature this one needs: it reads as off while that one is off.</summary>
         public string Requires;
+        /// <summary>
+        /// Where it shows among its product's features in the settings window, lowest first (equal ones in the order they
+        /// registered): a setting hardly anyone changes goes last with a high one.
+        /// </summary>
+        public int Order;
     }
 
     /// <summary>Registry of the feature flags of every Orbiters tool, stored in the user's EditorPrefs.</summary>
@@ -39,6 +45,13 @@ namespace Orbiters.Toolkit.Editor
             features.Add(feature);
             byKey.Add(feature.Key, feature);
             return feature;
+        }
+
+        /// <summary>The features by product (in the order products first registered one), each product's sorted by <see cref="OrbitersFeature.Order"/>.</summary>
+        public static IEnumerable<(string Product, IReadOnlyList<OrbitersFeature> Features)> ByProduct()
+        {
+            foreach (var product in features.GroupBy(f => string.IsNullOrEmpty(f.Product) ? "Orbiters" : f.Product))
+                yield return (product.Key, product.OrderBy(f => f.Order).ToList());
         }
 
         public static OrbitersFeature Find(string key) => key != null && byKey.TryGetValue(key, out var feature) ? feature : null;

@@ -1,5 +1,23 @@
 # Orbiters Toolkit
 
+## 0.4.17 — 2026-11-03
+
+- **The upload's OSC config reset clears every account's file, with Haï's package too.** 0.4.15 left the job to Haï's
+  Auto-reset OSC config when it was installed, and that package deletes only the signed-in account's file: the other
+  VRChat accounts of the computer kept the old parameters. `AvatarManifestExporter` now always runs
+  `VrchatOscConfig.AfterUpload`, which deletes `OSC\usr_*\Avatars\<avatar id>.json` in every account's folder; one
+  Console line says how many went.
+- **A switch for it.** `VrchatOscConfig.Feature` (`toolkit.reset-osc-config`), registered by My Avatar (Orbiters settings >
+  Features > My Avatar, last, on by default). Off, an upload deletes nothing; where nothing registers it (Toolkit
+  without My Avatar) the reset stays on. Tests: VrchatOscConfigTests (switch on, off, unregistered).
+- **Features keep an order within their product.** `OrbitersFeature.Order` (lowest first, equal ones as registered) and
+  `OrbitersFeatures.ByProduct()`, which the settings window lists: a setting hardly anyone changes goes last. Test:
+  OrbitersFeaturesTests.ProductsListTheirFeaturesByOrder.
+- **What the clean-up passes would take out, without changing anything.** `ComponentCleanup.Removes(usage, renderer,
+  hiddenObjects, disabledComponents)` follows `RemoveHiddenObjects` and `RemoveDisabledComponents` for one renderer.
+  `MaterialCleanup.DuplicateTextures(root)` gives the textures `MergeDuplicateTextures` would replace, and the one kept
+  instead; the merge uses it. My Avatar 0.9.25's rank estimates read both.
+
 ## 0.4.16 — 2026-11-03
 
 - **A 3D preview's ambient light is computed before it is read.** Unity leaves the ambient probe black until an editor

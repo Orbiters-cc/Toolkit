@@ -119,16 +119,17 @@ namespace Orbiters.Toolkit.Editor.VRChat.Manifest
         }
 
         /// <summary>
-        /// VRChat's OSC config of the uploaded avatar goes (<see cref="VrchatOscConfig"/>), whatever the platform built: VRChat
-        /// writes it again from the new parameters the next time it loads the avatar. Not when Haï's Auto-reset OSC config is
-        /// installed, which does it already.
+        /// VRChat's OSC config of the uploaded avatar goes for every account on this computer (<see cref="VrchatOscConfig"/>),
+        /// whatever the platform built: VRChat writes it again from the new parameters the next time it loads the avatar. Not
+        /// while My Avatar's switch is off (<see cref="VrchatOscConfig.Feature"/>).
         /// </summary>
         private static void ResetOscConfig(string avatarId)
         {
-            if (!VrchatOscConfig.IsAvatarId(avatarId) || InstalledTools.Has(VrchatOscConfig.HaiPackageId)) return;
+            if (!VrchatOscConfig.IsAvatarId(avatarId)) return;
             try
             {
-                var result = VrchatOscConfig.Reset(VrchatOscConfig.Folder, avatarId);
+                var result = VrchatOscConfig.AfterUpload(VrchatOscConfig.Folder, avatarId);
+                if (result == null) return;
                 // Account ids stay out of the Console.
                 if (result.Accounts.Count > 0)
                     Debug.Log($"[Orbiters] Reset VRChat's OSC config of {avatarId} ({result.Accounts.Count} account{(result.Accounts.Count == 1 ? "" : "s")}): VRChat writes it again from the uploaded avatar the next time it loads it.");

@@ -1,6 +1,8 @@
 using System.IO;
 using NUnit.Framework;
+using Orbiters.Toolkit.Editor;
 using Orbiters.Toolkit.Editor.VRChat;
+using UnityEditor;
 
 // VRChat's OSC config of an uploaded avatar, deleted for every account (a temporary folder stands for VRChat's OSC folder).
 public sealed class VrchatOscConfigTests
@@ -69,6 +71,71 @@ public sealed class VrchatOscConfigTests
         Assert.IsFalse(VrchatOscConfig.IsAvatarId("avtr_a\\b"));
         Assert.IsFalse(VrchatOscConfig.IsAvatarId("AVTR_x"));
         Assert.IsFalse(VrchatOscConfig.IsAvatarId("avtr_" + new string('a', 60)));
+    }
+
+    // Haï's Auto-reset OSC config clears only the signed-in account's file: the upload's reset no longer leaves it the job,
+    // so with or without it every account's file goes.
+    [Test] public void TheUploadResetsEveryAccountWhileTheSwitchIsOn()
+    {
+        using (Switch(true))
+        {
+            string first = Config("usr_11a17e99-a6fb-4b6a-b8d9-78b725f73b03", Avatar);
+            string second = Config("usr_1e0c2252-2c70-4b5b-b691-bcc25bb39cec", Avatar);
+            var result = VrchatOscConfig.AfterUpload(osc, Avatar);
+            Assert.IsNotNull(result);
+            Assert.AreEqual(2, result.Accounts.Count);
+            Assert.IsFalse(File.Exists(first) || File.Exists(second));
+        }
+    }
+
+    // My Avatar's switch off: the upload deletes nothing, in any account.
+    [Test] public void TheSwitchOffKeepsEveryConfig()
+    {
+        using (Switch(false))
+        {
+            string first = Config("usr_11a17e99-a6fb-4b6a-b8d9-78b725f73b03", Avatar);
+            string second = Config("usr_1e0c2252-2c70-4b5b-b691-bcc25bb39cec", Avatar);
+            Assert.IsFalse(VrchatOscConfig.Enabled);
+            Assert.IsNull(VrchatOscConfig.AfterUpload(osc, Avatar));
+            Assert.IsTrue(File.Exists(first) && File.Exists(second));
+        }
+    }
+
+    // Toolkit without My Avatar (nothing registers the switch): the reset stays on.
+    [Test] public void WithoutTheSwitchTheResetStaysOn()
+    {
+        var registered = OrbitersFeatures.Find(VrchatOscConfig.Feature);
+        if (registered != null) OrbitersFeatures.Unregister(VrchatOscConfig.Feature);
+        try
+        {
+            Assert.IsTrue(VrchatOscConfig.Enabled);
+            string file = Config("usr_11a17e99-a6fb-4b6a-b8d9-78b725f73b03", Avatar);
+            Assert.AreEqual(1, VrchatOscConfig.AfterUpload(osc, Avatar).Accounts.Count);
+            Assert.IsFalse(File.Exists(file));
+        }
+        finally { if (registered != null) OrbitersFeatures.Register(registered); }
+    }
+
+    // The switch as My Avatar registers it (or a stand-in where it isn't installed), set for the test, the user's choice back after.
+    private static System.IDisposable Switch(bool on)
+    {
+        var feature = OrbitersFeatures.Find(VrchatOscConfig.Feature);
+        bool standIn = feature == null;
+        if (standIn) feature = OrbitersFeatures.Register(new OrbitersFeature { Key = VrchatOscConfig.Feature, Product = "Tests", Default = true });
+        bool had = EditorPrefs.HasKey(feature.PrefKey), before = EditorPrefs.GetBool(feature.PrefKey, feature.Default);
+        OrbitersFeatures.SetEnabled(VrchatOscConfig.Feature, on);
+        return new Restore(() =>
+        {
+            if (had) EditorPrefs.SetBool(feature.PrefKey, before); else EditorPrefs.DeleteKey(feature.PrefKey);
+            if (standIn) OrbitersFeatures.Unregister(VrchatOscConfig.Feature);
+        });
+    }
+
+    private sealed class Restore : System.IDisposable
+    {
+        private System.Action action;
+        public Restore(System.Action action) => this.action = action;
+        public void Dispose() { action?.Invoke(); action = null; }
     }
 
     // VRChat's own folder, where the upload's reset looks.

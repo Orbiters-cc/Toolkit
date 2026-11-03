@@ -76,11 +76,11 @@ namespace Orbiters.Toolkit.Editor
             var note = new Label("Early features are off by default. They may change or break between updates.");
             note.AddToClassList("orbiters-settings__caption"); note.AddToClassList("orbiters-settings__caption--lead"); content.Add(note);
 
-            foreach (var product in OrbitersFeatures.All.GroupBy(f => string.IsNullOrEmpty(f.Product) ? "Orbiters" : f.Product))
+            foreach (var (product, features) in OrbitersFeatures.ByProduct())
             {
                 var group = new VisualElement(); group.AddToClassList("orbiters-settings__group"); content.Add(group);
-                var name = new Label(product.Key); name.AddToClassList("orbiters-settings__product"); group.Add(name);
-                foreach (var feature in product)
+                var name = new Label(product); name.AddToClassList("orbiters-settings__product"); group.Add(name);
+                foreach (var feature in features)
                 {
                     var row = FeatureRow(feature);
                     // USS has no sibling selector: the first row of a group drops its separator here.

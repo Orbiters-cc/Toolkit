@@ -43,6 +43,34 @@ namespace Orbiters.Toolkit.Editor.VRChat.Optimization
         }
 
         /// <summary>
+        /// Whether <see cref="RemoveHiddenObjects"/> (<paramref name="hiddenObjects"/>) or <see cref="RemoveDisabledComponents"/>
+        /// (<paramref name="disabledComponents"/>) would take <paramref name="renderer"/> out of the avatar, by the same
+        /// rules, without changing anything: estimates of what those passes save (My Avatar's rank plan).
+        /// </summary>
+        public static bool Removes(AvatarUsage usage, Renderer renderer, bool hiddenObjects, bool disabledComponents)
+        {
+            if (usage == null || renderer == null || !renderer.transform.IsChildOf(usage.Root.transform)) return false;
+            if (hiddenObjects)
+            {
+                // The walk from the root: an EditorOnly object is left to the SDK, the first object hidden for good decides.
+                var chain = new List<Transform>();
+                for (var t = renderer.transform; t != null && t != usage.Root.transform; t = t.parent) chain.Add(t);
+                for (int i = chain.Count - 1; i >= 0; i--)
+                {
+                    var t = chain[i];
+                    if (t.CompareTag("EditorOnly")) break;
+                    if (t.gameObject.activeSelf || usage.CanTurnOn(t.gameObject)) continue;
+                    if (!usage.HoldsHumanoid(t) && !usage.UsedFromOutside(t, ColliderList) && !usage.Pending(t)) return true;
+                    break;
+                }
+            }
+            if (disabledComponents && Removable(renderer) && !Enabled(renderer) && !usage.CanTurnOn(renderer) && !renderer.CompareTag("EditorOnly") &&
+                !usage.Pending(renderer.transform) && !usage.ReferencesTo(renderer).Any(r => r.From != null && !ColliderList(r.From, r.Property)) && !Required(renderer))
+                return true;
+            return false;
+        }
+
+        /// <summary>
         /// Components that start disabled and that no animation turns on: PhysBones, PhysBone colliders, contacts and
         /// constraints (VRChat's and Unity's), lights and renderers. One another component points at (other than a PhysBone's
         /// collider list) or needs stays.

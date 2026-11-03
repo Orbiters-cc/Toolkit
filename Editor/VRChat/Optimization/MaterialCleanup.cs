@@ -27,15 +27,7 @@ namespace Orbiters.Toolkit.Editor.VRChat.Optimization
         public static int MergeDuplicateTextures(GameObject root)
         {
             var renderers = root.GetComponentsInChildren<Renderer>(true);
-            var uses = renderers.SelectMany(r => r.sharedMaterials).Where(m => m != null).Distinct()
-                .SelectMany(m => m.GetTexturePropertyNameIDs().Select(m.GetTexture).OfType<Texture2D>().Distinct()).ToList();
-            var same = new Dictionary<Texture, Texture>();
-            foreach (var group in uses.Distinct().Select(t => (Texture: t, Identity: Identity(t))).Where(p => p.Identity != null).GroupBy(p => p.Identity))
-            {
-                // The one most materials show already: the fewest copies.
-                var kept = group.OrderByDescending(p => uses.Count(u => u == p.Texture)).ThenBy(p => AssetDatabase.GetAssetPath(p.Texture), StringComparer.Ordinal).First().Texture;
-                foreach (var (texture, _) in group) if (texture != kept) same[texture] = kept;
-            }
+            var same = DuplicateTextures(root);
             if (same.Count == 0) return 0;
             var copies = new Dictionary<Material, Material>();
             foreach (var renderer in renderers)
@@ -67,6 +59,24 @@ namespace Orbiters.Toolkit.Editor.VRChat.Optimization
             var shown = new HashSet<Texture>(renderers.SelectMany(r => r.sharedMaterials).Where(m => m != null).Distinct()
                 .SelectMany(m => m.GetTexturePropertyNameIDs().Select(m.GetTexture)).Where(t => t != null));
             return same.Keys.Count(t => !shown.Contains(t));
+        }
+
+        /// <summary>
+        /// The textures <see cref="MergeDuplicateTextures"/> would replace below <paramref name="root"/>, each with the one it
+        /// keeps instead (the one most materials show already), without changing anything.
+        /// </summary>
+        public static Dictionary<Texture, Texture> DuplicateTextures(GameObject root)
+        {
+            var uses = root.GetComponentsInChildren<Renderer>(true).SelectMany(r => r.sharedMaterials).Where(m => m != null).Distinct()
+                .SelectMany(m => m.GetTexturePropertyNameIDs().Select(m.GetTexture).OfType<Texture2D>().Distinct()).ToList();
+            var same = new Dictionary<Texture, Texture>();
+            foreach (var group in uses.Distinct().Select(t => (Texture: t, Identity: Identity(t))).Where(p => p.Identity != null).GroupBy(p => p.Identity))
+            {
+                // The one most materials show already: the fewest copies.
+                var kept = group.OrderByDescending(p => uses.Count(u => u == p.Texture)).ThenBy(p => AssetDatabase.GetAssetPath(p.Texture), StringComparer.Ordinal).First().Texture;
+                foreach (var (texture, _) in group) if (texture != kept) same[texture] = kept;
+            }
+            return same;
         }
 
         // The file's bytes and how it imports for the platform the editor builds for; null for a texture that is no file.
