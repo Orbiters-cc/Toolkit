@@ -255,6 +255,16 @@
   for a development build, which was `N4N0Installer.DesktopApp`). `VrcThumbnailHash` (the MD5 VRChat compares a
   thumbnail upload by, from My Avatar) is public in `Orbiters.Toolkit.Editor` for avatars and worlds alike.
 
+- **Recording without the wearer** (`N4N0Installer.HideSelf`, Orbiters contracts' `Docs/rig-frames.md`). VRChat's camera mask
+  Local User culls N4N0's capture kit with the avatar, so a recording with it off had no strip and no keyframes (0 of 509
+  frames against 678 of 748 with it on, same avatar). Each PC build now gets a last FX layer, `Capture hide self`, and the
+  local parameter `N4N0/Capture/HideSelf`: while Orbiters - N4N0 records with the mask off, it keeps Local User on and flips
+  that parameter, and every renderer but the kit's and the rig's is off on the wearer's client. Others keep seeing the
+  avatar; the wearer sees no body or N4N0 in their own view or mirrors meanwhile. It comes back by itself about 1.5 s after the last
+  flip (a crash, OSC stopping), at once when recording ends, and never hides again on a stuck value. Added after every
+  other avatar tool, it reads the renderers as they are uploaded: on the sample avatar (VRCFury, d4rk's optimizer) none is
+  missed, its performance rank and synced bits do not change, and the project's own assets stay as they were. Upload the avatar
+  again to get it; the app says so until then.
 - **N4N0's capture kit records whatever VRChat's camera looks at.** Its strip, skeleton band and depth frames were in a
   frame only while the camera saw the avatar: My Avatar's upload gave the kit the avatar's shared box at the hips
   (`AvatarBounds.Unify`), and the rig that was to carry its box to the camera stood elsewhere. Meshes whose box a
