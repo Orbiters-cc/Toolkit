@@ -77,9 +77,10 @@ namespace Orbiters.Toolkit.Editor.VRChat
         /// 13 gives VRChat worlds feedback (pages 34 to 37, contracts' Docs/world-feedback.md): a world's likes, the labels
         /// people gave it and its comments; Like, labels and comments to give; More with room for eight cards. 14 the screen
         /// mirror (page 38, <see cref="AddMirror"/>): what N4N0's camera sees before a world's video screen, Aim, Zoom in, Zoom
-        /// out, Stop; More with its card among seven (page 39).
+        /// out, Stop; More with its card among seven (page 39). 15 the 3D picture page with its two pictures as buttons (page 40):
+        /// 3D picture of people and 3D picture of the world where versions 12 to 14 have one Take and a line that changes it.
         /// </summary>
-        public const int ScreenVersion = 14;
+        public const int ScreenVersion = 15;
         /// <summary>
         /// Local, not saved, set by no menu: the screen's version (<see cref="ScreenVersion"/>), which Orbiters - N4N0 reads
         /// to know the pages the screen has. Screens before version 3 lack it.
@@ -120,8 +121,9 @@ namespace Orbiters.Toolkit.Editor.VRChat
         // chosen in Share to … carries a green check, History's and Share to …'s counts are quiet subtitles), 19 the version
         // 13 pages (37 of them: World feedback, its labels and comments, More with eight places), 20 the version 14 pages
         // (39 of them: the screen mirror, its camera's picture drawn from _Mirror while _MirrorLive, and More with its card)
-        // and the back with Orbiters - N4N0's icon.
-        internal const string ScreenRevision = "20";
+        // and the back with Orbiters - N4N0's icon, 21 the version 15 pages (40 of them: the 3D picture with two pictures as
+        // buttons).
+        internal const string ScreenRevision = "21";
         /// <summary>
         /// The screen shader's tag saying its files' revision. Legacy name, kept: the shared screen files already in
         /// projects (N4N0 1.0.19's included) carry it, and a screen without it would never count as current.
@@ -136,7 +138,7 @@ namespace Orbiters.Toolkit.Editor.VRChat
         // The same pages in the retro look (MenuPagesOption's "N4N0 screen pages retro.png").
         private const string ScreenPagesRetroTemplate = "Packages/orbiters.toolkit/Editor/VRChat/N4N0ScreenPagesRetro.png.bytes";
         private const string ScreenLayoutTemplate = "Packages/orbiters.toolkit/Editor/VRChat/N4N0ScreenLayout.png.bytes";
-        internal const int ScreenPageSlices = 40;
+        internal const int ScreenPageSlices = 41;
 
         public static string ScreenValue(int index) => ScreenValuePrefix + index;
         public static string ScreenTouch(bool right, int index) => ScreenTouchPrefix + (right ? "R" : "L") + index;

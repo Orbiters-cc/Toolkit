@@ -1,6 +1,6 @@
 # Orbiters Toolkit
 
-## Unreleased
+## 0.4.19 — 2026-11-05
 
 - **N4N0's rig frames fill the frame** (`N4N0Installer.Capture`, Orbiters contracts' `Docs/rig-frames.md`). The six faces, 512 px
   squares at 90° drawn at 420 px with black bars around them, become 640 x 420 pictures that fill the frame under the strip
@@ -10,6 +10,15 @@
   gives the build copy its own render textures, projections and shader (`BuildRigFaces`), whichever N4N0 release is placed, so
   uploading the avatar again is all it takes. Until then an avatar goes on drawing the old layout, which Orbiters - N4N0 keeps
   reading. Tests: N4N0CaptureTests.
+- **Two 3D pictures, two buttons** (`N4N0Installer`, Orbiters contracts' `Docs/n4n0.md`; needs Orbiters - N4N0 with screen
+  version 15). The N4N0 Action Menu's one 3D picture button, which took whichever was last chosen, becomes **3D picture of
+  people** and **3D picture of the world** (`N4N0/Photo3DPeople`, `N4N0/Photo3DWorld`, local: no synced bit). The Action Menu
+  holds eight controls, so an N4N0 with both Walk boost and Light keeps those two in a **More** submenu; with either alone
+  nothing moves. Options folder Menu 22.
+- **N4N0 screen version 15** (screen files revision 21). A new 3D picture page (page 40) has the same two pictures as large
+  buttons above the timer and the camera flight, where versions 12 to 14 have one Take and a line that a press changes: 41
+  page slices and layout rows, both looks, and N4N0's five language files, from `orbiters-desktop --n4n0-menu`. Every older
+  page's picture is byte for byte what it was. Upload the avatar with the new N4N0 to get both.
 
 ## 0.4.18 — 2026-11-04
 
