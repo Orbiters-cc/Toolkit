@@ -1,5 +1,16 @@
 # Orbiters Toolkit
 
+## Unreleased
+
+- **N4N0's rig frames fill the frame** (`N4N0Installer.Capture`, Orbiters contracts' `Docs/rig-frames.md`). The six faces, 512 px
+  squares at 90° drawn at 420 px with black bars around them, become 640 x 420 pictures that fill the frame under the strip
+  pixel for pixel: scene pixels from 49 % to 75 % of a 1080p frame, half as many again across every face, the render work up
+  about 2.5 %. The cube stays, with physical cameras (gate fit None) stretching it over the wider picture, and its scene
+  pixels now leave no direction out, where the square faces' borders and stamps left 2 % of the sphere. Each upload's build
+  gives the build copy its own render textures, projections and shader (`BuildRigFaces`), whichever N4N0 release is placed, so
+  uploading the avatar again is all it takes. Until then an avatar goes on drawing the old layout, which Orbiters - N4N0 keeps
+  reading. Tests: N4N0CaptureTests.
+
 ## 0.4.18 — 2026-11-04
 
 - **Recording without the wearer** (`N4N0Installer.HideSelf`, Orbiters contracts' `Docs/rig-frames.md`). VRChat's camera mask
