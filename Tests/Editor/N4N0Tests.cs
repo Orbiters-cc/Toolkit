@@ -64,7 +64,8 @@ public class N4N0Tests
             ("N4N0/State", VRCExpressionParameters.ValueType.Int, true, false, 0),
             ("N4N0/Talk", VRCExpressionParameters.ValueType.Bool, false, false, 0),
             ("N4N0/Touch", VRCExpressionParameters.ValueType.Bool, false, false, 0),
-            ("N4N0/Photo3D", VRCExpressionParameters.ValueType.Bool, false, false, 0),
+            ("N4N0/Photo3DPeople", VRCExpressionParameters.ValueType.Bool, false, false, 0),
+            ("N4N0/Photo3DWorld", VRCExpressionParameters.ValueType.Bool, false, false, 0),
             ("N4N0/Menu", VRCExpressionParameters.ValueType.Bool, false, false, 0),
             ("N4N0/Call/Menu", VRCExpressionParameters.ValueType.Bool, false, false, 0),
             ("N4N0/Call/Pick", VRCExpressionParameters.ValueType.Float, false, false, 0),
@@ -109,7 +110,9 @@ public class N4N0Tests
             {
                 ("Show N4N0", VRCExpressionsMenu.Control.ControlType.Toggle, "N4N0/Visible"), ("Menu", VRCExpressionsMenu.Control.ControlType.Toggle, "N4N0/Menu"),
                 ("Talk", VRCExpressionsMenu.Control.ControlType.Button, "N4N0/Talk"),
-                ("3D picture", VRCExpressionsMenu.Control.ControlType.Button, "N4N0/Photo3D"), ("Call", VRCExpressionsMenu.Control.ControlType.SubMenu, ""),
+                ("3D picture of people", VRCExpressionsMenu.Control.ControlType.Button, "N4N0/Photo3DPeople"),
+                ("3D picture of the world", VRCExpressionsMenu.Control.ControlType.Button, "N4N0/Photo3DWorld"),
+                ("Call", VRCExpressionsMenu.Control.ControlType.SubMenu, ""),
                 ("Record", VRCExpressionsMenu.Control.ControlType.Toggle, "N4N0/Capture/Record"),
             },
             menu.subMenu.controls.Select(c => (c.name, c.type, c.parameter.name)).ToArray());
@@ -1181,7 +1184,48 @@ public class N4N0Tests
         var parameters = AssetDatabase.LoadAssetAtPath<VRCExpressionParameters>(N4N0Installer.OptionsFolder + "Text slots 8 + screen in VR/Parameters.asset");
         var version = parameters.parameters.Single(p => p.name == N4N0Installer.ScreenVersionParameter);
         Assert.AreEqual((VRCExpressionParameters.ValueType.Int, false, false, (float)N4N0Installer.ScreenVersion), (version.valueType, version.networkSynced, version.saved, version.defaultValue));
-        Assert.AreEqual(14, N4N0Installer.ScreenVersion);
+        Assert.AreEqual(15, N4N0Installer.ScreenVersion);
+    }
+
+    // The Action Menu has room for eight: the two 3D pictures cost one more place, so with both options Walk boost and Light
+    // share More. With one of them, or none, everything stays where it was. Both pictures are local: no synced bit.
+    [Test]
+    public void TheActionMenuHasTwoPicturesAndNeverMoreThanEightControls()
+    {
+        if (VrcFury.Writer == null) Assert.Ignore("Requires the VRCFury integration.");
+        var prefab = AssetDatabase.LoadAssetAtPath<GameObject>(N4N0Installer.CreatePrefab(folder));
+        var placed = (GameObject)PrefabUtility.InstantiatePrefab(prefab, scene);
+        string[] Names(string options, out VRCExpressionsMenu menu)
+        {
+            menu = AssetDatabase.LoadAssetAtPath<VRCExpressionsMenu>(N4N0Installer.OptionsFolder + options + "/Menu.asset").controls.Single().subMenu;
+            return menu.controls.Select(c => c.name).ToArray();
+        }
+
+        N4N0Installer.SetOptions(placed.transform, 8, true, false, 72, light: true);
+        CollectionAssert.AreEqual(new[] { "Show N4N0", "Menu", "Talk", "3D picture of people", "3D picture of the world", "Call", "More", "Record" },
+            Names("Text slots 8 + walk boost + light", out var both), "All on: 8 controls, the options in More");
+        Assert.LessOrEqual(both.controls.Count, VRCExpressionsMenu.MAX_CONTROLS);
+        var more = both.controls.Single(c => c.name == "More").subMenu;
+        CollectionAssert.AreEqual(new[] { "Walk boost", "Light" }, more.controls.Select(c => c.name).ToArray());
+        Assert.AreEqual(N4N0Installer.WalkBoost, more.controls[0].subParameters.Single().name, "The radial still sets its parameter");
+        Assert.IsNotNull(more.controls[1].subMenu, "Light keeps its own submenu");
+        StringAssert.EndsWith("N4N0 more menu.asset", AssetDatabase.GetAssetPath(more), "A saved asset, as a menu that VRCFury merges must be");
+
+        N4N0Installer.SetOptions(placed.transform, 8, true, false);
+        CollectionAssert.AreEqual(new[] { "Show N4N0", "Menu", "Talk", "3D picture of people", "3D picture of the world", "Call", "Walk boost", "Record" },
+            Names("Text slots 8 + walk boost", out _), "One option: it stays where it was");
+
+        N4N0Installer.SetOptions(placed.transform, 8, false, false, 72, light: true);
+        CollectionAssert.AreEqual(new[] { "Show N4N0", "Menu", "Talk", "3D picture of people", "3D picture of the world", "Call", "Light", "Record" },
+            Names("Text slots 8 + light", out var one));
+        var buttons = one.controls.Where(c => c.name.StartsWith("3D picture", StringComparison.Ordinal)).ToArray();
+        Assert.IsTrue(buttons.All(c => c.type == VRCExpressionsMenu.Control.ControlType.Button));
+        CollectionAssert.AreEqual(new[] { N4N0Installer.Photo3DPeople, N4N0Installer.Photo3DWorld }, buttons.Select(c => c.parameter.name).ToArray());
+        var parameters = AssetDatabase.LoadAssetAtPath<VRCExpressionParameters>(N4N0Installer.OptionsFolder + "Text slots 8 + light/Parameters.asset");
+        Assert.IsTrue(buttons.All(b => parameters.parameters.Single(p => p.name == b.parameter.name).networkSynced == false), "Local: no synced bit");
+        Assert.IsFalse(parameters.parameters.Any(p => p.name == "N4N0/Photo3D"), "The old button is not built any more");
+        var owner = VrcFury.Features(placed).Single(f => f.kind == "FullController").feature;
+        Assert.IsTrue(buttons.All(b => VrcFury.IsGlobalParameter(owner, b.parameter.name)), "OSC finds them under these names");
     }
 
     // The retro look is the screen's material alone: it stays through N4N0's other options, and goes back.
