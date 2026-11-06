@@ -1,6 +1,6 @@
 # Orbiters Toolkit
 
-## Next
+## 0.4.20 — 2026-11-06
 
 - **N4N0's menu presses wherever its pointer is, whoever stands near** (`N4N0Installer.Room`, Orbiters contracts' `Docs/n4n0.md`;
   needs Orbiters - N4N0 with screen version 16). VRChat's contact broad phase stops at 1024 pairs a 5 m cell, which N4N0's own 28
