@@ -148,6 +148,7 @@ namespace Orbiters.Toolkit.Editor.VRChat
                 Control("Show N4N0", VRCExpressionsMenu.Control.ControlType.Toggle, Visible),
                 // Opens N4N0's menu directly (the other triggers go through Orbiters - N4N0: a binding, a word, a touch).
                 Control("Menu", VRCExpressionsMenu.Control.ControlType.Toggle, Menu),
+                Control("Stay here", VRCExpressionsMenu.Control.ControlType.Toggle, ScreenPinned),
                 Control("Talk", VRCExpressionsMenu.Control.ControlType.Button, Talk),
                 Control("3D picture of people", VRCExpressionsMenu.Control.ControlType.Button, Photo3DPeople),
                 Control("3D picture of the world", VRCExpressionsMenu.Control.ControlType.Button, Photo3DWorld),
@@ -170,14 +171,14 @@ namespace Orbiters.Toolkit.Editor.VRChat
         }
 
         /// <summary>
-        /// VRChat's Action Menu shows eight controls on a page, and the SDK refuses a menu with more. An N4N0 with every option
-        /// has nine since the two 3D pictures, so its two options share a submenu, More; with either alone everything stays
-        /// where it was.
+        /// VRChat's Action Menu shows eight controls on a page, and the SDK refuses a menu with more. An N4N0 without options has
+        /// eight since Stay here; its options (Walk boost, Light) go in a submenu, More, and that takes Record along so that
+        /// it fits: what a person reaches for while they stand before their menu stays on the first page.
         /// </summary>
         private static void FitActionMenu(string folder, List<VRCExpressionsMenu.Control> controls)
         {
             if (controls.Count <= VRCExpressionsMenu.MAX_CONTROLS) return;
-            var options = controls.Where(c => c.name == "Walk boost" || c.name == "Light").ToList();
+            var options = controls.Where(c => c.name == "Walk boost" || c.name == "Light" || c.name == "Record").ToList();
             var menu = ScriptableObject.CreateInstance<VRCExpressionsMenu>();
             menu.controls = options;
             AssetDatabase.CreateAsset(menu, AssetDatabase.GenerateUniqueAssetPath(folder + "/N4N0 more menu.asset"));

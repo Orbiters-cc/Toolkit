@@ -1,5 +1,20 @@
 # Orbiters Toolkit
 
+## Next
+
+- **N4N0's menu presses wherever its pointer is, whoever stands near** (`N4N0Installer.Room`, Orbiters contracts' `Docs/n4n0.md`;
+  needs Orbiters - N4N0 with screen version 16). VRChat's contact broad phase stops at 1024 pairs a 5 m cell, which N4N0's own 28
+  large receivers brought within reach of one other person: past the end of its sweep along the world's X a whole sender reads
+  nothing, its beam showing as ever, so a part of the screen went dead depending on which way its owner faced. N4N0's contacts
+  that only measure its owner now measure in a room of their own 100 m below the avatar, which reads the same and pairs with
+  nobody; the real cell has 28 fewer large receivers on top.
+- **Stay here** (`N4N0/Screen/Pinned`, local and saved): on Home and in the Action Menu, the screen stays where it is whatever its
+  owner does, closed and open, until turned off. Its first place after the avatar loads is before the eyes. With an option on
+  the avatar, Record goes in More with it to keep the Action Menu at eight controls.
+- **The screen waits for a hand**: `N4N0/Screen/Busy` (local, from Orbiters - N4N0) holds it from following while a hand is at it.
+- **Everyone else sees it where it is**: `N4N0/Screen/PlaceX`, `Y`, `Z` and `Settle`, 25 more synced bits. Their screen replays the
+  glide and then settles at the place its owner's rests at, or at load.
+
 ## 0.4.19 — 2026-11-05
 
 - **N4N0's rig frames fill the frame** (`N4N0Installer.Capture`, Orbiters contracts' `Docs/rig-frames.md`). The six faces, 512 px

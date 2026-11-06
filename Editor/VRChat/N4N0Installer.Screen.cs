@@ -80,7 +80,7 @@ namespace Orbiters.Toolkit.Editor.VRChat
         /// out, Stop; More with its card among seven (page 39). 15 the 3D picture page with its two pictures as buttons (page 40):
         /// 3D picture of people and 3D picture of the world where versions 12 to 14 have one Take and a line that changes it.
         /// </summary>
-        public const int ScreenVersion = 15;
+        public const int ScreenVersion = 16;
         /// <summary>
         /// Local, not saved, set by no menu: the screen's version (<see cref="ScreenVersion"/>), which Orbiters - N4N0 reads
         /// to know the pages the screen has. Screens before version 3 lack it.
@@ -122,8 +122,8 @@ namespace Orbiters.Toolkit.Editor.VRChat
         // 13 pages (37 of them: World feedback, its labels and comments, More with eight places), 20 the version 14 pages
         // (39 of them: the screen mirror, its camera's picture drawn from _Mirror while _MirrorLive, and More with its card)
         // and the back with Orbiters - N4N0's icon, 21 the version 15 pages (40 of them: the 3D picture with two pictures as
-        // buttons).
-        internal const string ScreenRevision = "21";
+        // buttons), 22 the version 16 pages (42 of them: the simple Home with Stay here).
+        internal const string ScreenRevision = "22";
         /// <summary>
         /// The screen shader's tag saying its files' revision. Legacy name, kept: the shared screen files already in
         /// projects (N4N0 1.0.19's included) carry it, and a screen without it would never count as current.
@@ -138,7 +138,7 @@ namespace Orbiters.Toolkit.Editor.VRChat
         // The same pages in the retro look (MenuPagesOption's "N4N0 screen pages retro.png").
         private const string ScreenPagesRetroTemplate = "Packages/orbiters.toolkit/Editor/VRChat/N4N0ScreenPagesRetro.png.bytes";
         private const string ScreenLayoutTemplate = "Packages/orbiters.toolkit/Editor/VRChat/N4N0ScreenLayout.png.bytes";
-        internal const int ScreenPageSlices = 41;
+        internal const int ScreenPageSlices = 43;
 
         public static string ScreenValue(int index) => ScreenValuePrefix + index;
         public static string ScreenTouch(bool right, int index) => ScreenTouchPrefix + (right ? "R" : "L") + index;
@@ -479,6 +479,7 @@ namespace Orbiters.Toolkit.Editor.VRChat
             if (head == null || emitter == null || n4n0.Find(Gaze) == null) throw new InvalidOperationException("This N4N0 was modified: add it again.");
             var (mesh, material) = ScreenAssets(folder, thumbnailBytes);
             var pointers = AddPointers(n4n0);
+            AddContactRoom(n4n0, pointers);
             var glide = AddPlacement(n4n0);
 
             var screen = new GameObject("Screen");
@@ -495,12 +496,13 @@ namespace Orbiters.Toolkit.Editor.VRChat
             var hold = screen.AddComponent<VRCParentConstraint>();
             hold.Sources.Add(new VRCConstraintSource(glide, 1));
             hold.Locked = true; hold.IsActive = true;
+            var room = AddRoomScreen(n4n0, screen.transform);
             AddPointingReceivers(screen.transform);
             // The eyes' and the gaze point's, at the same places.
             foreach (var (name, tag, parameter) in new (string, string, Func<int, string>)[] { ("Eye ", EyeTag, ScreenEye), ("Gaze ", GazeTag, ScreenGaze) })
             for (int i = 0; i < ScreenTouchPoints.Length; i++)
             {
-                var point = Child(screen.transform, name + i);
+                var point = Child(room, name + i);
                 point.localPosition = ScreenTouchPoints[i];
                 var receiver = point.gameObject.AddComponent<VRCContactReceiver>();
                 receiver.shapeType = ContactBase.ShapeType.Sphere; receiver.radius = ScreenTouchRadius;
@@ -573,6 +575,7 @@ namespace Orbiters.Toolkit.Editor.VRChat
             ScreenBlocks(controller, textSync, thumbnailBytes);
             ScreenLocalBlocks(controller, thumbnailBytes);
             ScreenLayer(controller, textSync, thumbnailBytes);
+            RoomController(controller);
             GazeDotLayer(controller);
             PlacementController(controller, parameters);
             PointingController(controller, parameters);
@@ -687,6 +690,7 @@ namespace Orbiters.Toolkit.Editor.VRChat
             // Shown.
             var shown = new AnimationClip { name = "Screen shown" };
             Curve(shown, ScreenObject, typeof(GameObject), "m_IsActive", 1);
+            Curve(shown, RoomScreen, typeof(GameObject), "m_IsActive", 1);
             Add(children, shown, One);
             // The digits.
             for (int i = 0; i < textSync; i++) Add(children, Digit(SyncDigit(i), TextLate(i, ValueLag)), One);
@@ -735,6 +739,7 @@ namespace Orbiters.Toolkit.Editor.VRChat
 
             var hidden = new AnimationClip { name = "Screen hidden" };
             Curve(hidden, ScreenObject, typeof(GameObject), "m_IsActive", 0);
+            Curve(hidden, RoomScreen, typeof(GameObject), "m_IsActive", 0);
             var closed = HeldPropRig.State(controller, machine, "Closed", hidden);
             var open = HeldPropRig.State(controller, machine, "Open", tree);
             // The owner's screen while the menu's Menu toggle is on, and after it is turned off: turning Menu off always

@@ -61,10 +61,6 @@ namespace Orbiters.Toolkit.Editor.VRChat
                 var hold = pointer.gameObject.AddComponent<VRCParentConstraint>();
                 hold.Sources.Add(new VRCConstraintSource(null, 1));
                 hold.IsActive = true; hold.Locked = true;
-                Sender(pointer.gameObject, TipTag(right));
-                var aim = Child(pointer, "Aim");
-                aim.localPosition = Vector3.forward * AimDistance;
-                Sender(aim.gameObject, AimTag(right));
                 return pointer;
             }).ToArray();
         }
@@ -83,12 +79,14 @@ namespace Orbiters.Toolkit.Editor.VRChat
         /// </summary>
         private static void AddPointingReceivers(Transform screen)
         {
+            var room = screen.parent.parent.Find("Contact room/Head/Screen");
             foreach (bool right in Hands)
             for (int i = 0; i < ScreenTouchPoints.Length; i++)
             {
-                Receiver(screen, "Touch " + (right ? "R" : "L") + i, i, ScreenTouch(right, i), TipTag(right), PointingReach, self: true);
-                Receiver(screen, "Aim " + (right ? "R" : "L") + i, i, ScreenAim(right, i), AimTag(right), PointingReach, self: true);
+                Receiver(room, "Touch " + (right ? "R" : "L") + i, i, ScreenTouch(right, i), TipTag(right), PointingReach, self: true);
+                Receiver(room, "Aim " + (right ? "R" : "L") + i, i, ScreenAim(right, i), AimTag(right), PointingReach, self: true);
             }
+            // Everyone else's fingertips are where they are, so these stay at the real screen.
             for (int i = 0; i < ScreenTouchPoints.Length; i++)
                 Receiver(screen, "Others " + i, i, ScreenOthers(i), OthersTag, ScreenTouchRadius, self: false);
         }
@@ -106,7 +104,7 @@ namespace Orbiters.Toolkit.Editor.VRChat
         }
 
         /// <summary>Whether a placed N4N0 points as screen version 7 does (its pointers have aim senders).</summary>
-        internal static bool HasPointing(Transform n4n0) => n4n0 != null && Hands.All(right => n4n0.Find(Pointer(right) + "/Aim") != null);
+        internal static bool HasPointing(Transform n4n0) => n4n0 != null && Hands.All(right => n4n0.Find(RoomAim(right)) != null);
 
         /// <summary>
         /// Holds a placed N4N0's pointers to <paramref name="animator"/>'s hands where the index fingertips are as the avatar
@@ -159,9 +157,11 @@ namespace Orbiters.Toolkit.Editor.VRChat
             var machine = Layer(controller, "Pointing");
             var hidden = new AnimationClip { name = "Pointing off" };
             Curve(hidden, Pointers, typeof(GameObject), "m_IsActive", 0);
+            foreach (bool right in Hands) Curve(hidden, RoomPointer(right), typeof(GameObject), "m_IsActive", 0);
             Curve(hidden, ScreenObject, typeof(SkinnedMeshRenderer), "material._Rays", 0);
             var shown = new AnimationClip { name = "Pointing on" };
             Curve(shown, Pointers, typeof(GameObject), "m_IsActive", 1);
+            foreach (bool right in Hands) Curve(shown, RoomPointer(right), typeof(GameObject), "m_IsActive", 1);
             Curve(shown, ScreenObject, typeof(SkinnedMeshRenderer), "material._Rays", 1);
             var off = HeldPropRig.State(controller, machine, "Off", hidden);
             var on = HeldPropRig.State(controller, machine, "On", shown);
