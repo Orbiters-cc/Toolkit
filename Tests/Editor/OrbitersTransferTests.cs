@@ -276,6 +276,77 @@ public sealed class OrbitersTransferTests
         Assert.That(file.Result.Cancelled, Is.True, file.Result.Error);
     }
 
+    private IEnumerator WaitForRequest(string path)
+    {
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+        while (!server.Asked(path) && watch.ElapsedMilliseconds < 10000) yield return null;
+        Assert.That(server.Asked(path), Is.True, "request reached the header wait");
+    }
+
+    [UnityTest] public IEnumerator AStalledUploadResponseEndsWithTheCancellation()
+    {
+        server.Routes["/upload-stalled"] = _ => Server.Partial(200, 1000, "{");
+        server.Holds["/upload-stalled"] = true;
+        using (var cancel = new CancellationTokenSource(1500))
+        {
+            var task = OrbitersTransfer.UploadMultipartAsync(server.Url + "/upload-stalled", null,
+                new[] { OrbitersTransfer.Part.Field("name", "Hat") }, cancellation: cancel.Token);
+            yield return Wait(task);
+            Assert.That(task.Exception, Is.Null);
+            Assert.That(task.Result.Cancelled, Is.True, task.Result.Error);
+            Assert.That(task.Result.Success, Is.False);
+        }
+    }
+
+    [UnityTest] public IEnumerator AHeaderTimeoutIsNotCallerCancellation()
+    {
+        const string path = "/timeout-headers";
+        server.HeaderHolds[path] = true;
+        using (var caller = new CancellationTokenSource())
+        {
+            var task = OrbitersHttp.TextAsync(server.Url + path, cancellation: caller.Token, kind: OrbitersHttpKind.Picture);
+            yield return Wait(task);
+            Assert.That(task.IsFaulted, Is.True);
+            var error = task.Exception?.GetBaseException() as OrbitersHttpException;
+            Assert.That(error, Is.Not.Null);
+            Assert.That(error.TimedOut, Is.True);
+            Assert.That(caller.IsCancellationRequested, Is.False);
+        }
+    }
+
+    [UnityTest] public IEnumerator AHeaderWaitEndsWithTheCancellation()
+    {
+        const string path = "/held-headers";
+        server.HeaderHolds[path] = true;
+        using (var cancel = new CancellationTokenSource())
+        {
+            var json = OrbitersHttp.JsonAsync<object>(System.Net.Http.HttpMethod.Post, server.Url + path, cancellation: cancel.Token);
+            yield return WaitForRequest(path);
+            cancel.Cancel();
+            yield return Wait(json);
+            Assert.That(json.IsCanceled, Is.True, json.Exception?.GetBaseException().Message);
+            try { json.GetAwaiter().GetResult(); }
+            catch (OperationCanceledException error) { Assert.That(error.CancellationToken, Is.EqualTo(cancel.Token)); }
+        }
+        foreach (bool upload in new[] { false, true })
+        {
+            string transferPath = upload ? "/held-upload-headers" : "/held-download-headers";
+            server.HeaderHolds[transferPath] = true;
+            using (var cancel = new CancellationTokenSource())
+            {
+                var task = upload
+                    ? OrbitersTransfer.UploadMultipartAsync(server.Url + transferPath, null, new[] { OrbitersTransfer.Part.Field("name", "Hat") }, cancellation: cancel.Token)
+                    : OrbitersTransfer.DownloadFileAsync(server.Url + transferPath, Path.Combine(folder, "headers"), null, cancellation: cancel.Token, retries: 0);
+                yield return WaitForRequest(transferPath);
+                cancel.Cancel();
+                yield return Wait(task);
+                Assert.That(task.Exception, Is.Null);
+                Assert.That(task.Result.Cancelled, Is.True, task.Result.Error);
+                Assert.That(task.Result.Success, Is.False);
+            }
+        }
+    }
+
     // Review 2 of XPK-18: an answer cut off before its end is a failure saying so: an error body, and an upload's answer
     // (never a success, never sent again by itself).
     [UnityTest] public IEnumerator ACutOffAnswerIsAFailureSayingSo()
@@ -321,6 +392,7 @@ public sealed class OrbitersTransferTests
         private readonly ConcurrentDictionary<string, long> received = new ConcurrentDictionary<string, long>();
         private readonly ConcurrentDictionary<string, string> heads = new ConcurrentDictionary<string, string>();
         /// <summary>Paths whose answer is written and then left open, unfinished, until the server stops.</summary>
+        public readonly ConcurrentDictionary<string, bool> HeaderHolds = new ConcurrentDictionary<string, bool>();
         public readonly ConcurrentDictionary<string, bool> Holds = new ConcurrentDictionary<string, bool>();
         /// <summary>Paths whose answer's body is written a byte at a time, this many milliseconds apart.</summary>
         public readonly ConcurrentDictionary<string, int> Slow = new ConcurrentDictionary<string, int>();
@@ -405,6 +477,7 @@ public sealed class OrbitersTransferTests
                     string target = lines[0].Split(' ')[1];
                     string path = target.Split('?')[0];
                     heads[path] = head.ToString();
+                    if (HeaderHolds.ContainsKey(path)) { stop.Token.WaitHandle.WaitOne(); return; }
                     long length = 0;
                     foreach (string line in lines)
                     {
