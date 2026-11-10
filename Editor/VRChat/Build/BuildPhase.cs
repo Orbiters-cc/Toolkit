@@ -20,8 +20,9 @@ namespace Orbiters.Toolkit.Editor.VRChat.Build
         /// <summary>Right after VRCFury's build (−10000), before every step that changes the controllers it built (MCB's survey at −9500).</summary>
         AfterVrcFury,
         /// <summary>
-        /// Accessories placed for good: after MCB's corrective links (−9000) and mode locks (−8970); before ReFit links
-        /// the refitted clothing's shapes (−8960) and shrinks the body under it (−8956).
+        /// Accessories placed for good: after MCB's corrective links (−9000) and mode locks (−8970) and ReFit's links
+        /// (−8960, which copy the refitted clothing's blendshape weights: Stick to the skin bakes them to find its spot);
+        /// before ReFit shrinks the body under the clothing (−8956).
         /// </summary>
         Accessories,
         /// <summary>After ReFit's links and shrinks (−8956), before MCB applies its versions (−8800): accessories follow the body's shapes.</summary>
@@ -58,7 +59,9 @@ namespace Orbiters.Toolkit.Editor.VRChat.Build
                 case BuildPhase.Start: return -20000;
                 case BuildPhase.BeforeVrcFury: return -10100;
                 case BuildPhase.AfterVrcFury: return -9999;
-                case BuildPhase.Accessories: return -8961;
+                // Skin sticking shared −8960 with ReFit's links and ran after them (the SDK's stable sort keeps types in
+                // metadata order, and RefitLinkHook's row came first): now explicitly after.
+                case BuildPhase.Accessories: return -8959;
                 case BuildPhase.AccessoryShapes: return -8950;
                 case BuildPhase.Structure: return -1101;
                 case BuildPhase.BeforeLazyOptimiser: return -101;

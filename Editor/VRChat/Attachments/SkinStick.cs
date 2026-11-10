@@ -413,8 +413,9 @@ namespace Orbiters.Toolkit.Editor.VRChat.Attachments
 
     internal sealed class SkinStickHook : BuildStep
     {
-        // After VRCFury (-10000) placed the accessories and MCB's mode locks (-8970); before ReFit's links (-8960), body
-        // blendshapes are followed (which it asks for) and My Avatar's attachments finish.
+        // After VRCFury (-10000) placed the accessories, MCB's mode locks (-8970) and ReFit's links (-8960: the refitted
+        // clothing's blendshape weights are synced, and its skin spot is measured on them); before ReFit's shrinks
+        // (-8956), body blendshapes are followed (which it asks for) and My Avatar's attachments finish.
         public override BuildPhase Phase => BuildPhase.Accessories;
         public override bool Run(BuildContext context)
         {

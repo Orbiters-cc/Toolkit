@@ -20,46 +20,50 @@ using Object = UnityEngine.Object;
 // steps were still SDK callbacks of their own.
 public sealed class AvatarBuildPipelineTests
 {
-    // Every other avatar build callback around Orbiters' steps, with its number (and, where it is known, its type's full
-    // name, checked against the loaded callbacks). Ties: the order the SDK ran them in.
-    private static readonly (string Name, int Order)[] Others =
+    // Every other avatar build callback around Orbiters' steps, with its number: its type's full name and the assembly (by
+    // name prefix) it comes with, or only a description where the tool is not in this project (checked by number only).
+    // Ties: the order the SDK ran them in.
+    private static readonly (string Assembly, string Name, int Order)[] Others =
     {
-        ("Orbiters.Mixer.Editor.VRChat.MixerBuildHook", -20001),
-        ("Orbiters.MyAvatar.Editor.Expressions.MenuUploadBuild+Capture", -11010),
-        ("NDMF preprocess", -11000),
-        ("Orbiters.Toolkit.Editor.VRChat.N4N0PlatformHook", -10200),
-        ("NativeMeshAvatarBuildHook", -10200),
-        ("Orbiters.Toolkit.Editor.VRChat.N4N0CaptureHook", -10150),
-        ("Orbiters.Toolkit.Editor.VRChat.N4N0MirrorHook", -10140),
-        ("Orbiters.Toolkit.Editor.VRChat.N4N0PicturesHook", -10140),
-        ("Orbiters.Toolkit.Editor.VRChat.Refit.RefitCaptureHook", -10110),
-        ("Orbiters.Toolkit.Editor.VRChat.Refit.RefitKeptFitsHook", -10105),
-        ("VersionCustomizationCaptureHook", -10105),
-        ("Orbiters.MyAvatar.Editor.NovabeastOptions+Restore", -10060),
-        ("Orbiters.MyAvatar.Editor.FaceTracking.FaceTrackingBuild+Capture", -10050),
-        ("VF.Hooks.VrcPreuploadHook", -10000),
-        ("VersionCustomizationSurveyHook", -9500),
-        ("Orbiters.MyAvatar.Editor.FaceTracking.FaceTrackingBuild+Apply", -9010),
-        ("Orbiters.MyAvatar.Editor.Expressions.MenuUploadBuild+Apply", -9005),
-        ("BlendShapeLinkPostVrcfuryHook", -9000),
-        ("VersionCustomizationLockHook", -8970),
-        ("Orbiters.Toolkit.Editor.VRChat.Refit.RefitLinkHook", -8960),
-        ("Orbiters.Toolkit.Editor.VRChat.Refit.RefitShrinkHook", -8956),
-        ("VersionCustomizationApplyHook", -8800),
-        ("Orbiters.MyAvatar.Editor.Optimization.UploadOptimizer+Structure", -1100),
-        ("NDMF optimize", -1025),
-        ("VF.Hooks.VrcsdkFixes.KeepEditorOnlyComponentsLongerHook+VrcfRemoveEditorOnlyObjects", -1024),
-        ("Lazy Optimiser's first pass", -100),
-        ("Lazy Optimiser's last pass", -90),
-        ("Poiyomi's material lock", 4),
-        ("Poiyomi's lock check", 100),
-        ("Orbiters.MyAvatar.Editor.Optimization.UploadOptimizer+Materials", 9000),
-        ("VF.Hooks.ParameterCompressorHook", int.MaxValue - 100),
+        ("Orbiters.Mixer", "Orbiters.Mixer.Editor.VRChat.MixerBuildHook", -20001),
+        ("Orbiters.MyAvatar", "Orbiters.MyAvatar.Editor.Expressions.MenuUploadBuild+Capture", -11010),
+        (null, "NDMF preprocess", -11000),
+        ("Orbiters.Toolkit", "Orbiters.Toolkit.Editor.VRChat.N4N0PlatformHook", -10200),
+        ("mcb", "NativeMeshAvatarBuildHook", -10200),
+        ("Orbiters.Toolkit", "Orbiters.Toolkit.Editor.VRChat.N4N0CaptureHook", -10150),
+        ("Orbiters.Toolkit", "Orbiters.Toolkit.Editor.VRChat.N4N0MirrorHook", -10140),
+        ("Orbiters.Toolkit", "Orbiters.Toolkit.Editor.VRChat.N4N0PicturesHook", -10140),
+        ("Orbiters.Toolkit", "Orbiters.Toolkit.Editor.VRChat.Refit.RefitCaptureHook", -10110),
+        ("Orbiters.Toolkit", "Orbiters.Toolkit.Editor.VRChat.Refit.RefitKeptFitsHook", -10105),
+        ("mcb", "VersionCustomizationCaptureHook", -10105),
+        ("Orbiters.MyAvatar", "Orbiters.MyAvatar.Editor.NovabeastOptions+Restore", -10060),
+        ("Orbiters.MyAvatar", "Orbiters.MyAvatar.Editor.FaceTracking.FaceTrackingBuild+Capture", -10050),
+        ("VRCFury", "VF.Hooks.VrcPreuploadHook", -10000),
+        ("mcb", "VersionCustomizationSurveyHook", -9500),
+        ("Orbiters.MyAvatar", "Orbiters.MyAvatar.Editor.FaceTracking.FaceTrackingBuild+Apply", -9010),
+        ("Orbiters.MyAvatar", "Orbiters.MyAvatar.Editor.Expressions.MenuUploadBuild+Apply", -9005),
+        ("mcb", "BlendShapeLinkPostVrcfuryHook", -9000),
+        ("mcb", "VersionCustomizationLockHook", -8970),
+        ("Orbiters.Toolkit", "Orbiters.Toolkit.Editor.VRChat.Refit.RefitLinkHook", -8960),
+        ("Orbiters.Toolkit", "Orbiters.Toolkit.Editor.VRChat.Refit.RefitShrinkHook", -8956),
+        ("mcb", "VersionCustomizationApplyHook", -8800),
+        ("Orbiters.MyAvatar", "Orbiters.MyAvatar.Editor.Optimization.UploadOptimizer+Structure", -1100),
+        (null, "NDMF optimize", -1025),
+        ("VRCFury", "VF.Hooks.VrcsdkFixes.KeepEditorOnlyComponentsLongerHook+VrcfRemoveEditorOnlyObjects", -1024),
+        (null, "Lazy Optimiser's first pass", -100),
+        (null, "Lazy Optimiser's last pass", -90),
+        ("Thry", "Thry.ThryEditor.UploadCallbacks.VRCAutoAnchor", 0),
+        ("Thry", "Thry.ThryEditor.ShaderOptimizer+LockMaterialsOnUpload", 100),
+        ("Orbiters.MyAvatar", "Orbiters.MyAvatar.Editor.Optimization.UploadOptimizer+Materials", 9000),
+        ("VRCFury", "VF.Hooks.ParameterCompressorHook", int.MaxValue - 100),
     };
 
     // The Toolkit's steps as they were (SDK callbacks), with their numbers, in the order they ran. SkinStickHook and
-    // ReFit's RefitLinkHook both had −8960: SkinStickHook ran first (the SDK lists an assembly's types in order, and
-    // Attachments/ comes before Refit/); now it has a phase of its own just before.
+    // ReFit's RefitLinkHook both had -8960. The SDK lists the callbacks of each assembly with Assembly.GetTypes (metadata
+    // order) and sorts them with a stable OrderBy, so the first type ran first: in the Toolkit assembly Unity built last,
+    // RefitLinkHook is type row 0x0037 and SkinStickHook 0x009B. RefitLink ran first, and must: it copies the refitted
+    // clothing's blendshape weights, which SkinStick bakes to find its skin spot. Now SkinStick has a phase of its own
+    // just after it (-8959), before ReFit's shrinks (-8956).
     private static readonly (Type Step, int Order)[] Former =
     {
         (typeof(XRayBuildCopyHook), -20000),
@@ -90,11 +94,11 @@ public sealed class AvatarBuildPipelineTests
         foreach (var (step, former) in Former)
         {
             int now = Order(step);
-            foreach (var (name, other) in Others)
+            foreach (var (_, name, other) in Others)
             {
                 Assert.That(now, Is.Not.EqualTo(other), step.Name + " shares its order with " + name + ": the SDK would order them by type.");
                 // The one former tie, broken as it ran.
-                int was = former != other ? Math.Sign(former - other) : step == typeof(SkinStickHook) && name.EndsWith("RefitLinkHook") ? -1 : 0;
+                int was = former != other ? Math.Sign(former - other) : step == typeof(SkinStickHook) && name.EndsWith("RefitLinkHook") ? 1 : 0;
                 Assert.That(was, Is.Not.Zero, "unexpected former tie of " + step.Name + " with " + name);
                 Assert.That(Math.Sign(now - other), Is.EqualTo(was), step.Name + " moved to the other side of " + name + " (" + other + ")");
             }
@@ -110,7 +114,7 @@ public sealed class AvatarBuildPipelineTests
         Assert.That(Order(typeof(XRayBuildCopyHook)), Is.EqualTo(-20000));
         Assert.That(Order(typeof(AttachmentBuildHook)), Is.EqualTo(-10100));
         Assert.That(Order(typeof(VrcFuryBuiltAnimationsHook)), Is.EqualTo(-9999));
-        Assert.That(Order(typeof(SkinStickHook)), Is.EqualTo(-8961));
+        Assert.That(Order(typeof(SkinStickHook)), Is.EqualTo(-8959));
         Assert.That(Order(typeof(SurfaceFollowHook)), Is.EqualTo(-8950));
         Assert.That(Order(typeof(AttachmentFinishHook)), Is.EqualTo(-8950), "after SurfaceFollowHook, in its phase");
         Assert.That(Order(typeof(LazyOptimiserOffHook)), Is.EqualTo(-101));
@@ -141,16 +145,71 @@ public sealed class AvatarBuildPipelineTests
         CollectionAssert.AreEquivalent(StillCallbacks, own, "the Toolkit's own build work is a BuildStep");
     }
 
-    [Test] public void OtherToolsCallbacksStillHaveTheNumbersPinnedHere()
+    private static List<IVRCSDKPreprocessAvatarCallback> SdkCallbacks()
     {
         var field = typeof(VRCBuildPipelineCallbacks).GetField("_preprocessAvatarCallbacks", BindingFlags.Static | BindingFlags.NonPublic | BindingFlags.Public);
-        var callbacks = (field?.GetValue(null) as IEnumerable<IVRCSDKPreprocessAvatarCallback>)?.ToList() ?? new List<IVRCSDKPreprocessAvatarCallback>();
-        var pinned = Others.ToLookup(o => o.Name, o => o.Order);
-        foreach (var callback in callbacks)
+        var callbacks = (field?.GetValue(null) as IEnumerable<IVRCSDKPreprocessAvatarCallback>)?.ToList();
+        Assert.IsNotNull(callbacks, "The SDK lists its build steps where Orbiters looks for them");
+        // The Mixer console's timing probes sit at every order and change nothing.
+        return callbacks.Where(c => c != null && c.GetType().Name != "LoggerBuildStepProbe").ToList();
+    }
+
+    private static bool Loaded(string assembly) =>
+        assembly != null && AppDomain.CurrentDomain.GetAssemblies().Any(a => a.GetName().Name.StartsWith(assembly, StringComparison.Ordinal));
+
+    [Test] public void OtherToolsCallbacksArePresentWithTheNumbersPinnedHere()
+    {
+        var callbacks = SdkCallbacks();
+        foreach (var (assembly, name, order) in Others)
         {
-            var name = callback.GetType().FullName;
-            if (!pinned.Contains(name)) continue;
-            Assert.That(pinned[name], Has.Member(callback.callbackOrder), name + " changed its number: check the Toolkit steps' phases against it and update Others.");
+            // A tool not installed here is skipped.
+            if (!Loaded(assembly)) continue;
+            var found = callbacks.Where(c => c.GetType().FullName == name).ToList();
+            Assert.That(found, Is.Not.Empty, name + " is gone while its package is installed: check the Toolkit steps' phases against what replaced it.");
+            Assert.That(found.Select(c => c.callbackOrder), Has.All.EqualTo(order), name + " changed its number: check the Toolkit steps' phases against it and update Others.");
+        }
+    }
+
+    // A callback this file doesn't know, among Orbiters' phases: where it must run against them is unknown.
+    [Test] public void NoUnknownCallbackRunsAmongOrbitersPhases()
+    {
+        var known = new HashSet<string>(Others.Select(o => o.Name).Concat(StillCallbacks), StringComparer.Ordinal);
+        int first = BuildPhases.Order(BuildPhase.Start), last = BuildPhases.Order(BuildPhase.SaveBuildData);
+        var unknown = SdkCallbacks().Where(c => !(c is BuildPhaseCallback) && !known.Contains(c.GetType().FullName) && c.callbackOrder >= first && c.callbackOrder <= last)
+            .Select(c => c.GetType().FullName + " (" + c.callbackOrder + ")").ToList();
+        Assert.That(unknown, Is.Empty, "pin these in Others, with the side of each Toolkit step they must run on");
+    }
+
+    // The SDK's own sequence: callbacks listed assembly by assembly, each assembly's types in metadata order, then a stable
+    // sort by order. Each Toolkit step lands on its former side of every callback actually there, ties included.
+    [Test] public void TheSdksSequenceKeepsEveryToolkitStepOnItsFormerSide()
+    {
+        var assemblies = AppDomain.CurrentDomain.GetAssemblies().ToList();
+        var listed = SdkCallbacks().OrderBy(c => assemblies.IndexOf(c.GetType().Assembly)).ThenBy(c => c.GetType().MetadataToken).ToList();
+        var sequence = listed.OrderBy(c => c.callbackOrder).ToList();
+        // Ties at int.MaxValue (VRCFury's last steps) run in assembly order: the last phase is where the manifest's own
+        // callback was, the Toolkit's only one there.
+        var lastOnes = sequence.Where(c => c.callbackOrder == int.MaxValue).ToList();
+        Assert.That(lastOnes.OfType<BuildLastCallback>().Count(), Is.EqualTo(1));
+        Assert.That(lastOnes.Count(c => c.GetType().Assembly == typeof(BuildStep).Assembly), Is.EqualTo(1), "the Toolkit has one callback at the end, as before");
+
+        foreach (var (step, former) in Former)
+        {
+            var phase = AvatarBuildPipeline.Steps.Single(s => s.GetType() == step).Phase;
+            int at = sequence.FindIndex(c => c is BuildPhaseCallback p && p.Phase == phase);
+            Assert.That(at, Is.GreaterThanOrEqualTo(0), step.Name + "'s phase is not in the SDK's list");
+            for (int i = 0; i < sequence.Count; i++)
+            {
+                var other = sequence[i];
+                if (other is BuildPhaseCallback) continue;
+                int order = other.callbackOrder;
+                string name = other.GetType().FullName;
+                int was = former != order ? Math.Sign(former - order) : step == typeof(SkinStickHook) && name.EndsWith("RefitLinkHook") ? 1 : 0;
+                // A former tie with another tool's int.MaxValue callback: the old callback was in this assembly's place.
+                if (was == 0 && order == int.MaxValue) continue;
+                Assert.That(was, Is.Not.Zero, "unexpected former tie of " + step.Name + " with " + name);
+                Assert.That(Math.Sign(at - i), Is.EqualTo(was), step.Name + " runs on the other side of " + name + " (" + order + ")");
+            }
         }
     }
 
