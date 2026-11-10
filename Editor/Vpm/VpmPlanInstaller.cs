@@ -155,9 +155,14 @@ namespace Orbiters.Toolkit.Editor.Vpm
             if (stranded.Count == 0) return plan;
             var offering = await System.Threading.Tasks.Task.Run(() => VpmRepositoryHistory.Offering(stranded), cancellation);
             var extra = new List<VpmCandidate>();
-            foreach (string url in offering.Values.SelectMany(u => u).Distinct(StringComparer.OrdinalIgnoreCase))
-                extra.AddRange((await VpmListingReader.ReadAsync(url, cancellation))
-                    .Where(c => offering.TryGetValue(c.Id, out var urls) && urls.Contains(url, StringComparer.OrdinalIgnoreCase)));
+            var listings = offering.Values.SelectMany(u => u).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+            // Read together, kept in the order of the URLs.
+            var read = await System.Threading.Tasks.Task.WhenAll(listings.Select(url => VpmListingReader.ReadAsync(url, cancellation)));
+            for (int i = 0; i < listings.Count; i++)
+            {
+                string url = listings[i];
+                extra.AddRange(read[i].Where(c => offering.TryGetValue(c.Id, out var urls) && urls.Contains(url, StringComparer.OrdinalIgnoreCase)));
+            }
             if (extra.Count == 0) return plan;
             var widerCatalog = new VpmProjectCatalog(candidates.Concat(extra));
             var wider = await System.Threading.Tasks.Task.Run(() => VpmDependencyPlan.ResolveForApproval(list, widerCatalog), cancellation);

@@ -53,6 +53,12 @@ namespace Orbiters.Toolkit.Editor.Vpm
             new Dictionary<string, (VpmDependencyStatus, DateTime)>(StringComparer.OrdinalIgnoreCase);
         private Manifest manifest;
         private DateTime manifestLoadedAt;
+        private bool manifestFailed;
+        // The project's VPM packages, read once for every status until packages change (or a minute passes: VPM's own
+        // tools may change the project's manifest outside Unity).
+        private static Func<string, string, (IVRCPackage Installed, IVRCPackage Matching)> project;
+        private static DateTime projectAt;
+        private static bool watching;
 
         public string PackageName { get; }
         /// <summary>Optional dependencies this returns true for count as installed (e.g. packages developed locally outside VPM).</summary>
@@ -76,8 +82,10 @@ namespace Orbiters.Toolkit.Editor.Vpm
         {
             var list = (statuses ?? Enumerable.Empty<VpmDependencyStatus>()).Where(s => s != null).ToList();
             var candidates = new List<VpmCandidate>(known ?? Enumerable.Empty<VpmCandidate>());
-            foreach (string url in list.Select(s => s.RepositoryUrl).Where(u => !string.IsNullOrWhiteSpace(u)).Distinct(StringComparer.OrdinalIgnoreCase))
-                candidates.AddRange(await VpmListingReader.ReadAsync(url, cancellation));
+            var urls = list.Select(s => s.RepositoryUrl).Where(u => !string.IsNullOrWhiteSpace(u)).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+            // Read together, kept in the order of the URLs.
+            foreach (var listing in await System.Threading.Tasks.Task.WhenAll(urls.Select(url => VpmListingReader.ReadAsync(url, cancellation))))
+                candidates.AddRange(listing);
             return VpmDependencyPlan.Resolve(list.Select(s => new VpmDependencyPlan.Requirement(s.Id, s.VersionRange, requiredBy)),
                 new VpmProjectCatalog(candidates));
         }
@@ -87,6 +95,12 @@ namespace Orbiters.Toolkit.Editor.Vpm
         public static VpmDependencies For(string packageName)
         {
             if (string.IsNullOrWhiteSpace(packageName)) throw new ArgumentException("A package name is required.", nameof(packageName));
+            if (!watching)
+            {
+                watching = true;
+                // Statuses and manifests stand until Unity's packages change (an install, a removal, a resolve).
+                UnityEditor.PackageManager.Events.registeredPackages += _ => Invalidate();
+            }
             if (!instances.TryGetValue(packageName, out var instance)) instances[packageName] = instance = new VpmDependencies(packageName);
             return instance;
         }
@@ -125,6 +139,8 @@ namespace Orbiters.Toolkit.Editor.Vpm
             var optionals = LoadManifest().orbiters?.optionalVpmDependencies;
             if (optionals == null || !optionals.TryGetValue(packageId, out var optional)) return null;
             string version = optional?.version;
+            // Asked fresh: the project's packages are read again too.
+            if (refresh) project = null;
             return Cached("optional:" + packageId + ":" + version, refresh, () => BuildStatus(packageId, version, false, optional));
         }
 
@@ -212,6 +228,7 @@ namespace Orbiters.Toolkit.Editor.Vpm
         public static void Invalidate()
         {
             foreach (var instance in instances.Values) { instance.statusCache.Clear(); instance.manifest = null; }
+            project = null;
             StatusChanged?.Invoke();
         }
 
@@ -270,10 +287,7 @@ namespace Orbiters.Toolkit.Editor.Vpm
 
             try
             {
-                var provider = new UnityProject(ProjectPath).VPMProvider;
-                provider.Refresh();
-                var installed = provider.GetPackage(packageId);
-                var matching = string.IsNullOrWhiteSpace(versionRange) ? installed : provider.GetPackageWithRange(packageId, versionRange);
+                var (installed, matching) = Project()(packageId, versionRange);
                 status.InstalledVersion = installed?.Version;
                 status.IsInstalled = matching != null;
                 if (installed != null && matching == null) status.Error = "Installed version " + installed.Version + " does not satisfy " + versionRange + ".";
@@ -307,6 +321,19 @@ namespace Orbiters.Toolkit.Editor.Vpm
             return status;
         }
 
+        private static Func<string, string, (IVRCPackage Installed, IVRCPackage Matching)> Project()
+        {
+            if (project != null && DateTime.UtcNow - projectAt < StatusCacheDuration) return project;
+            var provider = new UnityProject(ProjectPath).VPMProvider;
+            provider.Refresh();
+            projectAt = DateTime.UtcNow;
+            return project = (id, range) =>
+            {
+                IVRCPackage installed = provider.GetPackage(id);
+                return (installed, string.IsNullOrWhiteSpace(range) ? installed : provider.GetPackageWithRange(id, range));
+            };
+        }
+
         private static IVRCPackage AvailablePackage(string packageId, string versionRange) =>
             string.IsNullOrWhiteSpace(versionRange) ? Repos.GetLatestPackage(packageId) : Repos.GetPackageWithVersionMatch(packageId, versionRange);
 
@@ -325,7 +352,10 @@ namespace Orbiters.Toolkit.Editor.Vpm
 
         private Manifest LoadManifest()
         {
-            if (manifest != null && (DateTime.UtcNow - manifestLoadedAt).TotalSeconds < 10) return manifest;
+            // Read again once packages change (Invalidate): a package's package.json changes only with its package. One that
+            // could not be read is tried again after a few seconds.
+            if (manifest != null && (!manifestFailed || (DateTime.UtcNow - manifestLoadedAt).TotalSeconds < 10)) return manifest;
+            manifestFailed = false;
             try
             {
                 // Wherever Unity resolved the package: embedded, cache, or a local folder outside the project.
@@ -338,6 +368,7 @@ namespace Orbiters.Toolkit.Editor.Vpm
             {
                 Debug.LogError("[Orbiters] Could not read the VPM dependencies of " + PackageName + ": " + ex.Message);
                 manifest = new Manifest();
+                manifestFailed = true;
             }
             manifestLoadedAt = DateTime.UtcNow;
             return manifest;
