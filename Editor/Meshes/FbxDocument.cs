@@ -260,6 +260,24 @@ namespace Orbiters.Toolkit.Editor.Meshes
             writer.Write(stored);
         }
 
+        // Adler-32 with one modulo per block of 5552 bytes: the most that can be summed before b could pass 32 bits.
+        internal static uint Adler32(byte[] data)
+        {
+            uint a = 1, b = 0;
+            for (int start = 0; start < data.Length; start += 5552)
+            {
+                int end = Math.Min(data.Length, start + 5552);
+                for (int i = start; i < end; i++)
+                {
+                    a += data[i];
+                    b += a;
+                }
+                a %= 65521;
+                b %= 65521;
+            }
+            return (b << 16) | a;
+        }
+
         // zlib: a header, deflate, and the Adler-32 checksum of the data (big-endian).
         private static byte[] Deflate(byte[] data)
         {
@@ -268,13 +286,7 @@ namespace Orbiters.Toolkit.Editor.Meshes
                 output.WriteByte(0x78);
                 output.WriteByte(0x9c);
                 using (var deflate = new DeflateStream(output, System.IO.Compression.CompressionLevel.Fastest, true)) deflate.Write(data, 0, data.Length);
-                uint a = 1, b = 0;
-                foreach (byte value in data)
-                {
-                    a = (a + value) % 65521;
-                    b = (b + a) % 65521;
-                }
-                uint adler = (b << 16) | a;
+                uint adler = Adler32(data);
                 output.WriteByte((byte)(adler >> 24));
                 output.WriteByte((byte)(adler >> 16));
                 output.WriteByte((byte)(adler >> 8));

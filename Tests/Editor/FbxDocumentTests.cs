@@ -62,4 +62,22 @@ public sealed class FbxDocumentTests
         Assert.That(values[12], Is.EqualTo(1).Within(1e-6), "Translation is the fourth column.");
         Assert.That(FbxTransform.FromDoubles(values), Is.EqualTo(matrix));
     }
+
+    // TKG-39: Adler-32 summed in blocks with one modulo per block, against the byte-by-byte definition.
+    [Test]
+    public void BlockAdlerMatchesTheDefinition()
+    {
+        var method = typeof(FbxDocument).GetMethod("Adler32", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
+        Assert.That(method, Is.Not.Null);
+        var random = new System.Random(9);
+        foreach (int length in new[] { 0, 1, 5551, 5552, 5553, 20000, 100003 })
+        {
+            var data = new byte[length];
+            random.NextBytes(data);
+            if (length > 7) for (int i = 0; i < length / 2; i++) data[i] = 255;
+            uint a = 1, b = 0;
+            foreach (byte value in data) { a = (a + value) % 65521; b = (b + a) % 65521; }
+            Assert.That((uint)method.Invoke(null, new object[] { data }), Is.EqualTo((b << 16) | a), length + " bytes");
+        }
+    }
 }
