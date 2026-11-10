@@ -95,17 +95,20 @@ namespace Orbiters.Toolkit.Editor.VRChat.Attachments
     /// </summary>
     public static class AttachmentFollow
     {
-        public static List<FollowLink> Links(Transform avatarRoot, bool matchUnlinkedClothing = true)
+        public static List<FollowLink> Links(Transform avatarRoot, bool matchUnlinkedClothing = true) =>
+            avatarRoot == null ? new List<FollowLink>() : Links(AvatarSnapshot.Take(avatarRoot), matchUnlinkedClothing);
+
+        /// <summary><see cref="Links(Transform, bool)"/> with the avatar's facts from <paramref name="snapshot"/> (one bone index for every fitted accessory).</summary>
+        public static List<FollowLink> Links(AvatarSnapshot snapshot, bool matchUnlinkedClothing = true)
         {
             var result = new List<FollowLink>();
-            if (avatarRoot == null) return result;
-            var body = AttachmentPlanner.Body(avatarRoot);
-            var skeleton = AvatarSkeleton.Bones(avatarRoot, body);
-            var avatarRest = ArmatureRest.Frames(avatarRoot.GetComponentsInChildren<SkinnedMeshRenderer>(true).Where(r => r.bones.Any(b => b != null && skeleton.Contains(b))));
-            var index = AvatarBoneIndex.Build(avatarRoot, skeleton);
+            if (snapshot == null || snapshot.Root == null) return result;
+            var avatarRoot = snapshot.Transform;
+            var avatarRest = ArmatureRest.Frames(snapshot.Skins.Where(r => r.bones.Any(snapshot.InSkeleton)));
+            var index = snapshot.BoneIndex;
             var handled = new HashSet<Transform>();
 
-            foreach (var attachment in avatarRoot.GetComponentsInChildren<OrbitersAttachment>(true))
+            foreach (var attachment in snapshot.All<OrbitersAttachment>())
             {
                 var root = attachment.transform;
                 // A creator's recursive link only recognizes exact child names. A garment fitted to a
@@ -114,7 +117,7 @@ namespace Orbiters.Toolkit.Editor.VRChat.Attachments
                 if (AttachmentFit.Fitted(attachment) &&
                     (attachment.mode == OrbitersAttachment.AttachMode.Configured || attachment.mode == OrbitersAttachment.AttachMode.VrcFury))
                 {
-                    var fit = AttachmentFit.Compare(attachment.gameObject, avatarRoot);
+                    var fit = AttachmentFit.Compare(attachment.gameObject, snapshot);
                     if (fit != null)
                     {
                         foreach (var pair in fit.Pairs)
@@ -144,7 +147,7 @@ namespace Orbiters.Toolkit.Editor.VRChat.Attachments
                 }
             }
 
-            foreach (var link in VrcFury.ArmatureLinks(avatarRoot.gameObject))
+            foreach (var link in VrcFury.ArmatureLinks(snapshot.VrcFuryFeatures))
             {
                 if (link.From == null || handled.Contains(link.From.transform)) continue;
                 var target = link.Resolve(avatarRoot, index.Humanoid);
@@ -178,8 +181,8 @@ namespace Orbiters.Toolkit.Editor.VRChat.Attachments
 
             if (!matchUnlinkedClothing) return result;
             // Clothing armatures nothing links yet (merged by hand or by another tool): follow the bone matcher.
-            foreach (var group in avatarRoot.GetComponentsInChildren<SkinnedMeshRenderer>(true)
-                         .Where(r => r.sharedMesh != null && r.bones.Length > 0 && r.bones.Where(b => b != null).All(b => !skeleton.Contains(b)) && !handled.Contains(r.transform))
+            foreach (var group in snapshot.Skins
+                         .Where(r => r.sharedMesh != null && r.bones.Length > 0 && r.bones.Where(b => b != null).All(b => !snapshot.InSkeleton(b)) && !handled.Contains(r.transform))
                          .GroupBy(r => ArmatureRest.CommonRoot(r, avatarRoot)))
             {
                 if (group.Key == null) continue;

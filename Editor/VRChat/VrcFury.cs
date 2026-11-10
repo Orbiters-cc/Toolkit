@@ -80,7 +80,26 @@ namespace Orbiters.Toolkit.Editor.VRChat
         public static bool IsComponent(Component value) =>
             value != null && Find("VF.Component.VRCFuryComponent") is Type type && type.IsInstanceOfType(value);
 
-        public static object Content(Component vrcFury) => vrcFury != null ? Component?.GetField("content")?.GetValue(vrcFury) : null;
+        public static object Content(Component vrcFury) => vrcFury != null ? FieldOf(Component, "content", BindingFlags.Public | BindingFlags.Instance, false)?.GetValue(vrcFury) : null;
+
+        // Fields by type and name, those not found too: each model type is looked into once per script session.
+        private static readonly Dictionary<(Type, string), FieldInfo> Fields = new Dictionary<(Type, string), FieldInfo>();
+
+        // The field of that name on the type or (with baseTypes) the first of its base types declaring one.
+        private static FieldInfo FieldOf(Type type, string name, BindingFlags flags, bool baseTypes)
+        {
+            if (type == null) return null;
+            lock (Fields)
+            {
+                if (Fields.TryGetValue((type, name), out var known)) return known;
+                FieldInfo found = null;
+                if (!baseTypes) found = type.GetField(name, flags);
+                else
+                    for (var t = type; t != null && found == null; t = t.BaseType)
+                        found = t.GetField(name, flags | BindingFlags.DeclaredOnly);
+                return Fields[(type, name)] = found;
+            }
+        }
 
         /// <summary>
         /// Whether VRCFury builds this avatar (VRCFury is installed and the avatar has a VRCFury component other than debug
@@ -171,15 +190,8 @@ namespace Orbiters.Toolkit.Editor.VRChat
         }
 
         // Walks base types too: the model version is a private field of VRCFury's base feature class.
-        public static object Field(object model, string name)
-        {
-            for (var type = model?.GetType(); type != null; type = type.BaseType)
-            {
-                var field = type.GetField(name, BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.DeclaredOnly);
-                if (field != null) return field.GetValue(model);
-            }
-            return null;
-        }
+        public static object Field(object model, string name) =>
+            model == null ? null : FieldOf(model.GetType(), name, BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance, true)?.GetValue(model);
 
         /// <summary>
         /// Whether a Full Controller (its feature) shares <paramref name="name"/> with the avatar (its "globalParams" rules:
@@ -206,15 +218,8 @@ namespace Orbiters.Toolkit.Editor.VRChat
         }
 
         /// <summary>The object behind VRCFury's GuidWrapper fields (controllers, menus, parameter assets).</summary>
-        public static UnityEngine.Object ObjectReference(object wrapper)
-        {
-            for (var type = wrapper?.GetType(); type != null; type = type.BaseType)
-            {
-                var field = type.GetField("objRef", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
-                if (field != null) return field.GetValue(wrapper) as UnityEngine.Object;
-            }
-            return null;
-        }
+        public static UnityEngine.Object ObjectReference(object wrapper) =>
+            wrapper == null ? null : FieldOf(wrapper.GetType(), "objRef", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance, true)?.GetValue(wrapper) as UnityEngine.Object;
 
         /// <summary>An Armature Link as VRCFury will apply it.</summary>
         public sealed class Link
@@ -356,9 +361,12 @@ namespace Orbiters.Toolkit.Editor.VRChat
             return false;
         }
 
-        public static IEnumerable<Link> ArmatureLinks(GameObject root)
+        public static IEnumerable<Link> ArmatureLinks(GameObject root) => ArmatureLinks(Features(root));
+
+        /// <summary>The Armature Links among <paramref name="features"/> (from <see cref="Features"/>, or an avatar snapshot's).</summary>
+        public static IEnumerable<Link> ArmatureLinks(IEnumerable<(Component component, object feature, string kind)> features)
         {
-            foreach (var (c, feature, kind) in Features(root))
+            foreach (var (c, feature, kind) in features)
             {
                 if (kind != "ArmatureLink") continue;
                 // Without a Link From object VRCFury skips the link.

@@ -149,7 +149,8 @@ namespace Orbiters.Toolkit.Editor.VRChat.XRay
             foreach (var part in new VisualElement[] { avatarName, metrics }) part.style.display = shown ? DisplayStyle.Flex : DisplayStyle.None;
             if (!shown) { legend.style.display = compression.style.display = DisplayStyle.None; return; }
             avatarName.text = shownAvatar.name;
-            Show(AvatarBudget.Estimate(shownAvatar.gameObject));
+            // The kept snapshot: its lists stand until the avatar's structure changes.
+            Show(AvatarBudget.Estimate(AvatarSnapshot.Of(shownAvatar.gameObject)));
         }
 
         private void Show(AvatarBudget budget)

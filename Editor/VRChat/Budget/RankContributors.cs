@@ -48,9 +48,53 @@ namespace Orbiters.Toolkit.Editor.VRChat.Budget
                 if (item != null && counted) result.ItemOf(item.Value).Amounts[category] = result.ItemOf(item.Value).Amount(category) + amount;
             }
 
+            // One pass over the components: each is counted by its kind, in the categories' order below.
+            var renderers = new List<Renderer>();
+            var physBones = new List<VRCPhysBoneBase>();
+            var boneColliders = new List<VRCPhysBoneColliderBase>();
+            var contacts = new List<ContactBase>();
+            var vrcConstraints = new List<VRCConstraintBase>();
+            var constraints = new List<Component>();
+            var lights = new List<Light>();
+            var particles = new List<ParticleSystem>();
+            var sounds = new List<AudioSource>();
+            var cloths = new List<Cloth>();
+            var animators = new List<Animator>();
+            foreach (var component in root.GetComponentsInChildren<Component>(true))
+            {
+                switch (component)
+                {
+                    case null: continue;
+                    case Renderer renderer: renderers.Add(renderer); break;
+                    case VRCPhysBoneBase bone: physBones.Add(bone); break;
+                    case VRCPhysBoneColliderBase collider: boneColliders.Add(collider); break;
+                    case ContactBase contact: contacts.Add(contact); break;
+                    case VRCConstraintBase constraint: vrcConstraints.Add(constraint); break;
+                    case Light light: lights.Add(light); break;
+                    case ParticleSystem system: particles.Add(system); break;
+                    case AudioSource sound: sounds.Add(sound); break;
+                    case Cloth cloth: cloths.Add(cloth); break;
+                    case Animator animator: animators.Add(animator); break;
+                }
+                if (component is IConstraint) constraints.Add(component);
+            }
+            // A material's textures, read once however many slots show it.
+            var materialTextures = new Dictionary<Material, List<Texture>>();
+            List<Texture> TexturesOf(Material material)
+            {
+                if (materialTextures.TryGetValue(material, out var list)) return list;
+                list = new List<Texture>();
+                foreach (int id in material.GetTexturePropertyNameIDs())
+                {
+                    var texture = material.GetTexture(id);
+                    if (texture != null) list.Add(texture);
+                }
+                return materialTextures[material] = list;
+            }
+
             // Bones are shared: an item saves only those no other renderer uses.
             var boneUsers = new Dictionary<Transform, HashSet<string>>();
-            foreach (var renderer in root.GetComponentsInChildren<Renderer>(true))
+            foreach (var renderer in renderers)
             {
                 var mesh = MeshOptimization.MeshOf(renderer);
                 if (!(renderer is SkinnedMeshRenderer) && !(renderer is MeshRenderer)) continue;
@@ -73,10 +117,8 @@ namespace Orbiters.Toolkit.Editor.VRChat.Budget
                 foreach (var material in renderer.sharedMaterials)
                 {
                     if (material == null) continue;
-                    foreach (int id in material.GetTexturePropertyNameIDs())
+                    foreach (var texture in TexturesOf(material))
                     {
-                        var texture = material.GetTexture(id);
-                        if (texture == null) continue;
                         if (!result.textures.TryGetValue(texture, out var known)) known = (PathOf(renderer.transform), new HashSet<string>(StringComparer.Ordinal), false);
                         if (item.Length > 0) known.Items.Add(item);
                         else known.Shared = true;
@@ -87,7 +129,7 @@ namespace Orbiters.Toolkit.Editor.VRChat.Budget
             foreach (var group in boneUsers.Where(p => p.Value.Count == 1 && p.Value.First().Length > 0).GroupBy(p => p.Value.First()))
                 if (result.items.TryGetValue(group.Key, out var item)) item.Amounts[AvatarPerformanceCategory.BoneCount] = group.Count();
 
-            foreach (var bone in root.GetComponentsInChildren<VRCPhysBoneBase>(true))
+            foreach (var bone in physBones)
             {
                 int transforms = AvatarUsage.PhysBoneChain(bone).Count;
                 int colliders = bone.colliders?.Count(c => c != null) ?? 0;
@@ -95,19 +137,18 @@ namespace Orbiters.Toolkit.Editor.VRChat.Budget
                 Add(AvatarPerformanceCategory.PhysBoneTransformCount, bone, bone.name, transforms);
                 Add(AvatarPerformanceCategory.PhysBoneCollisionCheckCount, bone, bone.name, transforms * colliders);
             }
-            foreach (var collider in root.GetComponentsInChildren<VRCPhysBoneColliderBase>(true))
+            foreach (var collider in boneColliders)
                 Add(AvatarPerformanceCategory.PhysBoneColliderCount, collider, collider.name, 1f);
-            foreach (var contact in root.GetComponentsInChildren<ContactBase>(true))
+            foreach (var contact in contacts)
                 if (!(contact is ContactReceiver receiver && receiver.localOnly)) Add(AvatarPerformanceCategory.ContactCount, contact, contact.name, 1f);
-            foreach (var constraint in root.GetComponentsInChildren<VRCConstraintBase>(true))
+            foreach (var constraint in vrcConstraints)
                 Add(AvatarPerformanceCategory.ConstraintsCount, constraint, constraint.name, 1f);
-            foreach (var constraint in root.GetComponentsInChildren<IConstraint>(true))
-                if (constraint is Component component) Add(AvatarPerformanceCategory.ConstraintsCount, component, component.name, 1f);
-            foreach (var light in root.GetComponentsInChildren<Light>(true)) Add(AvatarPerformanceCategory.LightCount, light, light.name, 1f);
-            foreach (var particles in root.GetComponentsInChildren<ParticleSystem>(true)) Add(AvatarPerformanceCategory.ParticleSystemCount, particles, particles.name, 1f);
-            foreach (var sound in root.GetComponentsInChildren<AudioSource>(true)) Add(AvatarPerformanceCategory.AudioSourceCount, sound, sound.name, 1f);
-            foreach (var cloth in root.GetComponentsInChildren<Cloth>(true)) Add(AvatarPerformanceCategory.ClothCount, cloth, cloth.name, 1f);
-            foreach (var animator in root.GetComponentsInChildren<Animator>(true))
+            foreach (var component in constraints) Add(AvatarPerformanceCategory.ConstraintsCount, component, component.name, 1f);
+            foreach (var light in lights) Add(AvatarPerformanceCategory.LightCount, light, light.name, 1f);
+            foreach (var system in particles) Add(AvatarPerformanceCategory.ParticleSystemCount, system, system.name, 1f);
+            foreach (var sound in sounds) Add(AvatarPerformanceCategory.AudioSourceCount, sound, sound.name, 1f);
+            foreach (var cloth in cloths) Add(AvatarPerformanceCategory.ClothCount, cloth, cloth.name, 1f);
+            foreach (var animator in animators)
                 if (animator.transform != root.transform) Add(AvatarPerformanceCategory.AnimatorCount, animator, animator.name, 1f);
             return result;
         }
