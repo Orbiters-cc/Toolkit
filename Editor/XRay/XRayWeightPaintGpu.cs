@@ -67,7 +67,16 @@ namespace Orbiters.Toolkit.Editor.XRay
         internal static GraphicsBuffer NewWeights(float[] weightsPerVertex)
         {
             var made = new GraphicsBuffer(GraphicsBuffer.Target.Structured, Mathf.Max(1, weightsPerVertex.Length), sizeof(float));
-            made.SetData(weightsPerVertex);
+            try
+            {
+                made.SetData(weightsPerVertex);
+            }
+            catch
+            {
+                // Nobody owns it yet.
+                made.Release();
+                throw;
+            }
             return made;
         }
 

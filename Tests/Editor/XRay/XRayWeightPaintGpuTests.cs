@@ -66,6 +66,82 @@ namespace Orbiters.Toolkit.Editor.Tests.XRay
             }
         }
 
+        // With the switch off the overlay's colours are those of the code before the GPU path (kept here as the reference):
+        // the weights summed per vertex in a float, clamped, through Blender's ramp, on a mesh with many influences.
+        [Test]
+        public void SwitchedOffColoursAreThoseOfTheOldCode()
+        {
+            var mesh = new Mesh();
+            try
+            {
+                const int vertices = 500;
+                var random = new System.Random(7);
+                var counts = new byte[vertices];
+                var all = new System.Collections.Generic.List<BoneWeight1>();
+                for (int v = 0; v < vertices; v++)
+                {
+                    counts[v] = (byte)random.Next(0, 9);
+                    var raw = Enumerable.Range(0, counts[v]).Select(_ => (float)random.NextDouble() + 0.001f).ToArray();
+                    float sum = raw.Sum();
+                    // Sorted heaviest first with distinct bones, as Unity requires; some sums go a little above 1.
+                    var bones = Enumerable.Range(0, 12).OrderBy(_ => random.Next()).Take(counts[v]).ToArray();
+                    var weights = raw.Select(w => w / sum * (random.Next(4) == 0 ? 1.0003f : 1f)).OrderByDescending(w => w).ToArray();
+                    for (int k = 0; k < counts[v]; k++) all.Add(W(bones[k], weights[k]));
+                }
+                mesh.vertices = new Vector3[vertices];
+                using (var c = new Unity.Collections.NativeArray<byte>(counts, Unity.Collections.Allocator.Temp))
+                using (var w = new Unity.Collections.NativeArray<BoneWeight1>(all.ToArray(), Unity.Collections.Allocator.Temp))
+                    mesh.SetBoneWeights(c, w);
+
+                foreach (var shown in new[] { new[] { 0 }, new[] { 3, 5 }, new[] { 1, 2, 4, 6, 8, 10 }, Enumerable.Range(0, 12).ToArray() })
+                {
+                    var set = new System.Collections.Generic.HashSet<int>(shown);
+                    Assert.That(XRayWeightPaintService.ColorsOf(XRayWeightPaintService.BuildWeights(mesh, set)), Is.EqualTo(OldBuildWeightColors(mesh, set)),
+                        "bones " + string.Join(",", shown));
+                }
+            }
+            finally
+            {
+                Object.DestroyImmediate(mesh);
+            }
+        }
+
+        // XRayWeightPaintService.BuildWeightColors and EvaluateBlenderWeightColor as they were before the GPU path.
+        private static Color32[] OldBuildWeightColors(Mesh mesh, System.Collections.Generic.HashSet<int> selectedBoneIndices)
+        {
+            int count = mesh.vertexCount;
+            var colors = new Color32[count];
+            var perVertex = mesh.GetBonesPerVertex();
+            var weights = mesh.GetAllBoneWeights();
+            int at = 0;
+            for (int v = 0; v < count; v++)
+            {
+                float value = 0f;
+                int influences = v < perVertex.Length ? perVertex[v] : 0;
+                for (int k = 0; k < influences && at + k < weights.Length; k++)
+                {
+                    var weight = weights[at + k];
+                    if (selectedBoneIndices.Contains(weight.boneIndex)) value += weight.weight;
+                }
+
+                at += influences;
+                colors[v] = OldRamp(Mathf.Clamp01(value));
+            }
+
+            return colors;
+        }
+
+        private static Color32 OldRamp(float weight)
+        {
+            Color color;
+            if (weight <= 0.25f) color = Color.Lerp(new Color(0f, 0f, 1f, 1f), new Color(0f, 1f, 1f, 1f), weight / 0.25f);
+            else if (weight <= 0.5f) color = Color.Lerp(new Color(0f, 1f, 1f, 1f), new Color(0f, 1f, 0f, 1f), (weight - 0.25f) / 0.25f);
+            else if (weight <= 0.75f) color = Color.Lerp(new Color(0f, 1f, 0f, 1f), new Color(1f, 1f, 0f, 1f), (weight - 0.5f) / 0.25f);
+            else color = Color.Lerp(new Color(1f, 1f, 0f, 1f), new Color(1f, 0f, 0f, 1f), (weight - 0.75f) / 0.25f);
+            color.a = 1f;
+            return color;
+        }
+
         [Test]
         public void GpuOverlayDrawsTheRendererItselfAndLetsGoOfItsBuffers()
         {
