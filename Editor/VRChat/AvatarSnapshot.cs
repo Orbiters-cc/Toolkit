@@ -169,7 +169,8 @@ namespace Orbiters.Toolkit.Editor.VRChat
         /// The armature found from the avatar's humanoid hips alone (<see cref="AvatarSkeleton.Bones"/> without a body):
         /// what picks the body. Empty without a humanoid Animator.
         /// </summary>
-        public IReadOnlyCollection<Transform> Armature => Get("armature", Depends.Structure | Depends.Contents, () => AvatarSkeleton.Bones(Transform));
+        // Assets too: the humanoid's hips come through its Avatar asset (validity and mapping change when it is imported again).
+        public IReadOnlyCollection<Transform> Armature => Get("armature", Depends.Structure | Depends.Contents | Depends.Assets, () => AvatarSkeleton.Bones(Transform));
 
         /// <summary>The avatar's main body mesh (see <see cref="Attachments.AttachmentPlanner.Body(AvatarSnapshot, Transform)"/>).</summary>
         public SkinnedMeshRenderer Body => Get("body", Depends.Structure | Depends.Contents | Depends.Assets, () => FindBody(null));

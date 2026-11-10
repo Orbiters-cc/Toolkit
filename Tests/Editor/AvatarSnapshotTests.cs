@@ -135,6 +135,35 @@ public sealed class AvatarSnapshotTests
         Assert.AreSame(snapshot, AvatarSnapshot.Of(root), "one per root");
     }
 
+    // Review of TKV-1: an asset-only change (an Avatar or a mesh imported again, nothing in the scene) recomputes every
+    // fact that reads assets, the armature included, and the live snapshot then answers as a fresh one does.
+    [Test] public void AnAssetChangeRecomputesWhatReadsAssets()
+    {
+        var bone = Child("Hips").transform;
+        var skin = Skin("Body", 10, 2);
+        skin.sharedMesh.bindposes = new[] { Matrix4x4.identity };
+        skin.bones = new[] { bone };
+        var live = AvatarSnapshot.Of(root);
+        var armature = live.Armature;
+        var skeleton = live.Skeleton;
+        var index = live.BoneIndex;
+        var usage = live.Usage;
+        var skinned = live.SkinnedBones;
+
+        EditorChangeBus.Report(c => c.AddAsset("0123456789abcdef0123456789abcdef"));
+        Assert.AreNotSame(armature, live.Armature, "the armature reads the humanoid's Avatar asset");
+        Assert.AreNotSame(skeleton, live.Skeleton);
+        Assert.AreNotSame(index, live.BoneIndex);
+        Assert.AreNotSame(usage, live.Usage);
+        Assert.AreSame(skinned, live.SkinnedBones, "the skins' bone lists read no asset");
+
+        var fresh = AvatarSnapshot.Take(root);
+        CollectionAssert.AreEquivalent(fresh.Armature, live.Armature);
+        Assert.AreSame(fresh.Body, live.Body);
+        CollectionAssert.AreEquivalent(fresh.Skeleton, live.Skeleton);
+        CollectionAssert.AreEquivalent(fresh.BoneIndex.Bones, live.BoneIndex.Bones);
+    }
+
     [Test] public void ObjectsAddedWithoutTellingTheEditorAreNoticedAnyway()
     {
         var live = AvatarSnapshot.Of(root);
