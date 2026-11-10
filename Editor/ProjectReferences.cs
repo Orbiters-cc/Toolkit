@@ -43,23 +43,24 @@ namespace Orbiters.Toolkit.Editor
         /// </summary>
         public static async Task<ProjectReferences> ScanAsync(Action<float, string> progress = null, CancellationToken cancellation = default)
         {
-            // Nothing imported, deleted or moved since the last scan of this script session: its map still stands.
-            EditorChangeBus.Flush();
-            if (last != null && !filesChanged)
-            {
-                progress?.Invoke(1f, "Checked " + last.Scanned + " assets");
-                return last;
-            }
             if (!watching)
             {
                 watching = true;
                 EditorChangeBus.Changed += changes =>
                 {
-                    if (changes.Project || changes.Imported.Count + changes.Deleted.Count + changes.Moved.Count + changes.MovedFrom.Count > 0) filesChanged = true;
+                    if (changes.Project || changes.Imported.Count + changes.Deleted.Count + changes.Moved.Count + changes.MovedFrom.Count > 0) filesRevision++;
                 };
             }
-            filesChanged = false;
-            var map = new ProjectReferences();
+            // Nothing imported, deleted or moved since the last complete scan of this script session: its map still stands.
+            EditorChangeBus.Flush();
+            if (last != null && last.revision == filesRevision)
+            {
+                progress?.Invoke(1f, "Checked " + last.Scanned + " assets");
+                return last;
+            }
+            // Only a scan that finishes against files that did not change meanwhile is kept (a cancelled or failed one never).
+            last = null;
+            var map = new ProjectReferences { revision = filesRevision };
             // Every asset, not a list of types: a kind left out (an override controller using a clip) would make what it uses
             // look unused.
             var assets = AssetDatabase.FindAssets("", new[] { "Assets" }).Select(AssetDatabase.GUIDToAssetPath)
@@ -99,12 +100,28 @@ namespace Orbiters.Toolkit.Editor
             }
             progress?.Invoke(1f, "Checked " + assets.Count + " assets");
             // A file changed during the scan leaves the next one to read it.
-            if (!filesChanged) last = map;
+            EditorChangeBus.Flush();
+            if (map.Current) last = map;
             return map;
         }
 
+        /// <summary>
+        /// False once a file was imported, deleted or moved after this map's scan started (also during it): what it says may
+        /// be out of date, and nothing should be deleted on its word.
+        /// </summary>
+        public bool Current
+        {
+            get
+            {
+                EditorChangeBus.Flush();
+                return revision == filesRevision;
+            }
+        }
+
+        private long revision;
         private static ProjectReferences last;
-        private static bool watching, filesChanged;
+        private static bool watching;
+        private static long filesRevision;
 
         // Each asset's direct dependencies, read again only when the asset or what it uses changed.
         private static readonly Dictionary<string, (UnityEngine.Hash128 Hash, string[] Dependencies)> Direct = new Dictionary<string, (UnityEngine.Hash128, string[])>(StringComparer.OrdinalIgnoreCase);

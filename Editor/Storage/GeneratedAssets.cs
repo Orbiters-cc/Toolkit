@@ -93,6 +93,9 @@ namespace Orbiters.Toolkit.Editor.Storage
                 candidates.RemoveAll(Rendered().Contains);
                 if (candidates.Count == 0) { PutAside(removed); return removed; }
                 var references = await ProjectReferences.ScanAsync();
+                // A file imported, deleted or moved since the scan started may use a candidate: nothing goes on its word,
+                // and the sweep runs again once the editor is quiet.
+                if (!references.Current) { again = true; return removed; }
                 // The scan spans editor frames: what is loaded now decides.
                 var loaded = Loaded();
                 var removable = new HashSet<string>(candidates.Where(p => !loaded.Contains(p) && File.Exists(Path.Combine(Root, p))), StringComparer.OrdinalIgnoreCase);

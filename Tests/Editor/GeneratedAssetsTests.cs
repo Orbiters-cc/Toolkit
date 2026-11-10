@@ -116,4 +116,57 @@ public sealed class GeneratedAssetsTests
         Assert.AreNotSame(first.Result, after.Result);
         Assert.That(after.Result.UsersOf(folder + "/Idle.anim"), Does.Contain(folder + "/Idle.controller"));
     }
+
+    // Review of TKV-28: a scan cancelled after an import never lets the map from before the import decide a sweep; a
+    // prefab on disk (not loaded) that uses a tracked file keeps it.
+    [UnityTest] public IEnumerator ACancelledScanNeverLeavesAnOldMapToSweepWith()
+    {
+        string path = folder + "/Fit.asset";
+        var mesh = new Mesh { name = "Fit" };
+        AssetDatabase.CreateAsset(mesh, path);
+        GeneratedAssets.Track(path);
+        var before = ProjectReferences.ScanAsync();
+        yield return Wait(before);
+        Assert.That(before.Result.UsersOf(path), Is.Empty);
+
+        var go = new GameObject("Generated mesh user");
+        go.AddComponent<MeshFilter>().sharedMesh = mesh;
+        PrefabUtility.SaveAsPrefabAsset(go, folder + "/User.prefab");
+        Object.DestroyImmediate(go);
+        using (var cancelled = new System.Threading.CancellationTokenSource())
+        {
+            cancelled.Cancel();
+            var stopped = ProjectReferences.ScanAsync(null, cancelled.Token);
+            yield return Wait(stopped);
+            Assert.That(stopped.IsCanceled, Is.True);
+        }
+        var sweep = GeneratedAssets.SweepAsync();
+        yield return Wait(sweep);
+        Assert.That(sweep.Result, Does.Not.Contain(path), "the prefab saved before the cancelled scan uses it");
+        Assert.True(File.Exists(path));
+    }
+
+    // A file imported while a scan runs leaves that scan's map out of date: it is not kept, and says so.
+    [UnityTest] public IEnumerator AnImportDuringAScanMakesItsMapNotCurrent()
+    {
+        var clip = new AnimationClip { name = "Idle" };
+        AssetDatabase.CreateAsset(clip, folder + "/Idle.anim");
+        bool imported = false;
+        var during = ProjectReferences.ScanAsync((value, _) =>
+        {
+            // The scan's last report, before it decides whether its map stands.
+            if (imported || value < 1f) return;
+            imported = true;
+            UnityEditor.Animations.AnimatorController.CreateAnimatorControllerAtPathWithClip(folder + "/Idle.controller", clip);
+            AssetDatabase.SaveAssets();
+        });
+        yield return Wait(during);
+        Assert.True(imported);
+        Assert.That(during.Result.Current, Is.False);
+        var next = ProjectReferences.ScanAsync();
+        yield return Wait(next);
+        Assert.AreNotSame(during.Result, next.Result);
+        Assert.That(next.Result.Current, Is.True);
+        Assert.That(next.Result.UsersOf(folder + "/Idle.anim"), Does.Contain(folder + "/Idle.controller"));
+    }
 }
