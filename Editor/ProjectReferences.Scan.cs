@@ -119,10 +119,6 @@ namespace Orbiters.Toolkit.Editor
             ".flare", ".fontsettings", ".guiskin", ".giparams", ".brush", ".preset", ".signal", ".shadervariants", ".scenetemplate",
         };
 
-        // Marks, in a reading's importer name, an importer a tool wrote (a ScriptedImporter): its files are in that tool's
-        // own format.
-        private const string ScriptedImporterPrefix = "ScriptedImporter:";
-
         // Of those, the ones Unity's dependency list says nothing more about than their .meta.
         private static readonly HashSet<string> NoDependencies = new HashSet<string>(StringComparer.Ordinal)
         {
@@ -159,8 +155,7 @@ namespace Orbiters.Toolkit.Editor
                 {
                     Stats.UnityAsked++;
                     var type = AssetDatabase.GetImporterType(read.Path);
-                    read.Importer = type == null ? null
-                        : (typeof(UnityEditor.AssetImporters.ScriptedImporter).IsAssignableFrom(type) ? ScriptedImporterPrefix : "") + type.Name;
+                    read.Importer = type?.Name;
                     read.OwnGuid = AssetDatabase.AssetPathToGUID(read.Path);
                     var dependencies = new List<string>();
                     if (type != null && !NoDependencies.Contains(type.Name))
@@ -175,29 +170,15 @@ namespace Orbiters.Toolkit.Editor
                     read.UnityKnown = true;
                 }
             }
-            // Files whose own content is not read: pictures, sounds, models, libraries (their importers never take a GUID
-            // from inside the file; their .meta is read), and binary files. In a Force Text project (VRChat's default) Unity
-            // writes few of those itself: types marked [PreferBinarySerialization] (LightingData, NavMesh data, and tools'
-            // own caches), terrain data, files brought in by a .unitypackage or copied from a Force Binary project that
-            // Unity has not written since. Only those can make the scan uncertain, and only while they are not as Unity
-            // last imported them (checked afresh every time); a binary file a tool's own importer reads never does.
-            if (!read.ContentRead && read.Stamp.Size >= 0)
-            {
-                // A file not yet imported keeps the importer its kind gets by default.
-                bool plain = !string.IsNullOrEmpty(read.Importer) ? NoInnerReferences.Contains(read.Importer) : Media.Contains(Path.GetExtension(read.Path));
-                // A binary file read by a tool's own importer (a Substance Painter project, a VRM) is in that tool's format:
-                // it names no asset in its bytes, and what its import uses comes from Unity's dependencies and its .meta.
-                bool foreign = read.Importer != null && read.Importer.StartsWith(ScriptedImporterPrefix, StringComparison.Ordinal);
-                // Unity's own serialized files are told by their extension: Unity names the importer of an asset and of a
-                // file it has no importer for alike, so the importer's name cannot tell a binary asset from a Substance
-                // Painter project. Only a serialized file whose bytes are not known to be what Unity imported may use what
-                // its import does not say.
-                bool serialized = UnitySerializedExtensions.Contains(Path.GetExtension(read.Path));
-                if (serialized && !plain && !foreign && !ImportStamps.Current(read.Path, read.Stamp))
-                    throw new UncertainReferencesException(string.IsNullOrEmpty(read.Importer)
-                        ? read.Path + " is in a binary format Unity has not imported: what it uses cannot be read."
-                        : read.Path + " changed since Unity last imported it: what it uses is known once Unity imports it again.");
-            }
+            // Files whose own content is not read: pictures, sounds, models, libraries, a tool's own binary formats (none
+            // takes a GUID from inside the file; their .meta is read), and Unity's own files written in binary. For those
+            // Unity's import says what they use, as it did for every file before this scan read text: on real projects
+            // nothing reliable says whether a binary file changed since its import (a file copied or checked out anew is
+            // newer than an import that still stands), and refusing on a doubt there stopped every scan for good. Only a
+            // serialized file Unity has not imported at all (a binary settings file, a file not yet refreshed) leaves the
+            // scan unable to say what it uses.
+            if (!read.ContentRead && read.Stamp.Size >= 0 && string.IsNullOrEmpty(read.Importer) && UnitySerializedExtensions.Contains(Path.GetExtension(read.Path)))
+                throw new UncertainReferencesException(read.Path + " is in a binary format Unity has not imported: what it uses cannot be read.");
             var uses = new HashSet<string>(read.Guids, StringComparer.Ordinal);
             if (read.Dependencies != null) uses.UnionWith(read.Dependencies);
             if (!string.IsNullOrEmpty(read.OwnGuid)) uses.Remove(read.OwnGuid);

@@ -275,38 +275,6 @@ public sealed class GeneratedAssetsTests
         finally { if (File.Exists(file)) File.Delete(file); }
     }
 
-    // Round 2 (c): a file in Unity's binary format changed on disk since Unity imported it cannot say what it uses: the
-    // scan says so, and a sweep keeps everything until Unity imports the file again.
-    [UnityTest] public IEnumerator ABinaryFileChangedSinceItsImportKeepsEverything()
-    {
-        string path = folder + "/Fit.asset";
-        AssetDatabase.CreateAsset(new Mesh { name = "Fit" }, path);
-        GeneratedAssets.Track(path);
-        string binary = folder + "/Binary.asset";
-        // [PreferBinarySerialization]: binary on disk in a Force Text project too, also after an import.
-        AssetDatabase.CreateAsset(ScriptableObject.CreateInstance<BinaryReferencesFixture>(), binary);
-        AssetDatabase.ImportAsset(binary, ImportAssetOptions.ForceSynchronousImport | ImportAssetOptions.ForceUpdate);
-        Assert.That(File.ReadAllBytes(binary).Take(8192).Contains((byte)0), Is.True, "written in Unity's binary format");
-
-        var fresh = ProjectReferences.ScanAsync();
-        yield return Wait(fresh);
-        Assert.That(TaskResults.Done(fresh).UsersOf(path), Is.Empty);
-
-        File.SetLastWriteTimeUtc(binary, DateTime.UtcNow.AddMinutes(5));
-        var stale = ProjectReferences.ScanAsync();
-        while (!stale.IsCompleted) yield return null;
-        Assert.That(stale.Exception?.GetBaseException(), Is.InstanceOf<UncertainReferencesException>());
-        var sweep = GeneratedAssets.SweepAsync();
-        yield return Wait(sweep);
-        Assert.That(TaskResults.Done(sweep), Is.Empty, "nothing goes while a file's import is out of date");
-        Assert.True(File.Exists(path));
-
-        AssetDatabase.ImportAsset(binary, ImportAssetOptions.ForceSynchronousImport | ImportAssetOptions.ForceUpdate);
-        sweep = GeneratedAssets.SweepAsync();
-        yield return Wait(sweep);
-        Assert.That(TaskResults.Done(sweep), Does.Contain(path), "imported again: what it uses is known, and nothing uses the mesh");
-    }
-
     // Round 2 (c, text): a prefab edited on disk and not imported yet already counts with what it now uses.
     [UnityTest] public IEnumerator APrefabEditedAndNotImportedKeepsWhatItUses()
     {
