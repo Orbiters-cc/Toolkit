@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using Orbiters.Toolkit.Meshes;
 using UnityEngine;
 
 namespace Orbiters.Toolkit.Editor.Meshes
@@ -345,89 +346,18 @@ namespace Orbiters.Toolkit.Editor.Meshes
 
         /// <summary>
         /// How far each point is from the other version's surface (its closest triangle): a mesh subdivided or re-exported
-        /// with other vertices shows only where its shape really changed.
+        /// with other vertices shows only where its shape really changed. Exact, however far the point is.
         /// </summary>
         public static float[] SurfaceDistances(Vector3[] points, int[] triangles, Vector3[] query, float size)
         {
-            var result = new float[query.Length];
             if (triangles.Length < 3) return Distances(points, query, size);
-            // Cells about the size of a triangle: each triangle lands in a few of them.
-            double edges = 0;
-            int sampled = 0;
-            for (int t = 0; t + 2 < triangles.Length; t += Math.Max(3, triangles.Length / 3000 * 3), sampled++)
-                edges += (points[triangles[t]] - points[triangles[t + 1]]).magnitude;
-            float cell = Mathf.Max(size / 256f, (float)(edges / Math.Max(1, sampled)) * 1.5f, 1e-5f);
-            var grid = new Dictionary<Vector3Int, List<int>>();
-            var large = new List<int>();
-            Vector3Int Key(Vector3 p) => new Vector3Int(Mathf.FloorToInt(p.x / cell), Mathf.FloorToInt(p.y / cell), Mathf.FloorToInt(p.z / cell));
-            for (int t = 0; t + 2 < triangles.Length; t += 3)
-            {
-                Vector3 a = points[triangles[t]], b = points[triangles[t + 1]], c = points[triangles[t + 2]];
-                var min = Key(Vector3.Min(a, Vector3.Min(b, c)));
-                var max = Key(Vector3.Max(a, Vector3.Max(b, c)));
-                // A triangle far larger than a cell is checked against every point instead of filling the grid.
-                if ((long)(max.x - min.x + 1) * (max.y - min.y + 1) * (max.z - min.z + 1) > 64) { large.Add(t); continue; }
-                for (int x = min.x; x <= max.x; x++)
-                for (int y = min.y; y <= max.y; y++)
-                for (int z = min.z; z <= max.z; z++)
-                {
-                    var key = new Vector3Int(x, y, z);
-                    if (!grid.TryGetValue(key, out var list)) grid[key] = list = new List<int>();
-                    list.Add(t);
-                }
-            }
-            // Points are independent: searched in parallel over the read-only grid, leaving the editor half the cores.
-            System.Threading.Tasks.Parallel.For(0, query.Length, HalfTheCores, i =>
-            {
-                var p = query[i];
-                var key = Key(p);
-                float best = float.MaxValue;
-                foreach (int t in large)
-                    best = Mathf.Min(best, (Closest(p, points[triangles[t]], points[triangles[t + 1]], points[triangles[t + 2]]) - p).sqrMagnitude);
-                // Rings of cells around the point, one shell at a time. Once rings up to r are searched, any other triangle is
-                // at least r cells away: a point on the other surface stops after the first ring.
-                for (int ring = 0; ring <= 4; ring++)
-                {
-                    float reach = (ring - 1) * cell;
-                    if (ring > 1 && best <= reach * reach) break;
-                    for (int x = -ring; x <= ring; x++)
-                    for (int y = -ring; y <= ring; y++)
-                    for (int z = -ring; z <= ring; z++)
-                    {
-                        if (Mathf.Max(Mathf.Abs(x), Mathf.Max(Mathf.Abs(y), Mathf.Abs(z))) != ring) continue;
-                        if (!grid.TryGetValue(new Vector3Int(key.x + x, key.y + y, key.z + z), out var list)) continue;
-                        foreach (int t in list)
-                            best = Mathf.Min(best, (Closest(p, points[triangles[t]], points[triangles[t + 1]], points[triangles[t + 2]]) - p).sqrMagnitude);
-                    }
-                }
-                result[i] = best == float.MaxValue ? cell * 4f : Mathf.Sqrt(best);
-            });
+            var result = new float[query.Length];
+            var bvh = MeshBvh.Build(points, triangles);
+            var hits = new MeshBvh.Hit[query.Length];
+            // Points are independent: searched in parallel, leaving the editor half the cores.
+            bvh.ClosestPoints(query, float.PositiveInfinity, hits, Math.Max(1, Environment.ProcessorCount / 2));
+            for (int i = 0; i < query.Length; i++) result[i] = hits[i].Found ? hits[i].Distance : size;
             return result;
-        }
-
-        private static readonly System.Threading.Tasks.ParallelOptions HalfTheCores =
-            new System.Threading.Tasks.ParallelOptions { MaxDegreeOfParallelism = Math.Max(1, Environment.ProcessorCount / 2) };
-
-        // The closest point of a triangle (Ericson, Real-Time Collision Detection 5.1.5).
-        private static Vector3 Closest(Vector3 p, Vector3 a, Vector3 b, Vector3 c)
-        {
-            Vector3 ab = b - a, ac = c - a, ap = p - a;
-            float d1 = Vector3.Dot(ab, ap), d2 = Vector3.Dot(ac, ap);
-            if (d1 <= 0f && d2 <= 0f) return a;
-            Vector3 bp = p - b;
-            float d3 = Vector3.Dot(ab, bp), d4 = Vector3.Dot(ac, bp);
-            if (d3 >= 0f && d4 <= d3) return b;
-            float vc = d1 * d4 - d3 * d2;
-            if (vc <= 0f && d1 >= 0f && d3 <= 0f) return a + ab * (d1 / (d1 - d3));
-            Vector3 cp = p - c;
-            float d5 = Vector3.Dot(ab, cp), d6 = Vector3.Dot(ac, cp);
-            if (d6 >= 0f && d5 <= d6) return c;
-            float vb = d5 * d2 - d1 * d6;
-            if (vb <= 0f && d2 >= 0f && d6 <= 0f) return a + ac * (d2 / (d2 - d6));
-            float va = d3 * d6 - d5 * d4;
-            if (va <= 0f && d4 - d3 >= 0f && d5 - d6 >= 0f) return b + (c - b) * ((d4 - d3) / ((d4 - d3) + (d5 - d6)));
-            float denominator = 1f / (va + vb + vc);
-            return a + ab * (vb * denominator) + ac * (vc * denominator);
         }
 
         private static Color[] Heat(float[] distances, float threshold, float max)

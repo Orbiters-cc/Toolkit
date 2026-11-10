@@ -402,9 +402,8 @@ namespace Orbiters.Toolkit.Editor.Meshes
 
                 // Blendshapes kept on the mesh at their weight.
                 var baked = new bool[mesh.blendShapeCount];
-                var dv = new Vector3[n];
-                var dn = new Vector3[n];
-                BlendShapeEvaluation.Scratch scratch = null;
+                // Read once, sparse: baked, hashed for the weld and written from the same table.
+                var table = mesh.blendShapeCount > 0 ? BlendShapeTable.Read(mesh, BlendShapeTable.Parts.Normals) : null;
                 bool clamp = BlendShapeEvaluation.ClampWeights;
                 foreach (string shapeName in item.Baked)
                 {
@@ -412,8 +411,7 @@ namespace Orbiters.Toolkit.Editor.Meshes
                     if (shape < 0) { result.Warnings.Add(name + " has no blendshape " + shapeName + " to apply."); continue; }
                     baked[shape] = true;
                     // As the renderer shows it: Unity's skinning, with its weight clamping.
-                    BlendShapeEvaluation.Add(mesh, shape, item.Weight(shape), clamp, positions, hasNormals ? normals : null,
-                        scratch ?? (scratch = new BlendShapeEvaluation.Scratch(n)));
+                    table.AddTo(shape, item.Weight(shape), clamp, positions, hasNormals ? normals : null);
                 }
                 if (hasNormals && baked.Any(b => b))
                     for (int v = 0; v < n; v++)
@@ -479,15 +477,7 @@ namespace Orbiters.Toolkit.Editor.Meshes
 
                 // What the kept blendshapes move each vertex by, as one hash: vertices weld only where every shape moves them alike.
                 var kept = Enumerable.Range(0, mesh.blendShapeCount).Where(i => !baked[i] && mesh.GetBlendShapeFrameCount(i) > 0).ToList();
-                ulong[] shapeHash = kept.Count > 0 ? new ulong[n] : null;
-                foreach (int shape in kept)
-                    for (int f = 0; f < mesh.GetBlendShapeFrameCount(shape); f++)
-                    {
-                        mesh.GetBlendShapeFrameVertices(shape, f, dv, null, null);
-                        ulong salt = Mix((ulong)shape << 16 | (uint)f);
-                        for (int v = 0; v < n; v++)
-                            if (dv[v].x != 0f || dv[v].y != 0f || dv[v].z != 0f) shapeHash[v] = Mix(shapeHash[v] ^ salt ^ Hash(dv[v]));
-                    }
+                ulong[] shapeHash = kept.Count > 0 ? table.MotionSignatures(kept) : null;
 
                 // Control points: Unity's vertices welded where their place, weights and blendshape offsets agree.
                 var pointOf = new int[n];
@@ -580,7 +570,7 @@ namespace Orbiters.Toolkit.Editor.Meshes
                 foreach (long material in slotMaterials) Connect(material, model.Id);
 
                 if (skinned) Skin(item, name, model, geometryId, points, skinStart, influences);
-                if (kept.Count > 0) BlendShapes(item, name, geometryId, kept, points, hasNormals, dv, dn);
+                if (kept.Count > 0) BlendShapes(item, name, geometryId, kept, table, points, pointOf, hasNormals);
             }
 
             private static bool Same(int a, int b, Vector3[] positions, bool skinned, int[] skinStart, NativeArray<BoneWeight1> influences, ulong[] shapeHash)
@@ -756,16 +746,14 @@ namespace Orbiters.Toolkit.Editor.Meshes
             // ---- Blendshapes -----------------------------------------------------------------------------------------------
 
             // A channel per blendshape at the weight it shows, a shape per frame: the offsets of the control points it moves.
-            private void BlendShapes(FbxExportMesh item, string name, long geometryId, List<int> kept, List<int> points, bool hasNormals, Vector3[] dv, Vector3[] dn)
+            private void BlendShapes(FbxExportMesh item, string name, long geometryId, List<int> kept, BlendShapeTable table, List<int> points, int[] pointOf, bool hasNormals)
             {
                 var mesh = item.Mesh;
                 var blend = Object("Deformer", Id(), name, "Deformer", "BlendShape");
                 long blendId = (long)blend.Properties[0];
                 blend.Add("Version", 100);
                 Connect(blendId, geometryId);
-                var indexes = new List<int>();
-                var offsets = new List<double>();
-                var normalOffsets = new List<double>();
+                var moved = new List<long>();
                 var inBetweens = new List<string>();
                 foreach (int shape in kept)
                 {
@@ -782,33 +770,45 @@ namespace Orbiters.Toolkit.Editor.Meshes
                     Connect(channelId, blendId);
                     for (int f = 0; f < frames; f++)
                     {
-                        mesh.GetBlendShapeFrameVertices(shape, f, dv, hasNormals ? dn : null, null);
-                        indexes.Clear();
-                        offsets.Clear();
-                        normalOffsets.Clear();
-                        for (int point = 0; point < points.Count; point++)
+                        // The control points the frame moves (each point's own vertex, as the weld chose it), by point.
+                        var frame = table.Shapes[shape].Frames[f];
+                        var frameIndices = frame.Indices;
+                        var frameDeltas = frame.Deltas;
+                        var frameNormals = frame.Normals;
+                        bool withNormals = hasNormals && frame.HasNormals;
+                        moved.Clear();
+                        for (int k = 0; k < frameIndices.Length; k++)
                         {
-                            int v = points[point];
-                            Vector3 d = dv[v], m = hasNormals ? dn[v] : Vector3.zero;
+                            int v = frameIndices[k];
+                            int point = pointOf[v];
+                            if (point < 0 || points[point] != v) continue;
+                            Vector3 d = frameDeltas[k], m = withNormals ? frameNormals[k] : Vector3.zero;
                             if (d.x == 0f && d.y == 0f && d.z == 0f && m.x == 0f && m.y == 0f && m.z == 0f) continue;
-                            indexes.Add(point);
-                            offsets.Add(-(double)d.x); offsets.Add(d.y); offsets.Add(d.z);
-                            normalOffsets.Add(-(double)m.x); normalOffsets.Add(m.y); normalOffsets.Add(m.z);
+                            moved.Add((long)point << 32 | (uint)k);
                         }
+                        moved.Sort();
                         // A shape that moves nothing still names one point, so importers keep it.
-                        if (indexes.Count == 0)
+                        int count = Math.Max(1, moved.Count);
+                        var indexes = new int[count];
+                        var offsets = new double[count * 3];
+                        var normalOffsets = hasNormals ? new double[count * 3] : null;
+                        for (int i = 0; i < moved.Count; i++)
                         {
-                            indexes.Add(0);
-                            offsets.AddRange(new[] { 0d, 0d, 0d });
-                            normalOffsets.AddRange(new[] { 0d, 0d, 0d });
+                            int k = (int)(moved[i] & 0xFFFFFFFF);
+                            indexes[i] = (int)(moved[i] >> 32);
+                            Vector3 d = frameDeltas[k];
+                            offsets[i * 3] = -(double)d.x; offsets[i * 3 + 1] = d.y; offsets[i * 3 + 2] = d.z;
+                            if (normalOffsets == null) continue;
+                            Vector3 m = withNormals ? frameNormals[k] : Vector3.zero;
+                            normalOffsets[i * 3] = -(double)m.x; normalOffsets[i * 3 + 1] = m.y; normalOffsets[i * 3 + 2] = m.z;
                         }
                         string frameName = f == frames - 1 ? shapeName : shapeName + " " + weights[f].ToString("0.###", System.Globalization.CultureInfo.InvariantCulture);
                         var target = Object("Geometry", Id(), frameName, "Geometry", "Shape");
                         target.Add("Properties70");
                         target.Add("Version", 100);
-                        target.Add("Indexes", indexes.ToArray());
-                        target.Add("Vertices", offsets.ToArray());
-                        if (hasNormals) target.Add("Normals", normalOffsets.ToArray());
+                        target.Add("Indexes", indexes);
+                        target.Add("Vertices", offsets);
+                        if (hasNormals) target.Add("Normals", normalOffsets);
                         Connect((long)target.Properties[0], channelId);
                     }
                     result.BlendShapes++;

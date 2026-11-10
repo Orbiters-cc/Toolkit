@@ -4,7 +4,8 @@
   "references": [
     "Unity.Burst",
     "Unity.Mathematics",
-    "Unity.Collections"
+    "Unity.Collections",
+    "Orbiters.Toolkit"
   ],
   "includePlatforms": [
     "Editor"

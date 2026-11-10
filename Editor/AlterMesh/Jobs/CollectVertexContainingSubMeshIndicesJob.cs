@@ -14,7 +14,7 @@ namespace Orbiters.AlterMesh
     {
         [ReadOnly] public Mesh.MeshData Mesh;
 
-        public NativeList<uint> VertexContainingSubMeshIndices;
+        public NativeList<ulong> VertexContainingSubMeshIndices;
 
         public void Execute()
         {
@@ -28,7 +28,8 @@ namespace Orbiters.AlterMesh
         private void ProcessSubMesh(int subMeshIndex)
         {
             var subMesh = Mesh.GetSubMesh(subMeshIndex);
-            uint bit = 1u << subMeshIndex;
+            // A bit per submesh, up to 64 (MeshSimplifier refuses more): a 32-bit mask wrapped submesh 32 onto 0.
+            ulong bit = 1UL << subMeshIndex;
 
             var subMeshVertexContainingSubMeshIndices = VertexContainingSubMeshIndices.AsArray().GetSubArray(subMesh.firstVertex, subMesh.vertexCount).AsSpan();
 

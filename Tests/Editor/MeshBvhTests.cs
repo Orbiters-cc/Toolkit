@@ -217,6 +217,225 @@ namespace Orbiters.Toolkit.Editor.Tests
             }
         }
 
+        // TKG-21: the flat SAH tree answers what testing every triangle answers. Burst may round the last bit differently
+        // from managed code, so near ties are compared by distance.
+        private static float BruteDistance2(Vector3[] vertices, int[] triangles, int t, Vector3 p) =>
+            (Triangle.ClosestPoint(p, vertices[triangles[t * 3]], vertices[triangles[t * 3 + 1]], vertices[triangles[t * 3 + 2]], out _) - p).sqrMagnitude;
+
+        [Test]
+        public void ClosestPointMatchesEveryTriangleTested()
+        {
+            Sphere(30, 50, out var vertices, out var triangles);
+            var random = new System.Random(11);
+            vertices = vertices.Select(v => v * (1 + (float)(random.NextDouble() - .5) * .4f)).ToArray();
+            var bvh = MeshBvh.Build(vertices, triangles);
+            var points = new Vector3[600];
+            for (int i = 0; i < points.Length; i++)
+                points[i] = new Vector3((float)random.NextDouble() * 4 - 2, (float)random.NextDouble() * 4 - 2, (float)random.NextDouble() * 4 - 2);
+            var batch = new MeshBvh.Hit[points.Length];
+            bvh.ClosestPoints(points, 100f, batch);
+            for (int i = 0; i < points.Length; i++)
+            {
+                float best = float.PositiveInfinity;
+                for (int t = 0; t < triangles.Length / 3; t++) best = Mathf.Min(best, BruteDistance2(vertices, triangles, t, points[i]));
+                var hit = bvh.ClosestPoint(points[i], 100f);
+                Assert.That(hit.Found, Is.True, "point " + i);
+                Assert.That(hit.Distance, Is.EqualTo(Mathf.Sqrt(best)).Within(1e-5f), "point " + i);
+                Assert.That(Mathf.Sqrt(BruteDistance2(vertices, triangles, hit.Triangle, points[i])), Is.EqualTo(hit.Distance).Within(1e-5f), "point " + i + ": the hit is on its triangle");
+                Assert.That(batch[i].Triangle, Is.EqualTo(hit.Triangle), "point " + i + ": the batch agrees");
+                Assert.That(batch[i].Distance, Is.EqualTo(hit.Distance), "point " + i + ": the batch agrees");
+            }
+        }
+
+        // Duplicated faces (every triangle twice, the same corners) tie exactly: the lowest index wins in any order.
+        [Test]
+        public void TiesGoToTheLowestTriangleWhateverTheLayout()
+        {
+            Sphere(12, 24, out var vertices, out var triangles);
+            int count = triangles.Length / 3;
+            // Copy k + count has the same corners as k.
+            var doubled = triangles.Concat(triangles).ToArray();
+            // The same in reverse order, so the tree meets the copies first.
+            var reversed = new int[doubled.Length];
+            for (int t = 0; t < 2 * count; t++)
+                for (int k = 0; k < 3; k++) reversed[t * 3 + k] = doubled[(2 * count - 1 - t) * 3 + k];
+            var forward = MeshBvh.Build(vertices, doubled);
+            var backward = MeshBvh.Build(vertices, reversed);
+            var random = new System.Random(2);
+            for (int i = 0; i < 300; i++)
+            {
+                var p = new Vector3((float)random.NextDouble() * 3 - 1.5f, (float)random.NextDouble() * 3 - 1.5f, (float)random.NextDouble() * 3 - 1.5f);
+                var a = forward.ClosestPoint(p, 10f);
+                var b = backward.ClosestPoint(p, 10f);
+                Assert.That(a.Triangle, Is.LessThan(count), "point " + i + ": the original, not its copy");
+                Assert.That(2 * count - 1 - b.Triangle, Is.GreaterThanOrEqualTo(count), "point " + i + ": in reverse order the lower index is the copy");
+                Assert.That(b.Distance, Is.EqualTo(a.Distance), "point " + i);
+                var direction = -p.normalized;
+                var ra = forward.Raycast(p * 3f, direction, 100f);
+                var rb = backward.Raycast(p * 3f, direction, 100f);
+                Assert.That(ra.Found, Is.EqualTo(rb.Found), "ray " + i);
+                if (!ra.Found) continue;
+                Assert.That(ra.Triangle, Is.LessThan(count), "ray " + i);
+                Assert.That(2 * count - 1 - rb.Triangle, Is.GreaterThanOrEqualTo(count), "ray " + i);
+            }
+        }
+
+        [Test]
+        public void SubsetsFiltersAndBatchRaysAgree()
+        {
+            Sphere(16, 32, out var vertices, out var triangles);
+            int count = triangles.Length / 3;
+            var include = Enumerable.Range(0, count).Select(t => t % 3 != 0).ToArray();
+            var subset = MeshBvh.Build(vertices, triangles, include);
+            var all = MeshBvh.Build(vertices, triangles);
+            var random = new System.Random(4);
+            var origins = new Vector3[400];
+            var directions = new Vector3[400];
+            for (int i = 0; i < origins.Length; i++)
+            {
+                origins[i] = new Vector3((float)random.NextDouble() * 6 - 3, (float)random.NextDouble() * 6 - 3, (float)random.NextDouble() * 6 - 3);
+                directions[i] = (-origins[i] + new Vector3((float)random.NextDouble() - .5f, 0, 0)).normalized;
+            }
+            var batch = new MeshBvh.Hit[origins.Length];
+            subset.Raycasts(origins, directions, 100f, false, batch);
+            for (int i = 0; i < origins.Length; i++)
+            {
+                var a = subset.ClosestPoint(origins[i], 10f);
+                var b = all.ClosestPoint(origins[i], 10f, new EveryThirdLeftOut());
+                Assert.That(include[a.Triangle] && include[b.Triangle], Is.True, "point " + i + ": never a triangle left out");
+                Assert.That(a.Distance, Is.EqualTo(b.Distance).Within(1e-5f), "point " + i + ": a subset tree and a filter agree");
+                var ray = subset.Raycast(origins[i], directions[i], 100f, backfaces: false);
+                Assert.That(batch[i].Found, Is.EqualTo(ray.Found), "ray " + i);
+                if (ray.Found) Assert.That(batch[i].Triangle, Is.EqualTo(ray.Triangle), "ray " + i);
+                if (ray.Found) Assert.That(include[ray.Triangle], Is.True, "ray " + i);
+            }
+        }
+
+        // Review: a ray parallel to an axis that meets a triangle on its box's face (the review's case and its mirrors, and
+        // axis-aligned rays onto the edges and corners of a grid) is found as testing every triangle finds it.
+        [Test]
+        public void AxisParallelRaysOnBoxFacesAreFound()
+        {
+            var cases = new List<(Vector3[] Vertices, int[] Triangles, Vector3 Origin, Vector3 Direction)>();
+            Vector3 Swap(Vector3 v, int order, Vector3 sign)
+            {
+                var axes = new[] { new[] { 0, 1, 2 }, new[] { 1, 2, 0 }, new[] { 2, 0, 1 }, new[] { 0, 2, 1 }, new[] { 2, 1, 0 }, new[] { 1, 0, 2 } }[order];
+                return Vector3.Scale(new Vector3(v[axes[0]], v[axes[1]], v[axes[2]]), sign);
+            }
+            var triangle = new[] { new Vector3(0, 0, 1), new Vector3(1, 0, 1), new Vector3(1, 1, 1) };
+            foreach (var sign in new[] { Vector3.one, new Vector3(-1, 1, 1), new Vector3(1, -1, 1), new Vector3(1, 1, -1), -Vector3.one })
+                for (int order = 0; order < 6; order++)
+                    cases.Add((triangle.Select(v => Swap(v, order, sign)).ToArray(), new[] { 0, 1, 2 }, Swap(new Vector3(1, .25f, 0), order, sign), Swap(new Vector3(0, 0, 1), order, sign)));
+            // A grid of unit squares at z = 1, rays along z through its lines and corners.
+            var grid = new List<Vector3>();
+            var gridTriangles = new List<int>();
+            for (int y = 0; y <= 4; y++) for (int x = 0; x <= 4; x++) grid.Add(new Vector3(x, y, 1));
+            for (int y = 0; y < 4; y++)
+                for (int x = 0; x < 4; x++)
+                {
+                    int a = y * 5 + x;
+                    gridTriangles.AddRange(new[] { a, a + 5, a + 1, a + 1, a + 5, a + 6 });
+                }
+            for (float x = 0; x <= 4f; x += .5f)
+                for (float y = 0; y <= 4f; y += .5f)
+                    cases.Add((grid.ToArray(), gridTriangles.ToArray(), new Vector3(x, y, 0), Vector3.forward));
+            for (int c = 0; c < cases.Count; c++)
+            {
+                var (vertices, triangles, origin, direction) = cases[c];
+                var bvh = MeshBvh.Build(vertices, triangles);
+                float nearest = float.PositiveInfinity;
+                for (int t = 0; t < triangles.Length / 3; t++)
+                    if (Triangle.Raycast(origin, direction, vertices[triangles[t * 3]], vertices[triangles[t * 3 + 1]], vertices[triangles[t * 3 + 2]], true, false, out float d, out _))
+                        nearest = Mathf.Min(nearest, d);
+                var hit = bvh.Raycast(origin, direction, 10f);
+                Assert.That(hit.Found, Is.EqualTo(!float.IsPositiveInfinity(nearest)), "case " + c + ": " + origin + " along " + direction);
+                if (hit.Found) Assert.That(hit.Distance, Is.EqualTo(nearest).Within(1e-6f), "case " + c);
+                var batch = new MeshBvh.Hit[1];
+                bvh.Raycasts(new[] { origin }, new[] { direction }, 10f, true, batch);
+                Assert.That(batch[0].Found, Is.EqualTo(hit.Found), "case " + c + " (batch)");
+                var filtered = bvh.Raycast(origin, direction, 10f, true, new AcceptAllTriangles());
+                Assert.That(filtered.Found, Is.EqualTo(hit.Found), "case " + c + " (filtered)");
+            }
+            Assert.That(MeshBvh.Build(triangle, new[] { 0, 1, 2 }).Raycast(new Vector3(1, .25f, 0), Vector3.forward, 10f).Distance, Is.EqualTo(1f).Within(1e-6f), "the review's case");
+        }
+
+        private struct EveryThirdLeftOut : ITriangleFilter
+        {
+            public bool Accept(int triangle) => triangle % 3 != 0;
+        }
+
+        // Every triangle at one place: no split can separate them, the build falls back to medians and stays shallow.
+        [Test]
+        public void CoincidentTrianglesBuildAndAnswer()
+        {
+            var vertices = new[] { Vector3.zero, Vector3.right, Vector3.up };
+            var triangles = new int[3 * 20000];
+            for (int t = 0; t < 20000; t++) { triangles[t * 3] = 0; triangles[t * 3 + 1] = 1; triangles[t * 3 + 2] = 2; }
+            var bvh = MeshBvh.Build(vertices, triangles);
+            var hit = bvh.ClosestPoint(new Vector3(.2f, .2f, 1f), 10f);
+            Assert.That(hit.Found && hit.Triangle == 0, Is.True, "the lowest of 20000 equal triangles");
+            Assert.That(hit.Distance, Is.EqualTo(1f).Within(1e-6f));
+            var ray = bvh.Raycast(new Vector3(.2f, .2f, -1f), Vector3.forward, 10f);
+            Assert.That(ray.Found && ray.Triangle == 0, Is.True);
+        }
+
+        [Test]
+        public void PartialRefitsAgreeWithAFullRefit()
+        {
+            Sphere(24, 48, out var vertices, out var triangles);
+            var n = MeshNeighbors.Build(vertices, triangles);
+            var partial = MeshBvh.Build(vertices, triangles);
+            var copy = (Vector3[])vertices.Clone();
+            var full = MeshBvh.Build(copy, triangles);
+            var random = new System.Random(8);
+            var moved = new List<int>();
+            for (int step = 0; step < 20; step++)
+            {
+                var center = new Vector3((float)random.NextDouble() - .5f, (float)random.NextDouble() - .5f, (float)random.NextDouble() - .5f).normalized;
+                partial.VerticesInSphere(center, .25f, moved);
+                var push = new Vector3((float)random.NextDouble() - .5f, (float)random.NextDouble() - .5f, (float)random.NextDouble() - .5f) * .3f;
+                foreach (int v in moved) { vertices[v] += push; copy[v] += push; }
+                partial.RefitVertices(moved, n);
+                full.Refit();
+                for (int i = 0; i < 40; i++)
+                {
+                    var p = new Vector3((float)random.NextDouble() * 3 - 1.5f, (float)random.NextDouble() * 3 - 1.5f, (float)random.NextDouble() * 3 - 1.5f);
+                    var a = partial.ClosestPoint(p, 10f);
+                    var b = full.ClosestPoint(p, 10f);
+                    Assert.That(a.Triangle, Is.EqualTo(b.Triangle), "step " + step + " point " + i);
+                    Assert.That(a.Distance, Is.EqualTo(b.Distance), "step " + step + " point " + i);
+                }
+            }
+        }
+
+        // Not a check: how long a body-sized build, refit and query batch take (run by hand in Unity, read the log).
+        [Test, Explicit("benchmark")]
+        public void BenchmarkBodySizedTree()
+        {
+            Sphere(400, 400, out var vertices, out var triangles);
+            var watch = System.Diagnostics.Stopwatch.StartNew();
+            var bvh = MeshBvh.Build(vertices, triangles);
+            long build = watch.ElapsedMilliseconds;
+            watch.Restart();
+            bvh.Refit();
+            long refit = watch.ElapsedMilliseconds;
+            var random = new System.Random(1);
+            var points = new Vector3[200000];
+            for (int i = 0; i < points.Length; i++) points[i] = new Vector3((float)random.NextDouble() * 2.4f - 1.2f, (float)random.NextDouble() * 2.4f - 1.2f, (float)random.NextDouble() * 2.4f - 1.2f);
+            var hits = new MeshBvh.Hit[points.Length];
+            watch.Restart();
+            bvh.ClosestPoints(points, 10f, hits);
+            long batch = watch.ElapsedMilliseconds;
+            watch.Restart();
+            for (int i = 0; i < 20000; i++) bvh.ClosestPoint(points[i], 10f);
+            long single = watch.ElapsedMilliseconds;
+            watch.Restart();
+            var n = MeshNeighbors.Build(vertices, triangles);
+            long weld = watch.ElapsedMilliseconds;
+            Debug.Log("MeshBvh " + triangles.Length / 3 + " triangles: build " + build + " ms, refit " + refit + " ms, 200k closest points (batch) " + batch
+                + " ms, 20k single " + single + " ms; MeshNeighbors " + n.WeldedCount + " welded in " + weld + " ms");
+        }
+
         // OPT-02: welding by normal compares a vertex with a group's distinct normals: many coincident vertices facing alike
         // (a pile of collapsed vertices) stay fast, and the groups are the same as comparing with every member.
         [Test]

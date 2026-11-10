@@ -17,3 +17,13 @@ Ram.Type-0 (MIT, see `LICENSE-Meshia.md`). Changes from Meshia 3.2.0:
   so smart links never joined the vertices it dropped.
 - Native memory is always freed: when a step throws, and when `SimplifyAsync` is cancelled (on the editor's thread, before
   a script reload, the jobs are completed and their memory freed before the cancel returns).
+
+## SimplificationRun (Orbiters' own)
+
+`SimplificationRun` (`SimplificationRun.cs`) is written from scratch, not derived from Meshia. It runs once to the end and
+keeps its collapse log, so every smaller simplification is a prefix of the same run (`Write(collapses, mesh, shapes)`,
+`CollapsesWithin(deviation)`, `CollapsesFor(triangles or share)`). It works on the welded topology (seams slide along
+themselves with both wedges, borders along themselves, anything else stays), collapses onto existing vertices, so kept
+vertices keep every attribute, skin weight and blendshape offset exactly, and weighs normals and UV0 with attribute
+quadrics. The approach follows meshoptimizer's simplifier (Arseny Kapoulkine, MIT): vertex kinds, edge loops, passes of
+the cheapest collapses. The Meshia-derived `MeshSimplifier` stays until its last caller moves to it.

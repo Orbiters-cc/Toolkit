@@ -2,7 +2,11 @@
   "name": "Orbiters.Toolkit",
   "rootNamespace": "Orbiters.Toolkit",
   "references": [
-    "Unity.Newtonsoft.Json"
+    "Unity.Newtonsoft.Json",
+    "Unity.Burst",
+    "Unity.Mathematics",
+    "Unity.Collections"
   ],
+  "allowUnsafeCode": true,
   "autoReferenced": true
 }

@@ -1,6 +1,6 @@
 {
   "name": "Orbiters.AlterMesh.Tests",
-  "references": ["Orbiters.AlterMesh", "Unity.Collections", "Unity.Mathematics", "Unity.Burst"],
+  "references": ["Orbiters.AlterMesh", "Unity.Collections", "Unity.Mathematics", "Unity.Burst", "Orbiters.Toolkit"],
   "includePlatforms": ["Editor"],
   "optionalUnityReferences": ["TestAssemblies"],
   "overrideReferences": true,
