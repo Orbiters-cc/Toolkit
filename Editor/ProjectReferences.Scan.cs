@@ -65,7 +65,30 @@ namespace Orbiters.Toolkit.Editor
             // Its own content was read as text (otherwise only its .meta was: a picture, a model, a binary file).
             public bool ContentRead;
             public string Failure;
+            // The GUIDs its text and its .meta name (a function of their bytes alone).
             public readonly HashSet<string> Guids = new HashSet<string>(StringComparer.Ordinal);
+            // Unity's part (Add): its importer's name, its own GUID, the GUIDs of its direct dependencies and the dependency
+            // hash they were asked under. From the kept scan, reused while that hash stands; asked again otherwise.
+            public string Importer, OwnGuid, DependencyHash;
+            public string[] Dependencies;
+            public bool UnityKnown;
+            // Everything it uses: Guids and Dependencies, less its own GUID (what usedBy holds for it).
+            public HashSet<string> Uses;
+            // Taken from the kept scan, with the listing entry it stands for (to read it again when Unity's hash moved).
+            public bool FromKept;
+            public Listing.Entry Entry;
+
+            /// <summary>A copy of a kept reading for a new scan (Unity's part still checked against the dependency hash).</summary>
+            public FileRead Reuse(Listing.Entry entry)
+            {
+                var copy = new FileRead
+                {
+                    Path = Path, Imported = Imported, Stamp = Stamp, ContentRead = ContentRead, Importer = Importer, OwnGuid = OwnGuid,
+                    DependencyHash = DependencyHash, Dependencies = Dependencies, UnityKnown = UnityKnown, FromKept = true, Entry = entry,
+                };
+                copy.Guids.UnionWith(Guids);
+                return copy;
+            }
         }
 
         // Files whose content never names another asset: not read (their .meta is). Only a time saving: what Unity's
@@ -99,34 +122,67 @@ namespace Orbiters.Toolkit.Editor
         private void Add(FileRead read)
         {
             if (read.Failure != null) throw new UncertainReferencesException(read.Path + " could not be read: " + read.Failure);
-            var importer = read.Imported ? AssetDatabase.GetImporterType(read.Path) : null;
-            string guid = read.Imported ? AssetDatabase.AssetPathToGUID(read.Path) : null;
-            if (importer != null && !NoDependencies.Contains(importer.Name))
-                foreach (string dependency in AssetDatabase.GetDependencies(read.Path, false))
+            if (read.Imported)
+            {
+                // Unity's answers stand while the file's dependency hash does (its import and its importer's inputs). A hash
+                // that cannot be had means asking Unity again, never reusing; one that moved since the kept reading also
+                // reads the file again, even with equal stamps.
+                string hash = null;
+                try
                 {
-                    if (string.Equals(dependency, read.Path, StringComparison.OrdinalIgnoreCase)) continue;
-                    string used = AssetDatabase.AssetPathToGUID(dependency);
-                    if (!string.IsNullOrEmpty(used)) read.Guids.Add(used);
+                    var value = AssetDatabase.GetAssetDependencyHash(read.Path);
+                    if (value.isValid) hash = value.ToString();
                 }
+                catch (Exception ex) when (!(ex is UncertainReferencesException)) { hash = null; }
+                if (read.FromKept && (hash == null || read.DependencyHash != hash))
+                {
+                    var fresh = Reader.ReadOne(read.Entry, CancellationToken.None);
+                    Stats.Rereads++;
+                    if (fresh == null) return;
+                    if (fresh.Failure != null) throw new UncertainReferencesException(fresh.Path + " could not be read: " + fresh.Failure);
+                    read = fresh;
+                }
+                if (!read.UnityKnown || hash == null || read.DependencyHash != hash)
+                {
+                    Stats.UnityAsked++;
+                    var type = AssetDatabase.GetImporterType(read.Path);
+                    read.Importer = type?.Name;
+                    read.OwnGuid = AssetDatabase.AssetPathToGUID(read.Path);
+                    var dependencies = new List<string>();
+                    if (type != null && !NoDependencies.Contains(type.Name))
+                        foreach (string dependency in AssetDatabase.GetDependencies(read.Path, false))
+                        {
+                            if (string.Equals(dependency, read.Path, StringComparison.OrdinalIgnoreCase)) continue;
+                            string used = AssetDatabase.AssetPathToGUID(dependency);
+                            if (!string.IsNullOrEmpty(used)) dependencies.Add(used);
+                        }
+                    read.Dependencies = dependencies.ToArray();
+                    read.DependencyHash = hash;
+                    read.UnityKnown = true;
+                }
+            }
             // Files whose own content is not read: pictures, sounds, models, libraries (their importers never take a GUID
             // from inside the file; their .meta is read), and binary files. In a Force Text project (VRChat's default) Unity
             // writes few of those itself: types marked [PreferBinarySerialization] (LightingData, NavMesh data, and tools'
             // own caches), terrain data, files brought in by a .unitypackage or copied from a Force Binary project that
             // Unity has not written since, and binary formats of tools' ScriptedImporters. Only those can make the scan
-            // uncertain, and only while they are not as Unity last imported them.
+            // uncertain, and only while they are not as Unity last imported them (checked afresh every time).
             if (!read.ContentRead && read.Stamp.Size >= 0)
             {
                 // A file not yet imported keeps the importer its kind gets by default.
-                bool plain = importer != null ? NoInnerReferences.Contains(importer.Name) : Media.Contains(Path.GetExtension(read.Path));
+                bool plain = !string.IsNullOrEmpty(read.Importer) ? NoInnerReferences.Contains(read.Importer) : Media.Contains(Path.GetExtension(read.Path));
                 // Whatever its type: a file whose bytes are not known to be what Unity imported may use what its import does not say.
                 if (!plain && !ImportStamps.Current(read.Path, read.Stamp))
-                    throw new UncertainReferencesException(importer == null
+                    throw new UncertainReferencesException(string.IsNullOrEmpty(read.Importer)
                         ? read.Path + " is in a binary format Unity has not imported: what it uses cannot be read."
                         : read.Path + " changed since Unity last imported it: what it uses is known once Unity imports it again.");
             }
-            if (!string.IsNullOrEmpty(guid)) read.Guids.Remove(guid);
+            var uses = new HashSet<string>(read.Guids, StringComparer.Ordinal);
+            if (read.Dependencies != null) uses.UnionWith(read.Dependencies);
+            if (!string.IsNullOrEmpty(read.OwnGuid)) uses.Remove(read.OwnGuid);
+            read.Uses = uses;
             files[read.Path] = read;
-            foreach (string used in read.Guids)
+            foreach (string used in uses)
             {
                 if (!usedBy.TryGetValue(used, out var users)) usedBy[used] = users = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                 users.Add(read.Path);
@@ -217,12 +273,16 @@ namespace Orbiters.Toolkit.Editor
         /// <summary>Lists and reads every file on a worker thread: no Unity call.</summary>
         internal sealed class Reader
         {
-            private const int Chunk = 64 * 1024;
+            private const int Chunk = 1024 * 1024;
             private readonly List<Root> roots;
             private readonly CancellationToken cancellation;
+            // The kept scan's results by path (read only here): a file whose stamp equals its entry's is not read again.
+            internal Dictionary<string, FileRead> Kept;
             private int read, found;
 
             public Reader(List<Root> roots, CancellationToken cancellation) { this.roots = roots; this.cancellation = cancellation; }
+
+            public ScanStats Stats = new ScanStats();
 
             public int Read => Volatile.Read(ref read);
             public int Found => Volatile.Read(ref found);
@@ -230,17 +290,36 @@ namespace Orbiters.Toolkit.Editor
 
             public List<FileRead> Run()
             {
+                var clock = System.Diagnostics.Stopwatch.StartNew();
                 var listing = Listing.Of(roots, cancellation);
                 if (listing.Uncertain != null) throw new UncertainReferencesException(listing.Uncertain);
+                Stats.Listed = listing.Entries.Count;
+                Stats.ListingMilliseconds = clock.Elapsed.TotalMilliseconds;
+                clock.Restart();
                 Volatile.Write(ref found, listing.Entries.Count);
                 var result = new List<FileRead>(listing.Entries.Count);
                 foreach (var entry in listing.Entries)
                 {
                     cancellation.ThrowIfCancellationRequested();
-                    var one = ReadOne(entry, cancellation);
+                    FileRead one;
+                    // Same path, same size and write time of the file and of its .meta, same reader (the kept file's
+                    // version): the same bytes as far as Unity itself can tell, so the same GUIDs.
+                    if (Kept != null && Kept.TryGetValue(entry.Path, out var known) && known.Stamp.Equals(entry.Stamp) && known.Imported == entry.Imported)
+                    {
+                        one = known.Reuse(entry);
+                        Stats.FromKept++;
+                    }
+                    else
+                    {
+                        one = ReadOne(entry, cancellation);
+                        Stats.Read++;
+                        Stats.BytesRead += Math.Max(0, entry.Stamp.Size) + Math.Max(0, entry.Stamp.MetaSize);
+                        Stats.ReadPaths.Add(entry.Path);
+                    }
                     if (one != null) result.Add(one);
                     Interlocked.Increment(ref read);
                 }
+                Stats.ReadingMilliseconds = clock.Elapsed.TotalMilliseconds;
                 return result;
             }
 
@@ -276,24 +355,45 @@ namespace Orbiters.Toolkit.Editor
                     var encoding = Marked(stream);
                     if (encoding != null) return DecodedTokens(stream, encoding, into, cancellation);
                     var buffer = new byte[Chunk];
-                    var run = new char[32];
+                    // Each run of digits accumulates into two 64-bit halves: a GUID repeated thousands of times in a scene
+                    // costs a set lookup, not a string, and the long digit runs of a text-serialized mesh cost nothing.
+                    var seen = new HashSet<(ulong, ulong)>();
+                    ulong high = 0, low = 0;
                     int length = 0;
                     long offset = 0;
                     for (int count; (count = stream.Read(buffer, 0, buffer.Length)) > 0; offset += count)
                     {
                         cancellation.ThrowIfCancellationRequested();
+                        if (binaryStops && offset < 8192)
+                            for (int i = 0, end = (int)Math.Min(count, 8192 - offset); i < end; i++)
+                                if (buffer[i] == 0) return false;
                         for (int i = 0; i < count; i++)
                         {
-                            byte b = buffer[i];
-                            if (b == 0 && binaryStops && offset + i < 8192) return false;
-                            if (Hex((char)b, run, ref length)) continue;
-                            if (length == 32) into.Add(new string(run));
-                            length = 0;
+                            int digit = Digit(buffer[i]);
+                            if (digit >= 0)
+                            {
+                                if (length < 16) high = (high << 4) | (uint)digit;
+                                else if (length < 32) low = (low << 4) | (uint)digit;
+                                length++;
+                                continue;
+                            }
+                            if (length == 32) seen.Add((high, low));
+                            length = 0; high = 0; low = 0;
                         }
                     }
-                    if (length == 32) into.Add(new string(run));
+                    if (length == 32) seen.Add((high, low));
+                    foreach (var (h, l) in seen) into.Add(h.ToString("x16") + l.ToString("x16"));
                     return true;
                 }
+            }
+
+            // A hexadecimal digit's value, or -1.
+            private static int Digit(byte b)
+            {
+                if (b >= (byte)'0' && b <= (byte)'9') return b - '0';
+                if (b >= (byte)'a' && b <= (byte)'f') return b - 'a' + 10;
+                if (b >= (byte)'A' && b <= (byte)'F') return b - 'A' + 10;
+                return -1;
             }
 
             // A digit of a run: kept (lower case) while the run is at most 32 long.
