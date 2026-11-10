@@ -1,84 +1,32 @@
 using System;
 using System.Collections.Generic;
-using System.Runtime.CompilerServices;
 using Orbiters.Toolkit.Meshes;
-using UnityEditor;
 using UnityEngine;
 
 namespace Orbiters.Toolkit.Editor.VRChat.Optimization
 {
     /// <summary>
     /// The blendshapes of the meshes the build's mesh passes read and write, as sparse tables (<see cref="BlendShapeTable"/>):
-    /// each pass reads a mesh's shapes once (none again for a mesh a pass before wrote, while it holds what was written) and
-    /// writes the shapes of each mesh it makes once, through the table's own write.
+    /// each pass reads a source mesh's shapes once, fresh, and writes the shapes of each mesh it makes once, through the
+    /// table's own write. Nothing is remembered by mesh between calls: any tool of the upload may rebuild a mesh's shapes
+    /// (the same names and frames, other offsets) between two passes, and a pass must see what it holds then.
     /// </summary>
     internal static class MeshShapes
     {
-        // What a pass wrote into a mesh, and the shape of what it wrote: a mesh changed since (a shape added or cleared, its
-        // vertex count, a shape's name, frame count or weights) is read again. Unity changes a frame's offsets only by
-        // clearing the shapes and adding them again, which a later pass does on a copy of its own (BlendShapePruning), or in
-        // place by adding a frame (MergeToggled's collapse shapes): both show in the counts or the names.
-        private sealed class Written
-        {
-            public BlendShapeTable Table;
-            public int VertexCount;
-            public string[] Names;
-            public float[][] Weights;
-        }
-
-        private static readonly ConditionalWeakTable<Mesh, Written> Tables = new ConditionalWeakTable<Mesh, Written>();
-
-        /// <summary>
-        /// The blendshapes of <paramref name="mesh"/> (main thread). A mesh a pass wrote with <see cref="Write"/> answers with what
-        /// was written while its shapes are as written; an asset is read once until it changes (<see cref="BlendShapeTable.Cached"/>);
-        /// any other in-memory mesh is read now.
-        /// </summary>
+        /// <summary>The blendshapes of <paramref name="mesh"/> as they are now (main thread).</summary>
         public static BlendShapeTable Of(Mesh mesh)
         {
             if (mesh == null) throw new ArgumentNullException(nameof(mesh));
-            if (Tables.TryGetValue(mesh, out var written) && Holds(mesh, written)) return written.Table;
             if (mesh.blendShapeCount == 0) return new BlendShapeTable(mesh.vertexCount, Array.Empty<BlendShapeTable.Shape>());
-            // An asset changes through edits that mark it dirty; a mesh in memory may be rebuilt without (Cached's own rule).
-            return EditorUtility.IsPersistent(mesh) ? BlendShapeTable.Cached(mesh) : BlendShapeTable.Read(mesh);
+            return BlendShapeTable.Read(mesh);
         }
 
-        /// <summary>Replaces the blendshapes of <paramref name="mesh"/> with <paramref name="table"/>'s, once, and remembers them.</summary>
+        /// <summary>Replaces the blendshapes of <paramref name="mesh"/> with <paramref name="table"/>'s, once.</summary>
         public static void Write(Mesh mesh, BlendShapeTable table)
         {
             if (mesh == null) throw new ArgumentNullException(nameof(mesh));
             if (table == null) throw new ArgumentNullException(nameof(table));
             table.WriteTo(mesh);
-            Remember(mesh, table);
-        }
-
-        /// <summary>Remembers that <paramref name="mesh"/> holds <paramref name="table"/>'s blendshapes (written by its own code).</summary>
-        public static void Remember(Mesh mesh, BlendShapeTable table)
-        {
-            var shapes = table.Shapes;
-            var written = new Written { Table = table, VertexCount = table.VertexCount, Names = new string[shapes.Count], Weights = new float[shapes.Count][] };
-            for (int s = 0; s < shapes.Count; s++)
-            {
-                written.Names[s] = shapes[s].Name;
-                var weights = written.Weights[s] = new float[shapes[s].FrameCount];
-                for (int f = 0; f < weights.Length; f++) weights[f] = shapes[s].Frames[f].Weight;
-            }
-            Tables.Remove(mesh);
-            Tables.Add(mesh, written);
-        }
-
-        // The mesh's shapes have the layout written: same vertices, names, frame counts and weights.
-        private static bool Holds(Mesh mesh, Written written)
-        {
-            if (mesh.vertexCount != written.VertexCount || mesh.blendShapeCount != written.Names.Length) return false;
-            for (int s = 0; s < written.Names.Length; s++)
-            {
-                if (mesh.GetBlendShapeName(s) != written.Names[s]) return false;
-                var weights = written.Weights[s];
-                if (mesh.GetBlendShapeFrameCount(s) != weights.Length) return false;
-                for (int f = 0; f < weights.Length; f++)
-                    if (!mesh.GetBlendShapeFrameWeight(s, f).Equals(weights[f])) return false;
-            }
-            return true;
         }
 
         /// <summary>The shapes of <paramref name="table"/> that <paramref name="pick"/> picks (by index), in their order.</summary>

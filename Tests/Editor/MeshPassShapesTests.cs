@@ -126,21 +126,25 @@ public sealed class MeshPassShapesTests
         Same(expected, actual);
     }
 
-    // A mesh written by a pass answers with what was written, until it changes.
-    [Test] public void WrittenShapesAreKnownUntilTheMeshChanges()
+    // Review of MAF-26: a mesh one pass made, whose shapes another tool rebuilds under the same names and frames with other
+    // offsets, gives the next pass the new offsets.
+    [Test] public void APassReadsShapesRebuiltSinceTheLastPass()
     {
-        var mesh = Own(Grid(6, 1, 10));
-        var table = BlendShapeTable.Read(mesh);
-        MeshShapes.Write(mesh, table);
-        Assert.That(MeshShapes.Of(mesh), Is.SameAs(table));
-        mesh.AddBlendShapeFrame("Added", 100, new Vector3[mesh.vertexCount], null, null);
-        var read = MeshShapes.Of(mesh);
-        Assert.That(read, Is.Not.SameAs(table), "a shape added in place");
-        Assert.That(read.ShapeCount, Is.EqualTo(table.ShapeCount + 1));
-        MeshShapes.Write(mesh, table);
-        mesh.ClearBlendShapes();
-        mesh.AddBlendShapeFrame("Other", 100, Enumerable.Repeat(Vector3.up, mesh.vertexCount).ToArray(), null, null);
-        Assert.That(MeshShapes.Of(mesh).Shapes[0].Name, Is.EqualTo("Other"), "shapes cleared and added again");
+        var mesh = Own(Grid(8, 2, 10));
+        var part = Own(MeshParts.Subset(mesh, (a, b, c) => true, _ => true));
+        // Another tool: the same names, frame counts and weights, other offsets.
+        var names = Enumerable.Range(0, part.blendShapeCount).Select(part.GetBlendShapeName).ToList();
+        var weights = names.Select((_, s) => Enumerable.Range(0, part.GetBlendShapeFrameCount(s)).Select(f => part.GetBlendShapeFrameWeight(s, f)).ToList()).ToList();
+        part.ClearBlendShapes();
+        for (int s = 0; s < names.Count; s++)
+            foreach (float weight in weights[s])
+                part.AddBlendShapeFrame(names[s], weight, Enumerable.Range(0, part.vertexCount).Select(v => new Vector3(s + 1, weight, v) * .001f).ToArray(), null, null);
+        var other = Own(Grid(4, 1, 11));
+        Same(Own(MeshPassesReference.Join(part, other, null, true)), Own(MeshParts.Join(part, other)));
+        var joined = Own(MeshParts.Join(part, other));
+        var deltas = new Vector3[joined.vertexCount];
+        joined.GetBlendShapeFrameVertices(0, joined.GetBlendShapeFrameCount(0) - 1, deltas, null, null);
+        Assert.That(deltas[1].z, Is.EqualTo(.001f).Within(1e-9f), "the rebuilt offsets, not the ones the first pass wrote");
     }
 
     // ---- Fixture ----
