@@ -257,30 +257,29 @@ namespace Orbiters.Toolkit.Editor.XRay
             return renderers;
         }
 
-        private static bool RendererUsesSelection(
+        internal static bool RendererUsesSelection(
             SkinnedMeshRenderer renderer,
             HashSet<Transform> selectedTransforms)
         {
-            if (renderer == null || renderer.bones == null || selectedTransforms == null || selectedTransforms.Count == 0)
+            if (renderer == null || selectedTransforms == null || selectedTransforms.Count == 0)
             {
                 return false;
             }
 
-            foreach (var bone in renderer.bones)
+            // Read once (renderer.bones copies the array at every call). A bone is "under" the selection when it or one of
+            // its ancestors is selected (Transform.IsChildOf): one walk up per bone instead of one IsChildOf per selected
+            // object.
+            var bones = renderer.bones;
+            if (bones == null)
             {
-                if (bone == null)
-                {
-                    continue;
-                }
+                return false;
+            }
 
-                if (selectedTransforms.Contains(bone))
+            foreach (var bone in bones)
+            {
+                for (var current = bone; current != null; current = current.parent)
                 {
-                    return true;
-                }
-
-                foreach (var selectedTransform in selectedTransforms)
-                {
-                    if (selectedTransform != null && bone.IsChildOf(selectedTransform))
+                    if (selectedTransforms.Contains(current))
                     {
                         return true;
                     }
