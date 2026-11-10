@@ -19,6 +19,10 @@ namespace Orbiters.Toolkit.Editor
         private readonly Scroller scroller;
         private readonly List<VisualElement> pool = new List<VisualElement>();
         private readonly List<int> bound = new List<int>();
+        // The layout pass each slot was last placed in: a slot not placed in the current pass is hidden, whatever item it
+        // still holds (after the pool grew, an item can sit in a new slot while its old slot still holds it).
+        private readonly List<int> placed = new List<int>();
+        private int pass;
         private readonly Func<VisualElement> makeRow;
         private readonly Action<VisualElement, int> bindRow;
         private int itemCount;
@@ -170,11 +174,65 @@ namespace Orbiters.Toolkit.Editor
             Layout();
         }
 
-        private void ComputeStarts()
+        /// <summary>
+        /// <see cref="SetItemCount"/> and <see cref="RefreshRows"/> in one pass: every visible row is bound once, for the new
+        /// items (calling both binds the changed rows twice).
+        /// </summary>
+        public void ResetItems(int count, bool keepAtEnd)
+        {
+            for (int i = 0; i < bound.Count; i++) bound[i] = -1;
+            SetItemCount(count, keepAtEnd);
+        }
+
+        /// <summary>Binds the row showing <paramref name="index"/> again, when it is on screen (one item changed).</summary>
+        public void RefreshRow(int index)
+        {
+            for (int slot = 0; slot < bound.Count; slot++)
+            {
+                if (bound[slot] != index) continue;
+                bindRow(pool[slot], index);
+                return;
+            }
+        }
+
+        /// <summary>Binds again the rows on screen whose item <paramref name="changed"/> answers true for.</summary>
+        public void RefreshWhere(Func<int, bool> changed)
+        {
+            if (changed == null) return;
+            for (int slot = 0; slot < bound.Count; slot++)
+            {
+                int item = bound[slot];
+                if (item >= 0 && changed(item)) bindRow(pool[slot], item);
+            }
+        }
+
+        /// <summary>
+        /// The spans of the items from <paramref name="from"/> on changed (items appended, one item grew): only their starts
+        /// are counted again, then the rows are laid out. Rows already bound keep their binding.
+        /// </summary>
+        public void InvalidateSpans(int from)
+        {
+            ComputeStarts(Math.Max(0, from));
+            first = Clamp(first);
+            Layout();
+        }
+
+        private void ComputeStarts() => ComputeStarts(0);
+
+        // The starts of every item from `from` on (the earlier ones are kept when the array keeps its length).
+        private void ComputeStarts(int from)
         {
             if (spanOf == null) { starts = null; return; }
-            if (starts == null || starts.Length != itemCount + 1) starts = new int[itemCount + 1];
-            for (int i = 0; i < itemCount; i++) starts[i + 1] = starts[i] + Math.Max(1, spanOf(i));
+            if (starts == null || starts.Length != itemCount + 1)
+            {
+                var previous = starts;
+                starts = new int[itemCount + 1];
+                int keep = previous != null ? Math.Min(from, Math.Min(previous.Length, starts.Length) - 1) : 0;
+                if (keep > 0) Array.Copy(previous, starts, keep + 1);
+                from = Math.Max(0, keep);
+            }
+            from = Math.Min(from, itemCount);
+            for (int i = from; i < itemCount; i++) starts[i + 1] = starts[i] + Math.Max(1, spanOf(i));
         }
 
         private int Start(int index) => starts != null ? starts[Math.Max(0, Math.Min(index, itemCount))] : index;
@@ -209,9 +267,11 @@ namespace Orbiters.Toolkit.Editor
             evt.StopPropagation();
         }
 
-        private void Layout(bool updateScroller = true)
+        private void Layout(bool updateScroller = true) => LayoutFor(ViewportHeight, updateScroller);
+
+        // The rows for a viewport of height pixels (tests give one without a panel to lay it out).
+        internal void LayoutFor(float height, bool updateScroller = true)
         {
-            float height = ViewportHeight;
             if (height <= 0 || rowHeight <= 0) return;
 
             // Every item takes a row or more: as many items as rows fit (plus the one cut at the top) is enough.
@@ -227,34 +287,36 @@ namespace Orbiters.Toolkit.Editor
                 viewport.Add(row);
                 pool.Add(row);
                 bound.Add(-1);
+                placed.Add(0);
             }
+
+            pass++;
 
             int start = Math.Max(0, ItemAtRow(first));
             double end = first + height / rowHeight;
             int poolSize = pool.Count;
-            int shown = 0;
             for (int k = 0; k < poolSize; k++)
             {
                 int item = start + k;
                 if (k >= needed || item >= itemCount || Start(item) >= end) break;
                 int slot = item % poolSize;
                 var row = pool[slot];
+                // The height follows the item's span at every pass, bound again or not (InvalidateSpans keeps bindings).
+                row.style.height = rowHeight * Span(item);
                 if (bound[slot] != item)
                 {
                     bound[slot] = item;
-                    row.style.height = rowHeight * Span(item);
                     bindRow(row, item);
                 }
                 row.style.top = (float)((Start(item) - first) * rowHeight);
                 row.style.display = DisplayStyle.Flex;
-                shown = k + 1;
+                placed[slot] = pass;
             }
 
-            // Slots not used this frame.
+            // Slots not placed in this pass.
             for (int slot = 0; slot < poolSize; slot++)
             {
-                int item = bound[slot];
-                if (item < start || item >= start + shown || item >= itemCount)
+                if (placed[slot] != pass)
                 {
                     pool[slot].style.display = DisplayStyle.None;
                     bound[slot] = -1;

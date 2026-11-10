@@ -19,6 +19,11 @@ namespace Orbiters.Toolkit.Editor.XRay
         private static readonly Dictionary<int, XRayBoneSegment> hoveredSegments = new Dictionary<int, XRayBoneSegment>();
         private static readonly int PickingControlHint = "Orbiters.XRayGizmos.BonePicking".GetHashCode();
         private static double lastRepaintTime;
+        // Kept between Scene view events (read at every Layout, MouseMove and Repaint): no list or set per event.
+        private static readonly List<XRayBoneSegment> segments = new List<XRayBoneSegment>();
+        private static readonly HashSet<Transform> selected = new HashSet<Transform>();
+        // The switch, read from EditorPrefs once per script session.
+        private static bool? enabled;
 
         public static event Action Changed;
 
@@ -33,8 +38,12 @@ namespace Orbiters.Toolkit.Editor.XRay
 
         public static bool Enabled
         {
-            get => EditorPrefs.GetBool(EnabledKey, false);
-            private set => EditorPrefs.SetBool(EnabledKey, value);
+            get => enabled ?? (enabled = EditorPrefs.GetBool(EnabledKey, false)).Value;
+            private set
+            {
+                enabled = value;
+                EditorPrefs.SetBool(EnabledKey, value);
+            }
         }
 
         public static Transform HoveredBone => GetHover(SceneView.lastActiveSceneView).Bone;
@@ -72,7 +81,8 @@ namespace Orbiters.Toolkit.Editor.XRay
                 return;
             }
 
-            bool canHover = Enabled && !evt.alt && !Tools.viewToolActive && Tools.current != Tool.View && GUIUtility.hotControl == 0;
+            bool picking = Enabled;
+            bool canHover = picking && !evt.alt && !Tools.viewToolActive && Tools.current != Tool.View && GUIUtility.hotControl == 0;
             if (evt.type == EventType.Layout || evt.type == EventType.MouseMove)
             {
                 float distance = PickRadiusPixels;
@@ -91,7 +101,7 @@ namespace Orbiters.Toolkit.Editor.XRay
             }
 
             var hovered = GetHover(sceneView);
-            if (Enabled && hovered.IsValid && CanPickBone(evt, controlId))
+            if (picking && hovered.IsValid && CanPickBone(evt, controlId))
             {
                 Pick(hovered.Bone, evt.shift, evt.control || evt.command);
                 evt.Use();
@@ -138,7 +148,8 @@ namespace Orbiters.Toolkit.Editor.XRay
             XRayBoneSegment best = default;
             bestDistance = PickRadiusPixels;
 
-            foreach (var segment in XRayGizmoService.ActiveBoneSegments)
+            XRayGizmoService.CollectBoneSegments(segments);
+            foreach (var segment in segments)
             {
                 if (!segment.IsValid)
                 {
@@ -215,7 +226,7 @@ namespace Orbiters.Toolkit.Editor.XRay
 
         private static void DrawSelectedHighlights()
         {
-            var selected = new HashSet<Transform>();
+            selected.Clear();
             var selectedTransforms = Selection.transforms;
             if (selectedTransforms != null)
             {
@@ -229,7 +240,8 @@ namespace Orbiters.Toolkit.Editor.XRay
                 return;
             }
 
-            foreach (var segment in XRayGizmoService.ActiveBoneSegments)
+            XRayGizmoService.CollectBoneSegments(segments);
+            foreach (var segment in segments)
             {
                 if (!segment.IsValid ||
                     (!selected.Contains(segment.Bone) && !selected.Contains(segment.Child)))

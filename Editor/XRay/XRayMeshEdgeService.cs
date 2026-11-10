@@ -31,11 +31,8 @@ namespace Orbiters.Toolkit.Editor.XRay
 
         private static readonly List<SkinnedMeshRenderer> activeRenderers = new List<SkinnedMeshRenderer>();
         private static readonly List<Drawn> drawn = new List<Drawn>();
-        // The cameras running the buffer, with their buffer count once it was added: a count that changed (another tool
-        // removed every buffer, say) has it checked and added again.
-        private static readonly Dictionary<Camera, int> cameras = new Dictionary<Camera, int>();
+        private static readonly SceneViewBuffer edges = new SceneViewBuffer(BufferName, BufferEvent);
         private static readonly Dictionary<int, Mesh> bakedForWire = new Dictionary<int, Mesh>();
-        private static CommandBuffer buffer;
         private static Material material;
         private static bool isRefreshing;
 
@@ -50,7 +47,7 @@ namespace Orbiters.Toolkit.Editor.XRay
             SceneView.duringSceneGui += DrawWithoutGeometryShaders;
             AssemblyReloadEvents.beforeAssemblyReload += Release;
             EditorApplication.quitting += Release;
-            RemoveOrphanedBuffers();
+            edges.RemoveOrphaned();
             Refresh();
         }
 
@@ -84,7 +81,7 @@ namespace Orbiters.Toolkit.Editor.XRay
         internal static bool UsesGeometryShader => SystemInfo.supportsGeometryShaders;
 
         /// <summary>The command buffer the Scene view cameras run (null until edges were shown once).</summary>
-        internal static CommandBuffer Buffer => buffer;
+        internal static CommandBuffer Buffer => edges.Buffer;
 
         /// <summary>The renderers the command buffer draws, with the mesh and submesh count it was recorded for.</summary>
         internal static IReadOnlyList<Drawn> DrawnRenderers => drawn;
@@ -149,7 +146,7 @@ namespace Orbiters.Toolkit.Editor.XRay
             }
 
             // Off with nothing shown (most selection and hierarchy changes in most projects): nothing to do or tell.
-            if (!Enabled && activeRenderers.Count == 0 && drawn.Count == 0 && cameras.Count == 0 && bakedForWire.Count == 0)
+            if (!Enabled && activeRenderers.Count == 0 && drawn.Count == 0 && !edges.Attached && bakedForWire.Count == 0)
             {
                 return;
             }
@@ -260,30 +257,29 @@ namespace Orbiters.Toolkit.Editor.XRay
             return renderers;
         }
 
-        private static bool RendererUsesSelection(
+        internal static bool RendererUsesSelection(
             SkinnedMeshRenderer renderer,
             HashSet<Transform> selectedTransforms)
         {
-            if (renderer == null || renderer.bones == null || selectedTransforms == null || selectedTransforms.Count == 0)
+            if (renderer == null || selectedTransforms == null || selectedTransforms.Count == 0)
             {
                 return false;
             }
 
-            foreach (var bone in renderer.bones)
+            // Read once (renderer.bones copies the array at every call). A bone is "under" the selection when it or one of
+            // its ancestors is selected (Transform.IsChildOf): one walk up per bone instead of one IsChildOf per selected
+            // object.
+            var bones = renderer.bones;
+            if (bones == null)
             {
-                if (bone == null)
-                {
-                    continue;
-                }
+                return false;
+            }
 
-                if (selectedTransforms.Contains(bone))
+            foreach (var bone in bones)
+            {
+                for (var current = bone; current != null; current = current.parent)
                 {
-                    return true;
-                }
-
-                foreach (var selectedTransform in selectedTransforms)
-                {
-                    if (selectedTransform != null && bone.IsChildOf(selectedTransform))
+                    if (selectedTransforms.Contains(current))
                     {
                         return true;
                     }
@@ -322,21 +318,15 @@ namespace Orbiters.Toolkit.Editor.XRay
             drawn.Clear();
             if (activeRenderers.Count == 0 || !UsesGeometryShader)
             {
-                Detach();
-                buffer?.Clear();
+                edges.Clear();
                 return;
             }
 
-            if (buffer == null)
-            {
-                buffer = new CommandBuffer { name = BufferName };
-            }
-
-            buffer.Clear();
+            var buffer = edges.Begin();
             var mat = GetMaterial();
             if (mat == null)
             {
-                Detach();
+                edges.Detach();
                 return;
             }
 
@@ -359,15 +349,11 @@ namespace Orbiters.Toolkit.Editor.XRay
             }
 
             BufferRecordings++;
-            AttachToSceneViews();
+            edges.AttachToSceneViews();
         }
 
         // A renderer Unity does not draw is not skinned either: its edges would show a stale pose.
-        private static bool IsShown(SkinnedMeshRenderer renderer)
-        {
-            return renderer != null && renderer.enabled && renderer.gameObject.activeInHierarchy && renderer.sharedMesh != null &&
-                   !SceneVisibilityManager.instance.IsHidden(renderer.gameObject);
-        }
+        private static bool IsShown(SkinnedMeshRenderer renderer) => SceneViewBuffer.IsShown(renderer);
 
         /// <summary>
         /// Before a camera renders: on a Scene view camera, the buffer is attached and re-recorded when a drawn renderer
@@ -375,7 +361,7 @@ namespace Orbiters.Toolkit.Editor.XRay
         /// </summary>
         internal static void BeforeCameraRender(Camera camera)
         {
-            if (camera == null || camera.cameraType != CameraType.SceneView || drawn.Count == 0 || buffer == null)
+            if (camera == null || camera.cameraType != CameraType.SceneView || drawn.Count == 0 || edges.Buffer == null)
             {
                 return;
             }
@@ -392,7 +378,7 @@ namespace Orbiters.Toolkit.Editor.XRay
                 }
             }
 
-            Attach(camera);
+            edges.Attach(camera);
         }
 
         private static bool IsStale()
@@ -413,70 +399,6 @@ namespace Orbiters.Toolkit.Editor.XRay
             }
 
             return false;
-        }
-
-        private static void AttachToSceneViews()
-        {
-            foreach (SceneView view in SceneView.sceneViews)
-            {
-                if (view != null && view.camera != null)
-                {
-                    Attach(view.camera);
-                }
-            }
-        }
-
-        private static void Attach(Camera camera)
-        {
-            if (buffer == null || cameras.TryGetValue(camera, out int count) && camera.commandBufferCount == count)
-            {
-                return;
-            }
-
-            foreach (var gone in cameras.Keys.Where(c => c == null).ToList())
-            {
-                cameras.Remove(gone);
-            }
-
-            RemoveNamedBuffers(camera);
-            camera.AddCommandBuffer(BufferEvent, buffer);
-            cameras[camera] = camera.commandBufferCount;
-        }
-
-        private static void Detach()
-        {
-            foreach (var camera in cameras.Keys)
-            {
-                if (camera != null && buffer != null)
-                {
-                    camera.RemoveCommandBuffer(BufferEvent, buffer);
-                }
-            }
-
-            cameras.Clear();
-        }
-
-        // A script reload loses the managed buffer but not the native one a camera holds: it would draw a second time.
-        private static void RemoveOrphanedBuffers()
-        {
-            foreach (SceneView view in SceneView.sceneViews)
-            {
-                if (view != null && view.camera != null)
-                {
-                    RemoveNamedBuffers(view.camera);
-                }
-            }
-        }
-
-        private static void RemoveNamedBuffers(Camera camera)
-        {
-            foreach (var attached in camera.GetCommandBuffers(BufferEvent))
-            {
-                if (attached != null && attached.name == BufferName)
-                {
-                    camera.RemoveCommandBuffer(BufferEvent, attached);
-                }
-            }
         }
 
         // ---- Without geometry shaders ---------------------------------------------------------------------------------
@@ -637,11 +559,10 @@ namespace Orbiters.Toolkit.Editor.XRay
         // Nothing shown: the buffer leaves the cameras (it is kept for the next time).
         private static void Clear()
         {
-            bool shown = activeRenderers.Count > 0 || drawn.Count > 0 || cameras.Count > 0 || bakedForWire.Count > 0;
+            bool shown = activeRenderers.Count > 0 || drawn.Count > 0 || edges.Attached || bakedForWire.Count > 0;
             activeRenderers.Clear();
             drawn.Clear();
-            Detach();
-            buffer?.Clear();
+            edges.Clear();
             ReleaseBakedForWire();
             if (shown) SceneView.RepaintAll();
         }
@@ -649,9 +570,7 @@ namespace Orbiters.Toolkit.Editor.XRay
         private static void Release()
         {
             Clear();
-            RemoveOrphanedBuffers();
-            buffer?.Release();
-            buffer = null;
+            edges.Release();
             if (material != null)
             {
                 UnityEngine.Object.DestroyImmediate(material);

@@ -21,7 +21,9 @@ namespace Orbiters.Toolkit.Editor.XRay
         {
             lastDebugMode = IsReFitDebugModeEnabled();
             SceneView.duringSceneGui += OnSceneGUI;
-            EditorApplication.update += WatchDebugMode;
+            // ReFit writes its pref without telling anyone: looked at four times a second on the editor host (in a
+            // background editor too), not at every editor frame; repaints read the last value seen.
+            OrbitersEditorHost.Every("XRay.ReFitDebugMode", 0.25, WatchDebugMode, HostWhen.Always);
             EditorApplication.hierarchyChanged += OnHierarchyChanged;
             AssemblyReloadEvents.beforeAssemblyReload += RepaintSceneViews;
             EditorApplication.quitting += RepaintSceneViews;
@@ -35,7 +37,7 @@ namespace Orbiters.Toolkit.Editor.XRay
                 return;
             }
 
-            if (!IsReFitDebugModeEnabled())
+            if (!lastDebugMode)
             {
                 return;
             }

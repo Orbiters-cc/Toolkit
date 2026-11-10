@@ -47,6 +47,8 @@ namespace Orbiters.Toolkit.Editor.Preview
         private static string pendingReason;
         private static double due;
         private static double catchUpAt;
+        // The running capture's steps, at every editor frame on the editor host (none while no capture runs).
+        private static IDisposable stepping;
 
         internal static string Folder => Path.Combine(Path.GetDirectoryName(Path.GetFullPath(Application.dataPath)), "UserSettings", "Orbiters", "Previews");
 
@@ -54,7 +56,9 @@ namespace Orbiters.Toolkit.Editor.Preview
         {
             if (Application.isBatchMode) return;
             EditorSceneManager.sceneSaved += scene => Request(scene.path, "save");
-            EditorApplication.update += Tick;
+            // What waits (a save's capture a few seconds later, the catch-up after loading) is looked at four times a
+            // second on the editor host, not at every editor frame; a capture steps at every frame while it runs.
+            OrbitersEditorHost.Every("ProjectPreview.Watch", 0.25, Watch, HostWhen.Always);
             catchUpAt = EditorApplication.timeSinceStartup + CatchUpDelay;
         }
 
@@ -89,14 +93,19 @@ namespace Orbiters.Toolkit.Editor.Preview
         private static bool EditorBusy() =>
             EditorApplication.isCompiling || EditorApplication.isUpdating || EditorApplication.isPlayingOrWillChangePlaymode || BuildPipeline.isBuildingPlayer;
 
-        private static void Tick()
+        private static void Step()
         {
             if (capture != null)
             {
-                if (EditorApplication.isPlayingOrWillChangePlaymode) { capture.Abort("Play Mode"); capture = null; return; }
-                if (!capture.Step()) capture = null;
-                return;
+                if (EditorApplication.isPlayingOrWillChangePlaymode) { capture.Abort("Play Mode"); capture = null; }
+                else if (!capture.Step()) capture = null;
             }
+            if (capture == null) { stepping?.Dispose(); stepping = null; }
+        }
+
+        private static void Watch()
+        {
+            if (capture != null) return;
             double now = EditorApplication.timeSinceStartup;
             if (catchUpAt > 0 && now >= catchUpAt && !EditorBusy())
             {
@@ -120,7 +129,11 @@ namespace Orbiters.Toolkit.Editor.Preview
 
         private static void Start(Scene scene, string reason)
         {
-            try { capture = new Capture(scene, reason); }
+            try
+            {
+                capture = new Capture(scene, reason);
+                if (stepping == null) stepping = OrbitersEditorHost.EveryFrame("ProjectPreview.Capture", Step);
+            }
             catch (Exception ex)
             {
                 capture = null;

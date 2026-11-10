@@ -22,8 +22,7 @@ namespace Orbiters.Toolkit.Editor
         {
             this.pressed = pressed;
             this.tooltip = tooltip;
-            var sheet = AssetDatabase.LoadAssetAtPath<StyleSheet>(StyleSheetPath);
-            if (sheet) styleSheets.Add(sheet);
+            UiStyles.Attach(this, StyleSheetPath);
             AddToClassList("orbiters-icon-button");
             focusable = true;
             Icon = new VectorIcon(glyph); Icon.AddToClassList("orbiters-icon-button__icon"); Add(Icon);

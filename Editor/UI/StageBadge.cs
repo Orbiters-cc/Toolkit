@@ -14,8 +14,7 @@ namespace Orbiters.Toolkit.Editor
 
         public StageBadge(FeatureStage stage)
         {
-            var sheet = AssetDatabase.LoadAssetAtPath<StyleSheet>(StyleSheetPath);
-            if (sheet) styleSheets.Add(sheet);
+            UiStyles.Attach(this, StyleSheetPath);
             AddToClassList("orbiters-stage");
             pickingMode = PickingMode.Ignore;
             SetStage(stage);

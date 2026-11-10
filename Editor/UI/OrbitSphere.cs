@@ -34,8 +34,7 @@ namespace Orbiters.Toolkit.Editor
         public OrbitSphere(float maxTilt, Action<float, float> changed, Action began = null, Action reset = null)
         {
             this.maxTilt = maxTilt; this.changed = changed; this.began = began; this.reset = reset;
-            var sheet = AssetDatabase.LoadAssetAtPath<StyleSheet>(StyleSheetPath);
-            if (sheet) styleSheets.Add(sheet);
+            UiStyles.Attach(this, StyleSheetPath);
             AddToClassList("orbiters-sphere");
             ball = new VisualElement { focusable = true, tabIndex = 0 };
             ball.AddToClassList("orbiters-sphere__ball");

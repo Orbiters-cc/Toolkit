@@ -30,13 +30,17 @@ namespace Orbiters.Toolkit.Editor.LiveLink
 
         public static T Read<T>(string path) where T : class
         {
+            // Being rewritten, unreadable, or not this endpoint's JSON (half written while a writer could not replace it):
+            // none for now, read again later.
             try { return File.Exists(path) ? LiveLinkJson.Parse<T>(File.ReadAllText(path)) : null; }
-            catch (Exception) { return null; }
+            catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException || ex is JsonException || ex is ArgumentException || ex is NotSupportedException) { return null; }
         }
 
         public static void Delete(string path)
         {
-            try { if (File.Exists(path)) File.Delete(path); } catch (Exception) { }
+            // Held by a reader or not ours to delete: a stale endpoint is found unreachable by its client.
+            try { if (File.Exists(path)) File.Delete(path); }
+            catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException || ex is ArgumentException || ex is NotSupportedException) { }
         }
     }
 }

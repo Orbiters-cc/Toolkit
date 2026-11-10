@@ -39,8 +39,7 @@ namespace Orbiters.Toolkit.Editor
         public SegmentedControl(IEnumerable<Option> options, Action<int> changed)
         {
             this.changed = changed;
-            var sheet = AssetDatabase.LoadAssetAtPath<StyleSheet>(StyleSheetPath);
-            if (sheet) styleSheets.Add(sheet);
+            UiStyles.Attach(this, StyleSheetPath);
             AddToClassList("orbiters-segmented");
             indicator = new VisualElement { pickingMode = PickingMode.Ignore };
             indicator.AddToClassList("orbiters-segmented__indicator");
