@@ -24,6 +24,8 @@ namespace Orbiters.Toolkit.Editor.XRay
         private static int settingsRevision;
         private static double nextGeometryCheck;
         private static GameObject pinnedObject;
+        // The switch, read from EditorPrefs once per script session: it is asked on every Scene view event.
+        private static bool? enabled;
 
         public static event Action Changed;
 
@@ -41,8 +43,12 @@ namespace Orbiters.Toolkit.Editor.XRay
 
         public static bool Enabled
         {
-            get => EditorPrefs.GetBool(EnabledKey, false);
-            private set => EditorPrefs.SetBool(EnabledKey, value);
+            get => enabled ?? (enabled = EditorPrefs.GetBool(EnabledKey, false)).Value;
+            private set
+            {
+                enabled = value;
+                EditorPrefs.SetBool(EnabledKey, value);
+            }
         }
 
         public static XRayGizmoTargetMode TargetMode
@@ -110,19 +116,28 @@ namespace Orbiters.Toolkit.Editor.XRay
             get
             {
                 var segments = new List<XRayBoneSegment>();
-                foreach (var instance in Instances.Values)
-                {
-                    var owner = instance.Target.Owner;
-                    if (owner == null || instance.Segments == null) continue;
-                    foreach (var cached in instance.Segments)
-                    {
-                        if (cached.Bone == null) continue;
-                        if (cached.Child != null) segments.Add(new XRayBoneSegment(owner, cached.Bone, cached.Child));
-                        else if (cached.Leaf) segments.Add(new XRayBoneSegment(owner, cached.Bone, cached.Bone.TransformPoint(cached.LocalTail)));
-                    }
-                }
-
+                CollectBoneSegments(segments);
                 return segments;
+            }
+        }
+
+        /// <summary>
+        /// <see cref="ActiveBoneSegments"/> into <paramref name="segments"/> (cleared first): what the Scene view's picking
+        /// reads at every Layout and MouseMove, into a list it keeps.
+        /// </summary>
+        internal static void CollectBoneSegments(List<XRayBoneSegment> segments)
+        {
+            segments.Clear();
+            foreach (var instance in Instances.Values)
+            {
+                var owner = instance.Target.Owner;
+                if (owner == null || instance.Segments == null) continue;
+                foreach (var cached in instance.Segments)
+                {
+                    if (cached.Bone == null) continue;
+                    if (cached.Child != null) segments.Add(new XRayBoneSegment(owner, cached.Bone, cached.Child));
+                    else if (cached.Leaf) segments.Add(new XRayBoneSegment(owner, cached.Bone, cached.Bone.TransformPoint(cached.LocalTail)));
+                }
             }
         }
 
@@ -513,8 +528,9 @@ namespace Orbiters.Toolkit.Editor.XRay
                 }
 
                 bool hasDisplayedChild = false;
-                foreach (Transform child in bone)
+                for (int k = 0; k < bone.childCount; k++)
                 {
+                    var child = bone.GetChild(k);
                     if (child != null && boneSet.Contains(child))
                     {
                         hasDisplayedChild = true;
@@ -557,8 +573,9 @@ namespace Orbiters.Toolkit.Editor.XRay
 
             Vector3 childDirection = Vector3.zero;
             float childLength = 0f;
-            foreach (Transform child in bone)
+            for (int k = 0; k < bone.childCount; k++)
             {
+                var child = bone.GetChild(k);
                 if (child == null || boneSet.Contains(child))
                 {
                     continue;
