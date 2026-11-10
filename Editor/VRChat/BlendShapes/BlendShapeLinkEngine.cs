@@ -234,7 +234,12 @@ namespace Orbiters.Toolkit.Editor.VRChat.BlendShapes
         private static void CopyLayersToFx(List<(AnimatorController controller, int index, AnimatorControllerLayer layer)> layers, AnimatorController fx,
             HashSet<string> copiedToFx)
         {
-            var fxLayerNames = new HashSet<string>(fx.layers.Select(l => l.name));
+            // Layers and parameters set once each: every assignment rebuilds the whole FX controller.
+            var fxLayers = fx.layers.ToList();
+            var fxLayerNames = new HashSet<string>(fxLayers.Select(l => l.name));
+            var parameters = fx.parameters.ToList();
+            var parameterNames = new HashSet<string>(parameters.Select(p => p.name), StringComparer.Ordinal);
+            bool layersAdded = false, parametersAdded = false;
             foreach (var (source, index, layer) in layers)
             {
                 if (source == fx) continue;
@@ -248,23 +253,25 @@ namespace Orbiters.Toolkit.Editor.VRChat.BlendShapes
                 Trace($"Copying layer '{layer.name}' from '{source.name}' to FX controller for blendshape animations.");
                 foreach (var param in source.parameters)
                 {
-                    if (fx.parameters.Any(p => p.name == param.name)) continue;
-                    fx.AddParameter(param.name, param.type);
-                    var added = fx.parameters.FirstOrDefault(p => p.name == param.name);
-                    if (added == null) continue;
-                    added.defaultBool = param.defaultBool;
-                    added.defaultFloat = param.defaultFloat;
-                    added.defaultInt = param.defaultInt;
+                    if (!parameterNames.Add(param.name)) continue;
+                    // With the source's defaults (the parameters' getter hands out copies: setting them on one changes nothing).
+                    parameters.Add(new AnimatorControllerParameter
+                    {
+                        name = param.name, type = param.type,
+                        defaultBool = param.defaultBool, defaultFloat = param.defaultFloat, defaultInt = param.defaultInt
+                    });
+                    parametersAdded = true;
                 }
-                var fxLayers = fx.layers.ToList();
                 fxLayers.Add(new AnimatorControllerLayer
                 {
                     name = name, stateMachine = layer.stateMachine, avatarMask = null,
                     blendingMode = AnimatorLayerBlendingMode.Override, defaultWeight = layer.defaultWeight,
                     syncedLayerIndex = -1, syncedLayerAffectsTiming = false
                 });
-                fx.layers = fxLayers.ToArray();
+                layersAdded = true;
             }
+            if (parametersAdded) fx.parameters = parameters.ToArray();
+            if (layersAdded) fx.layers = fxLayers.ToArray();
             EditorUtility.SetDirty(fx);
         }
 
