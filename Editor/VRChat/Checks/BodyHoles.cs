@@ -49,7 +49,8 @@ namespace Orbiters.Toolkit.Editor.VRChat.Checks
             {
                 for (int i = 0; i < shapes.Count; i++) body.SetBlendShapeWeight(shapes[i], weights[i]);
             }
-            if (skin == null) return issues;
+            // Not checked is said, not taken for "nothing found".
+            if (skin == null) return NotChecked(issues, body, "its mesh could not be read");
             var size = new Bounds(skin[0], Vector3.zero);
             foreach (var point in skin) size.Encapsulate(point);
             // Clothing sits a few millimetres to centimetres off the skin: cells of 2% of the body's height.
@@ -66,9 +67,11 @@ namespace Orbiters.Toolkit.Editor.VRChat.Checks
                 return grid != null && moved.Count(v => grid.Near(skin[v])) >= Covered * moved.Count;
             }
 
+            var unreadable = new List<string>();
             foreach (int shape in shapes)
             {
                 var moved = Moved(mesh, shape);
+                if (moved == null) unreadable.Add(mesh.GetBlendShapeName(shape));
                 if (moved == null || moved.Count == 0) continue;
                 var over = toggled.Where(r => Over(r, moved)).ToList();
                 if (over.Count == 0 || worn.Any(r => Over(r, moved))) continue;
@@ -79,6 +82,15 @@ namespace Orbiters.Toolkit.Editor.VRChat.Checks
                     $"It hides the body under {pieces}, and no toggle sets it back: turning that clothing off shows a hole there. " +
                     $"Add “{name}” to the clothing's toggle, at {weight} with it on and 0 with it off.", body.name));
             }
+            if (unreadable.Count > 0) NotChecked(issues, body, "the shape" + (unreadable.Count > 1 ? "s " : " ") + string.Join(", ", unreadable.Take(3).Select(n => "“" + n + "”")) +
+                (unreadable.Count > 3 ? " and others" : "") + " could not be read");
+            return issues;
+        }
+
+        private static List<AvatarIssue> NotChecked(List<AvatarIssue> issues, Renderer body, string why)
+        {
+            issues.Add(new AvatarIssue(IssueLevel.Note, $"Holes under clothing on “{body.name}” were not checked",
+                $"The check could not run because {why}. Check by hand that turning clothing off shows no hole.", body.name));
             return issues;
         }
 
