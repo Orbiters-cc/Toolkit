@@ -7,79 +7,29 @@ using Microsoft.Win32.SafeHandles;
 
 namespace Orbiters.Toolkit.Editor.Processes
 {
-    // A single reader per pipe. Never schedules a Mono FileStream BeginRead callback:
-    // those callbacks can be aborted before AsyncStreamReader.Dispose finishes at reload.
+    // A single reader per pipe, read only when bytes are waiting (PeekNamedPipe, poll): no read ever blocks, so no thread can
+    // be stuck in a native read when the domain unloads, and no Mono FileStream BeginRead callback is ever scheduled (those
+    // callbacks can be aborted before AsyncStreamReader.Dispose finishes at reload).
     internal sealed class ProcessPipe
     {
         private readonly SafeFileHandle handle;
-        private readonly byte[] bytes = new byte[8192];
-        private readonly char[] characters;
-        private readonly Decoder decoder;
-        private readonly StringBuilder text = new StringBuilder();
-        private readonly StringBuilder pendingLine = new StringBuilder();
-        private readonly Action<string> onLine;
-        private readonly Stream destination;
-        private bool atStart = true, previousCarriageReturn;
         internal bool Closed { get; private set; }
-        internal string Text => text.ToString();
 
-        internal ProcessPipe(StreamReader reader, Action<string> onLine, Stream destination = null)
+        internal ProcessPipe(Stream stream)
         {
-            handle = ((FileStream)reader.BaseStream).SafeFileHandle;
-            decoder = reader.CurrentEncoding.GetDecoder();
-            characters = new char[reader.CurrentEncoding.GetMaxCharCount(bytes.Length)];
-            this.onLine = onLine;
-            this.destination = destination;
+            handle = ((FileStream)stream).SafeFileHandle;
         }
 
-        internal bool Pump()
+        /// <summary>Bytes read into the start of <paramref name="buffer"/> (0: none waiting), or -1 once the writer closed the pipe.</summary>
+        internal int Read(byte[] buffer)
         {
-            if (Closed) return false;
-            int count = ReadAvailable();
-            if (count < 0) { Finish(); return false; }
-            if (count == 0) return false;
-            if (destination != null) destination.Write(bytes, 0, count);
-            else Append(decoder.GetChars(bytes, 0, count, characters, 0, false));
-            return true;
+            if (Closed) return -1;
+            int read = ReadAvailable(buffer);
+            if (read < 0) Closed = true;
+            return read;
         }
 
-        internal void Finish()
-        {
-            if (Closed) return;
-            Closed = true;
-            if (destination != null) return;
-            Append(decoder.GetChars(Array.Empty<byte>(), 0, 0, characters, 0, true));
-            if (pendingLine.Length > 0) EmitLine();
-        }
-
-        private void Append(int count)
-        {
-            if (count == 0) return;
-            int start = atStart && characters[0] == '\ufeff' ? 1 : 0;
-            atStart = false;
-            text.Append(characters, start, count - start);
-            if (onLine == null) return;
-            for (int i = start; i < count; i++)
-            {
-                char character = characters[i];
-                if (character == '\r') { EmitLine(); previousCarriageReturn = true; }
-                else if (character == '\n')
-                {
-                    if (!previousCarriageReturn) EmitLine();
-                    previousCarriageReturn = false;
-                }
-                else { pendingLine.Append(character); previousCarriageReturn = false; }
-            }
-        }
-
-        private void EmitLine()
-        {
-            string line = pendingLine.ToString();
-            pendingLine.Clear();
-            onLine(line);
-        }
-
-        private int ReadAvailable()
+        private int ReadAvailable(byte[] buffer)
         {
             if (Path.DirectorySeparatorChar == '\\')
             {
@@ -87,7 +37,7 @@ namespace Orbiters.Toolkit.Editor.Processes
                     return PipeError(Marshal.GetLastWin32Error());
                 if (available == 0) return 0;
                 // No other reader consumes this handle between peek and read. Only request available bytes.
-                if (!ReadFile(handle, bytes, (uint)Math.Min(bytes.Length, available), out uint read, IntPtr.Zero))
+                if (!ReadFile(handle, buffer, (uint)Math.Min(buffer.Length, available), out uint read, IntPtr.Zero))
                     return PipeError(Marshal.GetLastWin32Error());
                 return read == 0 ? -1 : (int)read;
             }
@@ -102,7 +52,7 @@ namespace Orbiters.Toolkit.Editor.Processes
             }
             if (ready == 0) return 0;
             if ((descriptor.ReturnedEvents & 32) != 0) throw new IOException("Process pipe closed unexpectedly.");
-            long length = Read(descriptor.File, bytes, new UIntPtr((uint)bytes.Length)).ToInt64();
+            long length = Read(descriptor.File, buffer, new UIntPtr((uint)buffer.Length)).ToInt64();
             if (length == 0) return -1;
             if (length > 0) return (int)length;
             int readError = Marshal.GetLastWin32Error();
@@ -129,5 +79,80 @@ namespace Orbiters.Toolkit.Editor.Processes
         private static extern int Poll(ref PollDescriptor descriptor, UIntPtr count, int timeout);
         [DllImport("libc", EntryPoint = "read", SetLastError = true)]
         private static extern IntPtr Read(int file, byte[] buffer, UIntPtr count);
+    }
+
+    // A pipe's bytes decoded as they come: the whole text (a leading byte order mark dropped, at most maxCharacters of it) and
+    // one callback per line (CR, LF or CRLF ends one; the last line needs no ending). A character split between two reads is
+    // decoded whole.
+    internal sealed class ProcessText
+    {
+        private readonly Decoder decoder;
+        private readonly Encoding encoding;
+        private readonly StringBuilder text;
+        private readonly StringBuilder pendingLine = new StringBuilder();
+        private readonly Action<string> onLine;
+        private readonly int maxCharacters;
+        private char[] characters = new char[1024];
+        private bool atStart = true, previousCarriageReturn, finished;
+
+        internal ProcessText(Encoding encoding, Action<string> onLine, bool keepText = true, int maxCharacters = int.MaxValue)
+        {
+            this.encoding = encoding ?? new UTF8Encoding(false);
+            decoder = this.encoding.GetDecoder();
+            this.onLine = onLine;
+            this.maxCharacters = maxCharacters;
+            text = keepText ? new StringBuilder() : null;
+        }
+
+        internal string Text { get { lock (pendingLine) return text?.ToString() ?? string.Empty; } }
+
+        internal void Add(byte[] bytes, int offset, int count)
+        {
+            lock (pendingLine)
+            {
+                if (finished || count <= 0) return;
+                int needed = encoding.GetMaxCharCount(count);
+                if (characters.Length < needed) characters = new char[needed];
+                Append(decoder.GetChars(bytes, offset, count, characters, 0, false));
+            }
+        }
+
+        internal void Finish()
+        {
+            lock (pendingLine)
+            {
+                if (finished) return;
+                finished = true;
+                Append(decoder.GetChars(Array.Empty<byte>(), 0, 0, characters, 0, true));
+                if (pendingLine.Length > 0) EmitLine();
+            }
+        }
+
+        private void Append(int count)
+        {
+            if (count == 0) return;
+            int start = atStart && characters[0] == '﻿' ? 1 : 0;
+            atStart = false;
+            if (text != null && text.Length < maxCharacters) text.Append(characters, start, Math.Min(count - start, maxCharacters - text.Length));
+            if (onLine == null) return;
+            for (int i = start; i < count; i++)
+            {
+                char character = characters[i];
+                if (character == '\r') { EmitLine(); previousCarriageReturn = true; }
+                else if (character == '\n')
+                {
+                    if (!previousCarriageReturn) EmitLine();
+                    previousCarriageReturn = false;
+                }
+                else { pendingLine.Append(character); previousCarriageReturn = false; }
+            }
+        }
+
+        private void EmitLine()
+        {
+            string line = pendingLine.ToString();
+            pendingLine.Clear();
+            onLine(line);
+        }
     }
 }
