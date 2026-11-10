@@ -20,8 +20,6 @@ namespace Orbiters.Toolkit.Editor.VRChat.Attachments
         private const string CacheFolder = "Assets/OrbitersToolkitBuildCache";
         private static readonly List<AttachmentAnimationBuild> Builds = new List<AttachmentAnimationBuild>();
         private static readonly HashSet<AnimatorController> OwnedControllers = new HashSet<AnimatorController>();
-        private static IVRCSdkAvatarBuilderApi sdkBuilder;
-        private static bool sdkBuilding;
         private static bool createdCacheFolder;
         private readonly GameObject root;
         private readonly Dictionary<Transform, Original> original = new Dictionary<Transform, Original>();
@@ -48,38 +46,21 @@ namespace Orbiters.Toolkit.Editor.VRChat.Attachments
 
         static AttachmentAnimationBuild()
         {
-            VRCSdkControlPanel.OnSdkPanelEnable += (_, __) => HookBuilder();
-            EditorApplication.delayCall += () =>
-            {
-                HookBuilder();
-                DeleteStaleCache();
-            };
+            EditorApplication.delayCall += DeleteStaleCache;
         }
 
         // Releases the builds whose copy is gone, once nothing builds; listened to only while a build is open.
         private static void ReleaseGone()
         {
-            if (sdkBuilding || BuildPipeline.isBuildingPlayer || EditorApplication.isCompiling) return;
+            if (VrcSdkBuilds.Building || BuildPipeline.isBuildingPlayer || EditorApplication.isCompiling) return;
             foreach (var build in Builds.Where(b => b.root == null).ToArray()) build.Release();
         }
 
-        private static void HookBuilder()
-        {
-            if (!VRCSdkControlPanel.TryGetBuilder<IVRCSdkAvatarBuilderApi>(out var next) || next == sdkBuilder) return;
-            if (sdkBuilder != null)
-            {
-                sdkBuilder.OnSdkBuildStart -= BuildStart;
-                sdkBuilder.OnSdkBuildFinish -= BuildFinish;
-            }
-            sdkBuilder = next;
-            sdkBuilder.OnSdkBuildStart += BuildStart;
-            sdkBuilder.OnSdkBuildFinish += BuildFinish;
-        }
         // Build data left by a build that never finished (editor closed or crashed, scripts reloaded mid-build). Not while
         // entering or in play mode: the play mode avatar may still use it.
         private static void DeleteStaleCache()
         {
-            if (Builds.Count > 0 || sdkBuilding || EditorApplication.isPlayingOrWillChangePlaymode || !AssetDatabase.IsValidFolder(CacheFolder)) return;
+            if (Builds.Count > 0 || VrcSdkBuilds.Building || EditorApplication.isPlayingOrWillChangePlaymode || !AssetDatabase.IsValidFolder(CacheFolder)) return;
             foreach (var guid in AssetDatabase.FindAssets("", new[] { CacheFolder }))
             {
                 var path = AssetDatabase.GUIDToAssetPath(guid);
@@ -87,9 +68,6 @@ namespace Orbiters.Toolkit.Editor.VRChat.Attachments
             }
             if (AssetDatabase.FindAssets("", new[] { CacheFolder }).Length == 0) AssetDatabase.DeleteAsset(CacheFolder);
         }
-
-        private static void BuildStart(object sender, object avatar) { sdkBuilding = true; }
-        private static void BuildFinish(object sender, string message) { sdkBuilding = false; }
 
         public static bool Owns(AnimatorController controller) => controller != null && OwnedControllers.Contains(controller);
 

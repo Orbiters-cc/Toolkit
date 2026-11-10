@@ -37,6 +37,15 @@ namespace Orbiters.Toolkit.Editor.VRChat
         /// <summary>Raised on the editor's thread as each build succeeds.</summary>
         public static event Action<Build> Succeeded;
 
+        /// <summary>Raised as each build ends, whether it succeeded or not, with the SDK's message.</summary>
+        public static event Action<string> Finished;
+
+        /// <summary>Raised as an upload succeeds, with the id the avatar was uploaded under.</summary>
+        public static event Action<string> Uploaded;
+
+        /// <summary>Whether the SDK's panel is building an avatar now (between its build's start and end).</summary>
+        public static bool Building { get; private set; }
+
         /// <summary>The last build that succeeded in this editor session, or null.</summary>
         public static Build Last { get; private set; }
 
@@ -73,6 +82,8 @@ namespace Orbiters.Toolkit.Editor.VRChat
                 attached = builder;
                 attached.OnSdkBuildStart += OnBuildStart;
                 attached.OnSdkBuildSuccess += OnBuildSuccess;
+                attached.OnSdkBuildFinish += OnBuildFinish;
+                attached.OnSdkUploadSuccess += OnUploadSuccess;
             }
             catch (Exception ex)
             {
@@ -86,11 +97,30 @@ namespace Orbiters.Toolkit.Editor.VRChat
             if (attached == null) return;
             attached.OnSdkBuildStart -= OnBuildStart;
             attached.OnSdkBuildSuccess -= OnBuildSuccess;
+            attached.OnSdkBuildFinish -= OnBuildFinish;
+            attached.OnSdkUploadSuccess -= OnUploadSuccess;
             attached = null;
+            Building = false;
         }
 
-        private static void OnBuildStart(object sender, object target)
+        private static void Raise<T>(Action<T> listeners, T value)
         {
+            foreach (Action<T> listener in listeners?.GetInvocationList() ?? Array.Empty<Delegate>())
+                try { listener(value); }
+                catch (Exception ex) { Debug.LogException(ex); }
+        }
+
+        internal static void OnBuildFinish(object sender, string message)
+        {
+            Building = false;
+            Raise(Finished, message);
+        }
+
+        private static void OnUploadSuccess(object sender, string avatarId) => Raise(Uploaded, avatarId);
+
+        internal static void OnBuildStart(object sender, object target)
+        {
+            Building = true;
             started = target as GameObject;
             foreach (Action<GameObject> listener in Starting?.GetInvocationList() ?? Array.Empty<Delegate>())
                 try { listener(started); }

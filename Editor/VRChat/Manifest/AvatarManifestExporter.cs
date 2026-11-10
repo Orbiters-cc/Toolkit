@@ -27,15 +27,14 @@ namespace Orbiters.Toolkit.Editor.VRChat.Manifest
     {
         // ActiveBuildType ("Test" or "Publish", "None" outside the SDK's builds) came with VRChat SDK 3.7.5.
         private static readonly PropertyInfo BuildType = typeof(VRC_SdkBuilder).GetProperty("ActiveBuildType", BindingFlags.Public | BindingFlags.Static);
-        private static IVRCSdkAvatarBuilderApi builder;
         // What the last build wrote, for its upload.
         private static AvatarManifest built;
         private static string generator;
 
         static AvatarManifestExporter()
         {
-            VRCSdkControlPanel.OnSdkPanelEnable += (_, __) => HookBuilder();
-            HookBuilder();
+            VrcSdkBuilds.Starting += _ => built = null;
+            VrcSdkBuilds.Uploaded += Uploaded;
         }
 
         public override BuildPhase Phase => BuildPhase.Last;
@@ -89,23 +88,8 @@ namespace Orbiters.Toolkit.Editor.VRChat.Manifest
             return generator;
         }
 
-        private static void HookBuilder()
-        {
-            if (!VRCSdkControlPanel.TryGetBuilder<IVRCSdkAvatarBuilderApi>(out var next) || next == builder) return;
-            if (builder != null)
-            {
-                builder.OnSdkBuildStart -= BuildStart;
-                builder.OnSdkUploadSuccess -= Uploaded;
-            }
-            builder = next;
-            builder.OnSdkBuildStart += BuildStart;
-            builder.OnSdkUploadSuccess += Uploaded;
-        }
-
-        private static void BuildStart(object sender, object target) => built = null;
-
         // The id the upload ended with, when the build had none (or another).
-        private static void Uploaded(object sender, string avatarId)
+        private static void Uploaded(string avatarId)
         {
             try
             {
