@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using NUnit.Framework;
 using Orbiters.Toolkit.Editor;
+using UnityEditor;
 using UnityEditor.SceneManagement;
 using UnityEngine;
 using UnityEngine.SceneManagement;
@@ -51,6 +52,53 @@ public sealed class ModelThumbnailsTests
         }
         Assert.That(red, Is.GreaterThan(picture.width * picture.height / 5), "The body fills the picture.");
         Assert.That(blue, Is.LessThan(red / 50), "The ball is a speck beside it (" + blue + " pixels against the body's " + red + ").");
+    }
+
+    // The queue's pictures share one preview stage: each is the picture a stage of its own makes, also right after another
+    // model (other bounds, colours, transparency) was pictured on it.
+    [Test]
+    public void ASharedStageMakesTheSamePictures()
+    {
+        var first = Model("First", Color.red, Vector3.one);
+        var second = Model("Second", Color.green, new Vector3(0.3f, 2f, 0.5f));
+        var shared = new PreviewRenderUtility();
+        try
+        {
+            foreach (bool transparent in new[] { false, true })
+            {
+                var alone = Own(ModelThumbnails.Render(second, transparent));
+                Own(ModelThumbnails.Render(first, !transparent, shared));
+                var after = Own(ModelThumbnails.Render(second, transparent, shared));
+                Assert.That(after.GetPixels32(), Is.EqualTo(alone.GetPixels32()), "transparent: " + transparent);
+            }
+        }
+        finally
+        {
+            shared.Cleanup();
+        }
+    }
+
+    // The worker's PNG (EncodeArrayToPNG over the picture's raw pixels) reads back as EncodeToPNG's does.
+    [Test]
+    public void WorkerPngMatchesEncodeToPng()
+    {
+        var picture = Own(ModelThumbnails.Picture(Model("Model", Color.cyan, Vector3.one), true));
+        var png = ImageConversion.EncodeArrayToPNG(picture.GetRawTextureData(), picture.graphicsFormat, (uint)picture.width, (uint)picture.height);
+        var fromWorker = Own(new Texture2D(2, 2, TextureFormat.RGBA32, false));
+        var fromMain = Own(new Texture2D(2, 2, TextureFormat.RGBA32, false));
+        Assert.That(fromWorker.LoadImage(png), Is.True);
+        Assert.That(fromMain.LoadImage(picture.EncodeToPNG()), Is.True);
+        Assert.That(fromWorker.GetPixels32(), Is.EqualTo(fromMain.GetPixels32()));
+    }
+
+    private GameObject Model(string name, Color colour, Vector3 scale)
+    {
+        var root = Own(new GameObject(name));
+        SceneManager.MoveGameObjectToScene(root, scene);
+        root.transform.localScale = scale;
+        root.AddComponent<MeshFilter>().sharedMesh = Own(Cube(name));
+        root.AddComponent<MeshRenderer>().sharedMaterial = Own(Colour(colour));
+        return root;
     }
 
     private static Material Colour(Color colour) => new Material(Shader.Find("Unlit/Color")) { color = colour, hideFlags = HideFlags.HideAndDontSave };
