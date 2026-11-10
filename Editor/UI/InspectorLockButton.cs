@@ -27,8 +27,7 @@ namespace Orbiters.Toolkit.Editor
             button = new IconButton(IconGlyph.Unlock, "Lock", this.unlockedTooltip, Toggle);
             button.AddToClassList("orbiters-icon-button--small");
             Add(button);
-            var sheet = AssetDatabase.LoadAssetAtPath<StyleSheet>("Packages/orbiters.toolkit/Editor/UI/icon-button.uss");
-            if (sheet) styleSheets.Add(sheet);
+            UiStyles.Attach(this, "Packages/orbiters.toolkit/Editor/UI/icon-button.uss");
             AddToClassList("orbiters-inspector-lock");
             style.display = DisplayStyle.None;
             RegisterCallback<AttachToPanelEvent>(_ => { host = FindHost(); Show(); });

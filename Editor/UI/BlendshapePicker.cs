@@ -32,8 +32,7 @@ namespace Orbiters.Toolkit.Editor
             this.changed = changed;
             this.labelOf = labelOf ?? (name => name);
             recent = recent ?? new List<string>();
-            var sheet = UnityEditor.AssetDatabase.LoadAssetAtPath<StyleSheet>("Packages/orbiters.toolkit/Editor/UI/blendshape-picker.uss");
-            if (sheet != null) styleSheets.Add(sheet);
+            UiStyles.Attach(this, "Packages/orbiters.toolkit/Editor/UI/blendshape-picker.uss");
             AddToClassList("orbiters-shape-picker");
             available = names.Where(n => !string.IsNullOrEmpty(n)).Distinct(StringComparer.Ordinal)
                 .OrderBy(n => recent.Contains(n) ? recent.IndexOf(n) : int.MaxValue)

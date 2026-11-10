@@ -25,8 +25,7 @@ namespace Orbiters.Toolkit.Editor
 
         public BudgetBar()
         {
-            var sheet = AssetDatabase.LoadAssetAtPath<StyleSheet>(StyleSheetPath);
-            if (sheet) styleSheets.Add(sheet);
+            UiStyles.Attach(this, StyleSheetPath);
             AddToClassList("orbiters-budget");
             bar = new VisualElement(); bar.AddToClassList("orbiters-budget__bar"); Add(bar);
             legend = new VisualElement(); legend.AddToClassList("orbiters-budget__legend"); Add(legend);

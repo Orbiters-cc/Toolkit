@@ -16,8 +16,7 @@ namespace Orbiters.Toolkit.Editor
         public CheckBox(bool value, Action<bool> changed)
         {
             this.changed = changed;
-            var sheet = AssetDatabase.LoadAssetAtPath<StyleSheet>(StyleSheetPath);
-            if (sheet) styleSheets.Add(sheet);
+            UiStyles.Attach(this, StyleSheetPath);
             AddToClassList("orbiters-check");
             focusable = true;
             var mark = new VectorIcon(IconGlyph.Check);
