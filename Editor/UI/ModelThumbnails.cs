@@ -354,32 +354,90 @@ namespace Orbiters.Toolkit.Editor
         // The pixels are copied here; the PNG is encoded and written on a worker (the same encoder EncodeToPNG uses), into a
         // file of its own that then replaces the picture, so a reader never sees half a file. A picture not yet on the disk
         // is only made again by a later session.
+        // A picture waiting to be written: its raw pixels and where they go.
+        private readonly struct PendingSave
+        {
+            public readonly string Path;
+            public readonly byte[] Pixels;
+            public readonly UnityEngine.Experimental.Rendering.GraphicsFormat Format;
+            public readonly uint Width, Height;
+            public PendingSave(string path, byte[] pixels, UnityEngine.Experimental.Rendering.GraphicsFormat format, uint width, uint height)
+            {
+                Path = path; Pixels = pixels; Format = format; Width = width; Height = height;
+            }
+        }
+
+        /// <summary>The most pixel bytes waiting for the save worker; past it a picture is encoded and written at once, here.</summary>
+        internal const long MaxPendingSaveBytes = 32L * 1024 * 1024;
+        // One worker writes the pictures in order; the queue and its byte count are guarded by the queue itself.
+        private static readonly Queue<PendingSave> Saves = new Queue<PendingSave>();
+        private static long pendingSaveBytes;
+        private static bool saving;
+        // An unexpected save failure is said once per session (a full disk would otherwise say it for every picture).
+        private static int saveFailureLogged;
+
+        /// <summary>Pixel bytes waiting to be written (tests).</summary>
+        internal static long PendingSaveBytes { get { lock (Saves) return pendingSaveBytes; } }
+
+        // The pixels are copied here; the PNG is encoded and written by one save worker (the same encoder EncodeToPNG uses),
+        // into a file of its own that then replaces the picture, so a reader never sees half a file. Past
+        // MaxPendingSaveBytes waiting (a slow disk), the picture is encoded and written here instead, as before, so neither
+        // threads nor memory pile up. A picture not yet on the disk is only made again by a later session.
         private static void Save(string key, Texture2D texture)
         {
-            byte[] pixels = texture.GetRawTextureData();
-            var format = texture.graphicsFormat;
-            uint width = (uint)texture.width, height = (uint)texture.height;
-            string path = Path.Combine(Folder, key + ".png");
-            string folder = Folder;
-            DedicatedTask.Run(() =>
+            var save = new PendingSave(Path.Combine(Folder, key + ".png"), texture.GetRawTextureData(), texture.graphicsFormat,
+                (uint)texture.width, (uint)texture.height);
+            bool startWorker = false;
+            lock (Saves)
             {
-                string written = path + "." + Guid.NewGuid().ToString("N").Substring(0, 8) + ".png.tmp";
-                try
+                if (pendingSaveBytes + save.Pixels.Length <= MaxPendingSaveBytes)
                 {
-                    byte[] png = ImageConversion.EncodeArrayToPNG(pixels, format, width, height);
-                    Directory.CreateDirectory(folder);
-                    File.WriteAllBytes(written, png);
-                    if (File.Exists(path)) File.Replace(written, path, null);
-                    else File.Move(written, path);
+                    Saves.Enqueue(save);
+                    pendingSaveBytes += save.Pixels.Length;
+                    if (!saving) saving = startWorker = true;
+                    save = default;
                 }
-                catch (IOException) { TryDelete(written); }
-                catch (UnauthorizedAccessException) { TryDelete(written); }
-                catch (Exception ex)
+            }
+
+            if (save.Pixels != null) Write(save);
+            else if (startWorker) DedicatedTask.Run(DrainSaves);
+        }
+
+        private static void DrainSaves()
+        {
+            while (true)
+            {
+                PendingSave save;
+                lock (Saves)
                 {
-                    TryDelete(written);
-                    Debug.LogWarning("[Orbiters] Could not save a model picture: " + ex.Message);
+                    if (Saves.Count == 0) { saving = false; return; }
+                    save = Saves.Dequeue();
                 }
-            });
+
+                Write(save);
+                lock (Saves) pendingSaveBytes -= save.Pixels.Length;
+            }
+        }
+
+        private static void Write(PendingSave save)
+        {
+            string written = save.Path + "." + Guid.NewGuid().ToString("N").Substring(0, 8) + ".png.tmp";
+            try
+            {
+                byte[] png = ImageConversion.EncodeArrayToPNG(save.Pixels, save.Format, save.Width, save.Height);
+                Directory.CreateDirectory(Path.GetDirectoryName(save.Path));
+                File.WriteAllBytes(written, png);
+                if (File.Exists(save.Path)) File.Replace(written, save.Path, null);
+                else File.Move(written, save.Path);
+            }
+            catch (IOException) { TryDelete(written); }
+            catch (UnauthorizedAccessException) { TryDelete(written); }
+            catch (Exception ex)
+            {
+                TryDelete(written);
+                if (System.Threading.Interlocked.Exchange(ref saveFailureLogged, 1) == 0)
+                    Debug.LogWarning("[Orbiters] Could not save a model picture (said once): " + ex.Message);
+            }
         }
 
         // Only the temporary file Save wrote in the same call.
