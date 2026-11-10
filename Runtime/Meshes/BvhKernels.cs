@@ -496,7 +496,12 @@ namespace Orbiters.Toolkit.Meshes
         }
 
         /// <summary>The ray walk with a triangle filter.</summary>
-        public static void Raycast<TFilter>(in BvhView view, float3 origin, float3 direction, float maxDistance, bool backfaces, ref TFilter filter, out BvhHit hit) where TFilter : struct, ITriangleFilter
+        public static void Raycast<TFilter>(in BvhView view, float3 origin, float3 direction, float maxDistance, bool backfaces, ref TFilter filter, out BvhHit hit) where TFilter : struct, ITriangleFilter =>
+            Raycast(view, origin, direction, maxDistance, backfaces, false, ref filter, out hit);
+
+        /// <summary>The ray walk; with <paramref name="contact"/> a triangle the origin lies on is met at distance 0.</summary>
+        public static void Raycast<TFilter>(in BvhView view, float3 origin, float3 direction, float maxDistance, bool backfaces, bool contact, ref TFilter filter,
+            out BvhHit hit) where TFilter : struct, ITriangleFilter
         {
             hit = new BvhHit { Triangle = -1, Distance = maxDistance };
             if (view.NodeCount == 0) return;
@@ -522,7 +527,7 @@ namespace Orbiters.Toolkit.Meshes
                         int t = view.TriangleOfSlot[s];
                         if (!filter.Accept(t)) continue;
                         var c = view.Corners[s];
-                        if (!Triangle.Raycast(origin, direction, c.A, c.B, c.C, backfaces, mirrored, out float d, out float3 bary)) continue;
+                        if (!Triangle.Raycast(origin, direction, c.A, c.B, c.C, backfaces, mirrored, contact, out float d, out float3 bary)) continue;
                         if (d < hit.Distance || (hit.Triangle >= 0 && d == hit.Distance && t < hit.Triangle))
                         {
                             hit.Triangle = t; hit.Distance = d; hit.Bary = bary;
@@ -556,13 +561,16 @@ namespace Orbiters.Toolkit.Meshes
             ClosestPoint(view, point, maxDistance, ref filter, seed, out hit);
         }
 
-        /// <summary>The first triangle along a ray among those <paramref name="rule"/> accepts.</summary>
+        /// <summary>
+        /// The first triangle along a ray among those <paramref name="rule"/> accepts; <paramref name="contact"/> 1: a triangle the
+        /// origin lies on counts, at distance 0.
+        /// </summary>
         [BurstCompile(FloatMode = FloatMode.Strict, FloatPrecision = FloatPrecision.Standard, CompileSynchronously = true)]
-        public static void RaycastByRule(in BvhView view, in float3 origin, in float3 direction, float maxDistance, int backfaces, in TriangleRuleView rule,
-            out BvhHit hit)
+        public static void RaycastByRule(in BvhView view, in float3 origin, in float3 direction, float maxDistance, int backfaces, int contact,
+            in TriangleRuleView rule, out BvhHit hit)
         {
             var filter = rule;
-            Raycast(view, origin, direction, maxDistance, backfaces != 0, ref filter, out hit);
+            Raycast(view, origin, direction, maxDistance, backfaces != 0, contact != 0, ref filter, out hit);
         }
 
         /// <summary>The closest point of each of the classes of <paramref name="rule"/> (its ClassCount) into <paramref name="hits"/>.</summary>

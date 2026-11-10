@@ -76,7 +76,15 @@ namespace Orbiters.Toolkit.Meshes
         /// Without <paramref name="backfaces"/> only a triangle facing the ray counts (wound the other way round when
         /// <paramref name="mirrored"/>).
         /// </summary>
-        public static bool Raycast(float3 origin, float3 direction, float3 a, float3 b, float3 c, bool backfaces, bool mirrored, out float distance, out float3 bary)
+        public static bool Raycast(float3 origin, float3 direction, float3 a, float3 b, float3 c, bool backfaces, bool mirrored, out float distance, out float3 bary) =>
+            Raycast(origin, direction, a, b, c, backfaces, mirrored, false, out distance, out bary);
+
+        /// <summary>
+        /// <see cref="Raycast(float3, float3, float3, float3, float3, bool, bool, out float, out float3)"/>; with
+        /// <paramref name="contact"/> a ray starting on the triangle meets it at distance 0 (otherwise only ahead of the origin).
+        /// </summary>
+        public static bool Raycast(float3 origin, float3 direction, float3 a, float3 b, float3 c, bool backfaces, bool mirrored, bool contact,
+            out float distance, out float3 bary)
         {
             float3 e1 = b - a, e2 = c - a;
             float3 p = math.cross(direction, e2);
@@ -91,7 +99,7 @@ namespace Orbiters.Toolkit.Meshes
             float v = math.dot(direction, q) * invDet;
             if (v < 0f || u + v > 1f) return false;
             float d = math.dot(e2, q) * invDet;
-            if (d <= 0f) return false;
+            if (contact ? d < 0f : d <= 0f) return false;
             distance = d; bary = new float3(1f - u - v, u, v);
             return true;
         }

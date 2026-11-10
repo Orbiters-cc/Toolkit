@@ -71,9 +71,26 @@ namespace Orbiters.Toolkit.Editor.Tests
             Assert.That(hit.Found, Is.True, what + ": found");
             Assert.That(accepted(hit.Triangle), Is.True, what + ": the triangle is accepted");
             Assert.That(hit.Distance, Is.EqualTo(best).Within(1e-5f), what + ": the least distance");
-            // The copy ties exactly with its original: the lower index always wins.
-            int half = count / 2;
-            if (hit.Triangle >= half) Assert.That(accepted(hit.Triangle - half), Is.False, what + ": the copy won a tie against its original");
+            Assert.That(hit.Triangle, Is.EqualTo(ExactWinner(vertices, triangles, p, best, accepted)), what + ": the triangle the tie rule picks");
+        }
+
+        // The winner by the tie rule, exactly: the triangles within rounding of the least distance (managed arithmetic) are
+        // measured again each in a tree of its own (the Burst arithmetic of the walk, one triangle, no traversal order), and the
+        // lowest index among those at the least of those distances wins.
+        private static int ExactWinner(Vector3[] vertices, int[] triangles, Vector3 p, float best, Func<int, bool> accepted)
+        {
+            int count = triangles.Length / 3, winner = -1;
+            float least = float.PositiveInfinity;
+            var only = new bool[count];
+            for (int t = 0; t < count; t++)
+            {
+                if (!accepted(t) || Distance(vertices, triangles, t, p) > best + 1e-5f) continue;
+                only[t] = true;
+                float d = MeshBvh.Build(vertices, triangles, only).ClosestPoint(p, float.PositiveInfinity).Distance;
+                only[t] = false;
+                if (d < least) { least = d; winner = t; }
+            }
+            return winner;
         }
 
         private static TriangleRule MixedRule(Vector3[] faceNormals, int[] masks, int[] labels, bool[] acceptedLabels, bool[] allowed, int[] ranks,
@@ -343,8 +360,10 @@ namespace Orbiters.Toolkit.Editor.Tests
                         float best = float.PositiveInfinity;
                         for (int t = 0; t < 2 * count; t++) best = Mathf.Min(best, Distance(v, tris, t, p));
                         Assert.That(hit.Distance, Is.EqualTo(best).Within(1e-5f), "point " + p.ToString("F3"));
-                        // Each pair of coincident triangles is (t, t + count) in either order: the lower always wins.
+                        // Each pair of coincident triangles is (t, t + count) in either order: the lower always wins, and among
+                        // neighbours meeting at the nearest point the lowest index.
                         Assert.That(hit.Triangle, Is.LessThan(count), "point " + p.ToString("F3") + (tris == reversed ? " (reversed)" : ""));
+                        Assert.That(hit.Triangle, Is.EqualTo(ExactWinner(v, tris, p, best, t => true)), "point " + p.ToString("F3") + (tris == reversed ? " (reversed)" : ""));
                     }
             }
         }
@@ -392,6 +411,66 @@ namespace Orbiters.Toolkit.Editor.Tests
                 AssertBruteForce(first, vertices, triangles, p, 10f, accepted, "point " + i);
                 Assert.That(second.Triangle, Is.EqualTo(first.Triangle), "point " + i + ": both label tests agree");
             }
+        }
+
+        // Review: an empty table is a table (it pins to a null pointer): it accepts no label in it, unlike no table at all, in
+        // closest-point, ray and class queries alike.
+        [Test]
+        public void AnEmptyLabelTableIsNotAMissingOne()
+        {
+            DoubledSphere(8, 16, 2, out var vertices, out var triangles);
+            int count = triangles.Length / 3;
+            var labels = new int[count];
+            for (int t = 0; t < count; t++) labels[t] = t % 3;
+            var bvh = MeshBvh.Build(vertices, triangles);
+            var p = new Vector3(.2f, 1.5f, .1f);
+            var none = TriangleRule.All.Labelled(labels, null);
+            var empty = TriangleRule.All.Labelled(labels, Array.Empty<bool>());
+            var emptyOutside = TriangleRule.All.Labelled(labels, Array.Empty<bool>(), outsideAccepted: true);
+            var second = TriangleRule.All.AlsoLabelled(labels, Array.Empty<bool>());
+            Assert.That(bvh.ClosestPoint(p, 10f, none).Found, Is.True, "no table: any label");
+            Assert.That(bvh.ClosestPoint(p, 10f, empty).Found, Is.False, "an empty table accepts no label");
+            Assert.That(bvh.ClosestPoint(p, 10f, second).Found, Is.False, "the second test alike");
+            Assert.That(bvh.ClosestPoint(p, 10f, emptyOutside).Triangle, Is.EqualTo(bvh.ClosestPoint(p, 10f).Triangle), "outside the table, when accepted");
+            Assert.That(bvh.Raycast(p, -p.normalized, 10f, true, none).Found, Is.True);
+            Assert.That(bvh.Raycast(p, -p.normalized, 10f, true, empty).Found, Is.False);
+            Assert.That(bvh.Raycast(p, -p.normalized, 10f, true, second).Found, Is.False);
+            var hits = new MeshBvh.Hit[2];
+            bvh.ClosestPointsByClass(p, 10f, new TriangleClasses(empty, TriangleTests.None, TriangleTests.Labels), hits);
+            Assert.That(hits[0].Found && !hits[1].Found, Is.True, "classes: the empty table's class finds nothing");
+            bvh.ClosestPointsByClass(p, 10f, new TriangleClasses(none, TriangleTests.None, TriangleTests.Labels), hits);
+            Assert.That(hits[1].Triangle, Is.EqualTo(hits[0].Triangle), "classes: no table is every label");
+        }
+
+        // Review: a ray from a point on a surface meets it at distance 0 only when the caller asks (ReFit); otherwise only hits
+        // ahead count (Mixer). Two layers facing alike, 1 cm apart, the point on the first.
+        [Test]
+        public void RaysFromASurfaceMeetItOnlyWhenAsked()
+        {
+            var vertices = new[] { new Vector3(-1, -1, 0), new Vector3(1, -1, 0), new Vector3(0, 1, 0), new Vector3(-1, -1, .01f), new Vector3(1, -1, .01f), new Vector3(0, 1, .01f) };
+            var triangles = new[] { 0, 1, 2, 3, 4, 5 };
+            var bvh = MeshBvh.Build(vertices, triangles);
+            var p = new Vector3(0, 0, 0);
+            var contact = bvh.Raycast(p, Vector3.forward, 1f, true, TriangleRule.All, contact: true);
+            Assert.That(contact.Found && contact.Triangle == 0 && contact.Distance == 0f, Is.True, "contact: the surface the point is on");
+            var ahead = bvh.Raycast(p, Vector3.forward, 1f, true, TriangleRule.All);
+            Assert.That(ahead.Found && ahead.Triangle == 1, Is.True, "otherwise the next layer");
+            Assert.That(bvh.Raycast(p, Vector3.forward, 1f).Triangle, Is.EqualTo(1), "the unfiltered ray as before");
+            Assert.That(bvh.Raycast(p, Vector3.back, 1f, true, TriangleRule.All, contact: true).Triangle, Is.EqualTo(0), "either way out of it");
+        }
+
+        [Test]
+        public void AScopedPinRefusesRefitsUntilDisposed()
+        {
+            DoubledSphere(4, 8, 1, out var vertices, out var triangles);
+            var bvh = MeshBvh.Build(vertices, triangles);
+            using (var pin = bvh.PinScope())
+            {
+                Assert.That(pin.View.TriangleCount, Is.EqualTo(triangles.Length / 3));
+                Assert.Throws<InvalidOperationException>(() => bvh.Refit());
+            }
+            Assert.DoesNotThrow(() => bvh.Refit());
+            MeshBvh.ReleaseDroppedLeases(true);
         }
 
         [Test]

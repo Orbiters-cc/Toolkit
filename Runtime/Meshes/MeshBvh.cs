@@ -268,8 +268,66 @@ namespace Orbiters.Toolkit.Meshes
         /// </summary>
         public PinnedBvh Pin()
         {
-            PinnedBvh.ReleaseDropped();
+            PinnedBvh.ReleaseDropped(false);
             return new PinnedBvh(this);
+        }
+
+        /// <summary>
+        /// Releases leases dropped without Dispose once collected. With <paramref name="completeJobs"/> (main thread only: the
+        /// editor's periodic pump and the moment before a domain reload) their registered jobs are completed first, so every
+        /// dropped lease goes; without it only those whose jobs are already done. A dropped lease keeps its tree alive until
+        /// then.
+        /// </summary>
+        public static void ReleaseDroppedLeases(bool completeJobs) => PinnedBvh.ReleaseDropped(completeJobs);
+
+        /// <summary>
+        /// The tree's memory pinned for synchronous Burst work in one scope (a brush dab's kernel run with <c>Run()</c>), without
+        /// allocating: <c>using (var pin = bvh.PinScope()) { ... pin.View ... }</c>. Refits are refused until it is disposed.
+        /// Jobs scheduled to run past the scope need <see cref="Pin"/> and <see cref="PinnedBvh.DependsOn"/>.
+        /// </summary>
+        public PinScopeLease PinScope() => new PinScopeLease(this);
+
+        /// <summary>A scoped pin of a <see cref="MeshBvh"/> (see <see cref="PinScope"/>): stack only, disposed by its scope.</summary>
+        public ref struct PinScopeLease
+        {
+            private MeshBvh bvh;
+            private GCHandle nodes, corners, triangles, slots;
+            private BvhView view;
+
+            internal unsafe PinScopeLease(MeshBvh bvh)
+            {
+                PinnedBvh.ReleaseDropped(false);
+                this.bvh = bvh;
+                nodes = GCHandle.Alloc(bvh.nodes, GCHandleType.Pinned);
+                corners = GCHandle.Alloc(bvh.corners, GCHandleType.Pinned);
+                triangles = GCHandle.Alloc(bvh.triangleOfSlot, GCHandleType.Pinned);
+                slots = GCHandle.Alloc(bvh.slotOfTriangle, GCHandleType.Pinned);
+                view = new BvhView
+                {
+                    Nodes = (BvhNode*)nodes.AddrOfPinnedObject(),
+                    Corners = (BvhTriangle*)corners.AddrOfPinnedObject(),
+                    TriangleOfSlot = (int*)triangles.AddrOfPinnedObject(),
+                    SlotOfTriangle = (int*)slots.AddrOfPinnedObject(),
+                    TriangleCount = bvh.slotOfTriangle.Length,
+                    NodeCount = bvh.nodeCount,
+                    Mirrored = bvh.Mirrored ? 1 : 0
+                };
+                System.Threading.Interlocked.Increment(ref bvh.leases);
+            }
+
+            /// <summary>The pinned memory; refused once the scope is disposed.</summary>
+            public BvhView View => bvh != null ? view : throw new ObjectDisposedException(nameof(PinScopeLease));
+
+            public void Dispose()
+            {
+                if (bvh == null) return;
+                nodes.Free();
+                corners.Free();
+                triangles.Free();
+                slots.Free();
+                System.Threading.Interlocked.Decrement(ref bvh.leases);
+                bvh = null;
+            }
         }
 
         private int leases;
@@ -277,7 +335,7 @@ namespace Orbiters.Toolkit.Meshes
         private void RefuseWhilePinned()
         {
             if (System.Threading.Volatile.Read(ref leases) == 0) return;
-            PinnedBvh.ReleaseDropped();
+            PinnedBvh.ReleaseDropped(false);
             if (System.Threading.Volatile.Read(ref leases) > 0) throw new InvalidOperationException("The BVH is pinned for queries: dispose its leases before refitting.");
         }
 
@@ -323,13 +381,18 @@ namespace Orbiters.Toolkit.Meshes
 
             /// <summary>
             /// Releases the dropped leases whose registered jobs have completed (any thread: a completed handle is only read,
-            /// never waited on); the others wait for a later call.
+            /// never waited on); the others wait for a later call. With <paramref name="completeJobs"/> (main thread) their
+            /// jobs are completed first and every dropped lease is released.
             /// </summary>
-            internal static void ReleaseDropped()
+            internal static void ReleaseDropped(bool completeJobs)
             {
                 for (int n = Dropped.Count; n > 0 && Dropped.TryDequeue(out var lease); n--)
                 {
-                    if (lease.hasJobs && !lease.jobs.IsCompleted) { Dropped.Enqueue(lease); continue; }
+                    if (lease.hasJobs && !lease.jobs.IsCompleted)
+                    {
+                        if (!completeJobs) { Dropped.Enqueue(lease); continue; }
+                        lease.jobs.Complete();
+                    }
                     lease.Release();
                 }
             }
@@ -500,9 +563,13 @@ namespace Orbiters.Toolkit.Meshes
             return Query(QueryKind.Closest, point, default, maxDistance, false, rule, seed, default, Span<Hit>.Empty);
         }
 
-        /// <summary>The first triangle along a ray among those <paramref name="rule"/> accepts (Burst, any thread).</summary>
-        public Hit Raycast(Vector3 origin, Vector3 direction, float maxDistance, bool backfaces, in TriangleRule rule) =>
-            Query(QueryKind.Ray, origin, direction, maxDistance, backfaces, rule, -1, default, Span<Hit>.Empty);
+        /// <summary>
+        /// The first triangle along a ray among those <paramref name="rule"/> accepts (Burst, any thread). With
+        /// <paramref name="contact"/> a triangle the origin lies on is met at distance 0 (a point already on a surface); otherwise
+        /// only hits ahead of the origin count, as for the unfiltered rays.
+        /// </summary>
+        public Hit Raycast(Vector3 origin, Vector3 direction, float maxDistance, bool backfaces, in TriangleRule rule, bool contact = false) =>
+            Query(contact ? QueryKind.RayFromContact : QueryKind.Ray, origin, direction, maxDistance, backfaces, rule, -1, default, Span<Hit>.Empty);
 
         /// <summary>
         /// For each class of <paramref name="classes"/>, the closest point among its triangles within
@@ -516,7 +583,7 @@ namespace Orbiters.Toolkit.Meshes
             Query(QueryKind.Classes, point, default, maxDistance, false, classes.Rule, -1, classes, hits);
         }
 
-        private enum QueryKind { Closest, Ray, Classes }
+        private enum QueryKind { Closest, Ray, RayFromContact, Classes }
 
         // The rule's arrays pinned for the one Burst call that reads them.
         private unsafe Hit Query(QueryKind kind, Vector3 point, Vector3 direction, float maxDistance, bool backfaces, in TriangleRule rule, int seed,
@@ -528,7 +595,7 @@ namespace Orbiters.Toolkit.Meshes
                 return new Hit { Distance = maxDistance };
             }
             rule.Check(slotOfTriangle.Length);
-            if (kind == QueryKind.Ray) direction.Normalize();
+            if (kind == QueryKind.Ray || kind == QueryKind.RayFromContact) direction.Normalize();
             BvhHit hit;
             var found = stackalloc BvhHit[TriangleClasses.Max];
             fixed (BvhNode* n = nodes)
@@ -558,6 +625,7 @@ namespace Orbiters.Toolkit.Meshes
                     Mask = rule.mask,
                     Labels = labels,
                     AcceptedLabels = (byte*)accepted,
+                    HasAcceptedLabels = rule.acceptedLabels != null ? 1 : 0,
                     AcceptedLabelCount = rule.acceptedLabels?.Length ?? 0,
                     OutsideLabelsAccepted = rule.outsideLabelsAccepted ? 1 : 0,
                     HasExcludedLabel = rule.hasExcludedLabel ? 1 : 0,
@@ -585,8 +653,9 @@ namespace Orbiters.Toolkit.Meshes
                         BvhKernels.ClosestPointByRule(view, p, maxDistance, filter, seed, out hit);
                         return ToHit(hit);
                     case QueryKind.Ray:
+                    case QueryKind.RayFromContact:
                         float3 d = direction;
-                        BvhKernels.RaycastByRule(view, p, d, maxDistance, backfaces ? 1 : 0, filter, out hit);
+                        BvhKernels.RaycastByRule(view, p, d, maxDistance, backfaces ? 1 : 0, kind == QueryKind.RayFromContact ? 1 : 0, filter, out hit);
                         return ToHit(hit);
                     default:
                         BvhKernels.ClosestPointsByClass(view, p, maxDistance, filter, found);

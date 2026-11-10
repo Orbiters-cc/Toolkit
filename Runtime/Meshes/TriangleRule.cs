@@ -249,6 +249,8 @@ namespace Orbiters.Toolkit.Meshes
         public int Mask;
         [NativeDisableUnsafePtrRestriction] public int* Labels;
         [NativeDisableUnsafePtrRestriction] public byte* AcceptedLabels;
+        /// <summary>1 when the rule gave a table (an empty one pins to a null pointer: that is still a table, accepting no label in it).</summary>
+        public int HasAcceptedLabels;
         public int AcceptedLabelCount;
         public int OutsideLabelsAccepted;
         public int HasExcludedLabel, ExcludedLabel;
@@ -305,7 +307,7 @@ namespace Orbiters.Toolkit.Meshes
         {
             int label = Labels[triangle];
             if (HasExcludedLabel != 0 && label == ExcludedLabel) return false;
-            if (AcceptedLabels == null) return true;
+            if (HasAcceptedLabels == 0) return true;
             return (uint)label < (uint)AcceptedLabelCount ? AcceptedLabels[label] != 0 : OutsideLabelsAccepted != 0;
         }
 
