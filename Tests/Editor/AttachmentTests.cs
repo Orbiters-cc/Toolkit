@@ -828,4 +828,13 @@ public sealed class AttachmentTests
         renderer.rootBone = skinBones[0];
         return renderer;
     }
+
+    // TKV-8: the build decides by a link's kind; the labels the accessory list shows stay as they were.
+    [Test] public void FollowLinkLabelsComeFromTheirKind()
+    {
+        Assert.That(new FollowLink { Kind = FollowKind.VrcFury }.Source, Is.EqualTo("VRCFury"));
+        Assert.That(new FollowLink { Kind = FollowKind.MyAvatar }.Source, Is.EqualTo("My Avatar"));
+        Assert.That(new FollowLink { Kind = FollowKind.NameMatch }.Source, Is.EqualTo("Name match"));
+        Assert.That(new FollowLink { Kind = FollowKind.FittedClothing }.Source, Is.EqualTo("Fitted clothing"));
+    }
 }

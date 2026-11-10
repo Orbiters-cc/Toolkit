@@ -66,19 +66,19 @@ namespace Orbiters.Toolkit.Editor.VRChat.Parameters
         /// holds leaves the built avatar whichever asset declares it (a step after VRCFury removes it from the merged list).
         /// Each function returns the names for one component, or null.
         /// </summary>
-        public static readonly List<Func<Component, ICollection<string>>> BuildRemovedParameters = new List<Func<Component, ICollection<string>>>();
+        public static readonly ExtensionPoint<Func<Component, ICollection<string>>> BuildRemovedParameters = new ExtensionPoint<Func<Component, ICollection<string>>>("Parameters a build removes");
 
         /// <summary>
         /// VRCFury Toggles a build step leaves out with their menu item (e.g. items left out of the upload in My Avatar's
         /// menu editor): their parameter is not counted. Each function tells for one Toggle component.
         /// </summary>
-        public static readonly List<Func<Component, bool>> BuildRemovedToggles = new List<Func<Component, bool>>();
+        public static readonly ExtensionPoint<Func<Component, bool>> BuildRemovedToggles = new ExtensionPoint<Func<Component, bool>>("Toggles a build removes");
 
         /// <summary>
         /// Tells which objects are a face tracking template (My Avatar's), so their parameters are counted apart from the
         /// avatar's own. Takes priority over the custom base when an object is both.
         /// </summary>
-        public static readonly List<Func<GameObject, bool>> FaceTrackingOwners = new List<Func<GameObject, bool>>();
+        public static readonly ExtensionPoint<Func<GameObject, bool>> FaceTrackingOwners = new ExtensionPoint<Func<GameObject, bool>>("Face tracking templates");
 
         private static Type vrcFuryType, toggleType, fullControllerType;
         private static System.Reflection.FieldInfo networkSyncedField;

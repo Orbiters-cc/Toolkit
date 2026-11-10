@@ -36,7 +36,7 @@ namespace Orbiters.Toolkit.Editor.VRChat.Attachments
             bool reparent = VrcFury.Builds(avatarRoot);
             // A recursive creator link would align the fitted bones again, and only match identical
             // child names. Replace that link on this build copy; keep toggles and unrelated prop links.
-            var fitted = new HashSet<Transform>(moves.Where(l => l.Source == "Fitted clothing").Select(l => l.Follower));
+            var fitted = new HashSet<Transform>(moves.Where(l => l.Kind == FollowKind.FittedClothing).Select(l => l.Follower));
             foreach (var link in creatorLinks)
                 if (link.Recursive && link.From != null && fitted.Contains(link.From.transform))
                     Object.DestroyImmediate(link.Component);
@@ -53,11 +53,11 @@ namespace Orbiters.Toolkit.Editor.VRChat.Attachments
         private static List<FollowLink> Moves(GameObject avatarRoot, IReadOnlyList<VrcFury.Link> creatorLinks)
         {
             var links = AttachmentFollow.Links(avatarRoot.transform, matchUnlinkedClothing: false);
-            var fittedRoots = new HashSet<Transform>(links.Where(l => l.Source == "Fitted clothing")
+            var fittedRoots = new HashSet<Transform>(links.Where(l => l.Kind == FollowKind.FittedClothing)
                 .GroupBy(l => l.Accessory).Where(group => creatorLinks.Any(c => c.Recursive && c.From != null &&
                     group.Any(l => l.Follower == c.From.transform))).Select(group => group.Key));
-            var moves = links.Where(l => l.Source == "My Avatar" ||
-                l.Source == "Fitted clothing" && fittedRoots.Contains(l.Accessory)).ToList();
+            var moves = links.Where(l => l.Kind == FollowKind.MyAvatar ||
+                l.Kind == FollowKind.FittedClothing && fittedRoots.Contains(l.Accessory)).ToList();
             moves.Sort((a, b) => Depth(a.Follower).CompareTo(Depth(b.Follower)));
             return moves;
         }
