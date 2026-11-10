@@ -112,7 +112,13 @@ namespace Orbiters.Toolkit.Editor.Animations
                 switch (stream.GetEventType(i))
                 {
                     case ObjectChangeKind.ChangeGameObjectParent: stream.GetChangeGameObjectParentEvent(i, out var parent); id = parent.instanceId; break;
-                    case ObjectChangeKind.ChangeGameObjectOrComponentProperties: stream.GetChangeGameObjectOrComponentPropertiesEvent(i, out var properties); id = properties.instanceId; break;
+                    case ObjectChangeKind.ChangeGameObjectOrComponentProperties:
+                        stream.GetChangeGameObjectOrComponentPropertiesEvent(i, out var properties);
+                        // Only a GameObject's own properties hold a path (its name): a component's change (a slider dragged on a
+                        // renderer, a transform moved) renames nothing.
+                        if (!(EditorUtility.InstanceIDToObject(properties.instanceId) is GameObject)) continue;
+                        id = properties.instanceId;
+                        break;
                     case ObjectChangeKind.ChangeGameObjectStructureHierarchy: stream.GetChangeGameObjectStructureHierarchyEvent(i, out var hierarchy); id = hierarchy.instanceId; break;
                     case ObjectChangeKind.UpdatePrefabInstances: everywhere = true; Later(); continue;
                     case ObjectChangeKind.ChangeScene: rescan = true; everywhere = true; Later(); continue;
@@ -169,18 +175,19 @@ namespace Orbiters.Toolkit.Editor.Animations
         {
             int id = avatar.GetInstanceID();
             if (!Snapshots.TryGetValue(id, out var before)) { Snapshots[id] = PathSnapshot.Of(avatar.transform); return false; }
-            var moves = before.Moves();
+            // The paths now are read once: for the comparison, and as the next snapshot.
+            var moves = before.Moves(out var now);
             Pending.TryGetValue(id, out var held);
             if (moves.Count == 0)
             {
-                Snapshots[id] = PathSnapshot.Of(avatar.transform);
+                Snapshots[id] = now;
                 return held != null && Pending.Remove(id);
             }
             var plan = Breaks(avatar, before);
             if (plan.Fixable == 0)
             {
                 // Nothing broke: the snapshot follows the hierarchy.
-                Snapshots[id] = PathSnapshot.Of(avatar.transform);
+                Snapshots[id] = now;
                 return held != null && Pending.Remove(id);
             }
             var notice = held ?? new Notice { Avatar = avatar, Before = before };

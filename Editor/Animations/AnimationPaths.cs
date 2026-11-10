@@ -124,6 +124,9 @@ namespace Orbiters.Toolkit.Editor.Animations
         private static readonly List<(Type Behaviour, string Property, Type Target)> PathProperties = new List<(Type, string, Type)>();
         private static readonly Dictionary<int, (int Version, List<AssetRefs> Refs)> Cache = new Dictionary<int, (int, List<AssetRefs>)>();
         private static int version;
+        // Each clip's paths as last read, while Unity's dirty count of it (raised by every curve edit) stays the same: most
+        // edits that empty the cache above change no clip, and reading a clip's bindings is most of what a plan costs.
+        private static readonly Dictionary<Object, (int Dirty, PathChange[] Refs)> ClipPaths = new Dictionary<Object, (int, PathChange[])>();
 
         /// <summary>
         /// The avatar an object belongs to: its nearest ancestor with an avatar descriptor once VRChat's part registers
@@ -145,7 +148,7 @@ namespace Orbiters.Toolkit.Editor.Animations
         static AnimationPaths()
         {
             ObjectChangeEvents.changesPublished += OnChanges;
-            Undo.undoRedoPerformed += Invalidate;
+            Undo.undoRedoPerformed += Reread;
         }
 
         /// <summary>More animation data under an avatar (VRChat's playable layers, build tools' components).</summary>
@@ -170,6 +173,13 @@ namespace Orbiters.Toolkit.Editor.Animations
 
         /// <summary>Forgets the bindings read for <see cref="Plan"/>'s cache (they are read again when asked).</summary>
         public static void Invalidate() { version++; Cache.Clear(); }
+
+        // Assets imported or put back by an Undo may keep their dirty count: every clip is read again too.
+        internal static void Reread()
+        {
+            ClipPaths.Clear();
+            Invalidate();
+        }
 
         private static void OnChanges(ref ObjectChangeEventStream stream)
         {
@@ -292,6 +302,8 @@ namespace Orbiters.Toolkit.Editor.Animations
             if (cached && Cache.TryGetValue(key, out var hit) && hit.Version == version && hit.Refs.All(r => r.Asset != null)) return hit.Refs;
             var byKey = new Dictionary<(Object, Transform, bool), AssetRefs>();
             var list = new List<AssetRefs>();
+            if (ClipPaths.Count > 4096)
+                foreach (var gone in ClipPaths.Keys.Where(k => k == null).ToList()) ClipPaths.Remove(gone);
             foreach (var source in sources)
             {
                 if (source.Unknown != null) continue;
@@ -316,12 +328,20 @@ namespace Orbiters.Toolkit.Editor.Animations
             switch (refs.Asset)
             {
                 case AnimationClip clip:
+                    // Read paths are never changed (a plan copies those it changes): shared by every root playing the clip.
+                    int dirty = EditorUtility.GetDirtyCount(clip);
+                    if (ClipPaths.TryGetValue(clip, out var known) && known.Dirty == dirty)
+                    {
+                        refs.Refs.AddRange(known.Refs);
+                        break;
+                    }
                     foreach (var binding in AnimationUtility.GetCurveBindings(clip))
                         if (!string.IsNullOrEmpty(binding.path))
                             refs.Refs.Add(new PathChange { Kind = PathRefKind.Curve, From = binding.path, Property = binding.propertyName, Type = binding.type, Binding = binding });
                     foreach (var binding in AnimationUtility.GetObjectReferenceCurveBindings(clip))
                         if (!string.IsNullOrEmpty(binding.path))
                             refs.Refs.Add(new PathChange { Kind = PathRefKind.ObjectCurve, From = binding.path, Property = binding.propertyName, Type = binding.type, Binding = binding });
+                    ClipPaths[clip] = (dirty, refs.Refs.ToArray());
                     break;
                 case AvatarMask mask:
                     for (int i = 0; i < mask.transformCount; i++)
@@ -413,6 +433,8 @@ namespace Orbiters.Toolkit.Editor.Animations
             var sources = Sources(avatarRoot);
             var plan = new RepathPlan { Avatar = avatarRoot, Sources = sources };
             var guesses = new Dictionary<Transform, Dictionary<string, List<Transform>>>();
+            // Thousands of bindings share a few hundred paths: each is resolved once per snapshot and root.
+            var resolved = new Dictionary<(PathSnapshot, Transform, bool, string, Type), (Transform Target, Transform From)>();
             foreach (var refs in Refs(avatarRoot, sources, cached))
             {
                 // The VRChat SDK's own placeholder clips (proxy_stand_still, proxy_hands_idle…) animate a generic humanoid
@@ -421,7 +443,7 @@ namespace Orbiters.Toolkit.Editor.Animations
                 RepathAsset entry = null;
                 foreach (var original in refs.Refs)
                 {
-                    var change = Plan(refs, original, before, now, avatar, retargets, broken, guesses);
+                    var change = Plan(refs, original, before, now, avatar, retargets, broken, guesses, resolved);
                     if (change == null) continue;
                     entry ??= new RepathAsset { Asset = refs.Asset, Root = refs.Root, Locked = Locked(refs.Asset) };
                     entry.Changes.Add(change);
@@ -459,8 +481,17 @@ namespace Orbiters.Toolkit.Editor.Animations
         public static RepathPlan Broken(GameObject avatarRoot, bool cached = false) => Plan(avatarRoot, (PathSnapshot)null, null, true, cached);
 
         private static PathChange Plan(AssetRefs refs, PathChange original, PathSnapshot before, PathSnapshot now, Transform avatar,
-            IReadOnlyList<Retarget> retargets, bool broken, Dictionary<Transform, Dictionary<string, List<Transform>>> guesses)
+            IReadOnlyList<Retarget> retargets, bool broken, Dictionary<Transform, Dictionary<string, List<Transform>>> guesses,
+            Dictionary<(PathSnapshot, Transform, bool, string, Type), (Transform Target, Transform From)> resolved)
         {
+            Transform Resolve(PathSnapshot snapshot, AssetRefs on, string path, Type type, Transform root, out Transform at)
+            {
+                var key = (snapshot, on.Root, on.WalksUp, path, type);
+                if (!resolved.TryGetValue(key, out var hit)) resolved[key] = hit = (AnimationPaths.Resolve(snapshot, on, path, type, root, out var found), found);
+                at = hit.From;
+                return hit.Target;
+            }
+
             var target = Resolve(before, refs, original.From, original.Type, avatar, out var from);
             bool missing = target == null || !Holds(target, original.Type);
             if (missing)
@@ -642,17 +673,11 @@ namespace Orbiters.Toolkit.Editor.Animations
         {
             var wanted = new HashSet<string>(paths, StringComparer.Ordinal);
             var found = new Dictionary<string, List<string>>(StringComparer.Ordinal);
-            var guids = new[] { "t:AnimatorController", "t:AnimatorOverrideController", "t:BlendTree" }.SelectMany(t => AssetDatabase.FindAssets(t, new[] { "Assets" })).Distinct();
-            foreach (var guid in guids)
+            // Each controller's dependencies are read again only when it changed (ProjectReferences keeps them).
+            foreach (var pair in ProjectReferences.DirectUsers(wanted, "t:AnimatorController", "t:AnimatorOverrideController", "t:BlendTree"))
             {
-                string path = AssetDatabase.GUIDToAssetPath(guid);
-                if (ours.Contains(path) || wanted.Contains(path) || BuildData(path)) continue;
-                foreach (var dependency in AssetDatabase.GetDependencies(path, false))
-                {
-                    if (!wanted.Contains(dependency)) continue;
-                    if (!found.TryGetValue(dependency, out var list)) found[dependency] = list = new List<string>();
-                    list.Add(Path.GetFileNameWithoutExtension(path));
-                }
+                var by = pair.Value.Where(path => !ours.Contains(path) && !wanted.Contains(path) && !BuildData(path)).Select(Path.GetFileNameWithoutExtension).ToList();
+                if (by.Count > 0) found[pair.Key] = by;
             }
             return found;
         }
@@ -951,7 +976,7 @@ namespace Orbiters.Toolkit.Editor.Animations
     {
         private static void OnPostprocessAllAssets(string[] imported, string[] deleted, string[] moved, string[] movedFrom)
         {
-            if (imported.Length + deleted.Length + moved.Length > 0) AnimationPaths.Invalidate();
+            if (imported.Length + deleted.Length + moved.Length > 0) AnimationPaths.Reread();
         }
     }
 }

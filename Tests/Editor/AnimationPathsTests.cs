@@ -124,6 +124,28 @@ public sealed class AnimationPathsTests
         Assert.AreEqual(0, plan.Fixable, plan.ToString());
     }
 
+    // A clip's paths are kept between plans while the clip is unchanged: one edited since is read again.
+    [Test] public void AClipEditedAfterAPlanIsReadAgain()
+    {
+        Assert.AreEqual(0, AnimationPaths.Broken(avatar).Changes.Count());
+        int paths = AnimationPaths.CountPaths(avatar);
+        Assert.AreEqual(paths, AnimationPaths.CountPaths(avatar), "the same answer from the kept paths");
+        Curve(clip, "Gone/Thing", typeof(GameObject), "m_IsActive");
+        Assert.That(AnimationPaths.Broken(avatar).Changes.Select(c => c.From), Has.Member("Gone/Thing"));
+        Assert.AreEqual(paths + 1, AnimationPaths.CountPaths(avatar));
+    }
+
+    // The watcher keeps the hierarchy it compared with as the next snapshot: the same as reading it again.
+    [Test] public void TheHierarchyAComparisonReadIsTheSnapshotOfNow()
+    {
+        var before = PathSnapshot.Of(avatar.transform);
+        jacket.name = "Coat";
+        var moves = before.Moves(out var now);
+        Assert.That(moves.Select(m => m.FormerPath), Is.EquivalentTo(new[] { "Jacket", "Jacket/Sleeve", "Jacket/Speaker" }));
+        CollectionAssert.AreEquivalent(PathSnapshot.Of(avatar.transform).Paths.ToList(), now.Paths.ToList());
+        Assert.That(now.TryGet("Coat/Sleeve", out var found) && found == sleeve);
+    }
+
     [Test] public void DuplicateSiblingNamesResolveToTheFirst()
     {
         var hat = Child(avatar.transform, "Hat");
