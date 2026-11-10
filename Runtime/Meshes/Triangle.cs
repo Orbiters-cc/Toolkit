@@ -15,14 +15,18 @@ namespace Orbiters.Toolkit.Meshes
         /// </summary>
         public static float3 ClosestPoint(float3 p, float3 a, float3 b, float3 c, out float3 bary)
         {
-            // Ericson, Real-Time Collision Detection 5.1.5.
+            // Ericson, Real-Time Collision Detection 5.1.5, with the three region weights va, vb, vc taken in their cross
+            // product form (Binet-Cauchy: d1 * d4 - d3 * d2 = n . (ap x bp), and so on): the same values, but Ericson's
+            // differences of dot products lose almost every digit on a long thin triangle (products near 0.19 for a result
+            // near 2e-6 on a 1 m x 2 mm sliver), which put a point lying inside the sliver a millimetre away from it.
             float3 ab = b - a, ac = c - a, ap = p - a;
+            float3 n = math.cross(ab, ac);
             float d1 = math.dot(ab, ap), d2 = math.dot(ac, ap);
             if (d1 <= 0f && d2 <= 0f) { bary = new float3(1, 0, 0); return a; }
             float3 bp = p - b;
             float d3 = math.dot(ab, bp), d4 = math.dot(ac, bp);
             if (d3 >= 0f && d4 <= d3) { bary = new float3(0, 1, 0); return b; }
-            float vc = d1 * d4 - d3 * d2;
+            float vc = math.dot(n, math.cross(ap, bp));
             // A triangle without area (two corners at one place, or all three about on a line): an edge test passed still
             // gives the right point (p's projection lies within that edge) unless the edge has no length, and the face
             // test below would divide by about nothing, so its edges decide there.
@@ -30,11 +34,11 @@ namespace Orbiters.Toolkit.Meshes
             float3 cp = p - c;
             float d5 = math.dot(ab, cp), d6 = math.dot(ac, cp);
             if (d6 >= 0f && d5 <= d6) { bary = new float3(0, 0, 1); return c; }
-            float vb = d5 * d2 - d1 * d6;
+            float vb = math.dot(n, math.cross(cp, ap));
             if (vb <= 0f && d2 >= 0f && d6 <= 0f && d2 - d6 > 0f) { float w = d2 / (d2 - d6); bary = new float3(1 - w, 0, w); return a + w * ac; }
-            float va = d3 * d6 - d5 * d4;
+            float va = math.dot(n, math.cross(bp, cp));
             if (va <= 0f && d4 - d3 >= 0f && d5 - d6 >= 0f && (d4 - d3) + (d5 - d6) > 0f) { float w = (d4 - d3) / ((d4 - d3) + (d5 - d6)); bary = new float3(0, 1 - w, w); return b + w * (c - b); }
-            if (!(math.lengthsq(math.cross(ab, ac)) > 1e-10f * math.lengthsq(ab) * math.lengthsq(ac))) return ClosestPointOnCollapsed(p, a, b, c, out bary);
+            if (!(math.lengthsq(n) > 1e-10f * math.lengthsq(ab) * math.lengthsq(ac))) return ClosestPointOnCollapsed(p, a, b, c, out bary);
             float denom = 1f / (va + vb + vc);
             float vv = vb * denom, ww = vc * denom;
             bary = new float3(1 - vv - ww, vv, ww);

@@ -473,6 +473,152 @@ namespace Orbiters.Toolkit.Editor.Tests
             MeshBvh.ReleaseDroppedLeases(true);
         }
 
+        // ---- Long slivers among tiny triangles, against a reference in double precision -------------------------------------
+        // The tests above compare the tree with every triangle measured by the same Triangle routine, on well-shaped
+        // triangles of one size: a routine that measures a sliver wrong agrees with itself, so they could not see that
+        // Ericson's region weights lose their digits on a long thin triangle (a point inside a 1 m x 2 mm sliver came out
+        // a millimetre away: MeshPartsSurfaceTests.SurfaceChecksFindLongSliversAmongTinyTriangles). These measure with an
+        // independent double-precision reference, on slivers along each axis with tiny triangles around them.
+
+        // Slivers along axis (long side 0.3 to 3 m, 1e-2 to 1e-4 of that wide, in the plane of axis and another), among
+        // 1,000 tiny triangles (1 mm) in a band beside them, as a body's long seam strips are among its small faces.
+        private static void SliverField(int axis, int seed, out Vector3[] vertices, out int[] triangles, out int slivers)
+        {
+            var random = new System.Random(seed);
+            var v = new List<Vector3>();
+            var t = new List<int>();
+            slivers = 6;
+            for (int k = 0; k < slivers; k++)
+            {
+                float length = .3f + (float)random.NextDouble() * 2.7f;
+                float width = length * (float)Math.Pow(10, -2 - random.NextDouble() * 2);
+                var along = Vector3.zero; along[axis] = length;
+                var across = Vector3.zero; across[(axis + 1 + k % 2) % 3] = width;
+                var origin = RandomPoint(random, .5f);
+                int start = v.Count;
+                v.AddRange(new[] { origin, origin + along, origin + along * (float)random.NextDouble() + across });
+                t.AddRange(new[] { start, start + 1, start + 2 });
+            }
+            for (int i = 0; i < 1000; i++)
+            {
+                var step = Vector3.zero; step[axis] = i * .002f;
+                var lift = Vector3.zero; lift[(axis + 1) % 3] = 1f;
+                var p = step + lift + RandomPoint(random, .01f);
+                var right = Vector3.zero; right[axis] = .001f;
+                var up = Vector3.zero; up[(axis + 2) % 3] = .001f;
+                int start = v.Count;
+                v.AddRange(new[] { p, p + right, p + up });
+                t.AddRange(new[] { start, start + 1, start + 2 });
+            }
+            vertices = v.ToArray();
+            triangles = t.ToArray();
+        }
+
+        // The distance from p to triangle t in double precision: to the plane where the projection falls inside (barycentric
+        // weights from cross products), else to the nearest edge.
+        private static double ReferenceDistance(Vector3[] vertices, int[] triangles, int t, Vector3 point)
+        {
+            double[] P = { point.x, point.y, point.z };
+            double[] Corner(int k) { var c = vertices[triangles[t * 3 + k]]; return new double[] { c.x, c.y, c.z }; }
+            double[] Sub(double[] x, double[] y) => new[] { x[0] - y[0], x[1] - y[1], x[2] - y[2] };
+            double Dot(double[] x, double[] y) => x[0] * y[0] + x[1] * y[1] + x[2] * y[2];
+            double[] Cross(double[] x, double[] y) => new[] { x[1] * y[2] - x[2] * y[1], x[2] * y[0] - x[0] * y[2], x[0] * y[1] - x[1] * y[0] };
+            double Segment(double[] a, double[] b)
+            {
+                var d = Sub(b, a);
+                double l = Dot(d, d), s = l > 0 ? Math.Max(0, Math.Min(1, Dot(Sub(P, a), d) / l)) : 0;
+                var q = new[] { a[0] + d[0] * s - P[0], a[1] + d[1] * s - P[1], a[2] + d[2] * s - P[2] };
+                return Math.Sqrt(Dot(q, q));
+            }
+            double[] A = Corner(0), B = Corner(1), C = Corner(2);
+            var n = Cross(Sub(B, A), Sub(C, A));
+            double nn = Dot(n, n), best = Math.Min(Segment(A, B), Math.Min(Segment(B, C), Segment(C, A)));
+            if (nn > 0)
+            {
+                double h = Dot(Sub(P, A), n) / nn;
+                var q = new[] { P[0] - n[0] * h, P[1] - n[1] * h, P[2] - n[2] * h };
+                if (Dot(n, Cross(Sub(B, q), Sub(C, q))) >= 0 && Dot(n, Cross(Sub(C, q), Sub(A, q))) >= 0 && Dot(n, Cross(Sub(A, q), Sub(B, q))) >= 0)
+                    best = Math.Min(best, Math.Abs(h) * Math.Sqrt(nn));
+            }
+            return best;
+        }
+
+        // Points inside a sliver, beside its long edges (in its plane and off it) and far from everything.
+        private static IEnumerable<(Vector3 Point, string What)> SliverQueries(Vector3[] vertices, int[] triangles, int slivers, System.Random random)
+        {
+            for (int k = 0; k < slivers; k++)
+            {
+                Vector3 a = vertices[triangles[k * 3]], b = vertices[triangles[k * 3 + 1]], c = vertices[triangles[k * 3 + 2]];
+                var normal = Vector3.Cross(b - a, c - a).normalized;
+                float width = Vector3.Cross(b - a, c - a).magnitude / (b - a).magnitude;
+                for (int i = 0; i < 40; i++)
+                {
+                    // Clear of the corners and edges by 5% of the weights (the edges have their own queries below).
+                    float s = .05f + .4f * (float)random.NextDouble(), u = .05f + .4f * (float)random.NextDouble();
+                    var inside = a + (b - a) * s + (c - a) * u;
+                    yield return (inside, "inside sliver " + k);
+                    yield return (inside + normal * width * ((float)random.NextDouble() - .5f), "above sliver " + k);
+                    // Beside the long edge ab, in the plane, outside the sliver.
+                    var edge = a + (b - a) * (float)random.NextDouble();
+                    var outward = Vector3.Cross(normal, b - a).normalized;
+                    if (Vector3.Dot(outward, c - a) > 0) outward = -outward;
+                    yield return (edge + outward * width * (float)random.NextDouble(), "beside sliver " + k);
+                    yield return (RandomPoint(random, 3f), "far");
+                }
+            }
+        }
+
+        [TestCase(0)]
+        [TestCase(1)]
+        [TestCase(2)]
+        public void LongSliversAmongTinyTrianglesMatchADoublePrecisionReference(int axis)
+        {
+            SliverField(axis, 11 + axis, out var vertices, out var triangles, out int slivers);
+            int count = triangles.Length / 3;
+            var bvh = MeshBvh.Build(vertices, triangles);
+            var random = new System.Random(5 + axis);
+            var near = new List<int>();
+            foreach (var (p, what) in SliverQueries(vertices, triangles, slivers, random))
+            {
+                double best = double.MaxValue;
+                var reference = new double[count];
+                for (int t = 0; t < count; t++) best = Math.Min(best, reference[t] = ReferenceDistance(vertices, triangles, t, p));
+                // Float rounding of corners up to about 3.5 m away: a few ulps of that.
+                double tolerance = 2e-6 + best * 1e-5;
+
+                var hit = bvh.ClosestPoint(p, 10f);
+                Assert.That(hit.Found, Is.True, what);
+                Assert.That(hit.Distance, Is.EqualTo(best).Within(tolerance), what + ": the least distance");
+                Assert.That(reference[hit.Triangle], Is.EqualTo(best).Within(tolerance), what + ": a nearest triangle");
+                Assert.That((hit.Position - p).magnitude, Is.EqualTo(hit.Distance).Within(1e-5f), what + ": the point it gives");
+
+                // Every triangle within a radius is among those near it.
+                float radius = (float)best + .003f;
+                bvh.TrianglesNear(p, radius, near);
+                var found = new HashSet<int>(near);
+                for (int t = 0; t < count; t++)
+                    if (reference[t] < radius * (1 - 1e-5)) Assert.That(found.Contains(t), Is.True, what + ": triangle " + t + " near");
+
+                // A ray along the sliver's normal from above it meets it at the height it starts from.
+                if (!what.StartsWith("above", StringComparison.Ordinal)) continue;
+                int k = int.Parse(what.Substring(what.LastIndexOf(' ') + 1));
+                Vector3 a = vertices[triangles[k * 3]], b = vertices[triangles[k * 3 + 1]], c = vertices[triangles[k * 3 + 2]];
+                var normal = Vector3.Cross(b - a, c - a).normalized;
+                float height = Vector3.Dot(p - a, normal);
+                if (Mathf.Abs(height) < 1e-6f) continue;
+                var direction = height > 0 ? -normal : normal;
+                var ray = bvh.Raycast(p, direction, 10f);
+                // Another sliver may cross in between (they lie at random): the nearest crossing of any other triangle.
+                float expected = Mathf.Abs(height);
+                for (int t = 0; t < count; t++)
+                    if (t != k && Triangle.Raycast(p, direction, vertices[triangles[t * 3]], vertices[triangles[t * 3 + 1]], vertices[triangles[t * 3 + 2]], true, false,
+                            out float d, out _))
+                        expected = Mathf.Min(expected, d);
+                Assert.That(ray.Found, Is.True, what + ": the ray meets the sliver");
+                Assert.That(ray.Distance, Is.EqualTo(expected).Within(1e-5f), what + ": at its height");
+            }
+        }
+
         [Test]
         public void RulesRefuseArraysThatDoNotCoverTheMesh()
         {
