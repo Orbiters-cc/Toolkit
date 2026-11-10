@@ -94,12 +94,20 @@ namespace Orbiters.Toolkit.Editor.Animations
         /// The objects still below the root whose path differs from the snapshot's (renamed, or put elsewhere, or below one
         /// that was), each with its path then. Objects added or deleted since are not moves.
         /// </summary>
-        public List<(Transform Target, string FormerPath)> Moves()
+        public List<(Transform Target, string FormerPath)> Moves() => Moves(out _);
+
+        /// <summary>The same, with the hierarchy as it is now (<see cref="Of"/>, from the paths read for the comparison).</summary>
+        public List<(Transform Target, string FormerPath)> Moves(out PathSnapshot now)
         {
             var moves = new List<(Transform, string)>();
+            now = new PathSnapshot(Root);
             if (Root == null) return moves;
             foreach (var t in Root.GetComponentsInChildren<Transform>(true))
-                if (t != Root && byTransform.TryGetValue(t, out var path) && path != AnimationUtility.CalculateTransformPath(t, Root)) moves.Add((t, path));
+            {
+                string current = t == Root ? "" : AnimationUtility.CalculateTransformPath(t, Root);
+                now.Add(current, t);
+                if (t != Root && byTransform.TryGetValue(t, out var path) && path != current) moves.Add((t, path));
+            }
             return moves;
         }
     }

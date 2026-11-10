@@ -151,8 +151,9 @@ namespace Orbiters.Toolkit.Editor.VRChat.Optimization
 
             // Every toggle's curves, by the path from the avatar's root of what they show.
             var toggled = new Dictionary<string, List<(Transform AnimatorRoot, EditorCurveBinding Binding)>>(StringComparer.Ordinal);
+            var index = usage.Animations;
             foreach (var (clip, animatorRoot) in clips)
-                foreach (var binding in AnimationUtility.GetCurveBindings(clip))
+                foreach (var binding in index.Bindings(clip).Floats)
                 {
                     if (binding.propertyName != "m_IsActive" && binding.propertyName != "m_Enabled") continue;
                     string path = usage.PathOf(animatorRoot, binding.path);
@@ -350,7 +351,7 @@ namespace Orbiters.Toolkit.Editor.VRChat.Optimization
                 // Their unused blendshapes go first (baked); the ones animations use join the merged mesh.
                 foreach (var source in sources.OfType<SkinnedMeshRenderer>().Where(s => s.sharedMesh.blendShapeCount > 0))
                 {
-                    var copy = BlendShapePruning.Prune(usage.Root, source);
+                    var copy = BlendShapePruning.Prune(usage, source);
                     if (copy != null) result.Meshes.Add(copy);
                 }
                 merged = Merge(target, sources, build != null, hides);
@@ -387,7 +388,7 @@ namespace Orbiters.Toolkit.Editor.VRChat.Optimization
                 if (build != null)
                 {
                     Mirror(build, usage, target, units, made);
-                    MoveShapeAnimations(build, target, merged.Shapes);
+                    MoveShapeAnimations(build, usage, target, merged.Shapes);
                 }
             }
             finally { foreach (var source in sources) Remove(source, target, usage); }
@@ -435,6 +436,7 @@ namespace Orbiters.Toolkit.Editor.VRChat.Optimization
         // every clip that sets them; a renderer's own switch goes with it.
         private static void Mirror(AttachmentAnimationBuild build, AvatarUsage usage, SkinnedMeshRenderer target, List<Unit> units, List<(Unit Unit, Transform Bone)> made)
         {
+            var index = usage.Animations;
             using var edits = build.Edits();
             foreach (var (clip, animatorRoot) in build.Clips)
             {
@@ -442,7 +444,7 @@ namespace Orbiters.Toolkit.Editor.VRChat.Optimization
                 var removed = new List<EditorCurveBinding>();
                 var added = new List<EditorCurveBinding>();
                 var curves = new List<AnimationCurve>();
-                foreach (var binding in AnimationUtility.GetCurveBindings(clip))
+                foreach (var binding in index.Bindings(clip).Floats)
                 {
                     if (binding.propertyName != "m_IsActive" && binding.propertyName != "m_Enabled") continue;
                     string path = usage.PathOf(animatorRoot, binding.path);
@@ -470,8 +472,8 @@ namespace Orbiters.Toolkit.Editor.VRChat.Optimization
                     }
                 }
                 if (removed.Count == 0 && added.Count == 0) continue;
-                if (removed.Count > 0) AnimationUtility.SetEditorCurves(clip, removed.ToArray(), new AnimationCurve[removed.Count]);
-                if (added.Count > 0) AnimationUtility.SetEditorCurves(clip, added.ToArray(), curves.ToArray());
+                if (removed.Count > 0) index.SetCurves(clip, removed.ToArray(), new AnimationCurve[removed.Count]);
+                if (added.Count > 0) index.SetCurves(clip, added.ToArray(), curves.ToArray());
                 EditorUtility.SetDirty(clip);
             }
         }

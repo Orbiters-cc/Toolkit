@@ -3,10 +3,10 @@ using System.Linq;
 using Orbiters.Toolkit.Editor.Animations;
 using Orbiters.Toolkit.Editor.VRChat.Attachments;
 using Orbiters.Toolkit.Editor.VRChat.BlendShapes;
+using Orbiters.Toolkit.Editor.VRChat.Build;
 using UnityEditor;
 using UnityEditor.Animations;
 using UnityEngine;
-using VRC.SDKBase.Editor.BuildPipeline;
 
 namespace Orbiters.Toolkit.Editor.VRChat
 {
@@ -95,14 +95,14 @@ namespace Orbiters.Toolkit.Editor.VRChat
         }
     }
 
-    internal sealed class VrcFuryBuiltAnimationsHook : IVRCSDKPreprocessAvatarCallback
+    internal sealed class VrcFuryBuiltAnimationsHook : BuildStep
     {
         // Right after VRCFury's build (-10000), before every step that changes its controllers.
-        public int callbackOrder => -9999;
+        public override BuildPhase Phase => BuildPhase.AfterVrcFury;
 
-        public bool OnPreprocessAvatar(GameObject avatarRoot)
+        public override bool Run(BuildContext context)
         {
-            VrcFuryBuiltAnimations.Own(avatarRoot);
+            VrcFuryBuiltAnimations.Own(context.Avatar);
             return true;
         }
     }

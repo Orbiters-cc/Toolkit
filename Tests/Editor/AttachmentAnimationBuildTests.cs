@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using NUnit.Framework;
+using Orbiters.Toolkit.Editor.VRChat.Build;
 using Orbiters.Toolkit.Editor.VRChat.Attachments;
 using Orbiters.Toolkit.Editor.VRChat.BlendShapes;
 using Orbiters.Toolkit.VRChat;
@@ -84,6 +85,19 @@ public sealed class AttachmentAnimationBuildTests
     private static AnimatorController Controller(GameObject copy) => (AnimatorController)copy.GetComponent<VRCAvatarDescriptor>().baseAnimationLayers[0].animatorController;
     private static Transform Sleeve(GameObject copy) => copy.GetComponentsInChildren<Transform>(true).Single(t => t.name == "Sleeve");
     private static AnimationClip Clip(GameObject copy) => Controller(copy).animationClips.Single();
+
+    // The lists of the build's copies are kept between asks: they still leave out a copy a step destroyed since.
+    [Test] public void TheBuildsClipListLeavesOutDestroyedCopies()
+    {
+        var copy = Build();
+        var build = AttachmentAnimationBuild.Prepare(copy);
+        var clip = Clip(copy);
+        Assert.That(build.Clips.Select(c => c.Clip), Is.EqualTo(new[] { clip }));
+        Assert.That(build.Owned, Has.Member(clip));
+        Object.DestroyImmediate(clip, true);
+        Assert.That(build.Clips, Is.Empty);
+        Assert.That(build.Owned.Any(o => o == null), Is.False);
+    }
 
     [Test] public void MovesOnlyTheBuildCopyWithoutAddingConstraintsAndKeepsScaleFollowing()
     {
@@ -192,7 +206,7 @@ public sealed class AttachmentAnimationBuildTests
         var expected = AnimationUtility.CalculateTransformPath(Sleeve(copy), copy.transform);
         AttachmentBuild.Finish(copy);
         // The build's last step writes its data before the SDK saves the copy as a prefab.
-        Assert.True(new BuildCopyAssetsHook().OnPreprocessAvatar(copy));
+        Assert.True(new BuildCopyAssetsHook().Run(BuildContext.For(copy)));
         var path = folder + "/built.prefab";
         PrefabUtility.SaveAsPrefabAsset(copy, path);
         AssetDatabase.ImportAsset(AssetDatabase.GetAssetPath(Controller(copy)), ImportAssetOptions.ForceSynchronousImport | ImportAssetOptions.ForceUpdate);

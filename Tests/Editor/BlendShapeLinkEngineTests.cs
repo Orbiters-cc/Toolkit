@@ -79,6 +79,34 @@ public sealed class BlendShapeLinkEngineTests
         Assert.That(descriptor.baseAnimationLayers[1].mask, Is.Null);
     }
 
+    // Every layer copied to FX at once, with the parameters it reads at their own defaults.
+    [Test]
+    public void FxCopiesOfLayersKeepTheirParametersDefaults()
+    {
+        AddRenderer(Child("Body"), "Smile", "Fix");
+        var gesture = Controller("gesture");
+        gesture.AddLayer("Left");
+        gesture.AddParameter(new AnimatorControllerParameter { name = "Held", type = AnimatorControllerParameterType.Bool, defaultBool = true });
+        gesture.AddParameter(new AnimatorControllerParameter { name = "Speed", type = AnimatorControllerParameterType.Float, defaultFloat = .5f });
+        gesture.layers[0].stateMachine.AddState("Smile").motion = Clip("smile", Shape("Body", "Smile", 0, 100));
+        gesture.layers[1].stateMachine.AddState("Smile too").motion = Clip("smile too", Shape("Body", "Smile", 100, 0));
+        var fx = Controller("fx");
+        var descriptor = root.AddComponent<VRCAvatarDescriptor>();
+        descriptor.baseAnimationLayers = new[]
+        {
+            new VRCAvatarDescriptor.CustomAnimLayer { type = VRCAvatarDescriptor.AnimLayerType.Gesture, animatorController = gesture },
+            new VRCAvatarDescriptor.CustomAnimLayer { type = VRCAvatarDescriptor.AnimLayerType.FX, animatorController = fx }
+        };
+
+        var result = BlendShapeLinkEngine.Apply(root, new[] { FactorLink(BlendShapeLinkEndpoint.BlendShape, "Fix", null) }, "test");
+
+        Assert.That(result.Success, Is.True, result.Message);
+        Assert.That(fx.layers.Select(l => l.name), Is.SupersetOf(new[] { BlendShapeLinkEngine.FxLayerPrefix + gesture.layers[0].name, BlendShapeLinkEngine.FxLayerPrefix + "Left" }));
+        Assert.That(fx.parameters.Single(p => p.name == "Held").defaultBool, Is.True);
+        Assert.That(fx.parameters.Single(p => p.name == "Speed").defaultFloat, Is.EqualTo(.5f));
+        Assert.That(fx.parameters.Count(p => p.name == "UP_Test_Factor"), Is.EqualTo(1));
+    }
+
     [Test]
     public void SignatureMatchesOnlyClipsWithEveryChannel()
     {
@@ -223,6 +251,73 @@ public sealed class BlendShapeLinkEngineTests
             Assert.That(copy.Controller.layers[0].stateMachine.states[0].state, Is.Not.SameAs(authored.layers[0].stateMachine.states[0].state));
         }
         finally { copy.Destroy(); }
+    }
+
+    // The links read each clip's curves once: a link triggered by a shape an earlier link of the same pass adds still sees it.
+    [Test]
+    public void LinksChainThroughTheShapesEarlierLinksAdd()
+    {
+        AddRenderer(Child("Body"), "Smile", "Fix", "Other");
+        var controller = Controller("fx");
+        root.AddComponent<Animator>().runtimeAnimatorController = controller;
+        var state = controller.layers[0].stateMachine.AddState("Smile");
+        state.motion = Clip("smile", Shape("Body", "Smile", 0, 100));
+
+        var result = BlendShapeLinkEngine.Apply(root, new[]
+        {
+            BlendShapeLink.Copy("Body", "Smile", "Body", "Fix"),
+            BlendShapeLink.Copy("Body", "Fix", "Body", "Other"),
+        }, "test");
+
+        Assert.That(result.Success, Is.True, result.Message);
+        Assert.That(result.Links, Is.EqualTo(2));
+        var output = (AnimationClip)state.motion;
+        Assert.That(AnimationUtility.GetCurveBindings(output).Select(b => b.propertyName), Is.EquivalentTo(new[] { "blendShape.Smile", "blendShape.Fix", "blendShape.Other" }));
+    }
+
+    // A link nothing triggers changes no state, yet every controller gets its factor, as before the links were indexed.
+    [Test]
+    public void ALinkNothingTriggersAddsItsFactorAndNothingElse()
+    {
+        AddRenderer(Child("Body"), "Smile", "Fix");
+        var controller = Controller("fx");
+        root.AddComponent<Animator>().runtimeAnimatorController = controller;
+        var smile = Clip("smile", Shape("Body", "Smile", 0, 100));
+        var state = controller.layers[0].stateMachine.AddState("Smile");
+        state.motion = smile;
+        var link = FactorLink(BlendShapeLinkEndpoint.BlendShape, "Fix", null);
+        link.SourceProperty = "blendShape.Frown";
+
+        var result = BlendShapeLinkEngine.Apply(root, new[] { link }, "test");
+
+        Assert.That(result.Success, Is.False);
+        Assert.That(state.motion, Is.SameAs(smile));
+        Assert.That(controller.parameters.Select(p => p.name), Has.Member("UP_Test_Factor"));
+    }
+
+    // A state already holding a wrapper of the link's factor (an earlier pass) still has its FX mask cleared, though the
+    // link's own trigger is animated nowhere.
+    [Test]
+    public void AWrapperOfTheFactorStillClearsTheFxMask()
+    {
+        AddRenderer(Child("Body"), "Smile", "Fix");
+        var fxMask = Asset(new AvatarMask(), "fx.mask");
+        var fx = Controller("fx");
+        fx.layers[0].stateMachine.AddState("Smile").motion = Clip("smile", Shape("Body", "Smile", 0, 100));
+        var descriptor = root.AddComponent<VRCAvatarDescriptor>();
+        descriptor.baseAnimationLayers = new[] { new VRCAvatarDescriptor.CustomAnimLayer { type = VRCAvatarDescriptor.AnimLayerType.FX, animatorController = fx } };
+        Assert.That(BlendShapeLinkEngine.Apply(root, new[] { FactorLink(BlendShapeLinkEndpoint.BlendShape, "Fix", null) }, "first").Success, Is.True);
+        Assert.That(fx.layers[0].stateMachine.states[0].state.motion, Is.InstanceOf<BlendTree>());
+        var layers = fx.layers;
+        layers[0].avatarMask = fxMask;
+        fx.layers = layers;
+
+        var other = FactorLink(BlendShapeLinkEndpoint.BlendShape, "Fix", null);
+        other.SourceProperty = "blendShape.Frown";
+        var result = BlendShapeLinkEngine.Apply(root, new[] { other }, "second");
+
+        Assert.That(result.Success, Is.True, result.Message);
+        Assert.That(fx.layers[0].avatarMask, Is.Null, "the layer plays the wrapper's blendshape curves unmasked");
     }
 
     // Body/Smile goes from 0 to 100 over a second and triggers the effect through a factor link.

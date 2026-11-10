@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using Orbiters.Toolkit.Editor.VRChat.Build;
+using Orbiters.Toolkit.Editor.VRChat.Optimization;
 using UnityEditor;
 using UnityEditor.Animations;
 using UnityEngine;
@@ -22,7 +24,9 @@ namespace Orbiters.Toolkit.Editor.VRChat.BlendShapes
         public static Action<string> Log;
 
         private static readonly Dictionary<int, List<AppliedBlendShapeLink>> applied = new Dictionary<int, List<AppliedBlendShapeLink>>();
-        // Layers already copied to FX during this build, across several Apply calls.
+        // Layers already copied to FX during this build, across several Apply calls: the build's (BuildContext), or outside
+        // a build, those of this editor frame.
+        private sealed class CopiedToFx : HashSet<string> { }
         private static readonly HashSet<string> layersCopiedToFx = new HashSet<string>();
         private static int buildFrame = -1;
 
@@ -31,7 +35,10 @@ namespace Orbiters.Toolkit.Editor.VRChat.BlendShapes
 
         public static void ClearApplied() => applied.Clear();
 
-        /// <summary>Starts a new build: forgets the layers copied to FX by the previous one.</summary>
+        /// <summary>
+        /// Starts a new build outside Orbiters' build (<see cref="BuildContext"/>, which keeps its own): forgets the layers
+        /// copied to FX by the previous one.
+        /// </summary>
         public static void BeginBuild()
         {
             layersCopiedToFx.Clear();
@@ -42,7 +49,9 @@ namespace Orbiters.Toolkit.Editor.VRChat.BlendShapes
         {
             if (avatarRoot == null) return BlendShapeLinkResult.Fail("Avatar root is null.");
             if (links == null || links.Count == 0) return BlendShapeLinkResult.Fail("No links to apply.");
-            if (Time.frameCount != buildFrame) BeginBuild();
+            var context = BuildContext.Of(avatarRoot);
+            if (context == null && Time.frameCount != buildFrame) BeginBuild();
+            var copiedToFx = context != null ? context.State<CopiedToFx>() : layersCopiedToFx;
 
             var controllers = CollectBuiltControllers(avatarRoot);
             if (controllers.Count == 0) return BlendShapeLinkResult.Fail("No privately owned build AnimatorController found on avatar descriptor.");
@@ -55,17 +64,22 @@ namespace Orbiters.Toolkit.Editor.VRChat.BlendShapes
             if (fxController != null && !IsBuiltController(fxController)) fxController = null;
             var layersToCopyToFx = new Dictionary<string, (AnimatorController controller, int index, AnimatorControllerLayer layer)>();
             var changedControllers = new HashSet<AnimatorController>();
-            int linksProcessed = 0, clipsWrapped = 0, statesRewritten = 0;
+            int linksProcessed = 0;
             // The controllers' layers as they are now. While the links are applied the controllers are detached
             // (ControllerEdits): each rewritten state or wrapped clip would otherwise rebuild its whole controller, and
             // their own layers show an empty stand-in meanwhile. Masks cleared here are set once that is over.
             var layersOf = controllers.ToDictionary(c => c, c => c.layers);
             var masksCleared = new HashSet<AnimatorController>();
+            // What the clips bind, read once for every link (the build's index during a build).
+            var pass = new Pass(context != null ? context.Clips : AvatarUsage.AnimationsOf(avatarRoot), animatorRoot);
+            pass.Survey(controllers, layersOf);
             using (Animations.ControllerEdits.Batch(controllers))
             foreach (var link in links)
             {
                 bool linkChanged = false;
                 Trace($"Processing link: toFix='{link.TriggerName}' fixedBy='{link.EffectName}' across {controllers.Count} controllers");
+                // No clip animates its trigger shape and no state holds a wrapper of its factor: walking the states finds nothing.
+                bool found = pass.MayMatch(link);
                 foreach (var controller in controllers)
                 {
                     Trace($"Checking controller '{controller.name}' for link toFix='{link.TriggerName}'");
@@ -74,6 +88,7 @@ namespace Orbiters.Toolkit.Editor.VRChat.BlendShapes
                         Debug.LogWarning("[Orbiters] " + paramError);
                         continue;
                     }
+                    if (!found) continue;
 
                     bool controllerChanged = false;
                     var clipCache = new Dictionary<AnimationClip, Motion>();
@@ -84,14 +99,14 @@ namespace Orbiters.Toolkit.Editor.VRChat.BlendShapes
                     {
                         var layer = layers[i];
                         if (layer?.stateMachine == null) continue;
-                        if (!RewriteStateMachine(controller, layer.stateMachine, link, animatorRoot, clipCache, visitedMachines, visitedTrees, ref clipsWrapped, ref statesRewritten)) continue;
+                        if (!RewriteStateMachine(pass, controller, layer.stateMachine, link, clipCache, visitedMachines, visitedTrees)) continue;
                         controllerChanged = true;
                         linkChanged = true;
 
                         if (fxController != null && controller != fxController)
                         {
                             string layerKey = $"{controller.name}:{i}:{layer.name}";
-                            if (!layersToCopyToFx.ContainsKey(layerKey) && !layersCopiedToFx.Contains(layerKey))
+                            if (!layersToCopyToFx.ContainsKey(layerKey) && !copiedToFx.Contains(layerKey))
                             {
                                 Trace($"Layer '{layer.name}' in '{controller.name}' contains blendshape animations - will copy to FX controller.");
                                 layersToCopyToFx[layerKey] = (controller, i, layer);
@@ -132,7 +147,7 @@ namespace Orbiters.Toolkit.Editor.VRChat.BlendShapes
 
             if (layersToCopyToFx.Count > 0 && fxController != null)
             {
-                CopyLayersToFx(layersToCopyToFx.Values.ToList(), fxController);
+                CopyLayersToFx(layersToCopyToFx.Values.ToList(), fxController, copiedToFx);
                 changedControllers.Add(fxController);
             }
 
@@ -162,8 +177,8 @@ namespace Orbiters.Toolkit.Editor.VRChat.BlendShapes
             return new BlendShapeLinkResult
             {
                 Success = true, Links = linksProcessed, Controllers = changedControllers.Count,
-                ClipsWrapped = clipsWrapped, StatesRewritten = statesRewritten,
-                Message = $"Applied {label} links: {linksProcessed} link(s), {changedControllers.Count} controller(s), {clipsWrapped} wrapped clip(s), {statesRewritten} rewritten state/tree motion reference(s)."
+                ClipsWrapped = pass.ClipsWrapped, StatesRewritten = pass.StatesRewritten,
+                Message = $"Applied {label} links: {linksProcessed} link(s), {changedControllers.Count} controller(s), {pass.ClipsWrapped} wrapped clip(s), {pass.StatesRewritten} rewritten state/tree motion reference(s)."
             };
         }
 
@@ -216,13 +231,19 @@ namespace Orbiters.Toolkit.Editor.VRChat.BlendShapes
 
         // Copies (not moves) each layer: the original keeps driving bones/muscles in its playable layer, the FX copy shares
         // the same state machine and VRChat's FX layer only applies its non-transform curves.
-        private static void CopyLayersToFx(List<(AnimatorController controller, int index, AnimatorControllerLayer layer)> layers, AnimatorController fx)
+        private static void CopyLayersToFx(List<(AnimatorController controller, int index, AnimatorControllerLayer layer)> layers, AnimatorController fx,
+            HashSet<string> copiedToFx)
         {
-            var fxLayerNames = new HashSet<string>(fx.layers.Select(l => l.name));
+            // Layers and parameters set once each: every assignment rebuilds the whole FX controller.
+            var fxLayers = fx.layers.ToList();
+            var fxLayerNames = new HashSet<string>(fxLayers.Select(l => l.name));
+            var parameters = fx.parameters.ToList();
+            var parameterNames = new HashSet<string>(parameters.Select(p => p.name), StringComparer.Ordinal);
+            bool layersAdded = false, parametersAdded = false;
             foreach (var (source, index, layer) in layers)
             {
                 if (source == fx) continue;
-                layersCopiedToFx.Add($"{source.name}:{index}:{layer.name}");
+                copiedToFx.Add($"{source.name}:{index}:{layer.name}");
                 string name = FxLayerPrefix + layer.name;
                 if (fxLayerNames.Contains(name))
                 {
@@ -232,23 +253,25 @@ namespace Orbiters.Toolkit.Editor.VRChat.BlendShapes
                 Trace($"Copying layer '{layer.name}' from '{source.name}' to FX controller for blendshape animations.");
                 foreach (var param in source.parameters)
                 {
-                    if (fx.parameters.Any(p => p.name == param.name)) continue;
-                    fx.AddParameter(param.name, param.type);
-                    var added = fx.parameters.FirstOrDefault(p => p.name == param.name);
-                    if (added == null) continue;
-                    added.defaultBool = param.defaultBool;
-                    added.defaultFloat = param.defaultFloat;
-                    added.defaultInt = param.defaultInt;
+                    if (!parameterNames.Add(param.name)) continue;
+                    // With the source's defaults (the parameters' getter hands out copies: setting them on one changes nothing).
+                    parameters.Add(new AnimatorControllerParameter
+                    {
+                        name = param.name, type = param.type,
+                        defaultBool = param.defaultBool, defaultFloat = param.defaultFloat, defaultInt = param.defaultInt
+                    });
+                    parametersAdded = true;
                 }
-                var fxLayers = fx.layers.ToList();
                 fxLayers.Add(new AnimatorControllerLayer
                 {
                     name = name, stateMachine = layer.stateMachine, avatarMask = null,
                     blendingMode = AnimatorLayerBlendingMode.Override, defaultWeight = layer.defaultWeight,
                     syncedLayerIndex = -1, syncedLayerAffectsTiming = false
                 });
-                fx.layers = fxLayers.ToArray();
+                layersAdded = true;
             }
+            if (parametersAdded) fx.parameters = parameters.ToArray();
+            if (layersAdded) fx.layers = fxLayers.ToArray();
             EditorUtility.SetDirty(fx);
         }
 
@@ -280,9 +303,8 @@ namespace Orbiters.Toolkit.Editor.VRChat.BlendShapes
             return true;
         }
 
-        private static bool RewriteStateMachine(AnimatorController controller, AnimatorStateMachine machine, BlendShapeLink link,
-            GameObject animatorRoot, IDictionary<AnimationClip, Motion> clipCache, ISet<AnimatorStateMachine> visitedMachines, ISet<BlendTree> visitedTrees,
-            ref int clipsWrapped, ref int statesRewritten)
+        private static bool RewriteStateMachine(Pass pass, AnimatorController controller, AnimatorStateMachine machine, BlendShapeLink link,
+            IDictionary<AnimationClip, Motion> clipCache, ISet<AnimatorStateMachine> visitedMachines, ISet<BlendTree> visitedTrees)
         {
             if (!visitedMachines.Add(machine)) return false;
             bool changed = false, hasExistingWrapper = false;
@@ -293,15 +315,15 @@ namespace Orbiters.Toolkit.Editor.VRChat.BlendShapes
                 // Wrapped by a previous build: the layer mask still needs clearing.
                 if (ContainsWrapper(state.motion, link.FactorParameter, visitedTrees)) hasExistingWrapper = true;
                 bool motionChanged = false;
-                var rewritten = RewriteMotion(controller, state.motion, link, animatorRoot, clipCache, visitedTrees, ref clipsWrapped, ref motionChanged);
+                var rewritten = RewriteMotion(pass, controller, state.motion, link, clipCache, visitedTrees, ref motionChanged);
                 if (!motionChanged && (rewritten == null || rewritten == state.motion)) continue;
                 state.motion = rewritten;
                 EditorUtility.SetDirty(state);
-                statesRewritten++;
+                pass.StatesRewritten++;
                 changed = true;
             }
             foreach (var child in machine.stateMachines)
-                if (child.stateMachine != null && RewriteStateMachine(controller, child.stateMachine, link, animatorRoot, clipCache, visitedMachines, visitedTrees, ref clipsWrapped, ref statesRewritten))
+                if (child.stateMachine != null && RewriteStateMachine(pass, controller, child.stateMachine, link, clipCache, visitedMachines, visitedTrees))
                     changed = true;
             return changed || hasExistingWrapper;
         }
@@ -315,8 +337,8 @@ namespace Orbiters.Toolkit.Editor.VRChat.BlendShapes
             return false;
         }
 
-        private static Motion RewriteMotion(AnimatorController controller, Motion motion, BlendShapeLink link, GameObject animatorRoot,
-            IDictionary<AnimationClip, Motion> clipCache, ISet<BlendTree> visitedTrees, ref int clipsWrapped, ref bool changed)
+        private static Motion RewriteMotion(Pass pass, AnimatorController controller, Motion motion, BlendShapeLink link,
+            IDictionary<AnimationClip, Motion> clipCache, ISet<BlendTree> visitedTrees, ref bool changed)
         {
             if (motion == null) return null;
             if (motion is BlendTree tree)
@@ -328,7 +350,7 @@ namespace Orbiters.Toolkit.Editor.VRChat.BlendShapes
                     var wrapperChildren = tree.children;
                     var variant = wrapperChildren[1].motion;
                     bool variantChanged = false;
-                    var rewrittenVariant = RewriteMotion(controller, variant, link, animatorRoot, clipCache, visitedTrees, ref clipsWrapped, ref variantChanged);
+                    var rewrittenVariant = RewriteMotion(pass, controller, variant, link, clipCache, visitedTrees, ref variantChanged);
                     if (variantChanged || (rewrittenVariant != null && rewrittenVariant != variant))
                     {
                         wrapperChildren[1].motion = rewrittenVariant;
@@ -344,7 +366,7 @@ namespace Orbiters.Toolkit.Editor.VRChat.BlendShapes
                 {
                     var childMotion = children[i].motion;
                     bool childChanged = false;
-                    var rewritten = RewriteMotion(controller, childMotion, link, animatorRoot, clipCache, visitedTrees, ref clipsWrapped, ref childChanged);
+                    var rewritten = RewriteMotion(pass, controller, childMotion, link, clipCache, visitedTrees, ref childChanged);
                     if (!childChanged && (rewritten == null || rewritten == childMotion)) continue;
                     children[i].motion = rewritten;
                     childrenChanged = true;
@@ -360,15 +382,16 @@ namespace Orbiters.Toolkit.Editor.VRChat.BlendShapes
 
             if (!(motion is AnimationClip clip)) return motion;
             if (clipCache.TryGetValue(clip, out var cached)) return cached;
-            var variantClip = TryCreateVariantClip(controller, clip, link, animatorRoot);
+            var variantClip = TryCreateVariantClip(pass, controller, clip, link);
             if (variantClip == null)
             {
                 clipCache[clip] = clip;
                 return clip;
             }
-            Motion result = link.DirectCopy ? (Motion)variantClip : CreateWrapperTree(controller, clip, variantClip, link.FactorParameter);
+            pass.Learn(variantClip);
+            Motion result = link.DirectCopy ? (Motion)variantClip : pass.Wrapped(CreateWrapperTree(controller, clip, variantClip, link.FactorParameter));
             clipCache[clip] = result;
-            clipsWrapped++;
+            pass.ClipsWrapped++;
             changed = true;
             return result;
         }

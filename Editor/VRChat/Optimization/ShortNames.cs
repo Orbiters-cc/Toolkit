@@ -143,8 +143,9 @@ namespace Orbiters.Toolkit.Editor.VRChat.Optimization
             {
                 if (copy is AnimationClip clip)
                 {
-                    foreach (var binding in AnimationUtility.GetCurveBindings(clip)) yield return usage.PathOf(animatorRoot, binding.path);
-                    foreach (var binding in AnimationUtility.GetObjectReferenceCurveBindings(clip)) yield return usage.PathOf(animatorRoot, binding.path);
+                    var bindings = usage.Animations.Bindings(clip);
+                    foreach (var binding in bindings.Floats) yield return usage.PathOf(animatorRoot, binding.path);
+                    foreach (var binding in bindings.Objects) yield return usage.PathOf(animatorRoot, binding.path);
                 }
                 else if (copy is AvatarMask mask)
                     for (int i = 0; i < mask.transformCount; i++) yield return usage.PathOf(animatorRoot, mask.GetTransformPath(i));
@@ -211,19 +212,19 @@ namespace Orbiters.Toolkit.Editor.VRChat.Optimization
             result.Parameters = map.Count(p => !derived.Contains(p.Key));
             result.Characters += map.Where(p => names.Contains(p.Key) || bases.Contains(p.Key)).Sum(p => (long)(p.Key.Length - p.Value.Length));
 
-            void Apply(Dictionary<string, string> to) => RenameAll(controllers, owned, physBones, receivers, name => name != null && to.TryGetValue(name, out var renamed) ? renamed : name);
+            void Apply(Dictionary<string, string> to) => RenameAll(usage.Animations, controllers, owned, physBones, receivers, name => name != null && to.TryGetValue(name, out var renamed) ? renamed : name);
         }
 
-        private static void RenameAll(List<AnimatorController> controllers, List<Object> owned, List<VRCPhysBoneBase> physBones, List<ContactReceiver> receivers,
-            Func<string, string> rename)
+        private static void RenameAll(AnimationIndex index, List<AnimatorController> controllers, List<Object> owned, List<VRCPhysBoneBase> physBones,
+            List<ContactReceiver> receivers, Func<string, string> rename)
         {
             // Detached meanwhile: each renamed condition, state or clip would rebuild its whole controller (minutes on a big one).
-            using (ControllerEdits.Batch(controllers)) RenameAnimations(controllers, owned, rename);
+            using (ControllerEdits.Batch(controllers)) RenameAnimations(index, controllers, owned, rename);
             foreach (var physBone in physBones) physBone.parameter = rename(physBone.parameter);
             foreach (var receiver in receivers) receiver.parameter = rename(receiver.parameter);
         }
 
-        private static void RenameAnimations(List<AnimatorController> controllers, List<Object> owned, Func<string, string> rename)
+        private static void RenameAnimations(AnimationIndex index, List<AnimatorController> controllers, List<Object> owned, Func<string, string> rename)
         {
             foreach (var controller in controllers)
             {
@@ -259,11 +260,11 @@ namespace Orbiters.Toolkit.Editor.VRChat.Optimization
                         break;
                     case AnimationClip clip:
                         // Animations setting parameters (animator parameters driven by a clip).
-                        var from = AnimationUtility.GetCurveBindings(clip).Where(b => b.type == typeof(Animator) && rename(b.propertyName) != b.propertyName).ToArray();
+                        var from = index.Bindings(clip).Floats.Where(b => b.type == typeof(Animator) && rename(b.propertyName) != b.propertyName).ToArray();
                         if (from.Length == 0) continue;
                         var curves = from.Select(b => AnimationUtility.GetEditorCurve(clip, b)).ToArray();
-                        AnimationUtility.SetEditorCurves(clip, from, new AnimationCurve[from.Length]);
-                        AnimationUtility.SetEditorCurves(clip, from.Select(b => EditorCurveBinding.FloatCurve(b.path, typeof(Animator), rename(b.propertyName))).ToArray(), curves);
+                        index.SetCurves(clip, from, new AnimationCurve[from.Length]);
+                        index.SetCurves(clip, from.Select(b => EditorCurveBinding.FloatCurve(b.path, typeof(Animator), rename(b.propertyName))).ToArray(), curves);
                         break;
                     default: continue;
                 }

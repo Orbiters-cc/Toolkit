@@ -5,6 +5,7 @@ using System.Linq;
 using System.Reflection;
 using Newtonsoft.Json.Linq;
 using NUnit.Framework;
+using Orbiters.Toolkit.Editor.VRChat.Build;
 using Orbiters.Toolkit.Editor.VRChat;
 using Orbiters.Toolkit.Editor.VRChat.Manifest;
 using UnityEngine;
@@ -158,14 +159,15 @@ public class AvatarManifestTests
         var field = typeof(VRCBuildPipelineCallbacks).GetField("_preprocessAvatarCallbacks", BindingFlags.Static | BindingFlags.NonPublic | BindingFlags.Public);
         var callbacks = (field?.GetValue(null) as IEnumerable<IVRCSDKPreprocessAvatarCallback>)?.ToList();
         Assert.IsNotNull(callbacks, "The SDK lists its build steps where Orbiters looks for them");
-        Assert.IsTrue(callbacks.Any(c => c is AvatarManifestExporter), "Registered with the SDK");
+        Assert.IsTrue(callbacks.Any(c => c is BuildLastCallback), "Its phase is registered with the SDK");
+        Assert.IsTrue(AvatarBuildPipeline.StepsIn(BuildPhase.Last).Any(s => s is AvatarManifestExporter), "A step of the last phase");
         foreach (var callback in callbacks) Assert.LessOrEqual(callback.callbackOrder, exporter.callbackOrder, callback.GetType().FullName);
         Assert.IsTrue(HiddenAvatarBuild.LeftOut(typeof(AvatarManifestExporter)), "Orbiters' hidden builds upload nothing");
         // Outside the SDK's own builds (here, a test), nothing is written.
         var avatar = new GameObject("Not built");
         owned.Add(avatar);
         avatar.AddComponent<VRCAvatarDescriptor>();
-        Assert.IsTrue(exporter.OnPreprocessAvatar(avatar));
+        Assert.IsTrue(exporter.Run(BuildContext.For(avatar)));
         Assert.IsFalse(Directory.Exists(folder) && Directory.GetFiles(folder).Length > 0);
     }
 

@@ -91,6 +91,22 @@ public sealed class AnimationPathWatchSwitchTests
         Assert.IsTrue(AnimationPathWatch.Enabled);
     }
 
+    // Component edits rename nothing and are ignored, except on an avatar holding a notice: another controller on its
+    // Animator may play the right paths, and the notice is checked again.
+    [Test] public void AComponentChangeChecksOnlyAnAvatarHoldingANotice()
+    {
+        AnimationPathWatch.Enabled = true;
+        var animator = avatar.GetComponent<Animator>();
+        Assert.IsTrue(AnimationPathWatch.Marks(jacket.gameObject), "a GameObject's name holds a path");
+        Assert.IsFalse(AnimationPathWatch.Marks(animator), "no notice: a component's change renames nothing");
+        var notice = Rename();
+        Assert.IsNotNull(notice);
+        Assert.IsTrue(AnimationPathWatch.Marks(animator), "the controller it plays may have changed");
+        Assert.IsFalse(AnimationPathWatch.Marks(jacket), "a transform moved changes no path");
+        AnimationPathWatch.Leave(notice);
+        Assert.IsFalse(AnimationPathWatch.Marks(animator));
+    }
+
     [Test] public void OffAToolsOwnMoveStillAsks()
     {
         AnimationPathWatch.Enabled = false;

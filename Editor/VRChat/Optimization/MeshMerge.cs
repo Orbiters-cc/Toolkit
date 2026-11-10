@@ -146,10 +146,12 @@ namespace Orbiters.Toolkit.Editor.VRChat.Optimization
         // fixed order. Two renderers with the same text are set to the same values at the same moments.
         private static Dictionary<(string Path, string Property), string> MaterialCurves(AvatarUsage usage)
         {
-            var clips = AvatarUsage.Clips(usage.Root).ToList();
+            var index = usage.Animations;
+            index.Sync();
+            var clips = index.Clips;
             var keys = new Dictionary<(string, string), StringBuilder>();
             for (int i = 0; i < clips.Count; i++)
-                foreach (var binding in AnimationUtility.GetCurveBindings(clips[i].Clip))
+                foreach (var binding in index.Bindings(clips[i].Clip).Floats)
                 {
                     if (!binding.propertyName.StartsWith("material.", StringComparison.Ordinal)) continue;
                     var curve = AnimationUtility.GetEditorCurve(clips[i].Clip, binding);
@@ -170,14 +172,15 @@ namespace Orbiters.Toolkit.Editor.VRChat.Optimization
         {
             if (build == null) return;
             var paths = new HashSet<string>(joined.Select(r => usage.PathOf(r.transform)), StringComparer.Ordinal);
+            var index = usage.Animations;
             using var edits = build.Edits();
             foreach (var (clip, animatorRoot) in build.Clips)
             {
                 if (clip == null || animatorRoot == null) continue;
-                var removed = AnimationUtility.GetCurveBindings(clip)
+                var removed = index.Bindings(clip).Floats
                     .Where(b => b.propertyName.StartsWith("material.", StringComparison.Ordinal) && paths.Contains(usage.PathOf(animatorRoot, b.path))).ToArray();
                 if (removed.Length == 0) continue;
-                AnimationUtility.SetEditorCurves(clip, removed, new AnimationCurve[removed.Length]);
+                index.SetCurves(clip, removed, new AnimationCurve[removed.Length]);
                 EditorUtility.SetDirty(clip);
             }
         }
@@ -208,7 +211,7 @@ namespace Orbiters.Toolkit.Editor.VRChat.Optimization
                 // Their unused blendshapes go first (baked); the ones animations use join the merged mesh.
                 foreach (var source in sources.Where(s => s.sharedMesh.blendShapeCount > 0))
                 {
-                    var copy = BlendShapePruning.Prune(usage.Root, source);
+                    var copy = BlendShapePruning.Prune(usage, source);
                     if (copy != null) result.Meshes.Add(copy);
                 }
                 if (sources.Count == 0) continue;
@@ -217,7 +220,7 @@ namespace Orbiters.Toolkit.Editor.VRChat.Optimization
                 result.Meshes.Add(merged.Mesh);
                 result.Merged += sources.Count;
                 // The joining renderers go even when their animations could not follow: never drawn twice.
-                try { if (build != null) MoveShapeAnimations(build, target, merged.Shapes); }
+                try { if (build != null) MoveShapeAnimations(build, usage, target, merged.Shapes); }
                 finally { foreach (var source in sources) Remove(source, target, usage); }
             }
             return result;
@@ -289,8 +292,8 @@ namespace Orbiters.Toolkit.Editor.VRChat.Optimization
 
         private static bool Bake(AvatarUsage usage, SkinnedMeshRenderer source, Result result)
         {
-            if (BlendShapePruning.Used(usage.Root, source).Count > 0) return false;
-            var copy = BlendShapePruning.Prune(usage.Root, source);
+            if (BlendShapePruning.Used(usage, source).Count > 0) return false;
+            var copy = BlendShapePruning.Prune(usage, source);
             if (copy != null) result.Meshes.Add(copy);
             return source.sharedMesh.blendShapeCount == 0;
         }
@@ -314,10 +317,12 @@ namespace Orbiters.Toolkit.Editor.VRChat.Optimization
         // toggles with the same fingerprint and the same state at rest are on and off at the same moments.
         private static Dictionary<(string Path, string Property), string> Visibility(AvatarUsage usage)
         {
-            var clips = AvatarUsage.Clips(usage.Root).ToList();
+            var index = usage.Animations;
+            index.Sync();
+            var clips = index.Clips;
             var keys = new Dictionary<(string, string), StringBuilder>();
             for (int i = 0; i < clips.Count; i++)
-                foreach (var binding in AnimationUtility.GetCurveBindings(clips[i].Clip))
+                foreach (var binding in index.Bindings(clips[i].Clip).Floats)
                 {
                     bool active = binding.propertyName == "m_IsActive" && binding.type == typeof(GameObject);
                     bool enabled = binding.propertyName == "m_Enabled" && binding.type.IsAssignableFrom(typeof(SkinnedMeshRenderer));
@@ -345,8 +350,9 @@ namespace Orbiters.Toolkit.Editor.VRChat.Optimization
         }
 
         // The joining meshes' blendshape curves, onto the merged renderer under the shapes' names there.
-        private static void MoveShapeAnimations(AttachmentAnimationBuild build, SkinnedMeshRenderer target, List<(Transform Source, Dictionary<string, string> Names)> shapes)
+        private static void MoveShapeAnimations(AttachmentAnimationBuild build, AvatarUsage usage, SkinnedMeshRenderer target, List<(Transform Source, Dictionary<string, string> Names)> shapes)
         {
+            var index = usage.Animations;
             using var edits = build.Edits();
             foreach (var (clip, animatorRoot) in build.Clips)
             {
@@ -359,7 +365,7 @@ namespace Orbiters.Toolkit.Editor.VRChat.Optimization
                 {
                     if (source == null || !source.IsChildOf(animatorRoot) || names.Count == 0) continue;
                     string from = AnimationUtility.CalculateTransformPath(source, animatorRoot);
-                    foreach (var binding in AnimationUtility.GetCurveBindings(clip))
+                    foreach (var binding in index.Bindings(clip).Floats)
                     {
                         if (binding.path != from || binding.type != typeof(SkinnedMeshRenderer) || !binding.propertyName.StartsWith("blendShape.", StringComparison.Ordinal)) continue;
                         if (!names.TryGetValue(binding.propertyName.Substring("blendShape.".Length), out var name)) continue;
@@ -369,8 +375,8 @@ namespace Orbiters.Toolkit.Editor.VRChat.Optimization
                     }
                 }
                 if (removed.Count == 0) continue;
-                AnimationUtility.SetEditorCurves(clip, removed.ToArray(), new AnimationCurve[removed.Count]);
-                AnimationUtility.SetEditorCurves(clip, added.ToArray(), curves.ToArray());
+                index.SetCurves(clip, removed.ToArray(), new AnimationCurve[removed.Count]);
+                index.SetCurves(clip, added.ToArray(), curves.ToArray());
                 EditorUtility.SetDirty(clip);
             }
         }
