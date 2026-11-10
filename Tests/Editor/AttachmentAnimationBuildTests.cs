@@ -179,6 +179,8 @@ public sealed class AttachmentAnimationBuildTests
     [Test] public void NestedBlendTreeAndTransitionsAreClonedWithoutSharingMutableGraphObjects()
     {
         var state = source.layers[0].stateMachine.states.Single().state;
+        // A tree's parameter exists in its controller: Unity reports one that does not as soon as the controller's clips are listed.
+        source.AddParameter("Blend", AnimatorControllerParameterType.Float);
         var tree = new BlendTree { name = "Outer", blendParameter = "Blend", children = new[] { new ChildMotion { motion = clip, timeScale = 1 } } };
         AssetDatabase.AddObjectToAsset(tree, source); state.motion = tree;
         var next = source.layers[0].stateMachine.AddState("Next"); next.motion = clip;
