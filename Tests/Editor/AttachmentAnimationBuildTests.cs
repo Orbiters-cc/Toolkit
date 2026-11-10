@@ -86,6 +86,19 @@ public sealed class AttachmentAnimationBuildTests
     private static Transform Sleeve(GameObject copy) => copy.GetComponentsInChildren<Transform>(true).Single(t => t.name == "Sleeve");
     private static AnimationClip Clip(GameObject copy) => Controller(copy).animationClips.Single();
 
+    // The lists of the build's copies are kept between asks: they still leave out a copy a step destroyed since.
+    [Test] public void TheBuildsClipListLeavesOutDestroyedCopies()
+    {
+        var copy = Build();
+        var build = AttachmentAnimationBuild.Prepare(copy);
+        var clip = Clip(copy);
+        Assert.That(build.Clips.Select(c => c.Clip), Is.EqualTo(new[] { clip }));
+        Assert.That(build.Owned, Has.Member(clip));
+        Object.DestroyImmediate(clip, true);
+        Assert.That(build.Clips, Is.Empty);
+        Assert.That(build.Owned.Any(o => o == null), Is.False);
+    }
+
     [Test] public void MovesOnlyTheBuildCopyWithoutAddingConstraintsAndKeepsScaleFollowing()
     {
         var before = follower.position;

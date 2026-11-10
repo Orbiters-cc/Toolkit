@@ -31,6 +31,11 @@ namespace Orbiters.Toolkit.Editor.VRChat.Attachments
         private AnimatorController container;
         private AttachmentBuildMeshes meshes;
         private bool cloned;
+        // Raised whenever a graph or a copy is added: the lists below are made again only then.
+        private int version;
+        private int listed = -1;
+        private List<(AnimationClip Clip, Transform AnimatorRoot)> clips;
+        private List<(Object Copy, Transform AnimatorRoot)> owned;
 
         private sealed class Original
         {
@@ -49,11 +54,13 @@ namespace Orbiters.Toolkit.Editor.VRChat.Attachments
                 HookBuilder();
                 DeleteStaleCache();
             };
-            EditorApplication.update += () =>
-            {
-                if (sdkBuilding || BuildPipeline.isBuildingPlayer || EditorApplication.isCompiling) return;
-                foreach (var build in Builds.Where(b => b.root == null).ToArray()) build.Release();
-            };
+        }
+
+        // Releases the builds whose copy is gone, once nothing builds; listened to only while a build is open.
+        private static void ReleaseGone()
+        {
+            if (sdkBuilding || BuildPipeline.isBuildingPlayer || EditorApplication.isCompiling) return;
+            foreach (var build in Builds.Where(b => b.root == null).ToArray()) build.Release();
         }
 
         private static void HookBuilder()
@@ -146,6 +153,11 @@ namespace Orbiters.Toolkit.Editor.VRChat.Attachments
             var existing = Builds.FirstOrDefault(b => b.root == avatar);
             if (existing != null) return existing;
             var build = new AttachmentAnimationBuild(avatar);
+            if (Builds.Count == 0)
+            {
+                EditorApplication.update -= ReleaseGone;
+                EditorApplication.update += ReleaseGone;
+            }
             Builds.Add(build);
             return build;
         }
@@ -160,6 +172,7 @@ namespace Orbiters.Toolkit.Editor.VRChat.Attachments
                     graph = new Graph(this, t);
                     byRoot[t] = graph;
                     graphs.Add(graph);
+                    version++;
                 }
                 return graph;
             };
@@ -200,18 +213,40 @@ namespace Orbiters.Toolkit.Editor.VRChat.Attachments
         /// The build's copies of the avatar's animation data (controllers, state machines, states, transitions, behaviours,
         /// blend trees, clips, masks): a build step may change them.
         /// </summary>
-        public IEnumerable<Object> Owned => graphs.SelectMany(g => g.Copies.Values).Where(v => v != null).Distinct();
+        public IEnumerable<Object> Owned => OwnedByAnimator.Select(o => o.Copy).Distinct();
 
         /// <summary>The build's copies of the clips, each with the object its paths start from (the avatar's, or a nested Animator's).</summary>
-        public IEnumerable<(AnimationClip Clip, Transform AnimatorRoot)> Clips =>
-            graphs.SelectMany(g => g.Live<AnimationClip>().Select(c => (c, g.AnimatorRoot))).Distinct();
+        public IEnumerable<(AnimationClip Clip, Transform AnimatorRoot)> Clips
+        {
+            get
+            {
+                List();
+                // A later step may have destroyed a copy it no longer needed.
+                return clips.Where(c => c.Clip != null);
+            }
+        }
 
         /// <summary>
         /// <see cref="Owned"/>, each with the object the animator it plays in starts from (paths in clips, masks and state
         /// audio are relative to it).
         /// </summary>
-        public IEnumerable<(Object Copy, Transform AnimatorRoot)> OwnedByAnimator =>
-            graphs.SelectMany(g => g.Copies.Values.Where(v => v != null).Select(v => (v, g.AnimatorRoot))).Distinct();
+        public IEnumerable<(Object Copy, Transform AnimatorRoot)> OwnedByAnimator
+        {
+            get
+            {
+                List();
+                return owned.Where(o => o.Copy != null);
+            }
+        }
+
+        // The copies by animator, distinct and in the order made, listed again only after a copy was added.
+        private void List()
+        {
+            if (listed == version && clips != null) return;
+            owned = graphs.SelectMany(g => g.Copies.Values.Where(v => !ReferenceEquals(v, null)).Select(v => (v, g.AnimatorRoot))).Distinct().ToList();
+            clips = owned.Where(o => o.Copy is AnimationClip).Select(o => ((AnimationClip)o.Copy, o.AnimatorRoot)).ToList();
+            listed = version;
+        }
 
         /// <summary>
         /// Many edits to the build's animations at once (clips, states, transitions, masks): the build's controllers are
@@ -229,7 +264,8 @@ namespace Orbiters.Toolkit.Editor.VRChat.Attachments
             foreach (var graph in graphs)
                 foreach (var (target, formerPath) in moves)
                     if (target != null && !string.IsNullOrEmpty(formerPath)) graph.Alias(target, formerPath, root.transform);
-            using (Edits()) foreach (var graph in graphs) graph.Rewrite(activationCopies);
+            var index = Build.BuildContext.Of(root)?.Clips;
+            using (Edits()) foreach (var graph in graphs) graph.Rewrite(activationCopies, index);
         }
 
         private void Persist(Object value)
@@ -297,8 +333,10 @@ namespace Orbiters.Toolkit.Editor.VRChat.Attachments
             }
             // Moving a clothing bone out of its accessory must keep the accessory's visibility toggle, including
             // animation of any former ancestor. Independent identity frames preserve the AND of those active states.
-            var animatedActive = new HashSet<Transform>(graphs.SelectMany(g => g.AnimatedActiveTargets()));
-            var animatedTransform = new HashSet<Transform>(graphs.SelectMany(g => g.AnimatedTransformTargets()));
+            // The build's index of the clips' bindings: read once for the build, kept right by the rewrite below.
+            var index = Build.BuildContext.Of(root)?.Clips;
+            var animatedActive = new HashSet<Transform>(graphs.SelectMany(g => g.AnimatedActiveTargets(index)));
+            var animatedTransform = new HashSet<Transform>(graphs.SelectMany(g => g.AnimatedTransformTargets(index)));
             foreach (var move in moves)
             {
                 var follower = move.Follower;
@@ -339,7 +377,7 @@ namespace Orbiters.Toolkit.Editor.VRChat.Attachments
                     pair.Key.ignoreTransforms.Add(frames[follower]);
                 }
             }
-            using (Edits()) foreach (var graph in graphs) graph.Rewrite(activationCopies);
+            using (Edits()) foreach (var graph in graphs) graph.Rewrite(activationCopies, index);
         }
 
         private void AddCopy(Transform originalTransform, Transform copy)
@@ -379,6 +417,7 @@ namespace Orbiters.Toolkit.Editor.VRChat.Attachments
             if (!string.IsNullOrEmpty(assetPath)) AssetDatabase.DeleteAsset(assetPath);
             if (!string.IsNullOrEmpty(meshesPath)) AssetDatabase.DeleteAsset(meshesPath);
             Builds.Remove(this);
+            if (Builds.Count == 0) EditorApplication.update -= ReleaseGone;
             if (createdCacheFolder && Builds.Count == 0 && AssetDatabase.IsValidFolder(CacheFolder) &&
                 AssetDatabase.FindAssets("", new[] { CacheFolder }).Length == 0)
             {
@@ -411,6 +450,7 @@ namespace Orbiters.Toolkit.Editor.VRChat.Attachments
                     // on the clips that will actually play, rather than on a base clip hidden by an override.
                     var graph = new Graph(owner, animatorRoot);
                     owner.graphs.Add(graph);
+                    owner.version++;
                     RuntimeAnimatorController current = overrideController;
                     while (current is AnimatorOverrideController layer)
                     {
@@ -422,6 +462,7 @@ namespace Orbiters.Toolkit.Editor.VRChat.Attachments
                     }
                     var flattened = graph.Clone(current);
                     Copies.Add(source, flattened);
+                    owner.version++;
                     return flattened;
                 }
                 if (!(source is RuntimeAnimatorController || source is AnimatorStateMachine || source is AnimatorState ||
@@ -433,6 +474,7 @@ namespace Orbiters.Toolkit.Editor.VRChat.Attachments
                 if (template == source && Writable(source))
                 {
                     Copies.Add(source, source);
+                    owner.version++;
                     if (source is AnimatorController ownController)
                     {
                         OwnedControllers.Add(ownController);
@@ -456,6 +498,7 @@ namespace Orbiters.Toolkit.Editor.VRChat.Attachments
                 EditorUtility.CopySerialized(template, copy);
                 copy.name = source.name;
                 Copies.Add(source, copy);
+                owner.version++;
                 owner.Persist(copy);
                 Remap(template, copy);
                 EditorUtility.SetDirty(copy);
@@ -551,20 +594,24 @@ namespace Orbiters.Toolkit.Editor.VRChat.Attachments
                     throw new InvalidOperationException("An attachment moved an animated object outside its nested Animator. Put this accessory's animations in the avatar's playable layers before building.");
                 return AnimationUtility.CalculateTransformPath(target, animatorRoot);
             }
-            internal IEnumerable<Transform> AnimatedActiveTargets()
+            // A clip's bindings: from the build's index when there is one.
+            private static EditorCurveBinding[] Floats(AnimationClip clip, AnimationIndex index) =>
+                index != null ? index.Bindings(clip).Floats : AnimationUtility.GetCurveBindings(clip);
+
+            internal IEnumerable<Transform> AnimatedActiveTargets(AnimationIndex index)
             {
                 foreach (var clip in Live<AnimationClip>())
-                    foreach (var binding in AnimationUtility.GetCurveBindings(clip))
+                    foreach (var binding in Floats(clip, index))
                         if (binding.type == typeof(GameObject) && binding.propertyName == "m_IsActive" && paths.TryGet(binding.path, out var target))
                             yield return target;
             }
-            internal IEnumerable<Transform> AnimatedTransformTargets()
+            internal IEnumerable<Transform> AnimatedTransformTargets(AnimationIndex index)
             {
                 foreach (var clip in Live<AnimationClip>())
-                    foreach (var binding in AnimationUtility.GetCurveBindings(clip))
+                    foreach (var binding in Floats(clip, index))
                         if (binding.type == typeof(Transform) && paths.TryGet(binding.path, out var target)) yield return target;
             }
-            internal void Rewrite(Dictionary<Transform, List<Transform>> activationCopies)
+            internal void Rewrite(Dictionary<Transform, List<Transform>> activationCopies, AnimationIndex clipIndex)
             {
                 foreach (var clip in Live<AnimationClip>())
                 {
@@ -573,7 +620,7 @@ namespace Orbiters.Toolkit.Editor.VRChat.Attachments
                     var removed = new List<EditorCurveBinding>();
                     var added = new List<EditorCurveBinding>();
                     var addedCurves = new List<AnimationCurve>();
-                    foreach (var binding in AnimationUtility.GetCurveBindings(clip))
+                    foreach (var binding in Floats(clip, clipIndex))
                     {
                         var moved = binding;
                         moved.path = NewPath(binding.path);
@@ -595,7 +642,7 @@ namespace Orbiters.Toolkit.Editor.VRChat.Attachments
                         }
                     }
                     var objects = new List<(EditorCurveBinding from, EditorCurveBinding to, ObjectReferenceKeyframe[] keys)>();
-                    foreach (var binding in AnimationUtility.GetObjectReferenceCurveBindings(clip))
+                    foreach (var binding in clipIndex != null ? clipIndex.Bindings(clip).Objects : AnimationUtility.GetObjectReferenceCurveBindings(clip))
                     {
                         var moved = binding;
                         moved.path = NewPath(binding.path);
@@ -607,6 +654,7 @@ namespace Orbiters.Toolkit.Editor.VRChat.Attachments
                     foreach (var entry in objects) AnimationUtility.SetObjectReferenceCurve(clip, entry.from, null);
                     foreach (var entry in objects) AnimationUtility.SetObjectReferenceCurve(clip, entry.to, entry.keys);
                     EditorUtility.SetDirty(clip);
+                    clipIndex?.Changed(clip);
                 }
                 foreach (var mask in Live<AvatarMask>())
                 {
