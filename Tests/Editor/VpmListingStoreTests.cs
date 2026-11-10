@@ -55,6 +55,21 @@ namespace Orbiters.Toolkit.Editor.Tests
             foreach (string file in Directory.GetFiles(folder)) File.WriteAllText(file, "{ not json");
             Assert.That(ListingStore.Read(url), Is.Null);
         }
+
+        // Review: scheme and host compare without case, path and query exactly, for the copies and the memory cache.
+        [Test] public void ListingsThatDifferOnlyByPathCaseAreDifferentListings()
+        {
+            Assert.That(ListingUrls.Comparer.Equals("HTTPS://Example.COM/index.json", "https://example.com/index.json"), Is.True);
+            Assert.That(ListingUrls.Comparer.Equals("https://example.com/Index.json", "https://example.com/index.json"), Is.False);
+            Assert.That(ListingUrls.Comparer.Equals("https://example.com/index.json?v=A", "https://example.com/index.json?v=a"), Is.False);
+            Assert.That(ListingUrls.Comparer.GetHashCode("https://EXAMPLE.com/x.json"), Is.EqualTo(ListingUrls.Comparer.GetHashCode("https://example.com/x.json")));
+
+            ListingStore.Write("https://example.com/Index.json", Listing, "\"upper\"", null);
+            ListingStore.Write("https://example.com/index.json", Listing.Replace("1.2.0", "2.0.0"), "\"lower\"", null);
+            Assert.That(ListingStore.Read("https://example.com/Index.json").etag, Is.EqualTo("\"upper\""));
+            Assert.That(ListingStore.Read("https://example.com/index.json").etag, Is.EqualTo("\"lower\""));
+            Assert.That(ListingStore.Read("https://EXAMPLE.com/index.json")?.etag, Is.EqualTo("\"lower\""), "the host's case does not matter");
+        }
     }
 }
 #endif

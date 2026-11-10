@@ -19,7 +19,7 @@ namespace Orbiters.Toolkit.Editor.Vpm
     public static class VpmListingReader
     {
         private static readonly Dictionary<string, (DateTime at, List<VpmCandidate> packages)> Cache =
-            new Dictionary<string, (DateTime, List<VpmCandidate>)>(StringComparer.OrdinalIgnoreCase);
+            new Dictionary<string, (DateTime, List<VpmCandidate>)>(ListingUrls.Comparer);
 
         public static async Task<List<VpmCandidate>> ReadAsync(string url, CancellationToken cancellation = default)
         {
@@ -30,24 +30,33 @@ namespace Orbiters.Toolkit.Editor.Vpm
             {
                 if (!Uri.TryCreate(url, UriKind.Absolute, out var uri) || uri.Scheme != Uri.UriSchemeHttps) return packages;
                 var stored = await Task.Run(() => ListingStore.Read(url), cancellation);
-                OrbitersConditionalText answer;
-                // An error answer: nothing listed, and asked again next time.
-                try { answer = await OrbitersHttp.ConditionalTextAsync(uri.AbsoluteUri, stored?.etag, stored?.lastModified, cancellation); }
-                catch (OrbitersHttpException error) when (!error.Offline) { return packages; }
-                if (answer.NotModified && stored == null) return packages;
-                packages = await Task.Run(() =>
+                // Twice at most: a "not changed" whose kept copy is missing or no longer reads is asked again without validators.
+                for (int attempt = 0; ; attempt++)
                 {
-                    if (!answer.NotModified)
+                    OrbitersConditionalText answer;
+                    // An error answer: nothing listed, and asked again next time.
+                    try { answer = await OrbitersHttp.ConditionalTextAsync(uri.AbsoluteUri, stored?.etag, stored?.lastModified, cancellation); }
+                    catch (OrbitersHttpException error) when (!error.Offline) { return packages; }
+                    var kept = stored;
+                    var parsed = await Task.Run(() =>
                     {
-                        var parsed = Parse(answer.Text, url);
-                        if (answer.ETag != null || answer.LastModified != null) ListingStore.Write(url, answer.Text, answer.ETag, answer.LastModified);
-                        else ListingStore.Forget(url);
-                        return parsed;
-                    }
-                    // The copy that stood unchanged; one that no longer reads is forgotten, and downloaded whole next time.
-                    try { return Parse(stored.body, url); }
-                    catch (Exception) { ListingStore.Forget(url); throw; }
-                }, cancellation);
+                        if (!answer.NotModified)
+                        {
+                            var fresh = Parse(answer.Text, url);
+                            if (answer.ETag != null || answer.LastModified != null) ListingStore.Write(url, answer.Text, answer.ETag, answer.LastModified);
+                            else ListingStore.Forget(url);
+                            return fresh;
+                        }
+                        if (kept != null)
+                            try { return Parse(kept.body, url); }
+                            catch (Exception) { }
+                        ListingStore.Forget(url);
+                        return null;
+                    }, cancellation);
+                    if (parsed != null) { packages = parsed; break; }
+                    if (attempt >= 1) return packages;
+                    stored = null;
+                }
             }
             catch (Exception ex) when (!(ex is OperationCanceledException))
             {
@@ -82,6 +91,28 @@ namespace Orbiters.Toolkit.Editor.Vpm
     }
 
     /// <summary>
+    /// Which listing URLs are the same listing: scheme and host compared without case (as DNS does), port, path and query
+    /// exactly (servers may tell "/Index.json" from "/index.json").
+    /// </summary>
+    internal static class ListingUrls
+    {
+        public static readonly IEqualityComparer<string> Comparer = new Same();
+
+        /// <summary>The URL with its scheme and host in lower case, the rest as written; the URL itself when it is not one.</summary>
+        public static string Key(string url)
+        {
+            if (string.IsNullOrEmpty(url) || !Uri.TryCreate(url, UriKind.Absolute, out var uri)) return url ?? "";
+            return uri.Scheme.ToLowerInvariant() + "://" + uri.Host.ToLowerInvariant() + (uri.IsDefaultPort ? "" : ":" + uri.Port) + uri.PathAndQuery;
+        }
+
+        private sealed class Same : IEqualityComparer<string>
+        {
+            public bool Equals(string a, string b) => string.Equals(Key(a), Key(b), StringComparison.Ordinal);
+            public int GetHashCode(string url) => StringComparer.Ordinal.GetHashCode(Key(url));
+        }
+    }
+
+    /// <summary>
     /// The last copy of each VPM listing read, with the validators its server sent (ETag, Last-Modified), one file per
     /// listing in the user's local application data (listings are the same for every project). A copy that cannot be
     /// read, or that is another listing's, counts as none.
@@ -103,7 +134,7 @@ namespace Orbiters.Toolkit.Editor.Vpm
             set => folder = value;
         }
 
-        private static string FileOf(string url) => Path.Combine(Folder, Hashing.Sha256(url.ToLowerInvariant()).Substring(0, 32) + ".json");
+        private static string FileOf(string url) => Path.Combine(Folder, Hashing.Sha256(ListingUrls.Key(url)).Substring(0, 32) + ".json");
 
         public static Entry Read(string url)
         {
@@ -112,7 +143,7 @@ namespace Orbiters.Toolkit.Editor.Vpm
                 string file = FileOf(url);
                 if (!File.Exists(file)) return null;
                 var entry = JsonUtility.FromJson<Entry>(File.ReadAllText(file));
-                return entry != null && string.Equals(entry.url, url, StringComparison.OrdinalIgnoreCase) && entry.body != null &&
+                return entry != null && ListingUrls.Comparer.Equals(entry.url, url) && entry.body != null &&
                        (!string.IsNullOrEmpty(entry.etag) || !string.IsNullOrEmpty(entry.lastModified)) ? entry : null;
             }
             catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException || ex is ArgumentException) { return null; }
