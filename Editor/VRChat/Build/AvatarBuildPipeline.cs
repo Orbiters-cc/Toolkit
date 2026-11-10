@@ -120,18 +120,24 @@ namespace Orbiters.Toolkit.Editor.VRChat.Build
         }
 
         /// <summary>Runs one phase's steps on <paramref name="avatar"/>; false when one stopped the build.</summary>
-        internal static bool RunPhase(BuildPhase phase, GameObject avatar)
+        internal static bool RunPhase(BuildPhase phase, GameObject avatar) => RunPhase(phase, avatar, StepsIn(phase));
+
+        // A step that stops the build (false, or an exception) ends it: what the steps shared is forgotten at once. A build
+        // another tool's callback stops ends with the SDK's build (BuildContext follows VrcSdkBuilds.Finished).
+        internal static bool RunPhase(BuildPhase phase, GameObject avatar, IEnumerable<BuildStep> steps)
         {
             var context = BuildContext.Enter(avatar, phase, true);
+            bool done = false;
             try
             {
-                foreach (var step in StepsIn(phase))
+                foreach (var step in steps)
                     if (!step.Run(context)) return false;
+                done = true;
                 return true;
             }
             finally
             {
-                if (phase == BuildPhase.Last) BuildContext.End(avatar);
+                if (!done || phase == BuildPhase.Last) BuildContext.End(avatar);
             }
         }
 

@@ -185,6 +185,48 @@ public sealed class AnimationIndexTests
         Assert.That(BlendShapePruning.Used(usage, skin), Is.EquivalentTo(new[] { "never" }));
     }
 
+    // Every way other tools change clips raises the clip's dirty count, or the index would miss it: settled in Unity.
+    [Test] public void EveryKindOfCurveEditBehindItsBackIsSeenOnSync()
+    {
+        var (root, skin, ears, _) = Avatar();
+        var usage = new AvatarUsage(root);
+        var index = usage.Animations;
+        var fx = index.Clips.First().Clip;
+
+        AnimationUtility.SetEditorCurves(fx, new[] { Shape("Skin", "unused") }, new[] { AnimationCurve.Constant(0, 1, 100) });
+        index.Sync();
+        Assert.That(index.At("Skin").Select(b => b.Value.propertyName), Has.Member("blendShape.unused"), "SetEditorCurves");
+
+        var slot = EditorCurveBinding.PPtrCurve("Skin", typeof(SkinnedMeshRenderer), "m_Materials.Array.data[0]");
+        AnimationUtility.SetObjectReferenceCurve(fx, slot, new[] { new ObjectReferenceKeyframe { time = 0, value = Own(new Material(Shader.Find("Standard"))) } });
+        index.Sync();
+        Assert.That(index.At("Skin").Where(b => b.IsObject).Select(b => b.Value.propertyName), Has.Member("m_Materials.Array.data[0]"), "SetObjectReferenceCurve");
+
+        fx.SetCurve("Skin", typeof(SkinnedMeshRenderer), "blendShape.never", AnimationCurve.Constant(0, 1, 100));
+        index.Sync();
+        Assert.That(index.At("Skin").Select(b => b.Value.propertyName), Has.Member("blendShape.never"), "AnimationClip.SetCurve");
+        SameAsReadingEveryClip(root, usage, skin, ears);
+
+        fx.ClearCurves();
+        index.Sync();
+        Assert.That(index.At("Skin"), Is.Empty, "AnimationClip.ClearCurves");
+        SameAsReadingEveryClip(root, usage, skin, ears);
+    }
+
+    // A synced layer plays its own motions in the source layer's states: their shapes are used too.
+    [Test] public void ASyncedLayersOverrideClipsAreRead()
+    {
+        var (root, skin, _, descriptor) = Avatar();
+        var controller = (AnimatorController)descriptor.baseAnimationLayers[0].animatorController;
+        controller.AddLayer("Synced");
+        var layers = controller.layers;
+        layers[1].syncedLayerIndex = 0;
+        layers[1].SetOverrideMotion(layers[0].stateMachine.states[0].state, Clip("Override", (Shape("Skin", "never"), AnimationCurve.Constant(0, 1, 100))));
+        controller.layers = layers;
+        var usage = new AvatarUsage(root);
+        Assert.That(BlendShapePruning.Used(usage, skin), Has.Member("never"));
+    }
+
     [Test] public void DuringABuildUsedReadsTheBuildsIndex()
     {
         var (root, skin, ears, _) = Avatar();

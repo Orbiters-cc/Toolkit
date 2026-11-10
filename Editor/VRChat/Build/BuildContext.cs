@@ -80,7 +80,17 @@ namespace Orbiters.Toolkit.Editor.VRChat.Build
         internal static void End(GameObject avatar) => Open.RemoveAll(c => ReferenceEquals(c.Avatar, avatar) || c.Avatar == null);
 
         [InitializeOnLoadMethod]
-        private static void ForgetOnReload() => AssemblyReloadEvents.beforeAssemblyReload += Open.Clear;
+        private static void Follow()
+        {
+            AssemblyReloadEvents.beforeAssemblyReload += Open.Clear;
+            VrcSdkBuilds.Finished += _ => EndStarted();
+        }
+
+        /// <summary>
+        /// The SDK's build ended (done, or stopped by any tool's callback): the builds that ran a phase end with it. Those a
+        /// caller prepared and that have not started (a hidden build's) stay.
+        /// </summary>
+        internal static void EndStarted() => Open.RemoveAll(c => c.phase >= 0 || c.Avatar == null);
 
         /// <summary>
         /// What one kind of step keeps for this build (made empty on first use): the state its steps in several phases, or

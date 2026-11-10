@@ -314,6 +314,68 @@ public sealed class AvatarBuildPipelineTests
         finally { Object.DestroyImmediate(avatar); }
     }
 
+    private sealed class Stopping : TestStep
+    {
+        public Stopping(BuildPhase phase) : base(phase) { }
+        public override bool Run(BuildContext context)
+        {
+            context.State<List<int>>().Add(1);
+            return false;
+        }
+    }
+
+    private sealed class Throwing : TestStep
+    {
+        public Throwing(BuildPhase phase) : base(phase) { }
+        public override bool Run(BuildContext context) => throw new InvalidOperationException("stopped");
+    }
+
+    // A step that stops the build ends it: the next build of the same object starts from nothing.
+    [Test] public void AStoppedBuildForgetsWhatItsStepsShared()
+    {
+        var avatar = new GameObject("Stopped build");
+        try
+        {
+            Assert.That(AvatarBuildPipeline.RunPhase(BuildPhase.AfterVrcFury, avatar, new BuildStep[] { new Stopping(BuildPhase.AfterVrcFury) }), Is.False);
+            Assert.That(BuildContext.Of(avatar), Is.Null, "a false return ends the build");
+            Assert.Throws<InvalidOperationException>(() => AvatarBuildPipeline.RunPhase(BuildPhase.Start, avatar, new BuildStep[] { new Throwing(BuildPhase.Start) }));
+            Assert.That(BuildContext.Of(avatar), Is.Null, "so does an exception");
+
+            var ran = new List<string>();
+            Assert.That(AvatarBuildPipeline.RunPhase(BuildPhase.Start, avatar, new BuildStep[] { new Alpha(BuildPhase.Start, ran: ran) }), Is.True);
+            Assert.That(ran, Is.EqualTo(new[] { "Alpha" }));
+            Assert.That(BuildContext.Of(avatar).State<List<int>>(), Is.Empty, "the next build starts empty");
+        }
+        finally
+        {
+            BuildContext.End(avatar);
+            Object.DestroyImmediate(avatar);
+        }
+    }
+
+    // Another tool's callback stopped the build between two phases: the SDK's end of the build ends Orbiters' too, and
+    // leaves a build a caller only prepared.
+    [Test] public void TheSdksBuildEndEndsTheBuildsThatStarted()
+    {
+        var started = new GameObject("Started build");
+        var prepared = new GameObject("Prepared build");
+        try
+        {
+            AvatarBuildPipeline.RunPhase(BuildPhase.Start, started, Array.Empty<BuildStep>());
+            BuildContext.For(prepared).KeepShapes(new[] { "smile" });
+            VrcSdkBuilds.OnBuildFinish(null, "failed");
+            Assert.That(BuildContext.Of(started), Is.Null);
+            Assert.That(BuildContext.Of(prepared)?.KeptShapes, Is.EquivalentTo(new[] { "smile" }));
+        }
+        finally
+        {
+            BuildContext.End(started);
+            BuildContext.End(prepared);
+            Object.DestroyImmediate(started);
+            Object.DestroyImmediate(prepared);
+        }
+    }
+
     [Test] public void StepsShareStateThroughTheContext()
     {
         var avatar = new GameObject("State test");
