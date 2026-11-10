@@ -108,6 +108,12 @@ namespace Orbiters.Toolkit.Editor
                     string used = AssetDatabase.AssetPathToGUID(dependency);
                     if (!string.IsNullOrEmpty(used)) read.Guids.Add(used);
                 }
+            // Files whose own content is not read: pictures, sounds, models, libraries (their importers never take a GUID
+            // from inside the file; their .meta is read), and binary files. In a Force Text project (VRChat's default) Unity
+            // writes few of those itself: types marked [PreferBinarySerialization] (LightingData, NavMesh data, and tools'
+            // own caches), terrain data, files brought in by a .unitypackage or copied from a Force Binary project that
+            // Unity has not written since, and binary formats of tools' ScriptedImporters. Only those can make the scan
+            // uncertain, and only while they are not as Unity last imported them.
             if (!read.ContentRead && read.Stamp.Size >= 0)
             {
                 // A file not yet imported keeps the importer its kind gets by default.
