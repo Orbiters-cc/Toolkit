@@ -183,12 +183,6 @@ namespace Orbiters.Toolkit.Editor.VRChat
             sight.IsActive = true; sight.Locked = true;
             var point = Child(gaze, "Point");
             point.localPosition = Vector3.forward * GazeDistance;
-            foreach (var (at, tag) in new[] { (gaze, EyeTag), (point, GazeTag) })
-            {
-                var sender = at.gameObject.AddComponent<VRCContactSender>();
-                sender.shapeType = ContactBase.ShapeType.Sphere; sender.radius = GazeRadius; HeldPropRig.LocalOnlySender(sender, true);
-                sender.collisionTags.Add(tag);
-            }
             var dot = Child(point, "Dot");
             dot.localScale = Vector3.one * GazeDotRadius;
             dot.gameObject.AddComponent<MeshFilter>().sharedMesh = N4N0Mesh(folder);
@@ -294,6 +288,7 @@ namespace Orbiters.Toolkit.Editor.VRChat
             sight.Sources[0] = new VRCConstraintSource(bone, 1, turn * (gaze.position - bone.position), (turn * gaze.rotation).eulerAngles);
             FitPlacement(n4n0, avatar, animator);
             BindPointers(n4n0, avatar, animator, size);
+            FitRoom(n4n0, size);
             BindCardHands(n4n0, animator, size);
             FitLight(n4n0);
             BindMobile(n4n0, avatar, bone, eyes, size);

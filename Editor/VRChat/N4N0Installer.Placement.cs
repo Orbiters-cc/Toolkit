@@ -46,13 +46,29 @@ namespace Orbiters.Toolkit.Editor.VRChat
         /// <see cref="LargestScreen"/> times; its default is the size 1.
         /// </summary>
         public const string ScreenSize = "N4N0/Screen/Size";
+        /// <summary>
+        /// Local and saved, set by the Action Menu's and N4N0's menu's Stay here: the screen stays where it is, whatever its owner
+        /// does, no view follow. Off, it follows again.
+        /// </summary>
+        public const string ScreenPinned = "N4N0/Screen/Pinned";
+        /// <summary>Local, set by Orbiters - N4N0: a hand is at the screen, so looking away counts for nothing yet.</summary>
+        public const string ScreenBusy = "N4N0/Screen/Busy";
+        /// <summary>
+        /// Synced, set by Orbiters - N4N0: where the screen's middle is from its owner's eyes (right, up, ahead of the line of
+        /// sight kept level), over <see cref="SyncedPlaceRange"/>; on <see cref="ScreenSettle"/> everyone else's screen goes there.
+        /// </summary>
+        public const string ScreenPlaceX = "N4N0/Screen/PlaceX", ScreenPlaceY = "N4N0/Screen/PlaceY", ScreenPlaceZ = "N4N0/Screen/PlaceZ", ScreenSettle = "N4N0/Screen/Settle";
         /// <summary>The handle's grab (VRChat adds <c>_IsGrabbed</c>) and which hand is at it (local contacts).</summary>
         public const string ScreenGrab = "N4N0/Screen/Grab", ScreenHandL = "N4N0/Screen/HandL", ScreenHandR = "N4N0/Screen/HandR";
         /// <summary>The view cone's contact tag: only the screen's middle takes it.</summary>
         public const string ViewTag = "N4N0View";
         internal const string ScreenHome = Gaze + "/Screen home", ScreenPlace = Shown + "/Screen place", ScreenGlide = Shown + "/Screen glide";
         internal const string ScreenTarget = Shown + "/Screen target";
-        internal const string ScreenGrips = Shown + "/Screen grips", ScreenHandle = ScreenObject + "/Handle", ScreenView = ScreenObject + "/View";
+        internal const string ScreenGrips = Shown + "/Screen grips", ScreenHandle = ScreenObject + "/Handle", ScreenView = RoomScreen + "/View";
+        // Where everyone else's screen goes when its owner's rests: a frame at the eyes along the line of sight, level, and the
+        // place the three synced floats say in it, facing the eyes.
+        internal const string SyncedFrame = Head + "/Screen synced frame", SyncedPlace = SyncedFrame + "/Place";
+        internal const float SyncedPlaceRange = 1.27f;
         internal const string Carry = "Carry";
         internal static string ScreenGrip(bool right) => ScreenGrips + "/" + (right ? "Right" : "Left") + " grip";
         // The place's sources: its target, the left and right palms' carry frames.
@@ -104,9 +120,24 @@ namespace Orbiters.Toolkit.Editor.VRChat
                 return carry;
             }).ToArray();
             // The target: the home, frozen where it was while the screen glides to it (unfrozen, the home again).
+            var syncedFrame = Child(head, "Screen synced frame");
+            var at = syncedFrame.gameObject.AddComponent<VRCPositionConstraint>();
+            at.Sources.Add(new VRCConstraintSource(gaze, 1));
+            at.IsActive = true; at.Locked = true;
+            var level = syncedFrame.gameObject.AddComponent<VRCAimConstraint>();
+            level.Sources.Add(new VRCConstraintSource(n4n0.Find(GazePoint), 1));
+            level.AimAxis = Vector3.forward; level.UpAxis = Vector3.up; level.WorldUp = VRCConstraintBase.WorldUpType.SceneUp;
+            level.IsActive = true; level.Locked = true;
+            var syncedPlace = Child(syncedFrame, "Place");
+            syncedPlace.localPosition = ScreenHomeFromEyes + new Vector3(0, .06f, 0);
+            var turned = syncedPlace.gameObject.AddComponent<VRCAimConstraint>();
+            turned.Sources.Add(new VRCConstraintSource(gaze, 1));
+            turned.AimAxis = Vector3.back; turned.UpAxis = Vector3.up; turned.WorldUp = VRCConstraintBase.WorldUpType.SceneUp;
+            turned.IsActive = true; turned.Locked = true;
             var target = Child(shown, "Screen target");
             var aim = target.gameObject.AddComponent<VRCParentConstraint>();
             aim.Sources.Add(new VRCConstraintSource(home, 1));
+            aim.Sources.Add(new VRCConstraintSource(syncedPlace, 0));
             aim.IsActive = true; aim.Locked = true;
             // The place: unfreezing measures each source's offset where it is; the animator sets the target's back to 0.
             var place = Child(shown, "Screen place");
@@ -121,15 +152,6 @@ namespace Orbiters.Toolkit.Editor.VRChat
             blend.Sources.Add(new VRCConstraintSource(place, 1));
             blend.Sources.Add(new VRCConstraintSource(target, 0));
             blend.IsActive = true; blend.Locked = true;
-            // The view cone, at the eyes along the line of sight: local senders that cost nothing in the performance rank.
-            for (int i = 0; i < ViewDistances.Length; i++)
-            {
-                var sphere = Child(gaze, "View " + i);
-                sphere.localPosition = Vector3.forward * ViewDistances[i];
-                var sender = sphere.gameObject.AddComponent<VRCContactSender>();
-                sender.shapeType = ContactBase.ShapeType.Sphere; sender.radius = ViewDistances[i] * ViewWidth; HeldPropRig.LocalOnlySender(sender, true);
-                sender.collisionTags.Add(ViewTag);
-            }
             return glide;
         }
 
@@ -156,7 +178,7 @@ namespace Orbiters.Toolkit.Editor.VRChat
             HandContact(handle, "Left hand", ScreenHandL, true, HandleHandRadius, localOnly: true);
             HandContact(handle, "Right hand", ScreenHandR, false, HandleHandRadius, localOnly: true);
             handle.gameObject.SetActive(false);
-            var view = Child(screen, "View").gameObject.AddComponent<VRCContactReceiver>();
+            var view = Child(n4n0.Find(RoomScreen), "View").gameObject.AddComponent<VRCContactReceiver>();
             view.shapeType = ContactBase.ShapeType.Sphere; view.radius = .01f;
             view.allowSelf = true; view.allowOthers = false; view.localOnly = true;
             view.receiverType = ContactReceiver.ReceiverType.Constant; view.parameter = ScreenInView;
@@ -207,8 +229,9 @@ namespace Orbiters.Toolkit.Editor.VRChat
         /// </summary>
         private static void PlacementController(AnimatorController controller, List<VRCExpressionParameters.Parameter> parameters)
         {
-            foreach (var name in new[] { ScreenPlaced, ScreenHeldLeft, ScreenHeldRight, ScreenInView, ScreenGrab + "_IsGrabbed", ScreenHandL, ScreenHandR })
+            foreach (var name in new[] { ScreenPlaced, ScreenHeldLeft, ScreenHeldRight, ScreenInView, ScreenGrab + "_IsGrabbed", ScreenHandL, ScreenHandR, ScreenPinned, ScreenBusy, ScreenSettle })
                 controller.AddParameter(name, AnimatorControllerParameterType.Bool);
+            foreach (var (name, value) in SyncedPlaceDefaults) controller.AddParameter(new AnimatorControllerParameter { name = name, type = AnimatorControllerParameterType.Float, defaultFloat = value });
             controller.AddParameter(new AnimatorControllerParameter { name = ScreenSize, type = AnimatorControllerParameterType.Float, defaultFloat = DefaultScreenSize });
             foreach (var gesture in new[] { "GestureLeft", "GestureRight" })
                 if (!controller.parameters.Any(p => p.name == gesture)) controller.AddParameter(gesture, AnimatorControllerParameterType.Int);
@@ -216,8 +239,13 @@ namespace Orbiters.Toolkit.Editor.VRChat
             StaysLayer(controller);
             HandleGripLayer(controller);
             SizeLayer(controller);
+            SyncedPlaceLayer(controller);
             HandleLayer(controller);
             parameters.Add(Parameter(ScreenPlaced));
+            parameters.Add(Parameter(ScreenPinned, synced: false, saved: true));
+            parameters.Add(Parameter(ScreenBusy, synced: false));
+            parameters.Add(Parameter(ScreenSettle));
+            foreach (var (name, value) in SyncedPlaceDefaults) parameters.Add(Parameter(name, type: VRCExpressionParameters.ValueType.Float, defaultValue: value));
             parameters.Add(Parameter(ScreenHeldLeft));
             parameters.Add(Parameter(ScreenHeldRight));
             parameters.Add(Parameter(ScreenSize, type: VRCExpressionParameters.ValueType.Float, defaultValue: DefaultScreenSize));
@@ -238,6 +266,11 @@ namespace Orbiters.Toolkit.Editor.VRChat
             var glide = HeldPropRig.State(controller, machine, "Glide", GlideClip());
             var arrive = HeldPropRig.State(controller, machine, "Arrive", PlaceClip("Screen arrive", false, PlaceTarget, 0, .05f, targetFrozen: true));
             var waiting = HeldPropRig.State(controller, machine, "Waiting", PlaceClip("Screen waiting", true, PlaceTarget, 1, LookAwayTime));
+            // Everyone else's screen, once its owner's rests: a frame on the synced place, then a glide there from where it stays.
+            var aiming = HeldPropRig.State(controller, machine, "Settle aim", PlaceClip("Screen settle aim", true, PlaceTarget, 1, .05f, synced: true));
+            var settling = HeldPropRig.State(controller, machine, "Settle glide", GlideClip("Screen settle glide", true));
+            var settled = HeldPropRig.State(controller, machine, "Settle arrive", PlaceClip("Screen settle arrive", false, PlaceTarget, 0, .05f, targetFrozen: true, synced: true));
+            var waitOver = HeldPropRig.State(controller, machine, "Settled", PlaceClip("Screen settled place", true, PlaceTarget, 1));
             var catchLeft = HeldPropRig.State(controller, machine, "Left catch", PlaceClip("Screen left catch", true, PlaceLeft, 1));
             var catchRight = HeldPropRig.State(controller, machine, "Right catch", PlaceClip("Screen right catch", true, PlaceRight, 1));
             var left = HeldPropRig.State(controller, machine, "Left hand", PlaceClip("Screen left hand", false, PlaceLeft, 1));
@@ -249,7 +282,7 @@ namespace Orbiters.Toolkit.Editor.VRChat
             var notRight = (ScreenHeldRight, AnimatorConditionMode.IfNot, 0f);
             var isPlaced = (ScreenPlaced, AnimatorConditionMode.If, 0f);
             var notPlaced = (ScreenPlaced, AnimatorConditionMode.IfNot, 0f);
-            foreach (var state in new[] { start, placed, glide, arrive, waiting })
+            foreach (var state in new[] { start, placed, glide, arrive, waiting, aiming, settling, settled, waitOver })
             {
                 Transition(state, catchLeft, heldLeft);
                 Transition(state, catchRight, heldRight, notLeft);
@@ -262,6 +295,15 @@ namespace Orbiters.Toolkit.Editor.VRChat
             Exit(arrive, waiting, notPlaced);
             Transition(waiting, placed, isPlaced);
             Exit(waiting, glide, notPlaced);
+            var remote = ("IsLocal", AnimatorConditionMode.IfNot, 0f);
+            var settle = (ScreenSettle, AnimatorConditionMode.If, 0f);
+            var noSettle = (ScreenSettle, AnimatorConditionMode.IfNot, 0f);
+            Transition(placed, aiming, remote, settle, isPlaced);
+            Exit(aiming, settling);
+            Exit(settling, settled);
+            Exit(settled, waitOver);
+            Transition(waitOver, placed, noSettle);
+            Transition(waitOver, glide, notPlaced);
             // The next update: frozen where it was taken, then riding the palm from there.
             Transition(catchLeft, left, heldLeft);
             Transition(catchRight, right, heldRight);
@@ -272,7 +314,7 @@ namespace Orbiters.Toolkit.Editor.VRChat
             Transition(right, placed, notLeft, notRight);
             Transition(left, catchRight, notLeft, heldRight);
             Transition(right, catchLeft, notRight, heldLeft);
-            foreach (var state in new[] { start, placed, glide, arrive, waiting, catchLeft, catchRight, left, right }) state.writeDefaultValues = true;
+            foreach (var state in new[] { start, placed, glide, arrive, waiting, aiming, settling, settled, waitOver, catchLeft, catchRight, left, right }) state.writeDefaultValues = true;
         }
 
         // Leaves `from` once its clip has played once (and the conditions hold).
@@ -284,7 +326,7 @@ namespace Orbiters.Toolkit.Editor.VRChat
 
         // The place frozen or not with one source weighed in (its target's offsets back to 0), the glide on the place
         // (`onPlace` 1) or on the target (0), the target frozen or on the home. Shorter than 0.2 s, it plays once.
-        private static AnimationClip PlaceClip(string name, bool frozen, int source, float onPlace, float length = .2f, bool targetFrozen = false)
+        private static AnimationClip PlaceClip(string name, bool frozen, int source, float onPlace, float length = .2f, bool targetFrozen = false, bool synced = false)
         {
             var clip = new AnimationClip { name = name };
             void Set(string path, Type type, string property, float value) =>
@@ -300,15 +342,17 @@ namespace Orbiters.Toolkit.Editor.VRChat
             Set(ScreenGlide, typeof(VRCParentConstraint), "Sources.source0.Weight", onPlace);
             Set(ScreenGlide, typeof(VRCParentConstraint), "Sources.source1.Weight", 1 - onPlace);
             Set(ScreenTarget, typeof(VRCParentConstraint), "FreezeToWorld", targetFrozen ? 1 : 0);
+            Set(ScreenTarget, typeof(VRCParentConstraint), "Sources.source0.Weight", synced ? 0 : 1);
+            Set(ScreenTarget, typeof(VRCParentConstraint), "Sources.source1.Weight", synced ? 1 : 0);
             if (length != .2f) Once(clip);
             return clip;
         }
 
         // Gliding back: the place frozen where the screen stayed, the target frozen where the eyes looked as it set off, the
         // glide easing from the one over to the other.
-        private static AnimationClip GlideClip()
+        private static AnimationClip GlideClip(string name = "Screen glide", bool synced = false)
         {
-            var clip = PlaceClip("Screen glide", true, PlaceTarget, 1, targetFrozen: true);
+            var clip = PlaceClip(name, true, PlaceTarget, 1, targetFrozen: true, synced: synced);
             var ease = AnimationCurve.EaseInOut(0, 1, GlideTime, 0);
             var rise = AnimationCurve.EaseInOut(0, 0, GlideTime, 1);
             AnimationUtility.SetEditorCurve(clip, EditorCurveBinding.FloatCurve(ScreenGlide, typeof(VRCParentConstraint), "Sources.source0.Weight"), ease);
@@ -364,6 +408,9 @@ namespace Orbiters.Toolkit.Editor.VRChat
             var confirming = HeldPropRig.State(controller, machine, "Confirming view", confirm);
             // Closed, it waits here, so opening it starts Following (and its settle time) afresh.
             var closed = HeldPropRig.State(controller, machine, "Closed", new AnimationClip { name = "Screen closed" });
+            // Stay here: where it is, whatever its owner does, open or closed, until turned off. Its first place after the avatar
+            // loads is before the eyes: nothing is held from before a world change.
+            var pinned = HeldPropRig.State(controller, machine, "Pinned", new AnimationClip { name = "Screen pinned" });
             machine.defaultState = following;
             Drive(following, (ScreenPlaced, false));
             Drive(staying, (ScreenPlaced, true));
@@ -371,9 +418,18 @@ namespace Orbiters.Toolkit.Editor.VRChat
             Drive(settled, (ScreenPlaced, true));
             Drive(confirming, (ScreenPlaced, true));
             Drive(closed, (ScreenPlaced, false));
+            Drive(pinned, (ScreenPlaced, true));
             var local = ("IsLocal", AnimatorConditionMode.If, 0f);
+            var pin = (ScreenPinned, AnimatorConditionMode.If, 0f);
+            var unpin = (ScreenPinned, AnimatorConditionMode.IfNot, 0f);
+            var notBusy = (ScreenBusy, AnimatorConditionMode.IfNot, 0f);
             var shut = new[] { (ScreenOpen, AnimatorConditionMode.IfNot, 0f), (Menu, AnimatorConditionMode.IfNot, 0f) };
             // Closing and grabbing take priority over the contact and timers.
+            foreach (var state in new[] { staying, lookingAway, settled, confirming }) Transition(state, pinned, local, pin);
+            foreach (var open in new[] { ScreenOpen, Menu }) Transition(pinned, following, unpin, (open, AnimatorConditionMode.If, 0f));
+            Transition(pinned, closed, unpin, shut[0], shut[1]);
+            Transition(pinned, holding, local, (ScreenHeldLeft, AnimatorConditionMode.If, 0));
+            Transition(pinned, holding, local, (ScreenHeldRight, AnimatorConditionMode.If, 0));
             foreach (var state in new[] { following, staying, lookingAway, settled, confirming, holding }) Transition(state, closed, shut);
             foreach (var state in new[] { following, staying, lookingAway, settled, confirming })
             {
@@ -385,9 +441,10 @@ namespace Orbiters.Toolkit.Editor.VRChat
             Transition(settled, confirming, (ScreenInView, AnimatorConditionMode.If, 0));
             Transition(confirming, settled, (ScreenInView, AnimatorConditionMode.IfNot, 0));
             Exit(confirming, staying, (ScreenInView, AnimatorConditionMode.If, 0));
-            Transition(staying, lookingAway, (ScreenInView, AnimatorConditionMode.IfNot, 0));
+            Transition(staying, lookingAway, (ScreenInView, AnimatorConditionMode.IfNot, 0), notBusy);
             Transition(lookingAway, staying, (ScreenInView, AnimatorConditionMode.If, 0));
-            Exit(lookingAway, following, (ScreenInView, AnimatorConditionMode.IfNot, 0));
+            Transition(lookingAway, staying, (ScreenBusy, AnimatorConditionMode.If, 0));
+            Exit(lookingAway, following, (ScreenInView, AnimatorConditionMode.IfNot, 0), notBusy);
             Transition(holding, staying, (ScreenHeldLeft, AnimatorConditionMode.IfNot, 0), (ScreenHeldRight, AnimatorConditionMode.IfNot, 0));
         }
 
@@ -424,10 +481,46 @@ namespace Orbiters.Toolkit.Editor.VRChat
             foreach (var (at, scale) in new[] { (0f, SmallestScreen), (1f, LargestScreen) })
             {
                 var clip = new AnimationClip { name = "Screen size " + scale };
-                foreach (var axis in new[] { "x", "y", "z" }) Curve(clip, ScreenObject, typeof(Transform), "m_LocalScale." + axis, scale);
+                foreach (var axis in new[] { "x", "y", "z" })
+                {
+                    Curve(clip, ScreenObject, typeof(Transform), "m_LocalScale." + axis, scale);
+                    Curve(clip, RoomScreen, typeof(Transform), "m_LocalScale." + axis, scale);
+                }
                 size.AddChild(clip, at);
             }
             var state = HeldPropRig.State(controller, machine, "Size", size);
+            state.writeDefaultValues = true;
+            machine.defaultState = state;
+        }
+
+        // The floats at the screen's own home, so that a screen that has heard nothing yet is before the eyes.
+        private static readonly (string name, float value)[] SyncedPlaceDefaults =
+        {
+            (ScreenPlaceX, 0), (ScreenPlaceY, 0), (ScreenPlaceZ, ScreenHomeFromEyes.z / SyncedPlaceRange),
+        };
+
+        /// <summary>
+        /// The synced place from the three floats, on every client (a direct blend tree of one tree per axis: no layer per axis).
+        /// Only everyone else's screen goes there, on <see cref="ScreenSettle"/> (<see cref="PlaceLayer"/>).
+        /// </summary>
+        private static void SyncedPlaceLayer(AnimatorController controller)
+        {
+            var machine = Layer(controller, "Screen synced place");
+            var all = Hidden(new BlendTree { name = "Screen synced place", blendType = BlendTreeType.Direct });
+            var children = new List<ChildMotion>();
+            foreach (var (parameter, axis) in new[] { (ScreenPlaceX, "x"), (ScreenPlaceY, "y"), (ScreenPlaceZ, "z") })
+            {
+                var tree = Hidden(new BlendTree { name = "Screen synced " + axis, blendType = BlendTreeType.Simple1D, blendParameter = parameter, useAutomaticThresholds = false });
+                foreach (float end in new[] { -1f, 1f })
+                {
+                    var clip = Hidden(new AnimationClip { name = "Screen synced " + axis + " " + end });
+                    Curve(clip, SyncedPlace, typeof(Transform), "m_LocalPosition." + axis, end * SyncedPlaceRange);
+                    tree.AddChild(clip, end);
+                }
+                children.Add(new ChildMotion { motion = tree, directBlendParameter = One, timeScale = 1 });
+            }
+            all.children = children.ToArray();
+            var state = HeldPropRig.State(controller, machine, "Place", all);
             state.writeDefaultValues = true;
             machine.defaultState = state;
         }

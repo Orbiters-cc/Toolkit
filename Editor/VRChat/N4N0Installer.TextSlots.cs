@@ -14,8 +14,13 @@ namespace Orbiters.Toolkit.Editor.VRChat
     {
         /// <summary>The optional Walk boost radial's parameter (local, saved): Orbiters - N4N0's walk boost, 0 off to 1 strongest.</summary>
         public const string WalkBoost = "N4N0/WalkBoost";
-        /// <summary>The menu's 3D picture button (local): Orbiters - N4N0 takes a 3D picture with VRChat's camera.</summary>
-        public const string Photo3D = "N4N0/Photo3D";
+        /// <summary>
+        /// The menu's two 3D picture buttons (local, no synced bit): Orbiters - N4N0 takes a 3D picture of the people here, or of
+        /// the world without the avatars, with VRChat's camera, at the length chosen in the app. Flat names: VRChat's OSCQuery
+        /// tree would make "N4N0/Photo3D/..." a folder. Avatars uploaded earlier keep N4N0/Photo3D, whose one button takes the
+        /// picture last chosen; nothing builds it any more.
+        /// </summary>
+        public const string Photo3DPeople = "N4N0/Photo3DPeople", Photo3DWorld = "N4N0/Photo3DWorld";
         /// <summary>
         /// The menu's Menu toggle (local): N4N0's menu open (the projected screen when N4N0 has one, else Orbiters -
         /// N4N0's SteamVR overlay); the desktop turns it off when the menu closes on its own. The one direct trigger.
@@ -28,7 +33,7 @@ namespace Orbiters.Toolkit.Editor.VRChat
         // The controller, parameters and menu of each choice of options, shared by every N4N0 switched to it (they name no
         // object of their own: their curves follow paths below N4N0).
         // A new menu or parameters get a new folder: N4N0s switched earlier keep the files they use.
-        internal const string OptionsFolder = "Assets/Orbiters/N4N0/Menu 21/";
+        internal const string OptionsFolder = "Assets/Orbiters/N4N0/Menu 23/";
 
         [InitializeOnLoadMethod]
         private static void RegisterN4N0Options() => AttachmentHooks.RegisterOptions(root => FindAll(root).SelectMany(n4n0 =>

@@ -64,7 +64,8 @@ public class N4N0Tests
             ("N4N0/State", VRCExpressionParameters.ValueType.Int, true, false, 0),
             ("N4N0/Talk", VRCExpressionParameters.ValueType.Bool, false, false, 0),
             ("N4N0/Touch", VRCExpressionParameters.ValueType.Bool, false, false, 0),
-            ("N4N0/Photo3D", VRCExpressionParameters.ValueType.Bool, false, false, 0),
+            ("N4N0/Photo3DPeople", VRCExpressionParameters.ValueType.Bool, false, false, 0),
+            ("N4N0/Photo3DWorld", VRCExpressionParameters.ValueType.Bool, false, false, 0),
             ("N4N0/Menu", VRCExpressionParameters.ValueType.Bool, false, false, 0),
             ("N4N0/Call/Menu", VRCExpressionParameters.ValueType.Bool, false, false, 0),
             ("N4N0/Call/Pick", VRCExpressionParameters.ValueType.Float, false, false, 0),
@@ -82,7 +83,7 @@ public class N4N0Tests
                                                                       p.name.StartsWith("N4N0/Touchpad/", StringComparison.Ordinal) || p.name.StartsWith("N4N0/Stick/", StringComparison.Ordinal) ||
                                                                       p.name.StartsWith("N4N0/Mirror/", StringComparison.Ordinal)),
             "then the screen's, the link card's, the capture kit's (N4N0CaptureTests), the full pictures' (N4N0PictureTests), the controller input's and the screen mirror's (N4N0MirrorTests)");
-        Assert.AreEqual(1 + 8 + 1 + 8 + 8 * 8 + 3 + 8 + 3, parameters.CalcTotalCost(), "Synced bits: 1 + 8 + 1 + 8 + 8·N, the screen's 3 + 8, the card's 3");
+        Assert.AreEqual(1 + 8 + 1 + 8 + 8 * 8 + 3 + 8 + 3 + 25, parameters.CalcTotalCost(), "Synced bits: 1 + 8 + 1 + 8 + 8·N, the screen's 3 + 8, the card's 3, the screen's place 24 + 1");
 
         // Global in the Full Controller, so VRCFury keeps the names OSC looks for; its own parameters are renamed as usual.
         var full = VrcFury.Features(prefab).Single(f => f.kind == "FullController").feature;
@@ -108,8 +109,11 @@ public class N4N0Tests
         CollectionAssert.AreEqual(new[]
             {
                 ("Show N4N0", VRCExpressionsMenu.Control.ControlType.Toggle, "N4N0/Visible"), ("Menu", VRCExpressionsMenu.Control.ControlType.Toggle, "N4N0/Menu"),
+                ("Stay here", VRCExpressionsMenu.Control.ControlType.Toggle, "N4N0/Screen/Pinned"),
                 ("Talk", VRCExpressionsMenu.Control.ControlType.Button, "N4N0/Talk"),
-                ("3D picture", VRCExpressionsMenu.Control.ControlType.Button, "N4N0/Photo3D"), ("Call", VRCExpressionsMenu.Control.ControlType.SubMenu, ""),
+                ("3D picture of people", VRCExpressionsMenu.Control.ControlType.Button, "N4N0/Photo3DPeople"),
+                ("3D picture of the world", VRCExpressionsMenu.Control.ControlType.Button, "N4N0/Photo3DWorld"),
+                ("Call", VRCExpressionsMenu.Control.ControlType.SubMenu, ""),
                 ("Record", VRCExpressionsMenu.Control.ControlType.Toggle, "N4N0/Capture/Record"),
             },
             menu.subMenu.controls.Select(c => (c.name, c.type, c.parameter.name)).ToArray());
@@ -150,7 +154,7 @@ public class N4N0Tests
         if (VrcFury.Writer == null) Assert.Ignore("Requires the VRCFury integration.");
         N4N0Installer.CreatePrefab(folder, sync);
         var parameters = AssetDatabase.LoadAssetAtPath<VRCExpressionParameters>(folder + "/Parameters.asset");
-        Assert.AreEqual(1 + 8 + 1 + 8 + 8 * sync + 3 + 8 + 3, parameters.CalcTotalCost());
+        Assert.AreEqual(1 + 8 + 1 + 8 + 8 * sync + 3 + 8 + 3 + 25, parameters.CalcTotalCost());
         Assert.AreEqual(sync, parameters.parameters.Count(p => p.name.StartsWith(N4N0Installer.TextSyncPrefix, StringComparison.Ordinal)));
         var controller = AssetDatabase.LoadAssetAtPath<AnimatorController>(folder + "/N4N0.controller");
         var blocks = controller.layers.Single(l => l.name == "Text block").stateMachine.states.Count(s => s.state.name.StartsWith("Block "));
@@ -478,7 +482,8 @@ public class N4N0Tests
         Assert.IsTrue(N4N0Installer.HasScreen(root.transform));
         Assert.AreEqual(folder + "/N4N0 screen.mat", AssetDatabase.GetAssetPath(screen.sharedMaterial), "Its files in N4N0's folder, which a package carries");
         Assert.IsFalse(screen.gameObject.activeSelf, "Hidden until it opens");
-        var receivers = screen.GetComponentsInChildren<VRCContactReceiver>(true);
+        // The owner's own receivers are in the contact room, everyone else's fingertips' at the real screen.
+        var receivers = screen.GetComponentsInChildren<VRCContactReceiver>(true).Concat(root.transform.Find(N4N0Installer.RoomScreen).GetComponentsInChildren<VRCContactReceiver>(true)).ToArray();
         foreach (var r in receivers) Assert.IsTrue(r.localOnly, r.parameter + ": local, nothing in the performance rank");
         var proximity = receivers.Where(r => r.receiverType == VRC.Dynamics.ContactReceiver.ReceiverType.Proximity).ToList();
         Assert.AreEqual(8 + 8 + 4 + 4 + 4, proximity.Count, "Four per hand for the fingertip and for the aim, four for everyone else's fingertips, four each for the eyes and the gaze point");
@@ -498,10 +503,12 @@ public class N4N0Tests
         Assert.AreEqual((N4N0Installer.ViewTag, true, false), (view.collisionTags.Single(), view.allowSelf, view.allowOthers), "The middle: in its owner's sight or not");
         var parameters = AssetDatabase.LoadAssetAtPath<VRCExpressionParameters>(folder + "/Parameters.asset");
         var screenParameters = parameters.parameters.Where(p => p.name.StartsWith("N4N0/Screen/", StringComparison.Ordinal)).ToList();
-        Assert.AreEqual(1 + 1 + 1 + 1 + 1 + N4N0Installer.ScreenLocalValues + 4 + 4 + 4 + 8 + 8 + 4, screenParameters.Count,
+        Assert.AreEqual(1 + 1 + 1 + 1 + 1 + N4N0Installer.ScreenLocalValues + 4 + 4 + 4 + 8 + 8 + 4 + 2 + 4, screenParameters.Count,
             "Open, Replace, ThumbnailBytes, Version, the pointer, 16 values, 4 each for the eyes and the gaze, Placed, HeldLeft, HeldRight, Size, the fingertips' and aims' 8 each, everyone else's 4");
-        CollectionAssert.AreEquivalent(new[] { N4N0Installer.ScreenPlaced, N4N0Installer.ScreenHeldLeft, N4N0Installer.ScreenHeldRight, N4N0Installer.ScreenSize },
+        CollectionAssert.AreEquivalent(new[] { N4N0Installer.ScreenPlaced, N4N0Installer.ScreenHeldLeft, N4N0Installer.ScreenHeldRight, N4N0Installer.ScreenSize, N4N0Installer.ScreenPlaceX, N4N0Installer.ScreenPlaceY, N4N0Installer.ScreenPlaceZ, N4N0Installer.ScreenSettle },
             screenParameters.Where(p => p.networkSynced).Select(p => p.name), "Only where it is and its size are synced");
+        var pinned = screenParameters.Single(p => p.name == N4N0Installer.ScreenPinned);
+        Assert.AreEqual((false, true, VRCExpressionParameters.ValueType.Bool), (pinned.networkSynced, pinned.saved, pinned.valueType), "Stay here: its owner's choice, kept");
         var size = screenParameters.Single(p => p.name == N4N0Installer.ScreenSize);
         Assert.AreEqual((VRCExpressionParameters.ValueType.Float, N4N0Installer.DefaultScreenSize), (size.valueType, size.defaultValue), "Its size 1 by default");
         var replace = screenParameters.Single(p => p.name == N4N0Installer.ScreenReplace);
@@ -539,7 +546,7 @@ public class N4N0Tests
         Assert.AreEqual((VRCPhysBoneBase.AdvancedBool.Other, true, false, N4N0Installer.ScreenGrab), (grab.allowGrabbing, grab.grabFilter.allowSelf, grab.grabFilter.allowOthers, grab.parameter),
             "Only its owner grabs the handle");
         Assert.AreEqual("Orbiters/N4N0 Dot", n4n0.Find(N4N0Installer.ScreenHandle + "/Bar").GetComponent<MeshRenderer>().sharedMaterial.shader.name);
-        var view = n4n0.Find(N4N0Installer.Gaze).GetComponentsInChildren<VRCContactSender>(true).Where(c => c.collisionTags.Contains(N4N0Installer.ViewTag)).ToList();
+        var view = n4n0.Find(N4N0Installer.RoomGaze).GetComponentsInChildren<VRCContactSender>(true).Where(c => c.collisionTags.Contains(N4N0Installer.ViewTag)).ToList();
         Assert.AreEqual(N4N0Installer.ViewDistances.Length, view.Count, "The view cone's spheres");
         Assert.IsTrue(view.All(c => c.localOnly), "Local: nothing in the performance rank");
 
@@ -646,7 +653,7 @@ public class N4N0Tests
         playable.SetBool(N4N0Installer.Menu, true);
         var screen = n4n0.Find(N4N0Installer.ScreenObject);
         var home = n4n0.Find(N4N0Installer.ScreenHome);
-        var view = n4n0.Find(N4N0Installer.Gaze).GetComponentsInChildren<VRCContactSender>(true)
+        var view = n4n0.Find(N4N0Installer.RoomGaze).GetComponentsInChildren<VRCContactSender>(true)
             .Where(c => c.collisionTags.Contains(N4N0Installer.ViewTag)).ToArray();
         var states = new int[controller.layers.Length];
         var solver = new ConstraintSolver();
@@ -910,6 +917,74 @@ public class N4N0Tests
     // Desktop mode: the owner points by looking. The eyes and the gaze point stay on the line of sight however the head
     // turns, and Orbiters - N4N0's reading (Docs/n4n0.md, Screen: the line through the two located points, on the
     // screen's plane) lands where the owner looks.
+    /// <summary>
+    /// The contact room (N4N0Installer.Room): what its copies measure from each other is what the real things measure, turned
+    /// and walked anywhere, at any size of the screen; the room is far enough down to have a cell of VRChat's grid to itself.
+    /// </summary>
+    [Test]
+    public void TheContactRoomMeasuresWhatTheRealThingsMeasureFromTheirCellOfTheirOwn()
+    {
+        if (VrcFury.Writer == null) Assert.Ignore("Requires the VRCFury integration.");
+        var prefab = AssetDatabase.LoadAssetAtPath<GameObject>(N4N0Installer.CreatePrefab(folder));
+        var (avatar, head) = Humanoid(eyes: 1.4f);
+        var n4n0 = ((GameObject)PrefabUtility.InstantiatePrefab(prefab, avatar)).transform;
+        AttachmentHooks.Prepare(n4n0.gameObject, avatar);
+        n4n0.Find(N4N0Installer.ContactRoom).gameObject.SetActive(true);
+        n4n0.Find(N4N0Installer.RoomScreen).gameObject.SetActive(true);
+        foreach (bool right in new[] { false, true }) n4n0.Find(N4N0Installer.RoomPointer(right)).gameObject.SetActive(true);
+        var screen = n4n0.Find(N4N0Installer.ScreenObject);
+        var copy = n4n0.Find(N4N0Installer.RoomScreen);
+        var solver = new ConstraintSolver();
+        try
+        {
+            solver.Track(n4n0.gameObject);
+            foreach (var (place, yaw, scale) in new[] { (Vector3.zero, 0f, 1f), (new Vector3(30, 9, -12), 70f, 1f), (new Vector3(-300, -40, 800), 215f, 1.8f), (new Vector3(4, 0, 4), 320f, .6f) })
+            {
+                avatar.SetPositionAndRotation(place, Quaternion.Euler(0, yaw, 0));
+                head.rotation = avatar.rotation * Quaternion.Euler(12, -30, 5);
+                screen.localScale = copy.localScale = Vector3.one * scale;
+                solver.Solve();
+                solver.Solve();
+                foreach (bool right in new[] { false, true })
+                {
+                    var pointer = n4n0.Find(N4N0Installer.Pointer(right));
+                    var probe = n4n0.Find(N4N0Installer.RoomPointer(right));
+                    Assert.Less((screen.InverseTransformPoint(pointer.position) - copy.InverseTransformPoint(probe.position)).magnitude, 2e-3f, "The fingertip from the screen, at " + place);
+                    var aim = pointer.TransformPoint(Vector3.forward * N4N0Installer.AimDistance);
+                    Assert.Less((screen.InverseTransformPoint(aim) - copy.InverseTransformPoint(probe.Find("Aim").position)).magnitude, 2e-3f, "The aim from the screen");
+                }
+                var eyes = n4n0.Find(N4N0Installer.Gaze);
+                Assert.Less((screen.InverseTransformPoint(eyes.position) - copy.InverseTransformPoint(n4n0.Find(N4N0Installer.RoomGaze).position)).magnitude, 2e-3f, "The eyes from the screen");
+                Assert.Less(Quaternion.Angle(screen.rotation, copy.rotation), .1f, "The same way up");
+                Assert.Greater(Vector3.Distance(screen.position, copy.position), 60f, "Far from everyone's contacts: VRChat's grid has cells of 5 m");
+            }
+        }
+        finally { solver.Release(); }
+    }
+
+    /// <summary>The Action Menu has Stay here on its first page with every option, within its eight controls.</summary>
+    [Test]
+    public void StayHereIsOnTheActionMenuWithinItsEightControls()
+    {
+        if (VrcFury.Writer == null) Assert.Ignore("Requires the VRCFury integration.");
+        foreach (bool options in new[] { false, true })
+        {
+            string at = folder + (options ? "/With" : "/Without");
+            AssetDatabase.CreateFolder(folder, options ? "With" : "Without");
+            N4N0Installer.CreatePrefab(at);
+            var prefab = AssetDatabase.LoadAssetAtPath<GameObject>(at + "/N4N0.prefab");
+            var placed = (GameObject)PrefabUtility.InstantiatePrefab(prefab);
+            if (options) N4N0Installer.SetOptions(placed.transform, 8, true, false, 72, light: true);
+            var top = AssetDatabase.LoadAssetAtPath<VRCExpressionsMenu>(at + "/Menu.asset").controls.Single().subMenu;
+            if (!options)
+            {
+                Assert.LessOrEqual(top.controls.Count, VRCExpressionsMenu.MAX_CONTROLS);
+                Assert.AreEqual(N4N0Installer.ScreenPinned, top.controls.Single(c => c.name == "Stay here").parameter.name);
+            }
+            UnityEngine.Object.DestroyImmediate(placed);
+        }
+    }
+
     [Test]
     public void TheGazePointFollowsTheLineOfSightOntoTheScreen()
     {
@@ -920,7 +995,7 @@ public class N4N0Tests
         AttachmentHooks.Prepare(n4n0.gameObject, avatar);
         var eye = n4n0.Find(N4N0Installer.Gaze);
         var gaze = n4n0.Find(N4N0Installer.GazePoint);
-        foreach (var (at, tag) in new[] { (eye, N4N0Installer.EyeTag), (gaze, N4N0Installer.GazeTag) })
+        foreach (var (at, tag) in new[] { (n4n0.Find(N4N0Installer.RoomGaze), N4N0Installer.EyeTag), (n4n0.Find(N4N0Installer.RoomPoint), N4N0Installer.GazeTag) })
         {
             var sender = at.GetComponent<VRCContactSender>();
             Assert.IsTrue(sender.localOnly, "Local: nothing in the performance rank");
@@ -1009,12 +1084,13 @@ public class N4N0Tests
             Assert.Less(Vector3.Distance(hand.position + hand.rotation * source.ParentPositionOffset, pointer.position), 1e-4f, "where the straight finger's tip is, from the hand");
             Assert.Less(Vector3.Angle((tip - middle.position).normalized, pointer.forward), .1f, "Along the finger");
             Assert.AreEqual(size, pointer.lossyScale.x, 1e-4f, "As large as N4N0");
-            var sender = pointer.GetComponent<VRCContactSender>();
+            var copy = n4n0.Find(N4N0Installer.RoomPointer(right));
+            var sender = copy.GetComponent<VRCContactSender>();
             Assert.AreEqual((true, N4N0Installer.TipTag(right)), (sender.localOnly, sender.collisionTags.Single()), "The fingertip's");
             Assert.AreEqual(N4N0Installer.PointRadius * size, sender.radius * sender.transform.lossyScale.x, 1e-6f, "A known, tiny contact");
-            var aim = pointer.Find("Aim").GetComponent<VRCContactSender>();
+            var aim = copy.Find("Aim").GetComponent<VRCContactSender>();
             Assert.AreEqual((true, N4N0Installer.AimTag(right)), (aim.localOnly, aim.collisionTags.Single()), "The aim's");
-            Assert.Less(Vector3.Distance(tip + pointer.forward * N4N0Installer.AimDistance * size, aim.transform.position), 1e-4f, "Further along the finger");
+            Assert.AreEqual(N4N0Installer.AimDistance * size, aim.transform.localPosition.magnitude * copy.lossyScale.x, 1e-4f, "Further along the finger");
         }
         Assert.IsFalse(n4n0.Find(N4N0Installer.Pointers).gameObject.activeSelf, "On in VR only");
     }
@@ -1108,10 +1184,10 @@ public class N4N0Tests
             (N4N0Installer.LightLevel, VRCExpressionParameters.ValueType.Float, true, true, N4N0Installer.LightLevelDefault),
             (N4N0Installer.LightStay, VRCExpressionParameters.ValueType.Bool, true, false, 0f),
         }, own);
-        Assert.AreEqual(1 + 8 + 1 + 8 + 8 * 8 + 3 + 8 + 3 + 1 + 8 + 8 + 1, parameters.CalcTotalCost(), "18 synced bits more");
+        Assert.AreEqual(1 + 8 + 1 + 8 + 8 * 8 + 3 + 8 + 3 + 25 + 1 + 8 + 8 + 1, parameters.CalcTotalCost(), "18 synced bits more");
         Assert.IsTrue(VrcFury.IsGlobalParameter(VrcFury.Features(placed).Single(f => f.kind == "FullController").feature, N4N0Installer.LightColor));
         var n4n0Menu = AssetDatabase.LoadAssetAtPath<VRCExpressionsMenu>(shared + "/Menu.asset").controls.Single().subMenu;
-        var lightMenu = n4n0Menu.controls.Single(c => c.name == "Light").subMenu;
+        var lightMenu = n4n0Menu.controls.Single(c => c.name == "More").subMenu.controls.Single(c => c.name == "Light").subMenu;
         CollectionAssert.AreEqual(new[] { "Light", "Brightness", "Colour", "Stay there" }, lightMenu.controls.Select(c => c.name).ToArray());
         Assert.AreEqual(N4N0Installer.LightLevel, lightMenu.controls[1].subParameters.Single().name);
         var colours = lightMenu.controls[2].subMenu.controls;
@@ -1181,7 +1257,48 @@ public class N4N0Tests
         var parameters = AssetDatabase.LoadAssetAtPath<VRCExpressionParameters>(N4N0Installer.OptionsFolder + "Text slots 8 + screen in VR/Parameters.asset");
         var version = parameters.parameters.Single(p => p.name == N4N0Installer.ScreenVersionParameter);
         Assert.AreEqual((VRCExpressionParameters.ValueType.Int, false, false, (float)N4N0Installer.ScreenVersion), (version.valueType, version.networkSynced, version.saved, version.defaultValue));
-        Assert.AreEqual(14, N4N0Installer.ScreenVersion);
+        Assert.AreEqual(16, N4N0Installer.ScreenVersion);
+    }
+
+    // The Action Menu has room for eight: the two 3D pictures cost one more place, so with both options Walk boost and Light
+    // share More. With one of them, or none, everything stays where it was. Both pictures are local: no synced bit.
+    [Test]
+    public void TheActionMenuHasTwoPicturesAndNeverMoreThanEightControls()
+    {
+        if (VrcFury.Writer == null) Assert.Ignore("Requires the VRCFury integration.");
+        var prefab = AssetDatabase.LoadAssetAtPath<GameObject>(N4N0Installer.CreatePrefab(folder));
+        var placed = (GameObject)PrefabUtility.InstantiatePrefab(prefab, scene);
+        string[] Names(string options, out VRCExpressionsMenu menu)
+        {
+            menu = AssetDatabase.LoadAssetAtPath<VRCExpressionsMenu>(N4N0Installer.OptionsFolder + options + "/Menu.asset").controls.Single().subMenu;
+            return menu.controls.Select(c => c.name).ToArray();
+        }
+
+        N4N0Installer.SetOptions(placed.transform, 8, true, false, 72, light: true);
+        CollectionAssert.AreEqual(new[] { "Show N4N0", "Menu", "Stay here", "Talk", "3D picture of people", "3D picture of the world", "Call", "More" },
+            Names("Text slots 8 + walk boost + light", out var both), "All on: 8 controls, the options and Record in More");
+        Assert.LessOrEqual(both.controls.Count, VRCExpressionsMenu.MAX_CONTROLS);
+        var more = both.controls.Single(c => c.name == "More").subMenu;
+        CollectionAssert.AreEqual(new[] { "Walk boost", "Light", "Record" }, more.controls.Select(c => c.name).ToArray());
+        Assert.AreEqual(N4N0Installer.WalkBoost, more.controls[0].subParameters.Single().name, "The radial still sets its parameter");
+        Assert.IsNotNull(more.controls[1].subMenu, "Light keeps its own submenu");
+        StringAssert.EndsWith("N4N0 more menu.asset", AssetDatabase.GetAssetPath(more), "A saved asset, as a menu that VRCFury merges must be");
+
+        N4N0Installer.SetOptions(placed.transform, 8, true, false);
+        CollectionAssert.AreEqual(new[] { "Show N4N0", "Menu", "Stay here", "Talk", "3D picture of people", "3D picture of the world", "Call", "More" },
+            Names("Text slots 8 + walk boost", out _), "One option: in More with Record too, Stay here keeps the first page full");
+
+        N4N0Installer.SetOptions(placed.transform, 8, false, false, 72, light: true);
+        CollectionAssert.AreEqual(new[] { "Show N4N0", "Menu", "Stay here", "Talk", "3D picture of people", "3D picture of the world", "Call", "More" },
+            Names("Text slots 8 + light", out var one));
+        var buttons = one.controls.Where(c => c.name.StartsWith("3D picture", StringComparison.Ordinal)).ToArray();
+        Assert.IsTrue(buttons.All(c => c.type == VRCExpressionsMenu.Control.ControlType.Button));
+        CollectionAssert.AreEqual(new[] { N4N0Installer.Photo3DPeople, N4N0Installer.Photo3DWorld }, buttons.Select(c => c.parameter.name).ToArray());
+        var parameters = AssetDatabase.LoadAssetAtPath<VRCExpressionParameters>(N4N0Installer.OptionsFolder + "Text slots 8 + light/Parameters.asset");
+        Assert.IsTrue(buttons.All(b => parameters.parameters.Single(p => p.name == b.parameter.name).networkSynced == false), "Local: no synced bit");
+        Assert.IsFalse(parameters.parameters.Any(p => p.name == "N4N0/Photo3D"), "The old button is not built any more");
+        var owner = VrcFury.Features(placed).Single(f => f.kind == "FullController").feature;
+        Assert.IsTrue(buttons.All(b => VrcFury.IsGlobalParameter(owner, b.parameter.name)), "OSC finds them under these names");
     }
 
     // The retro look is the screen's material alone: it stays through N4N0's other options, and goes back.
@@ -1355,7 +1472,7 @@ public class N4N0Tests
         var phone = Merged(Built(avatar, mobile: true));
         List<(string, VRCExpressionParameters.ValueType)> Synced(List<VRCExpressionParameters.Parameter> list) =>
             list.Where(p => p.networkSynced).Select(p => (p.name, p.valueType)).ToList();
-        Assert.AreEqual(1 + 8 + 1 + 8 + 8 * 8 + 3 + 8 + 3 + 1 + 8 + 8 + 1, pc.Where(p => p.networkSynced).Sum(p => p.valueType == VRCExpressionParameters.ValueType.Bool ? 1 : 8), "N4N0 with 8 text slots and its light");
+        Assert.AreEqual(1 + 8 + 1 + 8 + 8 * 8 + 3 + 8 + 3 + 25 + 1 + 8 + 8 + 1, pc.Where(p => p.networkSynced).Sum(p => p.valueType == VRCExpressionParameters.ValueType.Bool ? 1 : 8), "N4N0 with 8 text slots and its light");
         CollectionAssert.AreEqual(Synced(pc), Synced(phone));
         // The PC N4N0's parameters come first and whole; the mobile build adds its version, local.
         CollectionAssert.AreEqual(pc.Select(p => p.name), phone.Take(pc.Count).Select(p => p.name));

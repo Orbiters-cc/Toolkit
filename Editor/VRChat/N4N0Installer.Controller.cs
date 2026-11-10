@@ -91,7 +91,8 @@ namespace Orbiters.Toolkit.Editor.VRChat
             controller.AddParameter(Talk, AnimatorControllerParameterType.Bool);
             controller.AddParameter(Touch, AnimatorControllerParameterType.Bool);
             // Read by Orbiters - N4N0 over OSC only, as the walk boost.
-            controller.AddParameter(Photo3D, AnimatorControllerParameterType.Bool);
+            controller.AddParameter(Photo3DPeople, AnimatorControllerParameterType.Bool);
+            controller.AddParameter(Photo3DWorld, AnimatorControllerParameterType.Bool);
             controller.AddParameter(Menu, AnimatorControllerParameterType.Bool);
             foreach (var button in new[] { CallMenu, CallGo, CallEnd }) controller.AddParameter(button, AnimatorControllerParameterType.Bool);
             controller.AddParameter(CallPick, AnimatorControllerParameterType.Float);
@@ -130,7 +131,8 @@ namespace Orbiters.Toolkit.Editor.VRChat
                 // Local, but expression parameters all the same: OSC reads and sets those only.
                 Parameter(Talk, synced: false),
                 Parameter(Touch, synced: false),
-                Parameter(Photo3D, synced: false),
+                Parameter(Photo3DPeople, synced: false),
+                Parameter(Photo3DWorld, synced: false),
                 Parameter(Menu, synced: false),
                 Parameter(CallMenu, synced: false),
                 Parameter(CallPick, synced: false, type: VRCExpressionParameters.ValueType.Float),
@@ -146,8 +148,10 @@ namespace Orbiters.Toolkit.Editor.VRChat
                 Control("Show N4N0", VRCExpressionsMenu.Control.ControlType.Toggle, Visible),
                 // Opens N4N0's menu directly (the other triggers go through Orbiters - N4N0: a binding, a word, a touch).
                 Control("Menu", VRCExpressionsMenu.Control.ControlType.Toggle, Menu),
+                Control("Stay here", VRCExpressionsMenu.Control.ControlType.Toggle, ScreenPinned),
                 Control("Talk", VRCExpressionsMenu.Control.ControlType.Button, Talk),
-                Control("3D picture", VRCExpressionsMenu.Control.ControlType.Button, Photo3D),
+                Control("3D picture of people", VRCExpressionsMenu.Control.ControlType.Button, Photo3DPeople),
+                Control("3D picture of the world", VRCExpressionsMenu.Control.ControlType.Button, Photo3DWorld),
                 CallSubmenu(folder),
             };
             if (walkBoost)
@@ -160,9 +164,28 @@ namespace Orbiters.Toolkit.Editor.VRChat
             }
             if (light) LightController(controller, folder, parameters, controls);
             CaptureController(controller, parameters, controls);
+            FitActionMenu(folder, controls);
             InputParametersOf(parameters);
             MirrorController(controller, parameters);
             Install(root, folder, controller, MenuPath, "N4N0 menu", controls, parameters.ToArray(), parameters.Select(p => p.name), MenuIcon(folder));
+        }
+
+        /// <summary>
+        /// VRChat's Action Menu shows eight controls on a page, and the SDK refuses a menu with more. An N4N0 without options has
+        /// eight since Stay here; its options (Walk boost, Light) go in a submenu, More, and that takes Record along so that
+        /// it fits: what a person reaches for while they stand before their menu stays on the first page.
+        /// </summary>
+        private static void FitActionMenu(string folder, List<VRCExpressionsMenu.Control> controls)
+        {
+            if (controls.Count <= VRCExpressionsMenu.MAX_CONTROLS) return;
+            var options = controls.Where(c => c.name == "Walk boost" || c.name == "Light" || c.name == "Record").ToList();
+            var menu = ScriptableObject.CreateInstance<VRCExpressionsMenu>();
+            menu.controls = options;
+            AssetDatabase.CreateAsset(menu, AssetDatabase.GenerateUniqueAssetPath(folder + "/N4N0 more menu.asset"));
+            var more = Control("More", VRCExpressionsMenu.Control.ControlType.SubMenu, "");
+            more.subMenu = menu;
+            controls.Insert(controls.IndexOf(options[0]), more);
+            controls.RemoveAll(options.Contains);
         }
 
         // N4N0's own icon on its folder in the expressions menu: the N4N0 mark, aqua to lime (256 px).

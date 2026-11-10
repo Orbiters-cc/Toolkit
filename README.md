@@ -1,5 +1,53 @@
 # Orbiters Toolkit
 
+## 0.4.20 — 2026-11-06
+
+- **N4N0's menu presses wherever its pointer is, whoever stands near** (`N4N0Installer.Room`, Orbiters contracts' `Docs/n4n0.md`;
+  needs Orbiters - N4N0 with screen version 16). VRChat's contact broad phase stops at 1024 pairs a 5 m cell, which N4N0's own 28
+  large receivers brought within reach of one other person: past the end of its sweep along the world's X a whole sender reads
+  nothing, its beam showing as ever, so a part of the screen went dead depending on which way its owner faced. N4N0's contacts
+  that only measure its owner now measure in a room of their own 100 m below the avatar, which reads the same and pairs with
+  nobody; the real cell has 28 fewer large receivers on top.
+- **Stay here** (`N4N0/Screen/Pinned`, local and saved): on Home and in the Action Menu, the screen stays where it is whatever its
+  owner does, closed and open, until turned off. Its first place after the avatar loads is before the eyes. With an option on
+  the avatar, Record goes in More with it to keep the Action Menu at eight controls.
+- **The screen waits for a hand**: `N4N0/Screen/Busy` (local, from Orbiters - N4N0) holds it from following while a hand is at it.
+- **Everyone else sees it where it is**: `N4N0/Screen/PlaceX`, `Y`, `Z` and `Settle`, 25 more synced bits. Their screen replays the
+  glide and then settles at the place its owner's rests at, or at load.
+
+## 0.4.19 — 2026-11-05
+
+- **N4N0's rig frames fill the frame** (`N4N0Installer.Capture`, Orbiters contracts' `Docs/rig-frames.md`). The six faces, 512 px
+  squares at 90° drawn at 420 px with black bars around them, become 640 x 420 pictures that fill the frame under the strip
+  pixel for pixel: scene pixels from 49 % to 75 % of a 1080p frame, half as many again across every face, the render work up
+  about 2.5 %. The cube stays, with physical cameras (gate fit None) stretching it over the wider picture, and its scene
+  pixels now leave no direction out, where the square faces' borders and stamps left 2 % of the sphere. Each upload's build
+  gives the build copy its own render textures, projections and shader (`BuildRigFaces`), whichever N4N0 release is placed, so
+  uploading the avatar again is all it takes. Until then an avatar goes on drawing the old layout, which Orbiters - N4N0 keeps
+  reading. Tests: N4N0CaptureTests.
+- **Two 3D pictures, two buttons** (`N4N0Installer`, Orbiters contracts' `Docs/n4n0.md`; needs Orbiters - N4N0 with screen
+  version 15). The N4N0 Action Menu's one 3D picture button, which took whichever was last chosen, becomes **3D picture of
+  people** and **3D picture of the world** (`N4N0/Photo3DPeople`, `N4N0/Photo3DWorld`, local: no synced bit). The Action Menu
+  holds eight controls, so an N4N0 with both Walk boost and Light keeps those two in a **More** submenu; with either alone
+  nothing moves. Options folder Menu 22.
+- **N4N0 screen version 15** (screen files revision 21). A new 3D picture page (page 40) has the same two pictures as large
+  buttons above the timer and the camera flight, where versions 12 to 14 have one Take and a line that a press changes: 41
+  page slices and layout rows, both looks, and N4N0's five language files, from `orbiters-desktop --n4n0-menu`. Every older
+  page's picture is byte for byte what it was. Upload the avatar with the new N4N0 to get both.
+
+## 0.4.18 — 2026-11-04
+
+- **Recording without the wearer** (`N4N0Installer.HideSelf`, Orbiters contracts' `Docs/rig-frames.md`). VRChat's camera mask
+  Local User culls N4N0's capture kit with the avatar, so a recording with it off had no strip and no keyframes (0 of 509
+  frames against 678 of 748 with it on, same avatar). Each PC build now gets a last FX layer, `Capture hide self`, and the
+  local parameter `N4N0/Capture/HideSelf`: while Orbiters - N4N0 records with the mask off, it keeps Local User on and flips
+  that parameter, and every renderer but the kit's and the rig's is off on the wearer's client. Others keep seeing the
+  avatar; the wearer sees no body or N4N0 in their own view or mirrors meanwhile. It comes back by itself about 1.5 s after the last
+  flip (a crash, OSC stopping), at once when recording ends, and never hides again on a stuck value. Added after every
+  other avatar tool, it reads the renderers as they are uploaded: on the sample avatar (VRCFury, d4rk's optimizer) none is
+  missed, its performance rank and synced bits do not change, and the project's own assets stay as they were. Upload the avatar
+  again to get it; the app says so until then.
+
 ## 0.4.17 — 2026-11-03
 
 - **The upload's OSC config reset clears every account's file, with Haï's package too.** 0.4.15 left the job to Haï's
