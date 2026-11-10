@@ -12,7 +12,9 @@ namespace Orbiters.Toolkit.Editor.Vpm
 {
     /// <summary>
     /// Reads a VPM repository listing (index.json) without adding it to the user's VPM settings, so a dependency plan can
-    /// show every package and version before anything changes. Answers are kept for ten minutes.
+    /// show every package and version before anything changes. Answers are kept for ten minutes in memory, and each
+    /// listing's last copy on disk (<see cref="ListingStore"/>): the repository is asked whether it changed since
+    /// (If-None-Match / If-Modified-Since) and only a changed listing is downloaded again.
     /// </summary>
     public static class VpmListingReader
     {
@@ -27,11 +29,25 @@ namespace Orbiters.Toolkit.Editor.Vpm
             try
             {
                 if (!Uri.TryCreate(url, UriKind.Absolute, out var uri) || uri.Scheme != Uri.UriSchemeHttps) return packages;
-                string json;
+                var stored = await Task.Run(() => ListingStore.Read(url), cancellation);
+                OrbitersConditionalText answer;
                 // An error answer: nothing listed, and asked again next time.
-                try { json = await OrbitersHttp.TextAsync(uri.AbsoluteUri, null, cancellation, OrbitersHttpKind.Listing); }
+                try { answer = await OrbitersHttp.ConditionalTextAsync(uri.AbsoluteUri, stored?.etag, stored?.lastModified, cancellation); }
                 catch (OrbitersHttpException error) when (!error.Offline) { return packages; }
-                packages = await Task.Run(() => Parse(json, url), cancellation);
+                if (answer.NotModified && stored == null) return packages;
+                packages = await Task.Run(() =>
+                {
+                    if (!answer.NotModified)
+                    {
+                        var parsed = Parse(answer.Text, url);
+                        if (answer.ETag != null || answer.LastModified != null) ListingStore.Write(url, answer.Text, answer.ETag, answer.LastModified);
+                        else ListingStore.Forget(url);
+                        return parsed;
+                    }
+                    // The copy that stood unchanged; one that no longer reads is forgotten, and downloaded whole next time.
+                    try { return Parse(stored.body, url); }
+                    catch (Exception) { ListingStore.Forget(url); throw; }
+                }, cancellation);
             }
             catch (Exception ex) when (!(ex is OperationCanceledException))
             {
@@ -62,6 +78,57 @@ namespace Orbiters.Toolkit.Editor.Vpm
                 }
             }
             return VpmCandidates.Newest(result);
+        }
+    }
+
+    /// <summary>
+    /// The last copy of each VPM listing read, with the validators its server sent (ETag, Last-Modified), one file per
+    /// listing in the user's local application data (listings are the same for every project). A copy that cannot be
+    /// read, or that is another listing's, counts as none.
+    /// </summary>
+    internal static class ListingStore
+    {
+        [Serializable]
+        internal sealed class Entry
+        {
+            public string url, etag, lastModified, body;
+        }
+
+        private static string folder;
+
+        internal static string Folder
+        {
+            get => folder ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Orbiters", "VpmListings");
+            // Tests: another folder (null: the user's).
+            set => folder = value;
+        }
+
+        private static string FileOf(string url) => Path.Combine(Folder, Hashing.Sha256(url.ToLowerInvariant()).Substring(0, 32) + ".json");
+
+        public static Entry Read(string url)
+        {
+            try
+            {
+                string file = FileOf(url);
+                if (!File.Exists(file)) return null;
+                var entry = JsonUtility.FromJson<Entry>(File.ReadAllText(file));
+                return entry != null && string.Equals(entry.url, url, StringComparison.OrdinalIgnoreCase) && entry.body != null &&
+                       (!string.IsNullOrEmpty(entry.etag) || !string.IsNullOrEmpty(entry.lastModified)) ? entry : null;
+            }
+            catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException || ex is ArgumentException) { return null; }
+        }
+
+        public static void Write(string url, string body, string etag, string lastModified)
+        {
+            try { Orbiters.Toolkit.Storage.SafePaths.ReplaceFile(FileOf(url), JsonUtility.ToJson(new Entry { url = url, etag = etag, lastModified = lastModified, body = body })); }
+            // Without a copy the listing is only downloaded whole next time.
+            catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException) { }
+        }
+
+        public static void Forget(string url)
+        {
+            try { File.Delete(FileOf(url)); }
+            catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException) { }
         }
     }
 

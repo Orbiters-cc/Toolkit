@@ -63,6 +63,13 @@ namespace Orbiters.Toolkit
     }
 
     /// <summary>One field or file of a multipart/form-data body.</summary>
+    /// <summary>What <see cref="OrbitersHttp.ConditionalTextAsync"/> got: the text and its validators, or "not changed".</summary>
+    public sealed class OrbitersConditionalText
+    {
+        public bool NotModified;
+        public string Text, ETag, LastModified;
+    }
+
     public sealed class OrbitersFormPart
     {
         public string Name, Value, FilePath, FileName, ContentType;
@@ -172,6 +179,34 @@ namespace Orbiters.Toolkit
         public static Task<string> TextAsync(string url, string token = null, CancellationToken cancellation = default, OrbitersHttpKind kind = OrbitersHttpKind.Api,
             IDictionary<string, string> headers = null) =>
             SendForTextAsync(HttpMethod.Get, url, null, token, cancellation, null, kind, headers);
+
+        /// <summary>
+        /// A GET that may answer "not changed": with the validators of the copy the caller keeps (<paramref name="etag"/>,
+        /// <paramref name="lastModified"/>; null when none), a 304 answer comes back as <see cref="OrbitersConditionalText.NotModified"/>
+        /// without a body; otherwise the text with its new validators. Throws <see cref="OrbitersHttpException"/> as
+        /// <see cref="TextAsync"/> does.
+        /// </summary>
+        public static async Task<OrbitersConditionalText> ConditionalTextAsync(string url, string etag, string lastModified, CancellationToken cancellation = default,
+            OrbitersHttpKind kind = OrbitersHttpKind.Listing)
+        {
+            var headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            if (!string.IsNullOrEmpty(etag)) headers["If-None-Match"] = etag;
+            if (!string.IsNullOrEmpty(lastModified)) headers["If-Modified-Since"] = lastModified;
+            try
+            {
+                return await SendAsync(() => new HttpRequestMessage(HttpMethod.Get, url), url, null, false, cancellation, kind, headers, null,
+                    async (response, token) => new OrbitersConditionalText
+                    {
+                        Text = await ReadTextAsync(response, token).ConfigureAwait(false),
+                        ETag = response.Headers.ETag?.ToString(),
+                        LastModified = response.Content.Headers.LastModified?.ToString("R"),
+                    }).ConfigureAwait(false);
+            }
+            catch (OrbitersHttpException error) when (error.StatusCode == 304 && headers.Count > 0)
+            {
+                return new OrbitersConditionalText { NotModified = true, ETag = etag, LastModified = lastModified };
+            }
+        }
 
         /// <summary>GET as bytes; throws <see cref="OrbitersHttpException"/> on an error answer or none.</summary>
         public static async Task<byte[]> BytesAsync(string url, string token = null, CancellationToken cancellation = default, OrbitersHttpKind kind = OrbitersHttpKind.Api)
