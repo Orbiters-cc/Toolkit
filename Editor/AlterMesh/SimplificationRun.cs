@@ -229,6 +229,13 @@ namespace Orbiters.AlterMesh
         /// <summary>How many collapses the run made.</summary>
         public int Count => count;
 
+        /// <summary>
+        /// Points (vertices at one place) that never move, decided before the run: corners, junctions, non-manifold points,
+        /// points shared by two materials with one wedge, borders with <see cref="SimplificationOptions.LockBorders"/>, and
+        /// the locked vertices' places. For reports and tests.
+        /// </summary>
+        public int LockedPoints { get; private set; }
+
         /// <summary>Triangles left after the first <paramref name="collapses"/> collapses.</summary>
         public int TrianglesAt(int collapses)
         {
@@ -630,6 +637,9 @@ namespace Orbiters.AlterMesh
                     if (options.LockedVertices[v]) kinds[remap[v]] = Kind.Locked;
             LockNonManifoldPoints();
             for (int v = 0; v < n; v++) kinds[v] = kinds[remap[v]];
+            int locked = 0;
+            for (int v = 0; v < n; v++) if (remap[v] == v && kinds[v] == Kind.Locked) locked++;
+            LockedPoints = locked;
         }
 
         // A point stays when its faces do not make one fan: an edge of more than two faces, faces wound against each other,
@@ -802,6 +812,31 @@ namespace Orbiters.AlterMesh
                 for (int c = v; map[c] != r && c != r;) { int next = map[c]; map[c] = r; c = next; }
             }
             return map;
+        }
+
+        /// <summary>
+        /// The triangles left after the first <paramref name="collapses"/> collapses, every triangle submesh's in their order,
+        /// as indices of the source mesh's vertices (a kept vertex is its source unchanged): what a check of the result's
+        /// surface needs, without writing a mesh.
+        /// </summary>
+        public int[] SourceTriangles(int collapses)
+        {
+            var map = WedgeMap(collapses);
+            var list = new List<int>(triangles.Length);
+            for (int s = 0; s < submeshIndices.Length; s++)
+            {
+                if (topologies[s] != MeshTopology.Triangles) continue;
+                var source = submeshIndices[s];
+                for (int i = 0; i + 2 < source.Length; i += 3)
+                {
+                    int a = source[i], b = source[i + 1], c = source[i + 2];
+                    if ((uint)a >= (uint)vertexCount || (uint)b >= (uint)vertexCount || (uint)c >= (uint)vertexCount) continue;
+                    a = map[a]; b = map[b]; c = map[c];
+                    if (remap[a] == remap[b] || remap[b] == remap[c] || remap[a] == remap[c]) continue;
+                    list.Add(a); list.Add(b); list.Add(c);
+                }
+            }
+            return list.ToArray();
         }
 
         /// <summary>
