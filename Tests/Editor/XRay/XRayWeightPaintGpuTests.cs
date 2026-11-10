@@ -88,7 +88,8 @@ namespace Orbiters.Toolkit.Editor.Tests.XRay
                 var all = new System.Collections.Generic.List<BoneWeight1>();
                 for (int v = 0; v < vertices; v++)
                 {
-                    counts[v] = (byte)random.Next(0, 9);
+                    // This fixture compares colours on valid skinned vertices.
+                    counts[v] = (byte)random.Next(1, 9);
                     var raw = Enumerable.Range(0, counts[v]).Select(_ => (float)random.NextDouble() + 0.001f).ToArray();
                     float sum = raw.Sum();
                     // Sorted heaviest first with distinct bones, as Unity requires; some sums go a little above 1.
