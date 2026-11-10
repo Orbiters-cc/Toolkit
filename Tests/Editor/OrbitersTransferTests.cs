@@ -276,6 +276,43 @@ public sealed class OrbitersTransferTests
         Assert.That(file.Result.Cancelled, Is.True, file.Result.Error);
     }
 
+    // Review 2 of XPK-18: an answer cut off before its end is a failure saying so: an error body, and an upload's answer
+    // (never a success, never sent again by itself).
+    [UnityTest] public IEnumerator ACutOffAnswerIsAFailureSayingSo()
+    {
+        server.Routes["/api/cut-error"] = _ => Server.Partial(409, 1000, "{\"error\":");
+        var call = OrbitersHttp.JsonAsync<object>(System.Net.Http.HttpMethod.Post, server.Url + "/api/cut-error", new { a = 1 });
+        yield return Wait(call);
+        var error = call.Exception?.GetBaseException() as OrbitersHttpException;
+        Assert.That(error, Is.Not.Null);
+        Assert.That(error.CutOff, Is.True);
+        StringAssert.Contains("cut off", error.Message);
+
+        server.Routes["/upload-cut"] = _ => Server.Partial(200, 1000, "{\"id\":");
+        var upload = OrbitersTransfer.UploadMultipartAsync(server.Url + "/upload-cut", null, new[] { OrbitersTransfer.Part.Field("name", "Hat") });
+        yield return Wait(upload);
+        Assert.That(upload.Result.Success, Is.False);
+        StringAssert.Contains("cut off", upload.Result.Error);
+        Assert.That(server.Received("/upload-cut"), Is.GreaterThan(0), "sent once");
+    }
+
+    // Review 2 of XPK-18: an answer that keeps coming, slowly, is not a stalled transfer.
+    [UnityTest] public IEnumerator ASlowSteadyAnswerIsNotAStall()
+    {
+        double limit = OrbitersHttp.StallLimitSeconds;
+        OrbitersHttp.StallLimitSeconds = 2;
+        try
+        {
+            server.Routes["/upload-slow"] = _ => Server.Answer(200, "{\"id\":1,\"padding\":\"0123456789\"}");
+            server.Slow["/upload-slow"] = 300;
+            var upload = OrbitersTransfer.UploadMultipartAsync(server.Url + "/upload-slow", null, new[] { OrbitersTransfer.Part.Field("name", "Hat") });
+            yield return Wait(upload);
+            Assert.That(upload.Result.Success, Is.True, upload.Result.Error);
+            Assert.That(upload.Result.Body, Does.Contain("padding"));
+        }
+        finally { OrbitersHttp.StallLimitSeconds = limit; }
+    }
+
     // A minimal HTTP/1.1 server: one request per connection, answers from Routes, remembers each path's Authorization.
     private sealed class Server : IDisposable
     {
@@ -285,6 +322,8 @@ public sealed class OrbitersTransferTests
         private readonly ConcurrentDictionary<string, string> heads = new ConcurrentDictionary<string, string>();
         /// <summary>Paths whose answer is written and then left open, unfinished, until the server stops.</summary>
         public readonly ConcurrentDictionary<string, bool> Holds = new ConcurrentDictionary<string, bool>();
+        /// <summary>Paths whose answer's body is written a byte at a time, this many milliseconds apart.</summary>
+        public readonly ConcurrentDictionary<string, int> Slow = new ConcurrentDictionary<string, int>();
         public readonly int Port;
         private readonly TcpListener listener;
         private readonly CancellationTokenSource stop = new CancellationTokenSource();
@@ -377,7 +416,13 @@ public sealed class OrbitersTransferTests
                     while (total < length) { int n = stream.Read(buffer, 0, (int)Math.Min(buffer.Length, length - total)); if (n <= 0) break; total += n; }
                     received[path] = total;
                     var answer = Routes.TryGetValue(path, out var route) ? route(target) : Encoding.ASCII.GetBytes("HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
-                    stream.Write(answer, 0, answer.Length);
+                    if (Slow.TryGetValue(path, out int delay))
+                    {
+                        int body = Encoding.ASCII.GetString(answer).IndexOf("\r\n\r\n", StringComparison.Ordinal) + 4;
+                        stream.Write(answer, 0, body);
+                        for (int i = body; i < answer.Length; i++) { stream.Flush(); Thread.Sleep(delay); stream.WriteByte(answer[i]); }
+                    }
+                    else stream.Write(answer, 0, answer.Length);
                     stream.Flush();
                     if (Holds.ContainsKey(path)) stop.Token.WaitHandle.WaitOne();
                 }

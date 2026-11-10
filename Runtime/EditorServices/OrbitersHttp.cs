@@ -46,11 +46,20 @@ namespace Orbiters.Toolkit
         /// <summary>The answer's body (at most 64 KB), or null.</summary>
         public string Body { get; }
         public string Url { get; }
+        /// <summary>The server answered but its answer was cut off before its end.</summary>
+        public bool CutOff { get; }
+        /// <summary>
+        /// For logs, not for people: e.g. the custom headers not sent on to another server after a redirect (they looked like
+        /// credentials). Part of <see cref="ToString"/>.
+        /// </summary>
+        public string Diagnostic { get; internal set; }
 
-        public OrbitersHttpException(string message, string url, int statusCode, string body = null, bool timedOut = false, Exception inner = null) : base(message, inner)
+        public OrbitersHttpException(string message, string url, int statusCode, string body = null, bool timedOut = false, Exception inner = null, bool cutOff = false) : base(message, inner)
         {
-            Url = url; StatusCode = statusCode; Body = body; TimedOut = timedOut;
+            Url = url; StatusCode = statusCode; Body = body; TimedOut = timedOut; CutOff = cutOff;
         }
+
+        public override string ToString() => string.IsNullOrEmpty(Diagnostic) ? base.ToString() : base.ToString() + Environment.NewLine + Diagnostic;
     }
 
     /// <summary>One field or file of a multipart/form-data body.</summary>
@@ -71,6 +80,10 @@ namespace Orbiters.Toolkit
         public long Bytes;
         /// <summary>A download stopped because it was (or announced it was) larger than allowed.</summary>
         public bool TooLarge;
+        /// <summary>The server's answer was cut off before its end (an upload may or may not have been received).</summary>
+        public bool CutOff;
+        /// <summary>For logs, not for people (see <see cref="OrbitersHttpException.Diagnostic"/>).</summary>
+        public string Diagnostic;
         public readonly Dictionary<string, string> Headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         public string Header(string name) => Headers.TryGetValue(name, out var value) ? value : null;
     }
@@ -93,6 +106,8 @@ namespace Orbiters.Toolkit
         public const double StallSeconds = 120d;
         /// <summary>Redirects a request follows at most.</summary>
         public const int MaxRedirects = 5;
+        // StallSeconds, shortened by tests.
+        internal static double StallLimitSeconds = StallSeconds;
         private const int ErrorBodyLimit = 64 * 1024;
         /// <summary>The largest answer a text or bytes call reads (files go through <see cref="DownloadFileAsync"/>).</summary>
         public const long MaxBodyBytes = 256L * 1024 * 1024;
@@ -201,24 +216,29 @@ namespace Orbiters.Toolkit
             var method = probe.Method;
             probe.Dispose();
             int retries = RetriesOf(method, kind);
+            var stripped = new List<string>();
             for (int attempt = 0; ; attempt++)
             {
                 OrbitersHttpException error;
+                int answered = 0;
                 using (var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellation))
                 {
                     if (TimeoutOf(kind) != System.Threading.Timeout.InfiniteTimeSpan) timeout.CancelAfter(TimeoutOf(kind));
                     try
                     {
-                        using (var response = await FollowAsync(make, url, token, tokenFirstHopOnly, headers, timeout.Token).ConfigureAwait(false))
+                        using (var response = await FollowAsync(make, url, token, tokenFirstHopOnly, headers, timeout.Token, stripped).ConfigureAwait(false))
                         // Cancelled or timed out while the body comes: the connection is closed, which ends a read that waits.
                         using (timeout.Token.Register(response.Dispose))
                         {
+                            answered = (int)response.StatusCode;
                             if (response.IsSuccessStatusCode) return await read(response, timeout.Token).ConfigureAwait(false);
-                            string body = await ReadLimitedAsync(response, timeout.Token).ConfigureAwait(false);
+                            var (body, complete) = await ReadLimitedAsync(response, timeout.Token, null).ConfigureAwait(false);
                             timeout.Token.ThrowIfCancellationRequested();
                             int status = (int)response.StatusCode;
-                            string message = ServerError(body) ?? (failure != null ? string.Format(failure, status) : StatusMessage(status, response.ReasonPhrase));
-                            error = new OrbitersHttpException(message, url, status, body);
+                            string message = complete
+                                ? ServerError(body) ?? (failure != null ? string.Format(failure, status) : StatusMessage(status, response.ReasonPhrase))
+                                : CutOffMessage(status);
+                            error = new OrbitersHttpException(message, url, status, body, cutOff: !complete);
                         }
                     }
                     catch (Exception ex) when (Stopped(ex) && cancellation.IsCancellationRequested)
@@ -236,18 +256,21 @@ namespace Orbiters.Toolkit
                     // The connection broke off while the body came.
                     catch (IOException ex)
                     {
-                        error = new OrbitersHttpException(StatusMessage(0), url, 0, inner: ex);
+                        error = answered != 0 ? new OrbitersHttpException(CutOffMessage(answered), url, answered, inner: ex, cutOff: true)
+                            : new OrbitersHttpException(StatusMessage(0), url, 0, inner: ex);
                     }
                 }
+                if (stripped.Count > 0) error.Diagnostic = "Not sent on to another server after a redirect: " + string.Join(", ", stripped.Distinct()) + ".";
                 bool busy = error.StatusCode == 429 || error.StatusCode >= 500;
-                if (attempt >= retries || !(error.Offline || busy)) throw error;
+                // Only requests that change nothing are retried (RetriesOf): a cut-off answer to a POST may mean it was done.
+                if (attempt >= retries || !(error.Offline || busy || error.CutOff)) throw error;
                 await Task.Delay(1000 * (attempt + 1) * (attempt + 1), cancellation).ConfigureAwait(false);
             }
         }
 
         // One hop at a time; the token goes on only to the same server (or, for downloads, never past the first hop).
         private static async Task<HttpResponseMessage> FollowAsync(Func<HttpRequestMessage> make, string url, string token, bool tokenFirstHopOnly,
-            IDictionary<string, string> headers, CancellationToken cancellation)
+            IDictionary<string, string> headers, CancellationToken cancellation, ICollection<string> stripped = null)
         {
             var first = new Uri(url);
             string current = url;
@@ -263,6 +286,7 @@ namespace Orbiters.Toolkit
                 if (headers != null)
                     foreach (var pair in headers)
                         if (credentials || !IsCredential(pair.Key)) request.Headers.TryAddWithoutValidation(pair.Key, pair.Value);
+                        else stripped?.Add(pair.Key + " (to " + request.RequestUri.Authority + ")");
                 HttpResponseMessage response;
                 try
                 {
@@ -303,24 +327,44 @@ namespace Orbiters.Toolkit
         // Stopped by a cancellation or a timeout: cancelled, or the response disposed under a read.
         private static bool Stopped(Exception ex) => ex is OperationCanceledException || ex is ObjectDisposedException || ex is IOException;
 
-        // An error answer's body, at most ErrorBodyLimit bytes (null when it cannot be read); stops with the token.
-        private static async Task<string> ReadLimitedAsync(HttpResponseMessage response, CancellationToken cancellation)
+        private static string CutOffMessage(long status) => $"Orbiters answered (HTTP {status}), but its answer was cut off before its end.";
+
+        // The body ended before the length it announced (a compressed body's announced length is not its length).
+        private sealed class CutOffException : IOException
         {
+            public CutOffException() : base("The answer was cut off before its end.") { }
+        }
+
+        private static bool Short(HttpResponseMessage response, long read) =>
+            response.Content.Headers.ContentEncoding.Count == 0 && response.Content.Headers.ContentLength is long announced && read < announced;
+
+        // An error answer's body, at most ErrorBodyLimit bytes, and whether it arrived whole (or up to the limit); stops
+        // with the token. `moved` hears each chunk (a transfer's stall watch).
+        private static async Task<(string Body, bool Complete)> ReadLimitedAsync(HttpResponseMessage response, CancellationToken cancellation, Action moved)
+        {
+            var buffer = new byte[ErrorBodyLimit];
+            int read = 0, n;
             try
             {
                 using (var stream = await response.Content.ReadAsStreamAsync().ConfigureAwait(false))
-                {
-                    var buffer = new byte[ErrorBodyLimit];
-                    int read = 0, n;
-                    while (read < buffer.Length && (n = await stream.ReadAsync(buffer, read, buffer.Length - read, cancellation).ConfigureAwait(false)) > 0) read += n;
-                    return Encoding.UTF8.GetString(buffer, 0, read);
-                }
+                    while (read < buffer.Length && (n = await stream.ReadAsync(buffer, read, buffer.Length - read, cancellation).ConfigureAwait(false)) > 0)
+                    {
+                        read += n;
+                        moved?.Invoke();
+                    }
             }
-            catch (Exception ex) when (!cancellation.IsCancellationRequested && (ex is IOException || ex is HttpRequestException || ex is ObjectDisposedException)) { return null; }
+            catch (Exception ex) when (!cancellation.IsCancellationRequested && (ex is IOException || ex is HttpRequestException || ex is ObjectDisposedException))
+            {
+                return (read > 0 ? Encoding.UTF8.GetString(buffer, 0, read) : null, false);
+            }
+            return (Encoding.UTF8.GetString(buffer, 0, read), read >= buffer.Length || !Short(response, read));
         }
 
-        // The whole body, at most MaxBodyBytes, read with the token (the caller closes the response when it fires).
-        private static async Task<byte[]> ReadBodyAsync(HttpResponseMessage response, CancellationToken cancellation)
+        private static Task<byte[]> ReadBodyAsync(HttpResponseMessage response, CancellationToken cancellation) => ReadBodyAsync(response, cancellation, null);
+
+        // The whole body, at most MaxBodyBytes, read with the token (the caller closes the response when it fires); throws
+        // CutOffException when it ends before the length it announced. `moved` hears each chunk.
+        private static async Task<byte[]> ReadBodyAsync(HttpResponseMessage response, CancellationToken cancellation, Action moved)
         {
             long? announced = response.Content.Headers.ContentLength;
             if (announced > MaxBodyBytes) throw new OrbitersHttpException($"The answer is larger than {MaxBodyBytes / (1024 * 1024)} MB.", response.RequestMessage?.RequestUri?.AbsoluteUri, (int)response.StatusCode);
@@ -331,18 +375,22 @@ namespace Orbiters.Toolkit
                 int n;
                 while ((n = await stream.ReadAsync(buffer, 0, buffer.Length, cancellation).ConfigureAwait(false)) > 0)
                 {
+                    moved?.Invoke();
                     if (memory.Length + n > MaxBodyBytes) throw new OrbitersHttpException($"The answer is larger than {MaxBodyBytes / (1024 * 1024)} MB.", response.RequestMessage?.RequestUri?.AbsoluteUri, (int)response.StatusCode);
                     memory.Write(buffer, 0, n);
                 }
                 cancellation.ThrowIfCancellationRequested();
+                if (Short(response, memory.Length)) throw new CutOffException();
                 return memory.ToArray();
             }
         }
 
         // The body as text, in the charset it names (UTF-8 otherwise), without a byte order mark.
-        private static async Task<string> ReadTextAsync(HttpResponseMessage response, CancellationToken cancellation)
+        private static Task<string> ReadTextAsync(HttpResponseMessage response, CancellationToken cancellation) => ReadTextAsync(response, cancellation, null);
+
+        private static async Task<string> ReadTextAsync(HttpResponseMessage response, CancellationToken cancellation, Action moved)
         {
-            var bytes = await ReadBodyAsync(response, cancellation).ConfigureAwait(false);
+            var bytes = await ReadBodyAsync(response, cancellation, moved).ConfigureAwait(false);
             var encoding = Encoding.UTF8;
             string charset = response.Content.Headers.ContentType?.CharSet?.Trim('"');
             if (!string.IsNullOrEmpty(charset))
@@ -433,7 +481,7 @@ namespace Orbiters.Toolkit
                 CancellationTokenRegistration abort = default;
                 try
                 {
-                    try { response = await FollowAsync(() => new HttpRequestMessage(HttpMethod.Get, url), url, token, true, null, watch.Token).ConfigureAwait(false); }
+                    try { response = await FollowAsync(() => new HttpRequestMessage(HttpMethod.Get, url), url, token, true, null, watch.Token).ConfigureAwait(false); watch.Moved(); }
                     catch (OrbitersHttpException refused)
                     {
                         result.StatusCode = refused.StatusCode;
@@ -446,9 +494,11 @@ namespace Orbiters.Toolkit
                     abort = watch.Token.Register(response.Dispose);
                     if (!response.IsSuccessStatusCode)
                     {
-                        result.Body = await ReadLimitedAsync(response, watch.Token).ConfigureAwait(false);
+                        var (body, complete) = await ReadLimitedAsync(response, watch.Token, watch.Moved).ConfigureAwait(false);
                         watch.Token.ThrowIfCancellationRequested();
-                        result.Error = ServerError(result.Body) ?? StatusMessage(result.StatusCode, response.ReasonPhrase);
+                        result.Body = body;
+                        result.CutOff = !complete;
+                        result.Error = complete ? ServerError(body) ?? StatusMessage(result.StatusCode, response.ReasonPhrase) : CutOffMessage(result.StatusCode);
                         return result;
                     }
                     long total = response.Content.Headers.ContentLength ?? 0;
@@ -470,6 +520,14 @@ namespace Orbiters.Toolkit
                             await file.WriteAsync(buffer, 0, n, watch.Token).ConfigureAwait(false);
                             progress?.Invoke(bytes, total, false);
                         }
+                        // Ended before the length it announced: tried again as a download that got no answer.
+                        if (Short(response, bytes))
+                        {
+                            result.CutOff = true;
+                            result.Error = CutOffMessage(result.StatusCode);
+                            result.StatusCode = 0;
+                            return result;
+                        }
                         sha.TransformFinalBlock(Array.Empty<byte>(), 0, 0);
                         result.Sha256 = Hex(sha.Hash);
                         result.Bytes = bytes;
@@ -479,7 +537,7 @@ namespace Orbiters.Toolkit
                     return result;
                 }
                 catch (Exception ex) when (Stopped(ex) && cancellation.IsCancellationRequested) { result.Cancelled = true; result.Error = "Cancelled."; return result; }
-                catch (Exception ex) when (Stopped(ex) && watch.Stalled) { result.Error = $"The download stopped: no data arrived for {StallSeconds:0} seconds."; return result; }
+                catch (Exception ex) when (Stopped(ex) && watch.Stalled) { result.Error = $"The download stopped: no data arrived for {StallLimitSeconds:0} seconds."; return result; }
                 // The connection failed or broke off: tried again as a download that got no answer.
                 catch (Exception ex) when (ex is HttpRequestException || ex is IOException)
                 {
@@ -517,6 +575,7 @@ namespace Orbiters.Toolkit
             {
                 HttpResponseMessage response = null;
                 MultipartBody content = null;
+                var stripped = new List<string>();
                 try
                 {
                     long total = new MultipartBody(list, watch, report).Length;
@@ -524,7 +583,7 @@ namespace Orbiters.Toolkit
                     HttpRequestMessage Make() => new HttpRequestMessage(new HttpMethod(method), url) { Content = content = new MultipartBody(list, watch, report) };
                     try
                     {
-                        response = await FollowAsync(Make, url, token, true, headers, watch.Token).ConfigureAwait(false);
+                        response = await FollowAsync(Make, url, token, true, headers, watch.Token, stripped).ConfigureAwait(false);
                     }
                     catch (OrbitersHttpException refused)
                     {
@@ -532,14 +591,28 @@ namespace Orbiters.Toolkit
                         result.Error = refused.Message;
                         return result;
                     }
+                    finally
+                    {
+                        if (stripped.Count > 0) result.Diagnostic = "Not sent on to another server after a redirect: " + string.Join(", ", stripped.Distinct()) + ".";
+                    }
                     Capture(response, result);
                     result.StatusCode = (int)response.StatusCode;
                     result.Bytes = content.Sent;
                     // The answer is read within the stall watch too: closed when cancelled or stalled.
+                    // Each chunk of it keeps the transfer alive: a slow answer is not a stalled one.
+                    watch.Moved();
                     using (watch.Token.Register(response.Dispose))
                     {
-                        try { result.Body = await ReadTextAsync(response, watch.Token).ConfigureAwait(false); }
-                        catch (Exception ex) when (!watch.Token.IsCancellationRequested && (ex is IOException || ex is HttpRequestException || ex is OrbitersHttpException)) { result.Body = null; }
+                        try { result.Body = await ReadTextAsync(response, watch.Token, watch.Moved).ConfigureAwait(false); }
+                        // A cut-off answer is a failure the caller decides about: the upload may or may not have been received, and
+                        // it is never sent again by itself.
+                        catch (Exception ex) when (!watch.Token.IsCancellationRequested && (ex is IOException || ex is HttpRequestException || ex is OrbitersHttpException))
+                        {
+                            result.Body = null;
+                            result.CutOff = true;
+                            result.Error = CutOffMessage(result.StatusCode) + " The upload may or may not have been received.";
+                            return result;
+                        }
                     }
                     if (!response.IsSuccessStatusCode)
                     {
@@ -551,7 +624,7 @@ namespace Orbiters.Toolkit
                     return result;
                 }
                 catch (Exception ex) when (Stopped(ex) && cancellation.IsCancellationRequested) { result.Cancelled = true; result.Error = "The upload was cancelled."; return result; }
-                catch (Exception ex) when (Stopped(ex) && watch.Stalled) { result.Error = $"The upload timed out: no data was sent for {StallSeconds:0} seconds."; return result; }
+                catch (Exception ex) when (Stopped(ex) && watch.Stalled) { result.Error = $"The upload timed out: nothing moved for {StallLimitSeconds:0} seconds."; return result; }
                 catch (Exception ex) when (ex is HttpRequestException || ex is IOException)
                 {
                     result.Error = result.StatusCode == 0 ? StatusMessage(0) : "The upload broke off: " + ex.Message;
@@ -650,7 +723,7 @@ namespace Orbiters.Toolkit
 
             private void Check()
             {
-                if (Stalled || since.ElapsedMilliseconds - Interlocked.Read(ref movedAt) < StallSeconds * 1000) return;
+                if (Stalled || since.ElapsedMilliseconds - Interlocked.Read(ref movedAt) < StallLimitSeconds * 1000) return;
                 Stalled = true;
                 try { source.Cancel(); } catch (ObjectDisposedException) { }
             }
