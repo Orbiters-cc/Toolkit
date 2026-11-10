@@ -114,7 +114,11 @@ namespace Orbiters.Toolkit.Editor.VRChat.Attachments
                 if (AttachmentFit.Fitted(attachment) &&
                     (attachment.mode == OrbitersAttachment.AttachMode.Configured || attachment.mode == OrbitersAttachment.AttachMode.VrcFury))
                 {
-                    var fit = AttachmentFit.Compare(attachment.gameObject, avatarRoot);
+                    // The avatar's bone index serves when neither the body nor a skeleton bone is the attachment's own (the
+                    // comparison leaves those out); otherwise it is built without them.
+                    var fit = body != null && !body.transform.IsChildOf(root) && !skeleton.Any(b => b.IsChildOf(root))
+                        ? AttachmentFit.Compare(attachment.gameObject, index, avatarRoot)
+                        : AttachmentFit.Compare(attachment.gameObject, avatarRoot);
                     if (fit != null)
                     {
                         foreach (var pair in fit.Pairs)

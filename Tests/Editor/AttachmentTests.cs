@@ -142,6 +142,22 @@ public sealed class AttachmentTests
         Assert.False(AttachmentFit.Fitted(attachment));
     }
 
+    // The follow links of fitted clothing reuse the avatar's bone index: the same bone pairs as the clothing's own comparison.
+    [Test] public void FittedClothingFollowsTheBonesItsOwnComparisonPairs()
+    {
+        var shirt = Clothing("Shirt", new[] { ("hips", "", ""), ("spine", "hips", ""), ("chest", "spine", ""), ("neck", "chest", ""),
+            ("shoulder.L", "chest", ""), ("upper_arm.L", "shoulder.L", ""), ("forearm.L", "upper_arm.L", "") });
+        shirt.transform.localScale = Vector3.one * 1.3f;
+        var attachment = AttachmentInstaller.Install(AttachmentPlanner.Analyze(shirt, avatar.transform), new AttachmentOptions { Created = true, AddToggle = false });
+        Assert.NotNull(AttachmentFit.Fit(attachment, avatar.transform));
+        attachment.mode = OrbitersAttachment.AttachMode.Configured;
+
+        var expected = AttachmentFit.Compare(attachment.gameObject, avatar.transform).Pairs.Select(p => (p.source, p.target)).ToList();
+        var links = AttachmentFollow.Links(avatar.transform, false).Where(l => l.Source == "Fitted clothing").Select(l => (l.Follower, l.Target)).ToList();
+        Assert.That(expected, Is.Not.Empty);
+        Assert.That(links, Is.EqualTo(expected));
+    }
+
     [Test] public void PoseOnlyFitRotatesSleevesWithDifferentBoneAxesAndRestoresThem()
     {
         var shirt = Clothing("Shirt", new[] { ("hips", "", ""), ("spine", "hips", ""), ("chest", "spine", ""), ("neck", "chest", ""),

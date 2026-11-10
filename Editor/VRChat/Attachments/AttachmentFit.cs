@@ -73,8 +73,8 @@ namespace Orbiters.Toolkit.Editor.VRChat.Attachments
             return Compare(root, AvatarBoneIndex.Build(avatarRoot, skeleton), avatarRoot);
         }
 
-        // With the armature of index: the avatar's, or the original base's over its body.
-        private static Measure Compare(GameObject root, AvatarBoneIndex index, Transform avatarRoot)
+        // With the armature of index: the avatar's (without the attachment's own bones), or the original base's over its body.
+        internal static Measure Compare(GameObject root, AvatarBoneIndex index, Transform avatarRoot)
         {
             var bones = root.GetComponentsInChildren<SkinnedMeshRenderer>(true).Where(r => r.sharedMesh != null)
                 .SelectMany(r => r.bones).Where(b => b != null && b.IsChildOf(root.transform) && b != root.transform).Distinct().ToList();

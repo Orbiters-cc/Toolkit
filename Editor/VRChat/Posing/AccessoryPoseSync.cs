@@ -72,26 +72,28 @@ namespace Orbiters.Toolkit.Editor.VRChat.Posing
             Orbiters.Toolkit.Editor.Refit.CustomBases.Describe(avatarRoot)?.Footprint?.Invoke() ?? new Orbiters.Toolkit.Editor.Refit.CustomBaseFootprint();
 
         /// <summary>The accessories under the avatar and how each follows it, without changing anything.</summary>
-        public static List<Accessory> Find(Transform avatarRoot)
+        public static List<Accessory> Find(Transform avatarRoot) => avatarRoot == null ? new List<Accessory>() : Find(avatarRoot, AttachmentFollow.Links(avatarRoot));
+
+        // From the avatar's links, already read.
+        private static List<Accessory> Find(Transform avatarRoot, List<FollowLink> links)
         {
             var result = new List<Accessory>();
-            if (avatarRoot == null) return result;
             var skeleton = AvatarSkeleton.Bones(avatarRoot, AttachmentPlanner.Body(avatarRoot));
             var footprint = CustomBaseObjects(avatarRoot);
-            foreach (var group in AttachmentFollow.Links(avatarRoot).GroupBy(l => l.Accessory))
+            foreach (var group in links.GroupBy(l => l.Accessory))
             {
                 if (group.Key == null || footprint.Owns(group.Key)) continue;
                 var bones = group.Key.GetComponentsInChildren<SkinnedMeshRenderer>(true).SelectMany(r => r.bones)
                     .Where(b => b != null && !skeleton.Contains(b)).Distinct().Count();
-                var links = group.ToList();
-                int driven = links.Count(l => Driven(l.Follower));
+                var own = group.ToList();
+                int driven = own.Count(l => Driven(l.Follower));
                 bool modular = group.Key.GetComponentsInChildren<Component>(true).Any(ModularAvatar.IsComponent);
-                bool rigid = links.Count == 1 && bones <= 1;
+                bool rigid = own.Count == 1 && bones <= 1;
                 result.Add(new Accessory
                 {
                     Root = group.Key, Name = group.Key.name,
-                    Rule = rigid ? (links[0].Blend != null ? "on the skin" : "on " + links[0].Target.name) : links[0].Source,
-                    Following = links.Count - driven, Total = rigid ? 1 : Mathf.Max(bones, links.Count),
+                    Rule = rigid ? (own[0].Blend != null ? "on the skin" : "on " + own[0].Target.name) : own[0].Source,
+                    Following = own.Count - driven, Total = rigid ? 1 : Mathf.Max(bones, own.Count),
                     Reason = modular ? "Modular Avatar attaches it: shown by name match."
                         : driven > 0 ? $"{driven} bone{(driven == 1 ? " is" : "s are")} driven by constraints and left alone." : null,
                 });
@@ -125,8 +127,9 @@ namespace Orbiters.Toolkit.Editor.VRChat.Posing
         {
             // Bones driven by constraints are left to them.
             var footprint = CustomBaseObjects(avatarRoot);
-            Links.AddRange(AttachmentFollow.Links(avatarRoot).Where(l => !Driven(l.Follower) && !footprint.Owns(l.Accessory)));
-            Found.AddRange(Find(avatarRoot));
+            var all = AttachmentFollow.Links(avatarRoot);
+            Links.AddRange(all.Where(l => !Driven(l.Follower) && !footprint.Owns(l.Accessory)));
+            Found.AddRange(Find(avatarRoot, all));
             if (Links.Count == 0)
             {
                 string error = Found.Count == 0 ? "No clothing or accessory to follow under this avatar." : "No accessory bone matches the avatar's bones.";
