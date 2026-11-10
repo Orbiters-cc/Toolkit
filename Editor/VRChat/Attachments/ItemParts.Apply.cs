@@ -389,7 +389,7 @@ namespace Orbiters.Toolkit.Editor.VRChat.Attachments
         }
 
         private static string FilesFolder(Plan plan, Part part, PartVariant variant) =>
-            plan.Files.TryGetValue(part.key, out var folder) ? folder : variant.IsBase ? variant.Folder : variant.Folder;
+            plan.Files.TryGetValue(part.key, out var folder) ? folder : variant.Folder;
 
         // A variant's own folder: by part, its name and a hash of what it is (its record, the bytes of every file it names and
         // how files are made from them), so the same variant applied again uses the same files and another variant never

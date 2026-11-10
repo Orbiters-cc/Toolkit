@@ -27,30 +27,22 @@ namespace Orbiters.Toolkit.Editor.VRChat.Attachments
         public const int MaxSize = 128;
 
         private static readonly List<(OrbitersAttachment Attachment, Component Toggle)> Waiting = new List<(OrbitersAttachment, Component)>();
-        private static bool hooked;
+        private static IDisposable hooked;
 
         /// <summary>Gives <paramref name="toggle"/> the picture of <paramref name="attachment"/> on the next editor frame.</summary>
         internal static void After(OrbitersAttachment attachment, Component toggle)
         {
             if (attachment == null || toggle == null || VrcFury.Writer == null) return;
             Waiting.Add((attachment, toggle));
-            if (hooked) return;
-            hooked = true;
-            EditorApplication.update += Tick;
-        }
-
-        private static void Tick()
-        {
-            // Not while scripts compile or assets import: the picture is imported, and a reload may follow.
-            if (EditorApplication.isCompiling || EditorApplication.isUpdating) return;
-            Flush();
+            // Not while scripts compile or assets import (the picture is imported, and a reload may follow), nor in Play Mode.
+            hooked ??= OrbitersEditorHost.Once("Accessory icons", Flush, 0, HostWhen.Idle);
         }
 
         /// <summary>Makes the icons still waiting, now (tests; the editor does on the frame after an install).</summary>
         internal static void Flush()
         {
-            EditorApplication.update -= Tick;
-            hooked = false;
+            hooked?.Dispose();
+            hooked = null;
             var waiting = Waiting.ToArray();
             Waiting.Clear();
             foreach (var (attachment, toggle) in waiting)
