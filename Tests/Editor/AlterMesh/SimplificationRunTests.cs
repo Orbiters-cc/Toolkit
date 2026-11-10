@@ -210,4 +210,166 @@ public sealed class SimplificationRunTests
             Assert.That(written[j].weight0, Is.EqualTo(weights[kept[j]].weight0).Within(1e-6f));
         }
     }
+
+    // ---- Review: topology and materials -----------------------------------------------------------------------------
+
+    private static Mesh FromLists(List<Vector3> vertices, List<int> triangles, string name)
+    {
+        var mesh = new Mesh { name = name };
+        mesh.SetVertices(vertices);
+        mesh.SetTriangles(triangles, 0);
+        return mesh;
+    }
+
+    // A closed box of grids (each corner shared, no seams), size by axis.
+    private static Mesh Box(int divisions, Vector3 size)
+    {
+        var vertices = new List<Vector3>();
+        var triangles = new List<int>();
+        var index = new Dictionary<Vector3, int>();
+        int At(Vector3 p)
+        {
+            if (!index.TryGetValue(p, out int i)) { i = vertices.Count; index.Add(p, i); vertices.Add(p); }
+            return i;
+        }
+        for (int axis = 0; axis < 3; axis++)
+            foreach (int side in new[] { -1, 1 })
+            {
+                var n = Vector3.zero; n[axis] = side;
+                var u = Vector3.zero; u[(axis + 1) % 3] = 1;
+                var v = Vector3.zero; v[(axis + 2) % 3] = 1;
+                if (side < 0) { var swap = u; u = v; v = swap; }
+                for (int i = 0; i < divisions; i++)
+                    for (int j = 0; j < divisions; j++)
+                    {
+                        Vector3 P(int a, int b) => Vector3.Scale(n * .5f + u * (a / (float)divisions - .5f) + v * (b / (float)divisions - .5f), size);
+                        int p00 = At(P(i, j)), p10 = At(P(i + 1, j)), p01 = At(P(i, j + 1)), p11 = At(P(i + 1, j + 1));
+                        triangles.AddRange(new[] { p00, p10, p11, p00, p11, p01 });
+                    }
+            }
+        return FromLists(vertices, triangles, "Box");
+    }
+
+    // Each directed edge at most once; closed: each also once the other way. No two faces on the same three points.
+    private static void AssertSurface(Mesh mesh, bool closed, string what)
+    {
+        var triangles = mesh.triangles;
+        var directed = new HashSet<(int, int)>();
+        var faces = new HashSet<(int, int, int)>();
+        for (int t = 0; t < triangles.Length; t += 3)
+        {
+            var corners = new[] { triangles[t], triangles[t + 1], triangles[t + 2] };
+            for (int e = 0; e < 3; e++)
+                Assert.That(directed.Add((corners[e], corners[(e + 1) % 3])), Is.True, what + ": an edge used twice the same way (a fold or a pinch)");
+            System.Array.Sort(corners);
+            Assert.That(faces.Add((corners[0], corners[1], corners[2])), Is.True, what + ": two faces on the same points");
+        }
+        if (closed)
+            foreach (var (a, b) in directed)
+                Assert.That(directed.Contains((b, a)), Is.True, what + ": the surface was opened");
+    }
+
+    private static void AssertEveryPrefix(SimplificationRun run, bool closed, string what, List<Object> owned)
+    {
+        foreach (int k in Enumerable.Range(0, run.Count + 1).Where(k => k % Mathf.Max(1, run.Count / 12) == 0 || k == run.Count))
+        {
+            var result = run.Write(k, new Mesh());
+            owned.Add(result);
+            AssertSurface(result, closed, what + " after " + k + " collapses");
+            if (closed) Assert.That(result.triangles.Length / 3, Is.GreaterThanOrEqualTo(4), what + ": a closed surface keeps a volume");
+        }
+    }
+
+    [Test] public void ATetrahedronStaysWhole()
+    {
+        var mesh = Own(FromLists(new List<Vector3> { new Vector3(1, 1, 1), new Vector3(-1, -1, 1), new Vector3(-1, 1, -1), new Vector3(1, -1, -1) },
+            new List<int> { 0, 1, 2, 0, 3, 1, 0, 2, 3, 1, 3, 2 }, "Tetrahedron"));
+        var run = SimplificationRun.Prepare(mesh, SimplificationOptions.Default);
+        run.Run();
+        Assert.That(run.Count, Is.EqualTo(0), "every collapse folds it into two faces back to back");
+        Assert.That(run.TrianglesAt(1), Is.EqualTo(4));
+        Assert.That(run.DeviationAt(1), Is.EqualTo(0f));
+        AssertEveryPrefix(run, true, "tetrahedron", owned);
+    }
+
+    [Test] public void ClosedBoxesStayClosedSurfaces([Values(1f, .002f)] float thickness)
+    {
+        var mesh = Own(Box(4, new Vector3(1f, 1f, thickness)));
+        AssertSurface(mesh, true, "the box itself");
+        var run = SimplificationRun.Prepare(mesh, SimplificationOptions.Default);
+        run.Run();
+        Assert.That(run.Count, Is.GreaterThan(0), "flat sides collapse");
+        AssertEveryPrefix(run, true, thickness < .01f ? "thin double-sided sheet" : "cube", owned);
+    }
+
+    [Test] public void APinchedPointStays()
+    {
+        // Two cones of six sides meeting at their apex (vertex 0), each open at its rim.
+        var vertices = new List<Vector3> { Vector3.zero };
+        var triangles = new List<int>();
+        foreach (float z in new[] { 1f, -1f })
+        {
+            int first = vertices.Count;
+            for (int i = 0; i < 6; i++) vertices.Add(new Vector3(Mathf.Cos(i * Mathf.PI / 3f), Mathf.Sin(i * Mathf.PI / 3f), z));
+            for (int i = 0; i < 6; i++)
+            {
+                int a = first + i, b = first + (i + 1) % 6;
+                if (z > 0) triangles.AddRange(new[] { 0, a, b }); else triangles.AddRange(new[] { 0, b, a });
+            }
+        }
+        var mesh = Own(FromLists(vertices, triangles, "Pinch"));
+        var run = SimplificationRun.Prepare(mesh, SimplificationOptions.Default);
+        run.Run();
+        Assert.That(run.KeptVertices(run.Count), Does.Contain(0), "the pinch is not moved");
+        AssertEveryPrefix(run, false, "pinched fan", owned);
+    }
+
+    // Two materials on one plane sharing their vertices along x = .5, UVs continuous: the boundary stays where it is.
+    [Test] public void MaterialBoundariesStayInPlace()
+    {
+        const int columns = 12, rows = 8;
+        var vertices = new List<Vector3>();
+        var uvs = new List<Vector2>();
+        for (int y = 0; y <= rows; y++)
+            for (int x = 0; x <= columns; x++) { vertices.Add(new Vector3(x / (float)columns, 0, y / (float)rows)); uvs.Add(new Vector2(x / (float)columns, y / (float)rows)); }
+        var left = new List<int>();
+        var right = new List<int>();
+        for (int y = 0; y < rows; y++)
+            for (int x = 0; x < columns; x++)
+            {
+                int a = y * (columns + 1) + x, b = a + 1, c = a + columns + 1, d = c + 1;
+                (x < columns / 2 ? left : right).AddRange(new[] { a, c, b, b, c, d });
+            }
+        var mesh = new Mesh { name = "Two materials" };
+        Own(mesh);
+        mesh.SetVertices(vertices);
+        mesh.SetUVs(0, uvs);
+        mesh.subMeshCount = 2;
+        mesh.SetTriangles(left, 0);
+        mesh.SetTriangles(right, 1);
+        mesh.RecalculateNormals();
+        var options = SimplificationOptions.Default;
+        options.LockBorders = true;
+        var run = SimplificationRun.Prepare(mesh, options);
+        run.Run();
+        Assert.That(run.Count, Is.GreaterThan(0), "each material's inside collapses");
+        var kept = new HashSet<int>(run.KeptVertices(run.Count));
+        for (int v = 0; v < vertices.Count; v++)
+            if (Mathf.Abs(vertices[v].x - .5f) < 1e-6f) Assert.That(kept.Contains(v), Is.True, "boundary vertex " + v + " stays");
+        var result = Own(run.Write(run.Count, new Mesh()));
+        var points = result.vertices;
+        for (int s = 0; s < 2; s++)
+        {
+            var indices = result.GetTriangles(s);
+            float area = 0f;
+            for (int t = 0; t < indices.Length; t += 3)
+            {
+                Vector3 a = points[indices[t]], b = points[indices[t + 1]], c = points[indices[t + 2]];
+                area += Vector3.Cross(b - a, c - a).magnitude * .5f;
+                foreach (var p in new[] { a, b, c })
+                    Assert.That(s == 0 ? p.x <= .5f + 1e-6f : p.x >= .5f - 1e-6f, Is.True, "submesh " + s + " stays on its side: " + p);
+            }
+            Assert.That(area, Is.EqualTo(.5f).Within(1e-4f), "submesh " + s + " covers its half");
+        }
+    }
 }

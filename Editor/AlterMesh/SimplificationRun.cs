@@ -108,6 +108,7 @@ namespace Orbiters.AlterMesh
         private int attributeCount;
         private float[] attributes;   // per wedge, weighted
         private int[] triangles;      // every triangle submesh's, without the collapsed ones
+        private int[] triangleSubmesh;  // the submesh of each of those
         private int[] remap, wedge;   // a wedge's point (its lowest wedge) and the next wedge at its place
         private bool ran;
 
@@ -203,6 +204,7 @@ namespace Orbiters.AlterMesh
             }
 
             var all = new List<int>();
+            var submeshOf = new List<int>();
             for (int s = 0; s < run.submeshIndices.Length; s++)
             {
                 if (run.topologies[s] != MeshTopology.Triangles) continue;
@@ -213,9 +215,11 @@ namespace Orbiters.AlterMesh
                     if ((uint)a >= (uint)n || (uint)b >= (uint)n || (uint)c >= (uint)n) continue;
                     if (run.remap[a] == run.remap[b] || run.remap[b] == run.remap[c] || run.remap[a] == run.remap[c]) continue;
                     all.Add(a); all.Add(b); all.Add(c);
+                    submeshOf.Add(s);
                 }
             }
             run.triangles = all.ToArray();
+            run.triangleSubmesh = submeshOf.ToArray();
             run.startTriangles = run.triangles.Length / 3;
             return run;
         }
@@ -226,13 +230,21 @@ namespace Orbiters.AlterMesh
         public int Count => count;
 
         /// <summary>Triangles left after the first <paramref name="collapses"/> collapses.</summary>
-        public int TrianglesAt(int collapses) => collapses <= 0 ? startTriangles : trianglesAfter[Math.Min(collapses, count) - 1];
+        public int TrianglesAt(int collapses)
+        {
+            collapses = Math.Min(collapses, count);
+            return collapses <= 0 ? startTriangles : trianglesAfter[collapses - 1];
+        }
 
         /// <summary>
         /// The surface deviation the first <paramref name="collapses"/> collapses are estimated to cause, in the mesh's units
         /// (the largest of their quadric errors as a distance: never decreasing with more collapses).
         /// </summary>
-        public float DeviationAt(int collapses) => collapses <= 0 ? 0f : deviation[Math.Min(collapses, count) - 1];
+        public float DeviationAt(int collapses)
+        {
+            collapses = Math.Min(collapses, count);
+            return collapses <= 0 ? 0f : deviation[collapses - 1];
+        }
 
         /// <summary>The most collapses whose estimated deviation stays within <paramref name="distance"/>.</summary>
         public int CollapsesWithin(float distance)
@@ -390,7 +402,7 @@ namespace Orbiters.AlterMesh
                     int i0 = from[c], i1 = to[c];
                     int r0 = remap[i0], r1 = remap[i1];
                     if (lockedThisPass[r0] || lockedThisPass[r1]) continue;
-                    if (Flips(r0, r1, offsets, nexts, prevs, collapseRemap)) { edgeGoal++; continue; }
+                    if (Flips(r0, r1, offsets, nexts, prevs, collapseRemap) || !KeepsTopology(r0, r1, offsets, nexts, prevs, collapseRemap)) { edgeGoal++; continue; }
                     int s0 = -1, s1 = -1;
                     if (kinds[i0] == Kind.Seam)
                     {
@@ -410,7 +422,10 @@ namespace Orbiters.AlterMesh
                     // The triangles at both points: those go.
                     int gone = 0;
                     for (int slot = offsets[r0]; slot < offsets[r0 + 1]; slot++)
-                        if (nexts[slot] == r1 || prevs[slot] == r1) gone++;
+                    {
+                        int a = remap[collapseRemap[nexts[slot]]], b = remap[collapseRemap[prevs[slot]]];
+                        if (a != b && (a == r1 || b == r1)) gone++;
+                    }
                     removedThisPass += gone;
                     alive -= gone;
                     runningMax = Math.Max(runningMax, math.sqrt(pointErrors[c]) * extent);
@@ -487,13 +502,52 @@ namespace Orbiters.AlterMesh
             for (int slot = offsets[r0]; slot < offsets[r0 + 1]; slot++)
             {
                 int a = remap[collapseRemap[nexts[slot]]], b = remap[collapseRemap[prevs[slot]]];
-                if (a == r1 || b == r1) continue;
+                // Faces that go with this collapse, or went with an earlier one of the pass.
+                if (a == r1 || b == r1 || a == b) continue;
                 float3 pa = positions[a], pb = positions[b];
                 float3 before = math.cross(pa - p0, pb - p0), after = math.cross(pa - p1, pb - p1);
                 float lengths = math.sqrt(math.lengthsq(before) * math.lengthsq(after));
                 if (!(math.dot(before, after) > options.MinNormalDot * lengths)) return true;
             }
             return false;
+        }
+
+        private readonly List<int> around0 = new List<int>(), around1 = new List<int>(), opposite = new List<int>();
+
+        // Whether moving point r0 onto r1 keeps the surface a surface, on the faces as they are now (earlier collapses of the
+        // pass applied through collapseRemap; r0 and r1 themselves are untouched this pass): the link condition (a point next
+        // to both must be the far corner of a face on the edge, else the collapse pinches the surface), and no face of r0
+        // may land on a face r1 has already (a tetrahedron would fold into two faces back to back).
+        private bool KeepsTopology(int r0, int r1, int[] offsets, int[] nexts, int[] prevs, int[] collapseRemap)
+        {
+            around0.Clear(); around1.Clear(); opposite.Clear();
+            for (int slot = offsets[r0]; slot < offsets[r0 + 1]; slot++)
+            {
+                int a = remap[collapseRemap[nexts[slot]]], b = remap[collapseRemap[prevs[slot]]];
+                if (a == b) continue;
+                around0.Add(a); around0.Add(b);
+                if (a == r1) opposite.Add(b);
+                else if (b == r1) opposite.Add(a);
+            }
+            for (int slot = offsets[r1]; slot < offsets[r1 + 1]; slot++)
+            {
+                int c = remap[collapseRemap[nexts[slot]]], d = remap[collapseRemap[prevs[slot]]];
+                if (c == d) continue;
+                around1.Add(c); around1.Add(d);
+            }
+            foreach (int x in around0)
+                if (x != r1 && around1.Contains(x) && !opposite.Contains(x)) return false;
+            for (int i = 0; i < around0.Count; i += 2)
+            {
+                int a = around0[i], b = around0[i + 1];
+                if (a == r1 || b == r1) continue;
+                for (int j = 0; j < around1.Count; j += 2)
+                {
+                    int c = around1[j], d = around1[j + 1];
+                    if ((c == a && d == b) || (c == b && d == a)) return false;
+                }
+            }
+            return true;
         }
 
         private static void RemapLoops(int[] loops, int[] collapseRemap)
@@ -521,11 +575,20 @@ namespace Orbiters.AlterMesh
             var fill = new int[n];
             Array.Copy(offsets, fill, n);
             var nexts = new int[indexCount];
+            var nextSubmesh = new int[indexCount];
             for (int t = 0; t < indexCount; t += 3)
-                for (int e = 0; e < 3; e++) nexts[fill[triangles[t + e]]++] = triangles[t + (e + 1) % 3];
-            bool HasEdge(int a, int b)
+                for (int e = 0; e < 3; e++)
+                {
+                    int slot = fill[triangles[t + e]]++;
+                    nexts[slot] = triangles[t + (e + 1) % 3];
+                    nextSubmesh[slot] = triangleSubmesh[t / 3];
+                }
+            // An edge between two materials is open too: the faces across it are of another submesh. A vertex on a material
+            // boundary that shares its wedges with both sides then has two open edges each way and stays (so do junctions);
+            // one with a wedge per side is a seam and slides along the boundary, each face keeping its submesh.
+            bool HasEdge(int a, int b, int submesh)
             {
-                for (int slot = offsets[a]; slot < offsets[a + 1]; slot++) if (nexts[slot] == b) return true;
+                for (int slot = offsets[a]; slot < offsets[a + 1]; slot++) if (nexts[slot] == b && nextSubmesh[slot] == submesh) return true;
                 return false;
             }
             var openIn = loopback = new int[n];
@@ -536,7 +599,7 @@ namespace Orbiters.AlterMesh
                 {
                     int target = nexts[slot];
                     if (target == v) { openIn[v] = openOut[v] = v; continue; }
-                    if (HasEdge(target, v)) continue;
+                    if (HasEdge(target, v, nextSubmesh[slot])) continue;
                     // More than one open edge in (or out) marks the vertex itself: it is locked below.
                     openIn[target] = openIn[target] == -1 ? v : target;
                     openOut[v] = openOut[v] == -1 ? target : v;
@@ -565,6 +628,60 @@ namespace Orbiters.AlterMesh
             if (options.LockedVertices != null)
                 for (int v = 0; v < n; v++)
                     if (options.LockedVertices[v]) kinds[remap[v]] = Kind.Locked;
+            LockNonManifoldPoints();
+            for (int v = 0; v < n; v++) kinds[v] = kinds[remap[v]];
+        }
+
+        // A point stays when its faces do not make one fan: an edge of more than two faces, faces wound against each other,
+        // or two fans meeting at one point (a pinch). Collapses there could not keep the surface a surface.
+        private void LockNonManifoldPoints()
+        {
+            int n = vertexCount;
+            var offsets = new int[n + 1];
+            for (int i = 0; i < triangles.Length; i++) offsets[remap[triangles[i]] + 1]++;
+            for (int v = 0; v < n; v++) offsets[v + 1] += offsets[v];
+            var fill = new int[n];
+            Array.Copy(offsets, fill, n);
+            var nexts = new int[triangles.Length];
+            var prevs = new int[triangles.Length];
+            for (int t = 0; t < triangles.Length; t += 3)
+                for (int e = 0; e < 3; e++)
+                {
+                    int slot = fill[remap[triangles[t + e]]]++;
+                    nexts[slot] = remap[triangles[t + (e + 1) % 3]];
+                    prevs[slot] = remap[triangles[t + (e + 2) % 3]];
+                }
+            var nodes = new List<int>();
+            var asNext = new List<int>();
+            var asPrev = new List<int>();
+            var parent = new List<int>();
+            int Node(int point)
+            {
+                int i = nodes.IndexOf(point);
+                if (i >= 0) return i;
+                nodes.Add(point); asNext.Add(0); asPrev.Add(0); parent.Add(nodes.Count - 1);
+                return nodes.Count - 1;
+            }
+            int Find(int i)
+            {
+                while (parent[i] != i) { parent[i] = parent[parent[i]]; i = parent[i]; }
+                return i;
+            }
+            for (int r = 0; r < n; r++)
+            {
+                if (remap[r] != r || offsets[r] == offsets[r + 1] || kinds[r] == Kind.Locked) continue;
+                nodes.Clear(); asNext.Clear(); asPrev.Clear(); parent.Clear();
+                bool manifold = true;
+                for (int slot = offsets[r]; slot < offsets[r + 1] && manifold; slot++)
+                {
+                    int a = Node(nexts[slot]), b = Node(prevs[slot]);
+                    if (++asNext[a] > 1 || ++asPrev[b] > 1) manifold = false;
+                    parent[Find(a)] = Find(b);
+                }
+                int components = 0;
+                for (int i = 0; i < nodes.Count && manifold; i++) if (Find(i) == i) components++;
+                if (!manifold || components != 1) kinds[r] = Kind.Locked;
+            }
             for (int v = 0; v < n; v++) kinds[v] = kinds[remap[v]];
         }
 
