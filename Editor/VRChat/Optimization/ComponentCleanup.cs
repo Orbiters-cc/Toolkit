@@ -235,10 +235,23 @@ namespace Orbiters.Toolkit.Editor.VRChat.Optimization
             foreach (var other in component.GetComponents<Component>())
             {
                 if (other == null || other == component) continue;
-                foreach (RequireComponent require in Attribute.GetCustomAttributes(other.GetType(), typeof(RequireComponent), true))
-                    if (new[] { require.m_Type0, require.m_Type1, require.m_Type2 }.Any(t => t != null && t.IsAssignableFrom(type))) return true;
+                foreach (var required in RequiredBy(other.GetType()))
+                    if (required.IsAssignableFrom(type)) return true;
             }
             return false;
+        }
+
+        // The types a component type's RequireComponent attributes name, read once per type.
+        private static readonly Dictionary<Type, Type[]> Requirements = new Dictionary<Type, Type[]>();
+
+        private static Type[] RequiredBy(Type type)
+        {
+            if (Requirements.TryGetValue(type, out var known)) return known;
+            var types = new List<Type>();
+            foreach (RequireComponent require in Attribute.GetCustomAttributes(type, typeof(RequireComponent), true))
+                foreach (var t in new[] { require.m_Type0, require.m_Type1, require.m_Type2 })
+                    if (t != null) types.Add(t);
+            return Requirements[type] = types.ToArray();
         }
     }
 }

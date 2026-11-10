@@ -35,35 +35,93 @@ namespace Orbiters.Toolkit.Editor
         public IReadOnlyCollection<string> UsersOf(string path, ICollection<string> ignore = null) =>
             usedBy.TryGetValue(path, out var users) ? (IReadOnlyCollection<string>)users.Where(u => ignore == null || !ignore.Contains(u)).ToList() : Array.Empty<string>();
 
-        /// <summary>Builds the map. <paramref name="progress"/> receives 0..1. Main thread; yields between slices.</summary>
+        /// <summary>
+        /// Builds the map. <paramref name="progress"/> receives 0..1. Main thread; yields between slices. Each file's
+        /// references come from the cache <see cref="ReachableAsync"/> keeps in Library/Orbiters (read again only when the
+        /// file, its .meta or Unity's import of it changed), so a scan after the first mostly lists files; only references to
+        /// files under Assets/ are kept.
+        /// </summary>
         public static async Task<ProjectReferences> ScanAsync(Action<float, string> progress = null, CancellationToken cancellation = default)
         {
-            var map = new ProjectReferences();
+            if (!watching)
+            {
+                watching = true;
+                EditorChangeBus.Changed += changes =>
+                {
+                    if (changes.Project || changes.Imported.Count + changes.Deleted.Count + changes.Moved.Count + changes.MovedFrom.Count > 0) filesRevision++;
+                };
+            }
+            // Nothing imported, deleted or moved since the last complete scan of this script session: its map still stands.
+            EditorChangeBus.Flush();
+            if (last != null && last.revision == filesRevision)
+            {
+                progress?.Invoke(1f, "Checked " + last.Scanned + " assets");
+                return last;
+            }
+            // Only a scan that finishes against files that did not change meanwhile is kept (a cancelled or failed one never).
+            last = null;
+            var map = new ProjectReferences { revision = filesRevision };
             // Every asset, not a list of types: a kind left out (an override controller using a clip) would make what it uses
             // look unused.
             var assets = AssetDatabase.FindAssets("", new[] { "Assets" }).Select(AssetDatabase.GUIDToAssetPath)
                 .Where(p => MayUseOthers(p) && !AssetDatabase.IsValidFolder(p)).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+            Store.Load();
             var started = DateTime.UtcNow;
-            for (int i = 0; i < assets.Count; i++)
+            var saved = DateTime.UtcNow;
+            try
             {
-                cancellation.ThrowIfCancellationRequested();
-                foreach (string dependency in AssetDatabase.GetDependencies(assets[i], false))
+                for (int i = 0; i < assets.Count; i++)
                 {
-                    if (string.Equals(dependency, assets[i], StringComparison.OrdinalIgnoreCase)) continue;
-                    if (!map.usedBy.TryGetValue(dependency, out var users)) map.usedBy[dependency] = users = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-                    users.Add(assets[i]);
-                }
-                map.Scanned++;
-                if ((DateTime.UtcNow - started).TotalMilliseconds > 12)
-                {
-                    progress?.Invoke((i + 1f) / assets.Count, $"Checking what uses what… {i + 1} of {assets.Count}");
-                    await Task.Yield();
-                    started = DateTime.UtcNow;
+                    cancellation.ThrowIfCancellationRequested();
+                    foreach (string guid in Store.Uses(assets[i]))
+                    {
+                        string dependency = AssetDatabase.GUIDToAssetPath(guid);
+                        if (string.IsNullOrEmpty(dependency) || string.Equals(dependency, assets[i], StringComparison.OrdinalIgnoreCase)) continue;
+                        if (!map.usedBy.TryGetValue(dependency, out var users)) map.usedBy[dependency] = users = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                        users.Add(assets[i]);
+                    }
+                    map.Scanned++;
+                    if ((DateTime.UtcNow - started).TotalMilliseconds > 12)
+                    {
+                        if ((DateTime.UtcNow - saved).TotalSeconds > 10)
+                        {
+                            Store.Save();
+                            saved = DateTime.UtcNow;
+                        }
+                        progress?.Invoke((i + 1f) / assets.Count, $"Checking what uses what… {i + 1} of {assets.Count}");
+                        await Task.Yield();
+                        started = DateTime.UtcNow;
+                    }
                 }
             }
+            finally
+            {
+                Store.Save();
+            }
             progress?.Invoke(1f, "Checked " + assets.Count + " assets");
+            // A file changed during the scan leaves the next one to read it.
+            EditorChangeBus.Flush();
+            if (map.Current) last = map;
             return map;
         }
+
+        /// <summary>
+        /// False once a file was imported, deleted or moved after this map's scan started (also during it): what it says may
+        /// be out of date, and nothing should be deleted on its word.
+        /// </summary>
+        public bool Current
+        {
+            get
+            {
+                EditorChangeBus.Flush();
+                return revision == filesRevision;
+            }
+        }
+
+        private long revision;
+        private static ProjectReferences last;
+        private static bool watching;
+        private static long filesRevision;
 
         // Each asset's direct dependencies, read again only when the asset or what it uses changed.
         private static readonly Dictionary<string, (UnityEngine.Hash128 Hash, string[] Dependencies)> Direct = new Dictionary<string, (UnityEngine.Hash128, string[])>(StringComparer.OrdinalIgnoreCase);

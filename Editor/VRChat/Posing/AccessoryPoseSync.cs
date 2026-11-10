@@ -50,7 +50,20 @@ namespace Orbiters.Toolkit.Editor.VRChat.Posing
         // The links followed when the preview paused, with their followers' rest: offsets kept across the pause.
         private static List<(FollowLink link, Matrix4x4 rest)> held;
 
-        public static Transform Root { get; private set; }
+        private static Transform root;
+        // Watches the followed bones at every frame only while the preview is on.
+        private static IDisposable watching;
+
+        public static Transform Root
+        {
+            get => root;
+            private set
+            {
+                root = value;
+                if (value != null && watching == null) watching = OrbitersEditorHost.EveryFrame("Accessory pose preview", FollowChangedPose);
+                else if (value == null && watching != null) { watching.Dispose(); watching = null; }
+            }
+        }
         public static bool Enabled => Root != null;
         public static IReadOnlyList<Accessory> Accessories => Found;
         public static string LastStatus { get; private set; } = "Off";
@@ -59,7 +72,6 @@ namespace Orbiters.Toolkit.Editor.VRChat.Posing
         static AccessoryPoseSync()
         {
             Undo.postprocessModifications += Follow;
-            EditorApplication.update += FollowChangedPose;
             Undo.undoRedoPerformed += UndoRedo;
             EditorApplication.playModeStateChanged += state => { if (state == PlayModeStateChange.ExitingEditMode) Disable(); };
             AssemblyReloadEvents.beforeAssemblyReload += Disable;
@@ -72,17 +84,23 @@ namespace Orbiters.Toolkit.Editor.VRChat.Posing
             Orbiters.Toolkit.Editor.Refit.CustomBases.Describe(avatarRoot)?.Footprint?.Invoke() ?? new Orbiters.Toolkit.Editor.Refit.CustomBaseFootprint();
 
         /// <summary>The accessories under the avatar and how each follows it, without changing anything.</summary>
-        public static List<Accessory> Find(Transform avatarRoot)
+        public static List<Accessory> Find(Transform avatarRoot) => avatarRoot == null ? new List<Accessory>() : Find(AvatarSnapshot.Take(avatarRoot));
+
+        /// <summary>
+        /// <see cref="Find(Transform)"/> with the avatar's facts from <paramref name="avatar"/>, and its follow links when the
+        /// caller already has them (<see cref="AttachmentFollow.Links(AvatarSnapshot, bool)"/>).
+        /// </summary>
+        public static List<Accessory> Find(AvatarSnapshot avatar, List<FollowLink> followLinks = null)
         {
             var result = new List<Accessory>();
-            if (avatarRoot == null) return result;
-            var skeleton = AvatarSkeleton.Bones(avatarRoot, AttachmentPlanner.Body(avatarRoot));
+            if (avatar == null || avatar.Root == null) return result;
+            var avatarRoot = avatar.Transform;
             var footprint = CustomBaseObjects(avatarRoot);
-            foreach (var group in AttachmentFollow.Links(avatarRoot).GroupBy(l => l.Accessory))
+            foreach (var group in (followLinks ?? AttachmentFollow.Links(avatar)).GroupBy(l => l.Accessory))
             {
                 if (group.Key == null || footprint.Owns(group.Key)) continue;
                 var bones = group.Key.GetComponentsInChildren<SkinnedMeshRenderer>(true).SelectMany(r => r.bones)
-                    .Where(b => b != null && !skeleton.Contains(b)).Distinct().Count();
+                    .Where(b => b != null && !avatar.InSkeleton(b)).Distinct().Count();
                 var links = group.ToList();
                 int driven = links.Count(l => Driven(l.Follower));
                 bool modular = group.Key.GetComponentsInChildren<Component>(true).Any(ModularAvatar.IsComponent);
@@ -125,8 +143,11 @@ namespace Orbiters.Toolkit.Editor.VRChat.Posing
         {
             // Bones driven by constraints are left to them.
             var footprint = CustomBaseObjects(avatarRoot);
-            Links.AddRange(AttachmentFollow.Links(avatarRoot).Where(l => !Driven(l.Follower) && !footprint.Owns(l.Accessory)));
-            Found.AddRange(Find(avatarRoot));
+            // One look at the avatar for the links, the accessory list and the bones below.
+            var avatar = AvatarSnapshot.Take(avatarRoot);
+            var all = AttachmentFollow.Links(avatar);
+            Links.AddRange(all.Where(l => !Driven(l.Follower) && !footprint.Owns(l.Accessory)));
+            Found.AddRange(Find(avatar, all));
             if (Links.Count == 0)
             {
                 string error = Found.Count == 0 ? "No clothing or accessory to follow under this avatar." : "No accessory bone matches the avatar's bones.";
@@ -147,9 +168,9 @@ namespace Orbiters.Toolkit.Editor.VRChat.Posing
             Links.Sort((x, y) => Depth(x.Follower).CompareTo(Depth(y.Follower)));
             foreach (var t in Links.Select(l => l.Follower).Distinct())
                 Snapshots.Add(new Snapshot { Transform = t, Position = t.localPosition, Rotation = t.localRotation, Scale = t.localScale });
-            foreach (var renderer in avatarRoot.GetComponentsInChildren<SkinnedMeshRenderer>(true))
+            foreach (var renderer in avatar.Skins)
                 RendererFrames[renderer] = renderer.forceMatrixRecalculationPerRender;
-            var skeleton = AvatarSkeleton.Bones(avatarRoot, AttachmentPlanner.Body(avatarRoot));
+            var skeleton = avatar.Skeleton;
             avatarBones = new HashSet<Transform>(skeleton);
             foreach (var bone in skeleton)
                 for (var ancestor = bone.parent; ancestor != null; ancestor = ancestor.parent) avatarBones.Add(ancestor);

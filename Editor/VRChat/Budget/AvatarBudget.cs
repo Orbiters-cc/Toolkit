@@ -33,10 +33,14 @@ namespace Orbiters.Toolkit.Editor.VRChat.Budget
         /// <summary>The custom base as users know it, or null when the avatar has none.</summary>
         public string CustomBase;
 
-        public static AvatarBudget Estimate(GameObject avatarRoot)
+        public static AvatarBudget Estimate(GameObject avatarRoot) => Estimate(AvatarSnapshot.Take(avatarRoot));
+
+        /// <summary><see cref="Estimate(GameObject)"/> with the avatar's skins, PhysBones and contacts from <paramref name="avatar"/>.</summary>
+        public static AvatarBudget Estimate(AvatarSnapshot avatar)
         {
             var budget = new AvatarBudget();
-            if (avatarRoot == null) return budget;
+            if (avatar == null || avatar.Root == null) return budget;
+            var avatarRoot = avatar.Root;
             var info = CustomBases.Describe(avatarRoot.transform);
             CustomBaseFootprint footprint = null;
             try { footprint = info?.Footprint?.Invoke(); }
@@ -47,22 +51,19 @@ namespace Orbiters.Toolkit.Editor.VRChat.Budget
             budget.Parameters = AvatarParameterBudget.Estimate(avatarRoot, new AvatarParameterBudget.Options { IsCustomBase = go => Owned(go.transform) });
 
             // VRChat counts the transforms skinned meshes use as bones.
-            var bones = new HashSet<Transform>();
-            foreach (var renderer in avatarRoot.GetComponentsInChildren<SkinnedMeshRenderer>(true))
-                foreach (var bone in renderer.bones)
-                    if (bone != null) bones.Add(bone);
+            var bones = avatar.SkinnedBones;
             budget.BuildRemovedBones = Mathf.Min(footprint?.BuildRemovedBones ?? 0, bones.Count);
             int customBones = footprint == null ? 0 : bones.Count(b => footprint.Bones.Contains(b) || Owned(b));
             int builtCustomBones = Mathf.Max(0, customBones - budget.BuildRemovedBones);
             budget.Bones = new BudgetCount(bones.Count - budget.BuildRemovedBones - builtCustomBones, builtCustomBones);
 
-            var physBones = avatarRoot.GetComponentsInChildren<VRCPhysBone>(true);
+            var physBones = avatar.All<VRCPhysBone>();
             budget.BuildPhysBones = footprint?.BuildPhysBones ?? 0;
             int customPhysBones = physBones.Count(p => Owned(p.transform));
-            budget.PhysBones = new BudgetCount(physBones.Length - customPhysBones, customPhysBones + budget.BuildPhysBones);
+            budget.PhysBones = new BudgetCount(physBones.Count - customPhysBones, customPhysBones + budget.BuildPhysBones);
 
             // Receivers only the wearer evaluates do not count.
-            var contacts = avatarRoot.GetComponentsInChildren<ContactBase>(true).Where(c => !(c is ContactReceiver receiver && receiver.localOnly)).ToArray();
+            var contacts = avatar.All<ContactBase>().Where(c => !(c is ContactReceiver receiver && receiver.localOnly)).ToArray();
             int customContacts = contacts.Count(c => Owned(c.transform));
             budget.Contacts = new BudgetCount(contacts.Length - customContacts, customContacts);
             return budget;

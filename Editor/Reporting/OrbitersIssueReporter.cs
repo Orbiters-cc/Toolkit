@@ -79,7 +79,7 @@ namespace Orbiters.Toolkit.Editor
 
         /// <summary>Sends a report: tests replace it.</summary>
         internal Func<string, string, IssuePayload, CancellationToken, Task> Transport = (url, token, payload, cancel) =>
-            OrbitersApi.SendAsync<object>(url, token, payload, cancel);
+            OrbitersHttp.JsonAsync<object>(System.Net.Http.HttpMethod.Post, url, payload, token, cancel);
 
         /// <summary>The masking of a report: tests replace it.</summary>
         internal Func<IssueRedactor> Redactor = IssueRedactor.ForThisEditor;
@@ -307,6 +307,10 @@ namespace Orbiters.Toolkit.Editor
             }
             // The server could not be reached: wait before the next report instead of trying each one.
             catch (HttpRequestException)
+            {
+                offlineUntil = DateTime.UtcNow + OfflinePause;
+            }
+            catch (OrbitersHttpException error) when (error.Offline)
             {
                 offlineUntil = DateTime.UtcNow + OfflinePause;
             }

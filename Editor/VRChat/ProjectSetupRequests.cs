@@ -51,14 +51,14 @@ namespace Orbiters.Toolkit.Editor.VRChat
         internal const int Schema = 1;
         private const double Interval = 2;
         private static readonly TimeSpan KeepResults = TimeSpan.FromDays(7);
-        private static double next;
 
         internal static string Folder => Path.Combine(Path.GetDirectoryName(Path.GetFullPath(Application.dataPath)), "UserSettings", "Orbiters", "SetupRequests");
 
         static ProjectSetupRequests()
         {
             if (Application.isBatchMode) return;
-            EditorApplication.update += Tick;
+            // Not while the editor compiles, imports, builds or plays.
+            OrbitersEditorHost.Every("Project setup requests", Interval, Tick, HostWhen.Idle);
         }
 
         private sealed class State
@@ -70,9 +70,6 @@ namespace Orbiters.Toolkit.Editor.VRChat
 
         private static void Tick()
         {
-            if (EditorApplication.timeSinceStartup < next) return;
-            next = EditorApplication.timeSinceStartup + Interval;
-            if (EditorApplication.isCompiling || EditorApplication.isUpdating || EditorApplication.isPlayingOrWillChangePlaymode || BuildPipeline.isBuildingPlayer) return;
             string folder = Folder;
             if (!Directory.Exists(folder)) return;
             try
@@ -138,7 +135,8 @@ namespace Orbiters.Toolkit.Editor.VRChat
             }
             catch (IOException e) { Debug.LogWarning("Orbiters Toolkit could not answer Orbiters - N4N0's request: " + e.Message); }
             catch (UnauthorizedAccessException e) { Debug.LogWarning("Orbiters Toolkit could not answer Orbiters - N4N0's request: " + e.Message); }
-            next = 0;
+            // Answered: its work starts at the next idle frame, not at the next poll.
+            OrbitersEditorHost.Once("Project setup requests", Tick, 0, HostWhen.Idle);
         }
 
         private static void Continue(string path, string statePath, string id, JObject request, State state)

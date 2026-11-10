@@ -64,17 +64,25 @@ namespace Orbiters.Toolkit.Editor.VRChat.Attachments
         }
 
         /// <summary>Compares the armature of <paramref name="root"/> (under the avatar) with the avatar's; null without key bones in common.</summary>
-        public static Measure Compare(GameObject root, Transform avatarRoot)
+        public static Measure Compare(GameObject root, Transform avatarRoot) => Compare(root, AvatarSnapshot.Take(avatarRoot));
+
+        /// <summary>
+        /// <see cref="Compare(GameObject, Transform)"/> with the avatar's facts from <paramref name="avatar"/>: its bone index
+        /// is used as it is unless the accessory holds bones of the avatar's skeleton or its body.
+        /// </summary>
+        public static Measure Compare(GameObject root, AvatarSnapshot avatar)
         {
-            if (root == null || avatarRoot == null) return null;
-            var body = AttachmentPlanner.Body(avatarRoot, root.transform);
-            var skeleton = AvatarSkeleton.Bones(avatarRoot, body);
+            if (root == null || avatar == null || avatar.Root == null) return null;
+            var body = AttachmentPlanner.Body(avatar, root.transform);
+            var skeleton = avatar.SkeletonWith(body);
+            int count = skeleton.Count;
             skeleton.RemoveWhere(b => b.IsChildOf(root.transform));
-            return Compare(root, AvatarBoneIndex.Build(avatarRoot, skeleton), avatarRoot);
+            var index = body == avatar.Body && skeleton.Count == count ? avatar.BoneIndex : AvatarBoneIndex.Build(avatar.Transform, skeleton);
+            return Compare(root, index, avatar);
         }
 
         // With the armature of index: the avatar's, or the original base's over its body.
-        private static Measure Compare(GameObject root, AvatarBoneIndex index, Transform avatarRoot)
+        private static Measure Compare(GameObject root, AvatarBoneIndex index, AvatarSnapshot snapshot)
         {
             var bones = root.GetComponentsInChildren<SkinnedMeshRenderer>(true).Where(r => r.sharedMesh != null)
                 .SelectMany(r => r.bones).Where(b => b != null && b.IsChildOf(root.transform) && b != root.transform).Distinct().ToList();
@@ -117,7 +125,7 @@ namespace Orbiters.Toolkit.Editor.VRChat.Attachments
                 ownLength += own; avatarLength += avatar; measure.Segments++;
             }
             if (measure.Segments > 0) measure.Scale = avatarLength / ownLength;
-            float height = Height(index, avatarRoot);
+            float height = Height(index, snapshot);
             var first = measure.Pairs[0];
             measure.Offset = height > 0f ? Vector3.Distance(first.source.position, first.target.position) / height : 0f;
             return measure;
@@ -138,10 +146,11 @@ namespace Orbiters.Toolkit.Editor.VRChat.Attachments
             // Measured and moved where the clothing rests, not where a posing preview shows it.
             using (AccessoryPoseSync.Pause(avatarRoot))
             {
-                var measure = Compare(attachment.gameObject, avatarRoot);
+                var avatar = AvatarSnapshot.Take(avatarRoot);
+                var measure = Compare(attachment.gameObject, avatar);
                 if (measure == null || !measure.NeedsFit) return null;
                 using (var original = OriginalArmature.Over(avatarRoot))
-                    return Apply(attachment, original != null ? Compare(attachment.gameObject, original.Index, avatarRoot) ?? measure : measure);
+                    return Apply(attachment, original != null ? Compare(attachment.gameObject, original.Index, avatar) ?? measure : measure);
             }
         }
 
@@ -245,12 +254,12 @@ namespace Orbiters.Toolkit.Editor.VRChat.Attachments
         }
 
         // Hips to head, else the body's height.
-        private static float Height(AvatarBoneIndex index, Transform avatarRoot)
+        private static float Height(AvatarBoneIndex index, AvatarSnapshot avatar)
         {
             var hips = index.Humanoid(HumanBodyBones.Hips);
             var head = index.Humanoid(HumanBodyBones.Head);
             if (hips != null && head != null) return Vector3.Distance(hips.position, head.position) * 2f;
-            var body = AttachmentPlanner.Body(avatarRoot);
+            var body = avatar.Body;
             return body != null ? body.bounds.size.y : 0f;
         }
 

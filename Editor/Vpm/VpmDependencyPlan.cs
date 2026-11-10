@@ -111,7 +111,7 @@ namespace Orbiters.Toolkit.Editor.Vpm
         /// could not be chosen says why.
         /// </summary>
         public static VpmDependencyPlan Resolve(IEnumerable<Requirement> requirements, IVpmCatalog catalog, VpmPlanScope scope = VpmPlanScope.Requested) =>
-            new Solver((requirements ?? Enumerable.Empty<Requirement>()).Where(r => r != null && !string.IsNullOrWhiteSpace(r.Id)).ToList(), catalog, scope).Run();
+            new Solver((requirements ?? Enumerable.Empty<Requirement>()).Where(r => r != null && !string.IsNullOrWhiteSpace(r.Id)).ToList(), Remembered.Of(catalog), scope).Run();
 
         /// <summary>The scopes <see cref="ResolveForApproval"/> widens through, the least disruptive first.</summary>
         public static readonly VpmPlanScope[] ApprovalScopes =
@@ -129,13 +129,48 @@ namespace Orbiters.Toolkit.Editor.Vpm
         public static VpmDependencyPlan ResolveForApproval(IEnumerable<Requirement> requirements, IVpmCatalog catalog)
         {
             var list = (requirements ?? Enumerable.Empty<Requirement>()).ToList();
+            // One look at the catalog for every scope tried.
+            var remembered = Remembered.Of(catalog);
             VpmDependencyPlan plan = null;
             foreach (var scope in ApprovalScopes)
             {
-                plan = Resolve(list, catalog, scope);
+                plan = Resolve(list, remembered, scope);
                 if (plan.CanApply) return plan;
             }
             return plan;
+        }
+
+        /// <summary>
+        /// The catalog's answers, each asked once per plan: a catalog may read the disk or VPM's repositories, and a search
+        /// asks the same few things at every step. Not for a catalog that changes while a plan is made.
+        /// </summary>
+        private sealed class Remembered : IVpmCatalog
+        {
+            private readonly IVpmCatalog source;
+            private readonly Dictionary<string, string> installed = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            private readonly Dictionary<string, bool> developed = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
+            private readonly Dictionary<string, List<VpmCandidate>> versions = new Dictionary<string, List<VpmCandidate>>(StringComparer.OrdinalIgnoreCase);
+            private readonly Dictionary<string, string> names = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            private readonly Dictionary<string, IReadOnlyDictionary<string, string>> dependencies = new Dictionary<string, IReadOnlyDictionary<string, string>>(StringComparer.OrdinalIgnoreCase);
+            private List<string> packages;
+
+            private Remembered(IVpmCatalog source) => this.source = source;
+
+            public static IVpmCatalog Of(IVpmCatalog catalog) => catalog is Remembered || catalog == null ? catalog : new Remembered(catalog);
+
+            private static T Ask<T>(Dictionary<string, T> known, string id, Func<string, T> read)
+            {
+                if (id == null) return read(id);
+                if (!known.TryGetValue(id, out var value)) known[id] = value = read(id);
+                return value;
+            }
+
+            public string Installed(string id) => Ask(installed, id, source.Installed);
+            public bool Developed(string id) => Ask(developed, id, source.Developed);
+            public IEnumerable<VpmCandidate> Versions(string id) => Ask(versions, id, i => (source.Versions(i) ?? Enumerable.Empty<VpmCandidate>()).ToList());
+            public string DisplayName(string id) => Ask(names, id, source.DisplayName);
+            public IReadOnlyDictionary<string, string> InstalledDependencies(string id) => Ask(dependencies, id, source.InstalledDependencies);
+            public IEnumerable<string> InstalledPackages() => packages ??= (source.InstalledPackages() ?? Enumerable.Empty<string>()).ToList();
         }
 
         private sealed class Option
@@ -172,6 +207,16 @@ namespace Orbiters.Toolkit.Editor.Vpm
             private bool exhausted;
             private HashSet<string> limitingChosen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             private Failure failure;
+            // Whether a version fits a range, each tested once: the search tests the same pairs at every step.
+            private readonly Dictionary<(SemanticRange Range, string Version, bool Prerelease), bool> fits = new Dictionary<(SemanticRange, string, bool), bool>();
+
+            private bool Fits(SemanticRange range, string version, bool prerelease = true)
+            {
+                if (range == null || version == null) return Satisfies(range, version, prerelease);
+                var key = (range, version, prerelease);
+                if (!fits.TryGetValue(key, out bool fit)) fits[key] = fit = Satisfies(range, version, prerelease);
+                return fit;
+            }
 
             public Solver(List<Requirement> roots, IVpmCatalog catalog, VpmPlanScope scope)
             {
@@ -271,7 +316,7 @@ namespace Orbiters.Toolkit.Editor.Vpm
                 {
                     if (!chosen.TryGetValue(dependency.Key, out var other) || other.Keep) continue;
                     var range = Parse(dependency.Value);
-                    if (other.Remove || range == null || !Satisfies(range, other.Version))
+                    if (other.Remove || range == null || !Fits(range, other.Version))
                         list.Add(new Conflict { Allowed = $"{Name(dependency.Key)} {dependency.Value}", Chosen = $"{Name(dependency.Key)} " + (other.Remove ? "removed" : other.Version) });
                 }
                 return list;
@@ -328,7 +373,7 @@ namespace Orbiters.Toolkit.Editor.Vpm
                     {
                         if (chosen.ContainsKey(ask.Source) || asked.Contains(ask.Source) || !MayChange(ask.Source)) continue;
                         var range = Parse(ask.Range);
-                        if (pair.Value.Remove || range == null || !Satisfies(range, pair.Value.Version)) { limiting.Add(ask.Source); Discover(ask.Source); }
+                        if (pair.Value.Remove || range == null || !Fits(range, pair.Value.Version)) { limiting.Add(ask.Source); Discover(ask.Source); }
                     }
                 }
                 // The first package found that something asks for (or that must change) and has no version yet.
@@ -356,11 +401,11 @@ namespace Orbiters.Toolkit.Editor.Vpm
                         // Only what nothing needs: no requirement, no chosen version, no other installed package.
                         if (asks.Count > 0 || InstalledAsks(id).Any() || chosen.Values.Any(o => o.Dependencies.ContainsKey(id))) continue;
                     }
-                    else if (!option.Developed && !ranges.All(r => Satisfies(r, option.Version, option.Keep || prerelease))) continue;
+                    else if (!option.Developed && !ranges.All(r => Fits(r, option.Version, option.Keep || prerelease))) continue;
                     // A version nothing ranges over (a tool the plan changes) is a release, never a pre-release.
                     if (!option.Keep && !option.Remove && !option.Developed && !prerelease && option.Version.Contains("-")) continue;
                     // A version the plan installs must also fit the installed packages using it; what is kept stays as it is.
-                    if (!option.Keep && !option.Remove && !installedRanges.All(r => Satisfies(r, option.Version))) continue;
+                    if (!option.Keep && !option.Remove && !installedRanges.All(r => Fits(r, option.Version))) continue;
                     anyFits = true;
                     if (!FitsChosen(option)) continue;
                     chosen[id] = option;
@@ -397,7 +442,7 @@ namespace Orbiters.Toolkit.Editor.Vpm
                     if (!chosen.TryGetValue(dependency.Key, out var other) || other.Developed) continue;
                     if (other.Remove) return false;
                     var range = Parse(dependency.Value);
-                    if (range == null || !Satisfies(range, other.Version)) return false;
+                    if (range == null || !Fits(range, other.Version)) return false;
                 }
                 return true;
             }
@@ -425,7 +470,7 @@ namespace Orbiters.Toolkit.Editor.Vpm
                 var list = Options(id);
                 if ((scope & VpmPlanScope.InstalledTools) == 0 || !installedAsks.ContainsKey(id)) return list;
                 var outside = InstalledAsks(id).Where(r => !asked.Contains(r.Source)).Select(r => Parse(r.Range)).ToList();
-                int Breaks(Option o) => o.Keep || o.Remove ? 0 : outside.Count(r => r == null || !Satisfies(r, o.Version));
+                int Breaks(Option o) => o.Keep || o.Remove ? 0 : outside.Count(r => r == null || !Fits(r, o.Version));
                 return list.Select((o, i) => (o, i)).OrderBy(p => p.o.Keep ? 0 : p.o.Remove ? 2 : 1).ThenBy(p => Breaks(p.o)).ThenBy(p => p.i).Select(p => p.o).ToList();
             }
 

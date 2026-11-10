@@ -264,8 +264,8 @@ public static class OrbitersBrowserLogin
         CancelWaiting();
         var attempt = new Attempt(OrbitersEnvironment.IsDevelopment, cancellation);
         using var callback = Callback.Start();
-        var link = await OrbitersApi.SendAsync<Link>(attempt.ApiUrl("editor-links"), null,
-            new { client, device = SystemInfo.deviceName, port = callback.Port, path = callback.Path }, cancellation);
+        var link = await Orbiters.Toolkit.OrbitersHttp.JsonAsync<Link>(System.Net.Http.HttpMethod.Post, attempt.ApiUrl("editor-links"),
+            new { client, device = SystemInfo.deviceName, port = callback.Port, path = callback.Path }, null, cancellation);
         attempt.ThrowIfStale();
         if (string.IsNullOrEmpty(link?.linkUrl) || string.IsNullOrEmpty(link.exchangeToken) || string.IsNullOrEmpty(link.connectedUrl))
             throw new InvalidOperationException("Orbiters did not return a sign-in link.");
@@ -300,8 +300,8 @@ public static class OrbitersBrowserLogin
                 try
                 {
                     attempt.ThrowIfStale();
-                    var auth = await OrbitersApi.SendAsync<AuthenticationService.AuthData>(attempt.ApiUrl("editor-links/exchange"), null,
-                        new { exchangeToken = pending.exchangeToken, code = arrival.Code }, cancellation);
+                    var auth = await Orbiters.Toolkit.OrbitersHttp.JsonAsync<AuthenticationService.AuthData>(System.Net.Http.HttpMethod.Post,
+                        attempt.ApiUrl("editor-links/exchange"), new { exchangeToken = pending.exchangeToken, code = arrival.Code }, null, cancellation);
                     if (string.IsNullOrWhiteSpace(auth?.token)) throw new InvalidOperationException("Orbiters did not return an account.");
                     attempt.Save(auth);
                 }

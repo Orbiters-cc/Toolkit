@@ -42,8 +42,9 @@ namespace Orbiters.Toolkit.Editor.VRChat.Attachments
         public static AttachmentPlan Analyze(GameObject root, Transform avatarRoot)
         {
             if (root == null || avatarRoot == null) throw new ArgumentNullException(root == null ? nameof(root) : nameof(avatarRoot));
-            var plan = new AttachmentPlan { Root = root, Avatar = avatarRoot, Body = Body(avatarRoot, root.transform) };
-            var skeleton = AvatarSkeleton.Bones(avatarRoot, plan.Body);
+            var avatar = AvatarSnapshot.Take(avatarRoot);
+            var plan = new AttachmentPlan { Root = root, Avatar = avatarRoot, Body = Body(avatar, root.transform) };
+            var skeleton = avatar.SkeletonWith(plan.Body);
             skeleton.RemoveWhere(b => b.IsChildOf(root.transform));
             var index = plan.Index = AvatarBoneIndex.Build(avatarRoot, skeleton);
 
@@ -332,18 +333,15 @@ namespace Orbiters.Toolkit.Editor.VRChat.Attachments
         }
 
         /// <summary>The avatar's main body mesh: skinned to the avatar's armature, with the most blendshapes.</summary>
-        public static SkinnedMeshRenderer Body(Transform avatarRoot, Transform exclude = null)
-        {
-            // Without a humanoid Animator the skeleton is unknown: any mesh that is not an attached accessory.
-            var skeleton = AvatarSkeleton.Bones(avatarRoot);
-            return avatarRoot.GetComponentsInChildren<SkinnedMeshRenderer>(true)
-                .Where(r => r.sharedMesh != null && (exclude == null || !r.transform.IsChildOf(exclude)) &&
-                            (skeleton.Count > 0 ? r.bones.Any(b => b != null && skeleton.Contains(b)) : r.GetComponentInParent<OrbitersAttachment>(true) == null))
-                .OrderByDescending(r => r.name.Equals("Body", StringComparison.OrdinalIgnoreCase))
-                .ThenByDescending(r => r.sharedMesh.blendShapeCount)
-                .ThenByDescending(r => r.sharedMesh.vertexCount)
-                .FirstOrDefault();
-        }
+        public static SkinnedMeshRenderer Body(Transform avatarRoot, Transform exclude = null) => Body(AvatarSnapshot.Take(avatarRoot), exclude);
+
+        /// <summary>
+        /// The avatar's main body mesh, leaving out the meshes at or below <paramref name="exclude"/>: of the meshes skinned
+        /// to the avatar's armature (any mesh outside an attached accessory without a humanoid Animator), the one named
+        /// "Body", else the one with the most blendshapes, else the most vertices.
+        /// </summary>
+        public static SkinnedMeshRenderer Body(AvatarSnapshot avatar, Transform exclude = null) =>
+            avatar == null ? null : exclude == null ? avatar.Body : avatar.BodyExcluding(exclude);
 
         /// <summary>World bounds of every renderer, from their meshes so that inactive objects count too.</summary>
         public static Bounds Bounds(GameObject root)
