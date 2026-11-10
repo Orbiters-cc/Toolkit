@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Runtime.InteropServices;
 using System.Threading.Tasks;
@@ -12,9 +13,15 @@ namespace Orbiters.Toolkit.Meshes
     /// sphere, the first triangle along a ray, the closest surface point, one at a time or in batches. A flat tree
     /// (binned SAH build, 32-byte nodes, leaves of four triangles whose corners sit in leaf order), built, refitted and
     /// queried by Burst code (<see cref="BvhKernels"/>) in managed arrays, so nothing has to be disposed.
-    /// The vertex array passed to Build is kept by reference: refit after changing it in place (queries read the corners
-    /// as of the last build or refit). Thread-safe for queries between refits. Ties are deterministic: among equally near
-    /// hits the lowest triangle index wins, whatever the tree's layout.
+    /// The vertex array passed to Build is kept by reference: refit after changing it in place, or hand the refit another
+    /// array (<see cref="Refit(Vector3[])"/>); queries read the corners as of the last build or refit. Thread-safe for queries
+    /// between refits. Answers depend only on the triangles (see <see cref="BvhKernels"/>): among equally near hits the
+    /// lowest triangle index wins, whatever the tree's layout, refits, seeds or traversal order.
+    /// <para>
+    /// Filtered queries come two ways: a <see cref="TriangleRule"/> (tests on per-triangle data, run by Burst: the same bits as
+    /// the unfiltered queries, what fitting code needs), or a generic <see cref="ITriangleFilter"/> run as managed code (any
+    /// logic, but its last bits may differ from Burst's).
+    /// </para>
     /// </summary>
     public sealed class MeshBvh
     {
@@ -25,6 +32,9 @@ namespace Orbiters.Toolkit.Meshes
             public Vector3 Position;
             public Vector3 Bary;
             public float Distance;
+
+            /// <summary><see cref="Triangle"/> when found, -1 otherwise (<see cref="Triangle"/> then reads 0).</summary>
+            public int TriangleOrNone => Found ? Triangle : -1;
         }
 
         private BvhNode[] nodes;
@@ -34,8 +44,12 @@ namespace Orbiters.Toolkit.Meshes
         private int[] triangleOfSlot;
         private int3[] slotVertices;
         private int[] leafOfTriangle;
+        // Per mesh triangle its slot, -1 when left out (seeded queries).
+        private int[] slotOfTriangle;
         private Vector3[] vertices;
         private int[] triangles;
+        // What every node's bounds are widened by (see BvhKernels' remarks).
+        private float slack;
 
         /// <summary>
         /// The vertices went through a mirroring transform (a negative scale: its determinant is negative), so the mesh's
@@ -80,11 +94,13 @@ namespace Orbiters.Toolkit.Meshes
             var nodes = new BvhNode[capacity];
             var parents = new int[capacity];
             int made;
+            float slack;
             fixed (BvhTriangle* c = bvh.corners)
             fixed (int* order = bvh.triangleOfSlot)
             fixed (BvhNode* n = nodes)
             fixed (int* p = parents)
-                BvhKernels.Build(c, order, count, n, p, &made);
+                BvhKernels.Build(c, order, count, n, p, &made, &slack);
+            bvh.slack = slack;
             if (made < capacity)
             {
                 Array.Resize(ref nodes, Math.Max(1, made));
@@ -94,10 +110,13 @@ namespace Orbiters.Toolkit.Meshes
             bvh.parents = parents;
             bvh.nodeCount = made;
             bvh.slotVertices = new int3[count];
+            bvh.slotOfTriangle = new int[triangleCount];
+            for (int t = 0; t < triangleCount; t++) bvh.slotOfTriangle[t] = -1;
             for (int s = 0; s < count; s++)
             {
                 int t = bvh.triangleOfSlot[s];
                 bvh.slotVertices[s] = new int3(triangles[t * 3], triangles[t * 3 + 1], triangles[t * 3 + 2]);
+                bvh.slotOfTriangle[t] = s;
             }
             for (int i = 0; i < made; i++)
             {
@@ -113,11 +132,53 @@ namespace Orbiters.Toolkit.Meshes
         {
             RefuseWhilePinned();
             if (nodeCount == 0) return;
+            float widen = slack;
             fixed (BvhNode* n = nodes)
             fixed (BvhTriangle* c = corners)
             fixed (Vector3* v = vertices)
             fixed (int3* sv = slotVertices)
-                BvhKernels.Refit(n, nodeCount, c, (float3*)v, sv, corners.Length);
+                BvhKernels.Refit(n, nodeCount, c, (float3*)v, sv, corners.Length, &widen);
+            slack = widen;
+        }
+
+        /// <summary>
+        /// Moves the tree onto <paramref name="moved"/> (the same vertices at other places, one per vertex) and refits it
+        /// there: the array is kept by reference from now on, as Build's was.
+        /// </summary>
+        public void Refit(Vector3[] moved)
+        {
+            if (moved == null) throw new ArgumentNullException(nameof(moved));
+            if (moved.Length != vertices.Length) throw new ArgumentException("One position per vertex: " + moved.Length + " for " + vertices.Length + ".", nameof(moved));
+            RefuseWhilePinned();
+            vertices = moved;
+            Refit();
+        }
+
+        /// <summary>
+        /// A copy of the tree reading <paramref name="moved"/> (the same vertices at other places, one per vertex: a shape
+        /// frame on a body), to refit on its own: refit it along what moved (<see cref="RefitTriangles"/>, far cheaper than a
+        /// build) before querying it; it then answers exactly as a tree built on <paramref name="moved"/> would. The copy has
+        /// its own bounds and corners; the layout tables are shared (they never change after the build).
+        /// </summary>
+        public MeshBvh Clone(Vector3[] moved)
+        {
+            if (moved == null) throw new ArgumentNullException(nameof(moved));
+            if (moved.Length != vertices.Length) throw new ArgumentException("One position per vertex: " + moved.Length + " for " + vertices.Length + ".", nameof(moved));
+            return new MeshBvh
+            {
+                nodes = (BvhNode[])nodes.Clone(),
+                nodeCount = nodeCount,
+                parents = parents,
+                corners = (BvhTriangle[])corners.Clone(),
+                triangleOfSlot = triangleOfSlot,
+                slotVertices = slotVertices,
+                leafOfTriangle = leafOfTriangle,
+                slotOfTriangle = slotOfTriangle,
+                vertices = moved,
+                triangles = triangles,
+                slack = slack,
+                Mirrored = Mirrored,
+            };
         }
 
         /// <summary>Refits only the leaves holding <paramref name="movedTriangles"/> and their ancestors.</summary>
@@ -186,27 +247,37 @@ namespace Orbiters.Toolkit.Meshes
             if (leaves * 4 > nodeCount) { Refit(); return; }
             if (dirtyLeafBuffer.Length < leaves) dirtyLeafBuffer = new int[Math.Max(leaves, dirtyLeafBuffer.Length * 2)];
             dirtyLeaves.CopyTo(dirtyLeafBuffer);
+            float widen = slack;
             fixed (BvhNode* n = nodes)
             fixed (int* p = parents)
             fixed (BvhTriangle* c = corners)
             fixed (Vector3* v = vertices)
             fixed (int3* sv = slotVertices)
             fixed (int* l = dirtyLeafBuffer)
-                BvhKernels.RefitLeaves(n, p, c, (float3*)v, sv, l, leaves);
+                BvhKernels.RefitLeaves(n, p, c, (float3*)v, sv, l, leaves, &widen);
+            slack = widen;
         }
 
         /// <summary>
         /// The tree's memory pinned for Burst jobs and other kernels (<see cref="BvhKernels"/>), until the lease is disposed.
         /// The lease owns the pins: hand <see cref="PinnedBvh.View"/> only to work that ends before it is disposed, and register
         /// every job that reads it with <see cref="PinnedBvh.DependsOn"/> (disposing completes them first). While any lease
-        /// is out the tree refuses refits.
+        /// is out the tree refuses refits. A lease dropped without being disposed is released once the collector has
+        /// finalized it and every job registered on it has completed (checked at the next pin or refit of any tree): never
+        /// while a registered job may still read the memory.
         /// </summary>
-        public PinnedBvh Pin() => new PinnedBvh(this);
+        public PinnedBvh Pin()
+        {
+            PinnedBvh.ReleaseDropped();
+            return new PinnedBvh(this);
+        }
 
         private int leases;
 
         private void RefuseWhilePinned()
         {
+            if (System.Threading.Volatile.Read(ref leases) == 0) return;
+            PinnedBvh.ReleaseDropped();
             if (System.Threading.Volatile.Read(ref leases) > 0) throw new InvalidOperationException("The BVH is pinned for queries: dispose its leases before refitting.");
         }
 
@@ -214,11 +285,14 @@ namespace Orbiters.Toolkit.Meshes
         public sealed class PinnedBvh : IDisposable
         {
             private readonly MeshBvh bvh;
-            private GCHandle nodes, corners, triangles;
+            private GCHandle nodes, corners, triangles, slots;
             private readonly BvhView view;
             private Unity.Jobs.JobHandle jobs;
             private bool hasJobs;
             private int disposed;
+
+            // Leases the collector found dropped without Dispose: kept (and so their pins) until their jobs are done.
+            private static readonly ConcurrentQueue<PinnedBvh> Dropped = new ConcurrentQueue<PinnedBvh>();
 
             internal unsafe PinnedBvh(MeshBvh bvh)
             {
@@ -226,15 +300,38 @@ namespace Orbiters.Toolkit.Meshes
                 nodes = GCHandle.Alloc(bvh.nodes, GCHandleType.Pinned);
                 corners = GCHandle.Alloc(bvh.corners, GCHandleType.Pinned);
                 triangles = GCHandle.Alloc(bvh.triangleOfSlot, GCHandleType.Pinned);
+                slots = GCHandle.Alloc(bvh.slotOfTriangle, GCHandleType.Pinned);
                 view = new BvhView
                 {
                     Nodes = (BvhNode*)nodes.AddrOfPinnedObject(),
                     Corners = (BvhTriangle*)corners.AddrOfPinnedObject(),
                     TriangleOfSlot = (int*)triangles.AddrOfPinnedObject(),
+                    SlotOfTriangle = (int*)slots.AddrOfPinnedObject(),
+                    TriangleCount = bvh.slotOfTriangle.Length,
                     NodeCount = bvh.nodeCount,
                     Mirrored = bvh.Mirrored ? 1 : 0
                 };
                 System.Threading.Interlocked.Increment(ref bvh.leases);
+            }
+
+            // Not a release: the jobs registered on the lease may still run, and only the main thread may complete them. The
+            // lease is handed (resurrected) to the queue that releases it once they are done.
+            ~PinnedBvh()
+            {
+                if (System.Threading.Volatile.Read(ref disposed) == 0) Dropped.Enqueue(this);
+            }
+
+            /// <summary>
+            /// Releases the dropped leases whose registered jobs have completed (any thread: a completed handle is only read,
+            /// never waited on); the others wait for a later call.
+            /// </summary>
+            internal static void ReleaseDropped()
+            {
+                for (int n = Dropped.Count; n > 0 && Dropped.TryDequeue(out var lease); n--)
+                {
+                    if (lease.hasJobs && !lease.jobs.IsCompleted) { Dropped.Enqueue(lease); continue; }
+                    lease.Release();
+                }
             }
 
             /// <summary>The pinned memory; refused once the lease is disposed.</summary>
@@ -257,18 +354,32 @@ namespace Orbiters.Toolkit.Meshes
 
             public void Dispose()
             {
-                if (System.Threading.Interlocked.Exchange(ref disposed, 1) != 0) return;
+                if (System.Threading.Volatile.Read(ref disposed) != 0) return;
                 // Every job that may still read the memory finishes before it can move.
                 if (hasJobs) jobs.Complete();
+                Release();
+                GC.SuppressFinalize(this);
+            }
+
+            private void Release()
+            {
+                if (System.Threading.Interlocked.Exchange(ref disposed, 1) != 0) return;
                 nodes.Free();
                 corners.Free();
                 triangles.Free();
+                slots.Free();
                 System.Threading.Interlocked.Decrement(ref bvh.leases);
             }
         }
 
         private unsafe BvhView ViewOf(BvhNode* n, BvhTriangle* c, int* t) =>
             new BvhView { Nodes = n, Corners = c, TriangleOfSlot = t, NodeCount = nodeCount, Mirrored = Mirrored ? 1 : 0 };
+
+        private unsafe BvhView ViewOf(BvhNode* n, BvhTriangle* c, int* t, int* st) => new BvhView
+        {
+            Nodes = n, Corners = c, TriangleOfSlot = t, SlotOfTriangle = st, TriangleCount = slotOfTriangle.Length, NodeCount = nodeCount,
+            Mirrored = Mirrored ? 1 : 0
+        };
 
         /// <summary>The triangles whose bounds overlap the sphere (a superset of those really inside).</summary>
         public void TrianglesNear(Vector3 center, float radius, List<int> result)
@@ -377,6 +488,110 @@ namespace Orbiters.Toolkit.Meshes
             fixed (int* t = triangleOfSlot)
                 BvhKernels.ClosestPoint(ViewOf(n, c, t), point, maxDistance, ref filter, out hit);
             return ToHit(hit);
+        }
+
+        /// <summary>
+        /// The closest point among the triangles <paramref name="rule"/> accepts (Burst, any thread), starting from
+        /// <paramref name="seed"/> (a triangle, typically the answer for a point near this one, or -1): the answer is the
+        /// unseeded one, only found faster.
+        /// </summary>
+        public Hit ClosestPoint(Vector3 point, float maxDistance, in TriangleRule rule, int seed = -1)
+        {
+            return Query(QueryKind.Closest, point, default, maxDistance, false, rule, seed, default, Span<Hit>.Empty);
+        }
+
+        /// <summary>The first triangle along a ray among those <paramref name="rule"/> accepts (Burst, any thread).</summary>
+        public Hit Raycast(Vector3 origin, Vector3 direction, float maxDistance, bool backfaces, in TriangleRule rule) =>
+            Query(QueryKind.Ray, origin, direction, maxDistance, backfaces, rule, -1, default, Span<Hit>.Empty);
+
+        /// <summary>
+        /// For each class of <paramref name="classes"/>, the closest point among its triangles within
+        /// <paramref name="maxDistance"/> into <paramref name="hits"/>[class] (one traversal; what one
+        /// <see cref="ClosestPoint(Vector3, float, in TriangleRule, int)"/> per class would return). Burst, any thread.
+        /// </summary>
+        public void ClosestPointsByClass(Vector3 point, float maxDistance, in TriangleClasses classes, Span<Hit> hits)
+        {
+            if (hits.Length < classes.Count) throw new ArgumentException("A hit per class.", nameof(hits));
+            if (classes.Count < 1) throw new ArgumentException("No class.", nameof(classes));
+            Query(QueryKind.Classes, point, default, maxDistance, false, classes.Rule, -1, classes, hits);
+        }
+
+        private enum QueryKind { Closest, Ray, Classes }
+
+        // The rule's arrays pinned for the one Burst call that reads them.
+        private unsafe Hit Query(QueryKind kind, Vector3 point, Vector3 direction, float maxDistance, bool backfaces, in TriangleRule rule, int seed,
+            in TriangleClasses classes, Span<Hit> hits)
+        {
+            if (nodeCount == 0)
+            {
+                for (int i = 0; i < hits.Length; i++) hits[i] = new Hit { Distance = maxDistance };
+                return new Hit { Distance = maxDistance };
+            }
+            rule.Check(slotOfTriangle.Length);
+            if (kind == QueryKind.Ray) direction.Normalize();
+            BvhHit hit;
+            var found = stackalloc BvhHit[TriangleClasses.Max];
+            fixed (BvhNode* n = nodes)
+            fixed (BvhTriangle* c = corners)
+            fixed (int* t = triangleOfSlot)
+            fixed (int* st = slotOfTriangle)
+            fixed (Vector3* faceNormals = rule.faceNormals)
+            fixed (int* masks = rule.masks)
+            fixed (int* labels = rule.labels)
+            fixed (bool* accepted = rule.acceptedLabels)
+            fixed (int* moreLabels = rule.moreLabels)
+            fixed (bool* moreAccepted = rule.acceptedMoreLabels)
+            fixed (bool* allowed = rule.allowed)
+            fixed (int* ranks = rule.ranks)
+            fixed (int* awayTriangles = rule.awayTriangles)
+            fixed (int* awayLabels = rule.awayLabels)
+            {
+                var view = ViewOf(n, c, t, st);
+                var filter = new TriangleRuleView
+                {
+                    Set = (int)rule.set,
+                    FaceNormals = (float3*)faceNormals,
+                    Direction = rule.direction,
+                    Minimum = rule.minimum,
+                    Facing = (int)rule.facing,
+                    Masks = masks,
+                    Mask = rule.mask,
+                    Labels = labels,
+                    AcceptedLabels = (byte*)accepted,
+                    AcceptedLabelCount = rule.acceptedLabels?.Length ?? 0,
+                    HasExcludedLabel = rule.hasExcludedLabel ? 1 : 0,
+                    ExcludedLabel = rule.excludedLabel,
+                    MoreLabels = moreLabels,
+                    AcceptedMoreLabels = (byte*)moreAccepted,
+                    AcceptedMoreLabelCount = rule.acceptedMoreLabels?.Length ?? 0,
+                    Allowed = (byte*)allowed,
+                    Ranks = ranks,
+                    MinimumRank = rule.minimumRank,
+                    AwayTriangles = awayTriangles,
+                    AwayLabels = awayLabels,
+                    AwayLabelCount = rule.awayLabels?.Length ?? 0,
+                    AwayA = rule.awayA,
+                    AwayB = rule.awayB,
+                    ExcludedTriangle = rule.excludedTriangle,
+                    Needs = classes.needs,
+                    ClassCount = classes.Count,
+                };
+                float3 p = point;
+                switch (kind)
+                {
+                    case QueryKind.Closest:
+                        BvhKernels.ClosestPointByRule(view, p, maxDistance, filter, seed, out hit);
+                        return ToHit(hit);
+                    case QueryKind.Ray:
+                        float3 d = direction;
+                        BvhKernels.RaycastByRule(view, p, d, maxDistance, backfaces ? 1 : 0, filter, out hit);
+                        return ToHit(hit);
+                    default:
+                        BvhKernels.ClosestPointsByClass(view, p, maxDistance, filter, found);
+                        for (int i = 0; i < classes.Count; i++) hits[i] = ToHit(found[i]);
+                        return default;
+                }
+            }
         }
 
         // Batches: blocks of queries per Burst call, spread over the thread pool (any thread; the job system needs the main one).
