@@ -153,7 +153,7 @@ namespace Orbiters.Toolkit.Editor.VRChat.Optimization
                 var one = MeshShapes.Of(first);
                 var two = MeshShapes.Of(second);
                 var frame = new MeshShapes.FrameBuilder();
-                var shapes = new List<BlendShapeTable.Shape>(names.Count);
+                var joinedShapes = new List<BlendShapeTable.Shape>(names.Count);
                 foreach (var name in names)
                 {
                     int i1 = one.IndexOf(name), i2 = two.IndexOf(name);
@@ -169,9 +169,9 @@ namespace Orbiters.Toolkit.Editor.VRChat.Optimization
                         if (i2 >= 0) MeshShapes.AddShapeAt(two, i2, weight, a, frame);
                         frames.Add(frame.Build(weight));
                     }
-                    shapes.Add(new BlendShapeTable.Shape(name, frames));
+                    joinedShapes.Add(new BlendShapeTable.Shape(name, frames));
                 }
-                MeshShapes.Write(joined, new BlendShapeTable(total, shapes));
+                MeshShapes.Write(joined, new BlendShapeTable(total, joinedShapes));
             }
             joined.RecalculateBounds();
             return joined;
