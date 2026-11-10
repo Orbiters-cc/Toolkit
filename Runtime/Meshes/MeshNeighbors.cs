@@ -11,6 +11,12 @@ namespace Orbiters.Toolkit.Meshes
     /// vertex's neighbours over the edges, and the triangles around it. Indices are into the mesh's own vertex array
     /// unless the name says <c>welded</c>. Flat arrays (offsets and values, one pair per relation), read through spans:
     /// a build makes about a dozen arrays whatever the mesh's size, and the result is not changed after it.
+    /// <para>
+    /// Read-only, though arrays are handed out: <see cref="Weld"/> and <see cref="Representative"/> are the weld itself
+    /// (the spans, refits and every other reader share them), and <see cref="Members"/>, <see cref="Adjacent"/> and
+    /// <see cref="TrianglesOf"/> are copies made once for callers that still index arrays: writing into any of them makes
+    /// readers disagree. They stay arrays only until those callers (Mixer) read the spans.
+    /// </para>
     /// </summary>
     public sealed class MeshNeighbors
     {
