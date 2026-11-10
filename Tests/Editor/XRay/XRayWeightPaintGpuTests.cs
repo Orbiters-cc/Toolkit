@@ -25,7 +25,7 @@ namespace Orbiters.Toolkit.Editor.Tests.XRay
             var mesh = new Mesh { vertices = new Vector3[4], triangles = new[] { 0, 1, 2, 0, 2, 3 } };
             try
             {
-                // Five influences on vertex 0 (more than legacy BoneWeight keeps), a sum above 1 on vertex 2 when 0 and 1 show.
+                // Five influences on vertex 0 (more than legacy BoneWeight keeps), a full sum on vertex 2 when 0 and 1 show.
                 var perVertex = new byte[] { 5, 1, 2, 1 };
                 var weights = new[]
                 {
@@ -40,24 +40,32 @@ namespace Orbiters.Toolkit.Editor.Tests.XRay
                     mesh.SetBoneWeights(counts, all);
                 }
 
+                // Unity stores these weights as UNorm16: one step is 1 / 65535.
+                const float storageStep = 1f / 65535f;
+                var stored = mesh.GetAllBoneWeights();
                 foreach (var shown in new[] { new[] { 0 }, new[] { 4 }, new[] { 0, 1 }, new[] { 1, 3, 4 }, new int[0] })
                 {
                     var set = new System.Collections.Generic.HashSet<int>(shown);
                     var actual = XRayWeightPaintService.BuildWeights(mesh, set);
                     var expected = new float[4];
+                    var storedExpected = new float[4];
                     int at = 0;
                     for (int v = 0; v < 4; v++)
                     {
                         for (int k = 0; k < perVertex[v]; k++)
+                        {
                             if (set.Contains(weights[at + k].boneIndex)) expected[v] += weights[at + k].weight;
+                            if (set.Contains(stored[at + k].boneIndex)) storedExpected[v] += stored[at + k].weight;
+                        }
                         at += perVertex[v];
                     }
 
                     for (int v = 0; v < 4; v++)
-                        Assert.That(actual[v], Is.EqualTo(expected[v]).Within(1e-6f), $"bones {string.Join(",", shown)}, vertex {v}");
+                        Assert.That(actual[v], Is.EqualTo(expected[v]).Within(storageStep), $"bones {string.Join(",", shown)}, vertex {v}");
+                    Assert.That(actual, Is.EqualTo(storedExpected), "every stored influence is summed exactly");
                     var colors = XRayWeightPaintService.ColorsOf(actual);
                     for (int v = 0; v < 4; v++)
-                        Assert.That(colors[v], Is.EqualTo(XRayWeightPaintService.EvaluateBlenderWeightColor(Mathf.Clamp01(expected[v]))));
+                        Assert.That(colors[v], Is.EqualTo(XRayWeightPaintService.EvaluateBlenderWeightColor(Mathf.Clamp01(storedExpected[v]))));
                 }
             }
             finally
@@ -80,7 +88,8 @@ namespace Orbiters.Toolkit.Editor.Tests.XRay
                 var all = new System.Collections.Generic.List<BoneWeight1>();
                 for (int v = 0; v < vertices; v++)
                 {
-                    counts[v] = (byte)random.Next(0, 9);
+                    // This fixture compares colours on valid skinned vertices.
+                    counts[v] = (byte)random.Next(1, 9);
                     var raw = Enumerable.Range(0, counts[v]).Select(_ => (float)random.NextDouble() + 0.001f).ToArray();
                     float sum = raw.Sum();
                     // Sorted heaviest first with distinct bones, as Unity requires; some sums go a little above 1.

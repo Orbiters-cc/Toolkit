@@ -276,11 +276,12 @@ namespace Orbiters.Toolkit
                             error = new OrbitersHttpException(message, url, status, body, cutOff: !complete);
                         }
                     }
-                    catch (Exception ex) when (Stopped(ex) && cancellation.IsCancellationRequested)
+                    // Mono may wrap an aborted socket read; the token decides cancellation, not the exception type.
+                    catch (Exception) when (cancellation.IsCancellationRequested)
                     {
                         throw new OperationCanceledException(cancellation);
                     }
-                    catch (Exception ex) when (Stopped(ex) && timeout.IsCancellationRequested)
+                    catch (Exception) when (timeout.IsCancellationRequested)
                     {
                         error = new OrbitersHttpException($"Orbiters did not answer within {TimeoutOf(kind).TotalSeconds:0} seconds.", url, 0, timedOut: true);
                     }
@@ -328,7 +329,13 @@ namespace Orbiters.Toolkit
                     // Started on the thread pool: resolving the server's name may block the calling thread.
                     response = await Task.Run(() => Client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellation), cancellation).ConfigureAwait(false);
                 }
+                catch (Exception) when (cancellation.IsCancellationRequested)
+                {
+                    request.Dispose();
+                    throw new OperationCanceledException(cancellation);
+                }
                 catch (HttpRequestException) { offline = true; request.Dispose(); throw; }
+                catch { request.Dispose(); throw; }
                 offline = false;
                 Interlocked.Exchange(ref answeredTicks, DateTime.UtcNow.Ticks);
                 int status = (int)response.StatusCode;
@@ -358,9 +365,6 @@ namespace Orbiters.Toolkit
                    n.Contains("token") || n.Contains("auth") || n.Contains("key") || n.Contains("secret") || n.Contains("session") ||
                    n.Contains("password") || n.Contains("cookie") || n.Contains("credential");
         }
-
-        // Stopped by a cancellation or a timeout: cancelled, or the response disposed under a read.
-        private static bool Stopped(Exception ex) => ex is OperationCanceledException || ex is ObjectDisposedException || ex is IOException;
 
         private static string CutOffMessage(long status) => $"Orbiters answered (HTTP {status}), but its answer was cut off before its end.";
 
@@ -517,7 +521,7 @@ namespace Orbiters.Toolkit
                 try
                 {
                     try { response = await FollowAsync(() => new HttpRequestMessage(HttpMethod.Get, url), url, token, true, null, watch.Token).ConfigureAwait(false); watch.Moved(); }
-                    catch (OrbitersHttpException refused)
+                    catch (OrbitersHttpException refused) when (!watch.Token.IsCancellationRequested)
                     {
                         result.StatusCode = refused.StatusCode;
                         result.Error = refused.Message.Replace("The request was", "The download was");
@@ -555,6 +559,7 @@ namespace Orbiters.Toolkit
                             await file.WriteAsync(buffer, 0, n, watch.Token).ConfigureAwait(false);
                             progress?.Invoke(bytes, total, false);
                         }
+                        watch.Token.ThrowIfCancellationRequested();
                         // Ended before the length it announced: tried again as a download that got no answer.
                         if (Short(response, bytes))
                         {
@@ -571,8 +576,8 @@ namespace Orbiters.Toolkit
                     progress?.Invoke(result.Bytes, result.Bytes, true);
                     return result;
                 }
-                catch (Exception ex) when (Stopped(ex) && cancellation.IsCancellationRequested) { result.Cancelled = true; result.Error = "Cancelled."; return result; }
-                catch (Exception ex) when (Stopped(ex) && watch.Stalled) { result.Error = $"The download stopped: no data arrived for {StallLimitSeconds:0} seconds."; return result; }
+                catch (Exception) when (cancellation.IsCancellationRequested) { result.Cancelled = true; result.Error = "Cancelled."; return result; }
+                catch (Exception) when (watch.Stalled) { result.Error = $"The download stopped: no data arrived for {StallLimitSeconds:0} seconds."; return result; }
                 // The connection failed or broke off: tried again as a download that got no answer.
                 catch (Exception ex) when (ex is HttpRequestException || ex is IOException)
                 {
@@ -620,7 +625,7 @@ namespace Orbiters.Toolkit
                     {
                         response = await FollowAsync(Make, url, token, true, headers, watch.Token, stripped).ConfigureAwait(false);
                     }
-                    catch (OrbitersHttpException refused)
+                    catch (OrbitersHttpException refused) when (!watch.Token.IsCancellationRequested)
                     {
                         result.StatusCode = refused.StatusCode;
                         result.Error = refused.Message;
@@ -658,8 +663,8 @@ namespace Orbiters.Toolkit
                     report?.Invoke(total, total, true);
                     return result;
                 }
-                catch (Exception ex) when (Stopped(ex) && cancellation.IsCancellationRequested) { result.Cancelled = true; result.Error = "The upload was cancelled."; return result; }
-                catch (Exception ex) when (Stopped(ex) && watch.Stalled) { result.Error = $"The upload timed out: nothing moved for {StallLimitSeconds:0} seconds."; return result; }
+                catch (Exception) when (cancellation.IsCancellationRequested) { result.Cancelled = true; result.Error = "The upload was cancelled."; return result; }
+                catch (Exception) when (watch.Stalled) { result.Error = $"The upload timed out: nothing moved for {StallLimitSeconds:0} seconds."; return result; }
                 catch (Exception ex) when (ex is HttpRequestException || ex is IOException)
                 {
                     result.Error = result.StatusCode == 0 ? StatusMessage(0) : "The upload broke off: " + ex.Message;
