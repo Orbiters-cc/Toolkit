@@ -14,7 +14,8 @@ namespace Orbiters.Toolkit.Editor
     /// </summary>
     public sealed class EditorChanges
     {
-        private readonly HashSet<int> properties = new HashSet<int>(), structure = new HashSet<int>(), subtrees = new HashSet<int>(), destroyed = new HashSet<int>();
+        private readonly HashSet<int> properties = new HashSet<int>(), structure = new HashSet<int>(), subtrees = new HashSet<int>(), destroyed = new HashSet<int>(),
+            rewritten = new HashSet<int>();
         private readonly HashSet<string> assets = new HashSet<string>(StringComparer.Ordinal);
         private readonly List<string> imported = new List<string>(), deleted = new List<string>(), moved = new List<string>(), movedFrom = new List<string>();
         private Dictionary<int, Object> found;
@@ -50,6 +51,12 @@ namespace Orbiters.Toolkit.Editor
         /// a prefab instance updated, or their whole subtree's structure changed.
         /// </summary>
         public IReadOnlyCollection<int> Subtrees => subtrees;
+
+        /// <summary>
+        /// The roots of subtrees anything below may have changed in (objects, components, properties): a hierarchy's
+        /// structure changed as a whole, or a prefab instance was updated. Also in <see cref="Subtrees"/>.
+        /// </summary>
+        public IReadOnlyCollection<int> Rewritten => rewritten;
 
         /// <summary>The roots of the hierarchies destroyed (their parents are in <see cref="Subtrees"/>).</summary>
         public IReadOnlyCollection<int> Destroyed => destroyed;
@@ -129,6 +136,7 @@ namespace Orbiters.Toolkit.Editor
         internal void AddStructure(int id) { if (id != 0) structure.Add(id); }
         internal void AddSubtree(int id) { if (id != 0) subtrees.Add(id); }
         internal void AddDestroyed(int id) { if (id != 0) { destroyed.Add(id); subtrees.Add(id); } }
+        internal void AddRewritten(int id) { if (id != 0) { rewritten.Add(id); subtrees.Add(id); } }
         internal void AddAsset(string guid) { if (!string.IsNullOrEmpty(guid)) assets.Add(guid); }
         internal void SetEverything() => Everything = true;
         internal void SetUndoRedo() => UndoRedo = true;
@@ -154,7 +162,7 @@ namespace Orbiters.Toolkit.Editor
                     case ObjectChangeKind.ChangeGameObjectStructure:
                         stream.GetChangeGameObjectStructureEvent(i, out var structure); AddStructure(structure.instanceId); break;
                     case ObjectChangeKind.ChangeGameObjectStructureHierarchy:
-                        stream.GetChangeGameObjectStructureHierarchyEvent(i, out var hierarchy); AddSubtree(hierarchy.instanceId); break;
+                        stream.GetChangeGameObjectStructureHierarchyEvent(i, out var hierarchy); AddRewritten(hierarchy.instanceId); break;
                     case ObjectChangeKind.ChangeGameObjectParent:
                         stream.GetChangeGameObjectParentEvent(i, out var parent);
                         AddSubtree(parent.instanceId); AddSubtree(parent.previousParentInstanceId); AddSubtree(parent.newParentInstanceId); break;
@@ -172,7 +180,7 @@ namespace Orbiters.Toolkit.Editor
                         stream.GetDestroyAssetObjectEvent(i, out var removed); AddAsset(removed.guid.ToString()); break;
                     case ObjectChangeKind.UpdatePrefabInstances:
                         stream.GetUpdatePrefabInstancesEvent(i, out var prefabs);
-                        foreach (int id in prefabs.instanceIds) AddSubtree(id);
+                        foreach (int id in prefabs.instanceIds) AddRewritten(id);
                         break;
                     // A scene opened, closed or changed as a whole, and changes added in later Unity versions.
                     default: SetEverything(); break;

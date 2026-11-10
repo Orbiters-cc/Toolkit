@@ -40,6 +40,8 @@ namespace Orbiters.Toolkit.Editor.VRChat.Checks
             // whose own share is measured again.
             public bool Walk = true, AssetsTouched = true, Everything = true;
             public readonly HashSet<int> Dirty = new HashSet<int>();
+            // Subtrees anything below may have changed in (a prefab update, a hierarchy rewritten): all measured again.
+            public readonly List<Transform> Rewritten = new List<Transform>();
             public readonly Dictionary<int, Part> Parts = new Dictionary<int, Part>();
             // Every id a part answers for (its GameObject, transform and components), to its GameObject's id.
             public readonly Dictionary<int, int> Owners = new Dictionary<int, int>();
@@ -54,7 +56,7 @@ namespace Orbiters.Toolkit.Editor.VRChat.Checks
             public readonly Dictionary<int, Known> Contents = new Dictionary<int, Known>();
             public Dictionary<int, Known> AssetContents = new Dictionary<int, Known>();
 
-            public bool Stale => Walk || Everything || Dirty.Count > 0 || AssetsTouched || ReferencesChanged;
+            public bool Stale => Walk || Everything || Dirty.Count > 0 || Rewritten.Count > 0 || AssetsTouched || ReferencesChanged;
         }
 
         private readonly struct Known
@@ -88,6 +90,15 @@ namespace Orbiters.Toolkit.Editor.VRChat.Checks
         {
             unchecked
             {
+                // Every GameObject of a rewritten subtree is measured again, as if it had changed itself.
+                if (entry.Rewritten.Count > 0)
+                {
+                    foreach (var subtree in entry.Rewritten)
+                        if (subtree != null && subtree.IsChildOf(entry.Root.transform))
+                            foreach (var t in subtree.GetComponentsInChildren<Transform>(true)) entry.Dirty.Add(t.gameObject.GetInstanceID());
+                    entry.Rewritten.Clear();
+                    entry.Walk = true;
+                }
                 if (entry.Walk || entry.Everything) WalkAll(entry);
                 else
                 {
@@ -281,6 +292,7 @@ namespace Orbiters.Toolkit.Editor.VRChat.Checks
             foreach (int id in changes.Properties) Touch(changes, id, false);
             foreach (int id in changes.Structure) Touch(changes, id, false);
             foreach (int id in changes.Subtrees) Touch(changes, id, true);
+            foreach (int id in changes.Rewritten) Rewrite(changes, id);
             foreach (string guid in changes.Assets) TouchAsset(guid, null);
             foreach (string path in changes.ImportPaths())
                 if (!string.IsNullOrEmpty(path)) TouchAsset(AssetDatabase.AssetPathToGUID(path), path);
@@ -304,6 +316,26 @@ namespace Orbiters.Toolkit.Editor.VRChat.Checks
                 if (!resolved) { transform = changes.TransformOf(id); resolved = true; }
                 if (transform != null && transform.IsChildOf(entry.Root.transform)) entry.Walk = true;
             }
+        }
+
+        // A subtree anything below may have changed in: the avatars holding it measure all of it again (all of the avatar
+        // when the subtree holds it, or when its object is gone).
+        private static void Rewrite(EditorChanges changes, int id)
+        {
+            if (id == 0) return;
+            var transform = changes.TransformOf(id);
+            foreach (var entry in Entries.Values)
+            {
+                if (transform == null) { if (entry.Owners.ContainsKey(id)) entry.Everything = entry.AssetsTouched = true; continue; }
+                if (entry.Root.transform.IsChildOf(transform)) entry.Everything = true;
+                else if (transform.IsChildOf(entry.Root.transform)) entry.Rewritten.Add(transform);
+            }
+        }
+
+        /// <summary>For tests: forgets what was measured of this avatar, so the next value is measured from nothing.</summary>
+        internal static void Forget(GameObject root)
+        {
+            if (root != null) Entries.Remove(root.GetInstanceID());
         }
 
         private static void TouchAsset(string guid, string path)

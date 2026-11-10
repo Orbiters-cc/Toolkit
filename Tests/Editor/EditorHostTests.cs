@@ -223,6 +223,59 @@ public sealed class EditorHostTests
         finally { EditorSceneManager.ClosePreviewScene(scene); }
     }
 
+    // Review of TKV-26: after each kind of change the editor reports, the value kept up to date equals one measured from
+    // nothing; a rewritten subtree (a prefab update, a hierarchy's structure) counts for everything below it.
+    [Test] public void EachKindOfChangeGivesTheValueOfAFreshMeasure()
+    {
+        var scene = EditorSceneManager.NewPreviewScene();
+        try
+        {
+            var root = new GameObject("Avatar");
+            SceneManager.MoveGameObjectToScene(root, scene);
+            var child = new GameObject("Child");
+            child.transform.SetParent(root.transform);
+            var grandchild = new GameObject("Grandchild");
+            grandchild.transform.SetParent(child.transform);
+            var collider = grandchild.AddComponent<BoxCollider>();
+            var other = new GameObject("Other");
+            other.transform.SetParent(root.transform);
+            EditorChangeBus.Flush();
+            AvatarSignature.Of(root);
+
+            void Check(string what, Action<EditorChanges> report)
+            {
+                EditorChangeBus.Report(report);
+                string kept = AvatarSignature.Of(root);
+                AvatarSignature.Forget(root);
+                Assert.AreEqual(AvatarSignature.Of(root), kept, what);
+            }
+            void Edit(float size) { collider.size = Vector3.one * size; EditorUtility.SetDirty(collider); }
+
+            Edit(2);
+            Check("properties", c => c.AddProperties(collider.GetInstanceID()));
+            grandchild.AddComponent<SphereCollider>();
+            Check("structure", c => c.AddStructure(grandchild.GetInstanceID()));
+            Edit(3);
+            grandchild.AddComponent<CapsuleCollider>();
+            Check("a rewritten subtree, reported on its root", c => c.AddRewritten(child.GetInstanceID()));
+            Edit(4);
+            Check("the avatar itself rewritten", c => c.AddRewritten(root.GetInstanceID()));
+            grandchild.transform.SetParent(other.transform);
+            Check("parent", c => { c.AddSubtree(grandchild.GetInstanceID()); c.AddSubtree(child.GetInstanceID()); c.AddSubtree(other.GetInstanceID()); });
+            var made = new GameObject("Made");
+            made.AddComponent<BoxCollider>();
+            made.transform.SetParent(child.transform);
+            Check("created", c => c.AddSubtree(made.GetInstanceID()));
+            other.transform.SetSiblingIndex(0);
+            Check("children order", c => c.AddSubtree(root.GetInstanceID()));
+            int id = grandchild.GetInstanceID();
+            Object.DestroyImmediate(grandchild);
+            Check("destroyed", c => { c.AddDestroyed(id); c.AddSubtree(other.GetInstanceID()); });
+            Check("undo", c => c.SetUndoRedo());
+        }
+        finally { EditorSceneManager.ClosePreviewScene(scene); }
+    }
+
     [Test] public void Hash64IsStableAndTellsTextsApart()
     {
         Assert.AreEqual(AvatarSignature.Hash64("abc"), AvatarSignature.Hash64("abc"));
