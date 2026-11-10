@@ -345,4 +345,49 @@ public sealed class GeneratedAssetsTests
         }
         finally { GeneratedAssets.AfterScan = null; }
     }
+
+    // Review of round 2: a deletion is decided by Removable in one call: candidates used only by each other go together,
+    // one kept by the caller keeps what it uses, and none goes when the project changed too much to check again at once.
+    [UnityTest] public IEnumerator RemovableDecidesInOneCallAndAnswersNoneWhenUncertain()
+    {
+        var texture = new Texture2D(2, 2);
+        AssetDatabase.CreateAsset(texture, folder + "/Picture.asset");
+        var material = new Material(Shader.Find("Standard")) { mainTexture = texture };
+        AssetDatabase.CreateAsset(material, folder + "/Look.mat");
+        AssetDatabase.SaveAssets();
+        string picture = folder + "/Picture.asset", look = folder + "/Look.mat";
+
+        var scan = ProjectReferences.ScanAsync();
+        yield return Wait(scan);
+        var map = scan.Result;
+        Assert.That(map.UsersOf(picture), Does.Contain(look));
+        Assert.That(map.Removable(new[] { picture }), Is.Empty, "the material outside the candidates uses it");
+        Assert.That(map.Removable(new[] { picture, look }), Is.EquivalentTo(new[] { picture, look }), "used only by a candidate: both go");
+        Assert.That(map.Removable(new[] { picture, look }, p => p == look), Is.Empty, "the kept material keeps its picture");
+
+        for (int i = 0; i <= ProjectReferences.RecheckFiles; i++) File.WriteAllText(folder + "/Note" + i + ".txt", "note " + i);
+        Assert.That(map.Removable(new[] { picture, look }, null, out string uncertain), Is.Empty, "too many files changed to check again at once");
+        Assert.That(uncertain, Is.Not.Null);
+    }
+
+    // Review of round 2: a text file with a byte order mark is read in its own encoding; a text file that does not read
+    // as text (UTF-16 without one) cannot say what it names, which is not "nothing".
+    [Test] public void TextInOtherEncodingsIsDecodedOrUncertain()
+    {
+        string temporary = Path.Combine(Path.GetTempPath(), "OrbitersEncodings-" + Guid.NewGuid().ToString("N").Substring(0, 8));
+        try
+        {
+            Directory.CreateDirectory(temporary);
+            const string guid = "0123456789abcdef0123456789abcdef";
+            File.WriteAllText(Path.Combine(temporary, "Marked16.json"), "{\"guid\": \"" + guid + "\"}", new System.Text.UnicodeEncoding(false, true));
+            File.WriteAllText(Path.Combine(temporary, "Marked32.txt"), "uses " + guid, new System.Text.UTF32Encoding(true, true));
+            File.WriteAllBytes(Path.Combine(temporary, "Bare16.json"), new System.Text.UnicodeEncoding(false, false).GetBytes("{\"guid\": \"" + guid + "\"}"));
+            var root = new ProjectReferences.Root("Packages/orbiters.test-encodings", temporary, false);
+            var read = new ProjectReferences.Reader(new System.Collections.Generic.List<ProjectReferences.Root> { root }, default).Run();
+            Assert.That(read.Single(f => f.Path.EndsWith("Marked16.json", StringComparison.Ordinal)).Guids, Is.EquivalentTo(new[] { guid }));
+            Assert.That(read.Single(f => f.Path.EndsWith("Marked32.txt", StringComparison.Ordinal)).Guids, Is.EquivalentTo(new[] { guid }));
+            Assert.That(read.Single(f => f.Path.EndsWith("Bare16.json", StringComparison.Ordinal)).Failure, Is.Not.Null, "cannot be decoded: uncertain");
+        }
+        finally { if (temporary.Contains("OrbitersEncodings-") && Directory.Exists(temporary)) Directory.Delete(temporary, true); }
+    }
 }

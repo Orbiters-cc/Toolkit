@@ -146,16 +146,10 @@ namespace Orbiters.Toolkit.Editor.Storage
                 // From here to the deletion, one synchronous step: the scan spans editor frames, so the files changed since
                 // it read them are read again, and what is loaded now decides.
                 AfterScan?.Invoke();
-                if (!references.Recheck()) return removed;
                 var loaded = Loaded();
-                var removable = new HashSet<string>(candidates.Where(p => !loaded.Contains(p) && File.Exists(Path.Combine(Root, p))), StringComparer.OrdinalIgnoreCase);
                 // Files only used by other files going go together; anything used from outside that set stays.
-                for (bool changed = true; changed;)
-                {
-                    changed = false;
-                    foreach (string path in removable.ToList())
-                        if (references.UsersOf(path, removable).Count > 0) { removable.Remove(path); changed = true; }
-                }
+                var removable = references.Removable(candidates.Where(p => File.Exists(Path.Combine(Root, p))), loaded.Contains, out string uncertain);
+                if (uncertain != null) return removed;
                 removed.AddRange(removable);
                 PutAside(removed);
                 completed = true;

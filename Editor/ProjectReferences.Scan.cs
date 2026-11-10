@@ -94,10 +94,6 @@ namespace Orbiters.Toolkit.Editor
             "DefaultImporter", "TextScriptImporter", "MonoImporter",
         };
 
-        // Binary assets only Unity's own bakes write, which Unity imports as it writes them: their references are taken
-        // from the import even before an import stamp exists for them.
-        private static readonly HashSet<string> BakedOnly = new HashSet<string>(StringComparer.Ordinal) { "LightingDataAsset", "NavMeshData" };
-
         // The main-thread part of reading a file: Unity's dependencies, and whether a file not read as text is still as
         // Unity imported it.
         private void Add(FileRead read)
@@ -116,7 +112,8 @@ namespace Orbiters.Toolkit.Editor
             {
                 // A file not yet imported keeps the importer its kind gets by default.
                 bool plain = importer != null ? NoInnerReferences.Contains(importer.Name) : Media.Contains(Path.GetExtension(read.Path));
-                if (!plain && !ImportStamps.Current(read.Path, read.Stamp) && !BakedOnly.Contains(AssetDatabase.GetMainAssetTypeAtPath(read.Path)?.Name ?? ""))
+                // Whatever its type: a file whose bytes are not known to be what Unity imported may use what its import does not say.
+                if (!plain && !ImportStamps.Current(read.Path, read.Stamp))
                     throw new UncertainReferencesException(importer == null
                         ? read.Path + " is in a binary format Unity has not imported: what it uses cannot be read."
                         : read.Path + " changed since Unity last imported it: what it uses is known once Unity imports it again.");
@@ -155,7 +152,10 @@ namespace Orbiters.Toolkit.Editor
                 name.Length == 0 || name[0] == '.' || name[name.Length - 1] == '~' || string.Equals(name, "cvs", StringComparison.OrdinalIgnoreCase) ||
                 name.EndsWith(".tmp", StringComparison.OrdinalIgnoreCase);
 
-            public static Listing Of(IEnumerable<Root> roots, CancellationToken cancellation)
+            public static Listing Of(IEnumerable<Root> roots, CancellationToken cancellation) => Of(roots, cancellation, double.PositiveInfinity, null);
+
+            /// <summary>The listing, or Uncertain once it took longer than <paramref name="limitMilliseconds"/> on <paramref name="clock"/>.</summary>
+            public static Listing Of(IEnumerable<Root> roots, CancellationToken cancellation, double limitMilliseconds, System.Diagnostics.Stopwatch clock)
             {
                 var listing = new Listing();
                 foreach (var root in roots)
@@ -167,6 +167,7 @@ namespace Orbiters.Toolkit.Editor
                     while (pending.Count > 0)
                     {
                         cancellation.ThrowIfCancellationRequested();
+                        if (clock != null && clock.Elapsed.TotalMilliseconds > limitMilliseconds) { listing.Uncertain = "Listing the project's files again took too long."; return listing; }
                         var (folder, path, depth) = pending.Pop();
                         if (depth > MaxDepth) { listing.Uncertain = "Folders nest too deep at " + path + " to be checked."; return listing; }
                         FileSystemInfo[] children;
@@ -199,6 +200,13 @@ namespace Orbiters.Toolkit.Editor
                 return listing;
             }
         }
+
+        // Kinds that are text: one that does not read as text is an encoding the scan cannot decode.
+        private static readonly HashSet<string> TextKinds = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ".json", ".txt", ".xml", ".yaml", ".yml", ".csv", ".md", ".html", ".htm", ".cs", ".uxml", ".uss", ".tss", ".shader", ".cginc", ".hlsl",
+            ".asmdef", ".asmref",
+        };
 
         /// <summary>Lists and reads every file on a worker thread: no Unity call.</summary>
         internal sealed class Reader
@@ -238,7 +246,12 @@ namespace Orbiters.Toolkit.Editor
                 {
                     if (entry.Meta != null) Tokens(entry.Meta.FullName, result.Guids, false, cancellation);
                     if (entry.File is FileInfo file && file.Exists)
+                    {
                         result.ContentRead = !Media.Contains(file.Extension) && Tokens(file.FullName, result.Guids, true, cancellation);
+                        // A text file that is not text as read (UTF-16 or UTF-32 without a byte order mark, say) may name GUIDs
+                        // the scan cannot see: not "names nothing".
+                        if (!result.ContentRead && TextKinds.Contains(file.Extension)) result.Failure = "it is text in an encoding that cannot be told";
+                    }
                 }
                 catch (Exception ex) when (ex is FileNotFoundException || ex is DirectoryNotFoundException) { return null; }
                 catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException) { result.Failure = ex.Message; }
@@ -252,12 +265,14 @@ namespace Orbiters.Toolkit.Editor
             /// </summary>
             internal static bool Tokens(string fullPath, HashSet<string> into, bool binaryStops, CancellationToken cancellation)
             {
-                var buffer = new byte[Chunk];
-                var run = new char[32];
-                int length = 0;
-                long offset = 0;
                 using (var stream = new FileStream(fullPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete, Chunk))
                 {
+                    var encoding = Marked(stream);
+                    if (encoding != null) return DecodedTokens(stream, encoding, into, cancellation);
+                    var buffer = new byte[Chunk];
+                    var run = new char[32];
+                    int length = 0;
+                    long offset = 0;
                     for (int count; (count = stream.Read(buffer, 0, buffer.Length)) > 0; offset += count)
                     {
                         cancellation.ThrowIfCancellationRequested();
@@ -265,19 +280,57 @@ namespace Orbiters.Toolkit.Editor
                         {
                             byte b = buffer[i];
                             if (b == 0 && binaryStops && offset + i < 8192) return false;
-                            char c = (char)b;
-                            bool hex = (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');
-                            if (hex)
-                            {
-                                if (length < 32) run[length] = char.ToLowerInvariant(c);
-                                length++;
-                                continue;
-                            }
+                            if (Hex((char)b, run, ref length)) continue;
                             if (length == 32) into.Add(new string(run));
                             length = 0;
                         }
                     }
+                    if (length == 32) into.Add(new string(run));
+                    return true;
                 }
+            }
+
+            // A digit of a run: kept (lower case) while the run is at most 32 long.
+            private static bool Hex(char c, char[] run, ref int length)
+            {
+                if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F'))) return false;
+                if (length < 32) run[length] = char.ToLowerInvariant(c);
+                length++;
+                return true;
+            }
+
+            // The encoding a byte order mark names, the stream left after it; null (stream at its start) for none or UTF-8's
+            // (UTF-8 is read as bytes: a GUID's digits are the same bytes).
+            private static System.Text.Encoding Marked(FileStream stream)
+            {
+                var start = new byte[4];
+                int n = stream.Read(start, 0, 4);
+                System.Text.Encoding encoding = null;
+                int skip = 0;
+                if (n >= 4 && start[0] == 0xFF && start[1] == 0xFE && start[2] == 0 && start[3] == 0) { encoding = new System.Text.UTF32Encoding(false, false); skip = 4; }
+                else if (n >= 4 && start[0] == 0 && start[1] == 0 && start[2] == 0xFE && start[3] == 0xFF) { encoding = new System.Text.UTF32Encoding(true, false); skip = 4; }
+                else if (n >= 2 && start[0] == 0xFF && start[1] == 0xFE) { encoding = new System.Text.UnicodeEncoding(false, false); skip = 2; }
+                else if (n >= 2 && start[0] == 0xFE && start[1] == 0xFF) { encoding = new System.Text.UnicodeEncoding(true, false); skip = 2; }
+                stream.Position = encoding != null ? skip : 0;
+                return encoding;
+            }
+
+            private static bool DecodedTokens(FileStream stream, System.Text.Encoding encoding, HashSet<string> into, CancellationToken cancellation)
+            {
+                var run = new char[32];
+                int length = 0;
+                var buffer = new char[Chunk];
+                using (var reader = new StreamReader(stream, encoding, false, Chunk, true))
+                    for (int count; (count = reader.Read(buffer, 0, buffer.Length)) > 0;)
+                    {
+                        cancellation.ThrowIfCancellationRequested();
+                        for (int i = 0; i < count; i++)
+                        {
+                            if (Hex(buffer[i], run, ref length)) continue;
+                            if (length == 32) into.Add(new string(run));
+                            length = 0;
+                        }
+                    }
                 if (length == 32) into.Add(new string(run));
                 return true;
             }

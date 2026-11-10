@@ -15,9 +15,8 @@ namespace Orbiters.Toolkit.Editor
     /// asset Unity's import says it depends on. A file whose own content cannot be read (Unity's binary format) is trusted
     /// only while it is exactly as Unity last imported it; otherwise the scan cannot say what uses what and fails with
     /// <see cref="UncertainReferencesException"/>. Files are read on a worker and Unity is asked a slice per editor frame,
-    /// so the editor stays responsive; the scan ends by checking, in the same step as its return, that no file changed
-    /// meanwhile (those that did are read again). Tools use it before removing files: a material another avatar's prefab
-    /// still uses is kept.
+    /// so the editor stays responsive. Tools use it before removing files, through <see cref="Removable"/> in the step that
+    /// deletes: a material another avatar's prefab still uses is kept.
     /// </summary>
     public sealed partial class ProjectReferences
     {
@@ -39,10 +38,15 @@ namespace Orbiters.Toolkit.Editor
         }
 
         /// <summary>
-        /// Builds the map. <paramref name="progress"/> receives 0..1. Call on the main thread; the files are read on a worker
-        /// and Unity is asked a slice per editor frame. Throws <see cref="UncertainReferencesException"/> when what uses what
-        /// cannot be known (a file in Unity's binary format changed since its import, a file that cannot be read): a caller
-        /// deciding a deletion then keeps everything.
+        /// Builds the map. <paramref name="progress"/> receives 0..1. Call on the main thread; the files are listed and read
+        /// on a worker and Unity is asked a slice per editor frame; at the end the project is listed again (on the worker)
+        /// and what changed meanwhile is read again, until a listing finds nothing new. Throws
+        /// <see cref="UncertainReferencesException"/> when what uses what cannot be known (a binary file whose bytes are not
+        /// known to be what Unity imported, a file that cannot be read or decoded): a caller deciding a deletion then keeps
+        /// everything.
+        /// A deletion must be decided by <see cref="Removable"/>, in the same synchronous step as the deletion itself: it
+        /// checks the project once more and answers which candidates may go. Deleting on <see cref="UsersOf"/> after the
+        /// scan returned, without that call, is a bug: files may have changed since.
         /// </summary>
         public static async Task<ProjectReferences> ScanAsync(Action<float, string> progress = null, CancellationToken cancellation = default)
         {
@@ -55,59 +59,95 @@ namespace Orbiters.Toolkit.Editor
                 progress?.Invoke(0.5f * reader.Fraction, $"Reading the project's files… {reader.Read} of {reader.Found}");
                 await Task.Yield();
             }
-            var found = await reading;
-            var slice = Stopwatch.StartNew();
-            for (int i = 0; i < found.Count; i++)
+            await map.AddSlicedAsync(await reading, 0.5f, 0.45f, progress, cancellation);
+            // Files changed while the scan ran are read again, until a listing finds nothing new.
+            for (int round = 0; ; round++)
             {
-                cancellation.ThrowIfCancellationRequested();
-                map.Add(found[i]);
-                if (slice.Elapsed.TotalMilliseconds <= 12) continue;
-                progress?.Invoke(0.5f + 0.5f * (i + 1f) / found.Count, $"Checking what uses what… {i + 1} of {found.Count}");
-                await Task.Yield();
-                slice.Restart();
+                var known = map.files.ToDictionary(p => p.Key, p => p.Value.Stamp, StringComparer.OrdinalIgnoreCase);
+                var roots = map.roots;
+                var diff = await Task.Run(() => Diff(roots, known, null, cancellation, true), cancellation);
+                if (diff.Uncertain != null) throw new UncertainReferencesException(diff.Uncertain);
+                if (diff.Changed.Count == 0 && diff.Gone.Count == 0) break;
+                if (round >= 4) throw new UncertainReferencesException("Files kept changing while the project was checked.");
+                foreach (string gone in diff.Gone) map.Remove(gone);
+                foreach (var read in diff.Changed) map.Remove(read.Path);
+                await map.AddSlicedAsync(diff.Changed, 0.95f, 0f, progress, cancellation);
             }
-            // The last word, in one step with the return: files changed while the scan ran are read again.
-            string reason = map.Recheck(out _);
-            if (reason != null) throw new UncertainReferencesException(reason);
+            if (!SameRoots(Roots(), map.roots)) throw new UncertainReferencesException("The project's packages changed while it was checked.");
             progress?.Invoke(1f, "Checked " + map.files.Count + " files");
             return map;
         }
 
+        // Unity's part of reading each file, a slice per editor frame.
+        private async Task AddSlicedAsync(List<FileRead> found, float from, float span, Action<float, string> progress, CancellationToken cancellation)
+        {
+            var slice = Stopwatch.StartNew();
+            for (int i = 0; i < found.Count; i++)
+            {
+                cancellation.ThrowIfCancellationRequested();
+                Add(found[i]);
+                if (slice.Elapsed.TotalMilliseconds <= 12) continue;
+                progress?.Invoke(from + span * (i + 1f) / found.Count, $"Checking what uses what… {i + 1} of {found.Count}");
+                await Task.Yield();
+                slice.Restart();
+            }
+        }
+
         /// <summary>
-        /// Brings the map up to date at once, on the main thread: the files are listed again and those new or changed since
-        /// they were read are read again, those gone forgotten. Call it in the same synchronous step as a deletion the map
-        /// decides. False when the map cannot be trusted any more (too many changes to read now, a file that cannot be
-        /// read, a binary file changed since its import, the set of packages changed): keep everything then.
+        /// Checks the project once more and answers which of <paramref name="candidates"/> may go, in one synchronous call
+        /// to make right before deleting them, in the same step: those not used by any file outside the candidates (files
+        /// only used by other candidates going go together) and not kept by <paramref name="keep"/> (used by an object
+        /// loaded in the editor, say). None when the project cannot be checked again now: it changed too much since the
+        /// scan, the check would take too long, a file cannot be read, the packages changed.
+        /// </summary>
+        public List<string> Removable(IEnumerable<string> candidates, Func<string, bool> keep = null) => Removable(candidates, keep, out _);
+
+        /// <summary><see cref="Removable(IEnumerable{string}, Func{string, bool})"/>, saying why it answered none when it could not check (else null).</summary>
+        public List<string> Removable(IEnumerable<string> candidates, Func<string, bool> keep, out string uncertain)
+        {
+            uncertain = null;
+            var removable = new HashSet<string>(candidates ?? Enumerable.Empty<string>(), StringComparer.OrdinalIgnoreCase);
+            if (removable.Count == 0) return new List<string>();
+            uncertain = Recheck(out _);
+            if (uncertain != null) return new List<string>();
+            if (keep != null) removable.RemoveWhere(p => keep(p));
+            for (bool changed = true; changed;)
+            {
+                changed = false;
+                foreach (string path in removable.ToList())
+                    if (UsersOf(path, removable).Count > 0) { removable.Remove(path); changed = true; }
+            }
+            return removable.ToList();
+        }
+
+        /// <summary>
+        /// Brings the map up to date at once, on the main thread: the project is listed again and the files new or changed
+        /// since the map read them (by their stamp) are read again, those gone forgotten. Bounded: it lists for at most
+        /// <see cref="RecheckMilliseconds"/> and reads at most <see cref="RecheckFiles"/> files and <see cref="RecheckBytes"/>
+        /// bytes; past that it answers false instead of holding the editor. False also when a file cannot be read, a binary
+        /// file is not as Unity imported it, or the packages changed: keep everything then. <see cref="Removable"/> calls it.
         /// </summary>
         public bool Recheck() => Recheck(out _) == null;
+
+        internal const double RecheckMilliseconds = 250;
+        internal const int RecheckFiles = 64;
+        internal const long RecheckBytes = 8L * 1024 * 1024;
 
         internal string Recheck(out int reread)
         {
             reread = 0;
             var now = Roots();
             if (!SameRoots(now, roots)) return "The project's packages changed while it was checked.";
-            var listing = Listing.Of(now, CancellationToken.None);
-            if (listing.Uncertain != null) return listing.Uncertain;
-            var changed = new List<Listing.Entry>();
-            long bytes = 0;
-            var present = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            foreach (var entry in listing.Entries)
-            {
-                present.Add(entry.Path);
-                if (files.TryGetValue(entry.Path, out var known) && known.Stamp.Equals(entry.Stamp)) continue;
-                changed.Add(entry);
-                bytes += Math.Max(0, entry.Stamp.Size) + Math.Max(0, entry.Stamp.MetaSize);
-            }
-            // Read again now, in one step: a few files a save or an import just wrote, not a project copied in.
-            if (changed.Count > RecheckFiles || bytes > RecheckBytes) return $"{changed.Count} files changed while the project was checked.";
-            foreach (string gone in files.Keys.Where(p => !present.Contains(p)).ToList()) Remove(gone);
+            var known = files.ToDictionary(p => p.Key, p => p.Value.Stamp, StringComparer.OrdinalIgnoreCase);
+            var diff = Diff(now, known, Stopwatch.StartNew(), CancellationToken.None, false);
+            if (diff.Uncertain != null) return diff.Uncertain;
+            foreach (string gone in diff.Gone) Remove(gone);
             try
             {
-                foreach (var entry in changed)
+                foreach (var read in diff.Changed)
                 {
-                    Remove(entry.Path);
-                    var read = Reader.ReadOne(entry, CancellationToken.None);
-                    if (read != null) Add(read);
+                    Remove(read.Path);
+                    Add(read);
                     reread++;
                 }
             }
@@ -115,8 +155,50 @@ namespace Orbiters.Toolkit.Editor
             return null;
         }
 
-        private const int RecheckFiles = 256;
-        private const long RecheckBytes = 64L * 1024 * 1024;
+        private sealed class Changes
+        {
+            public readonly List<FileRead> Changed = new List<FileRead>();
+            public readonly List<string> Gone = new List<string>();
+            public string Uncertain;
+        }
+
+        // Lists the roots and reads the files whose stamp differs from the one they were read with (new ones too); no
+        // Unity call, so it may run on a worker. With a clock, bounded by the recheck limits.
+        private static Changes Diff(List<Root> roots, Dictionary<string, Stamp> known, Stopwatch clock, CancellationToken cancellation, bool unbounded)
+        {
+            var changes = new Changes();
+            var listing = Listing.Of(roots, cancellation, unbounded ? double.PositiveInfinity : RecheckMilliseconds, clock);
+            if (listing.Uncertain != null) { changes.Uncertain = listing.Uncertain; return changes; }
+            var present = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var changed = new List<Listing.Entry>();
+            long bytes = 0;
+            foreach (var entry in listing.Entries)
+            {
+                present.Add(entry.Path);
+                if (known.TryGetValue(entry.Path, out var stamp) && stamp.Equals(entry.Stamp)) continue;
+                changed.Add(entry);
+                bytes += Math.Max(0, entry.Stamp.Size) + Math.Max(0, entry.Stamp.MetaSize);
+            }
+            // At once, a few files a save or an import just wrote, not a project copied in.
+            if (!unbounded && (changed.Count > RecheckFiles || bytes > RecheckBytes))
+            {
+                changes.Uncertain = $"{changed.Count} files changed since the project was checked.";
+                return changes;
+            }
+            changes.Gone.AddRange(known.Keys.Where(p => !present.Contains(p)));
+            foreach (var entry in changed)
+            {
+                if (!unbounded && clock != null && clock.Elapsed.TotalMilliseconds > RecheckMilliseconds * 2)
+                {
+                    changes.Uncertain = "Checking the project again took too long.";
+                    return changes;
+                }
+                var read = Reader.ReadOne(entry, cancellation);
+                if (read != null) changes.Changed.Add(read);
+                else changes.Gone.Add(entry.Path);
+            }
+            return changes;
+        }
 
         private void Remove(string path)
         {

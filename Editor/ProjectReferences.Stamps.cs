@@ -40,6 +40,11 @@ namespace Orbiters.Toolkit.Editor
             {
                 Load();
                 string hash = AssetDatabase.GetAssetDependencyHash(path).ToString();
+                // As strong as Unity's own change detection, never weaker: Unity reimports a file when its or its .meta's
+                // size or write time differs from what it recorded, and so this stamp holds those four, written only when
+                // Unity has just imported the file (ProjectReferencesImports), never from the file as the scan finds it.
+                // A file replaced with the same size and an older write time kept is missed here as it is by Unity, whose
+                // dependency data is then just as out of date: the accepted limit.
                 if (entries.TryGetValue(path, out var known)) return known.Stamp.Equals(stamp) && known.Hash == hash;
                 return ImportedAfter(path, stamp);
             }
