@@ -281,7 +281,8 @@ public sealed class GeneratedAssetsTests
         AssetDatabase.CreateAsset(new Mesh { name = "Fit" }, path);
         GeneratedAssets.Track(path);
         string binary = folder + "/Binary.asset";
-        UnityEditorInternal.InternalEditorUtility.SaveToSerializedFileAndForget(new Object[] { new Mesh { name = "Binary" } }, binary, false);
+        // [PreferBinarySerialization]: binary on disk in a Force Text project too, also after an import.
+        AssetDatabase.CreateAsset(ScriptableObject.CreateInstance<BinaryReferencesFixture>(), binary);
         AssetDatabase.ImportAsset(binary, ImportAssetOptions.ForceSynchronousImport | ImportAssetOptions.ForceUpdate);
         Assert.That(File.ReadAllBytes(binary).Take(8192).Contains((byte)0), Is.True, "written in Unity's binary format");
 
