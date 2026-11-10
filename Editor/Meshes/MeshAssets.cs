@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using System.IO;
+using Orbiters.Toolkit.Meshes;
 using Orbiters.Toolkit.Storage;
 using Unity.Collections;
 using UnityEditor;
@@ -106,14 +107,7 @@ namespace Orbiters.Toolkit.Editor.Meshes
             // Indices as stored, with their base vertex: a 16-bit mesh reaches vertices past 65535 only through it.
             for (int s = 0; s < from.subMeshCount; s++)
                 to.SetIndices(from.GetIndices(s, false), from.GetTopology(s), s, false, (int)from.GetBaseVertex(s));
-            int n = from.vertexCount;
-            var dv = new Vector3[n]; var dn = new Vector3[n]; var dt = new Vector3[n];
-            for (int shape = 0; shape < from.blendShapeCount; shape++)
-                for (int frame = 0; frame < from.GetBlendShapeFrameCount(shape); frame++)
-                {
-                    from.GetBlendShapeFrameVertices(shape, frame, dv, dn, dt);
-                    to.AddBlendShapeFrame(from.GetBlendShapeName(shape), from.GetBlendShapeFrameWeight(shape, frame), dv, dn, dt);
-                }
+            if (from.blendShapeCount > 0) BlendShapeTable.Read(from).WriteTo(to);
             to.bounds = from.bounds;
         }
 
