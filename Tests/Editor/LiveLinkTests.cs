@@ -229,6 +229,31 @@ namespace Orbiters.Toolkit.Editor.Tests
             }
         }
 
+        // An endpoint file half written, missing, or at a path that cannot be one reads as none; deleting it never throws.
+        [Test]
+        public void EndpointFilesThatCannotBeReadAreNone()
+        {
+            string folder = Path.Combine(Path.GetTempPath(), "OrbitersLiveLinkTest-" + Guid.NewGuid().ToString("N"));
+            try
+            {
+                string path = Path.Combine(folder, "endpoint.json");
+                Directory.CreateDirectory(folder);
+                File.WriteAllText(path, "{\"port\":");
+                Assert.That(LiveLinkEndpointFile.Read<Dictionary<string, int>>(path), Is.Null, "half written");
+                Assert.That(LiveLinkEndpointFile.Read<Dictionary<string, int>>(Path.Combine(folder, "none.json")), Is.Null, "missing");
+                Assert.That(LiveLinkEndpointFile.Read<Dictionary<string, int>>(""), Is.Null, "not a path");
+                File.WriteAllText(path, "{\"port\":7}");
+                Assert.That(LiveLinkEndpointFile.Read<Dictionary<string, int>>(path)["port"], Is.EqualTo(7));
+                Assert.DoesNotThrow(() => LiveLinkEndpointFile.Delete(""));
+                LiveLinkEndpointFile.Delete(path);
+                Assert.That(File.Exists(path), Is.False);
+            }
+            finally
+            {
+                if (Directory.Exists(folder)) Directory.Delete(folder, true);
+            }
+        }
+
         // A reader that does not share writing keeps the file as it was: the write says so in the Console instead of throwing.
         [Test]
         public void AnEndpointFileHeldWithoutWriteSharingIsLeftAsItWas()

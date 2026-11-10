@@ -372,4 +372,60 @@ public sealed class SimplificationRunTests
             Assert.That(area, Is.EqualTo(.5f).Within(1e-4f), "submesh " + s + " covers its half");
         }
     }
+
+    // TKG-24 review: how much a material boundary locks. Three materials in bands of rows on one plane, sharing the
+    // vertices of the two rows between them (as an imported body shares its neck and wrist loops): every vertex of those
+    // rows has open edges both ways and stays, ends included; nothing else does (the plane's own border slides when not
+    // locked). On this 25 x 25 grid: 2 x 25 = 50 of 625 vertices (8%); on a body, the vertices of its material loops.
+    [Test] public void SharedMaterialBoundariesLockTheirVerticesOnly()
+    {
+        const int columns = 24, rows = 24, bands = 3;
+        var vertices = new List<Vector3>();
+        var uvs = new List<Vector2>();
+        for (int y = 0; y <= rows; y++)
+            for (int x = 0; x <= columns; x++) { vertices.Add(new Vector3(x / (float)columns, 0, y / (float)rows)); uvs.Add(new Vector2(x / (float)columns, y / (float)rows)); }
+        var lists = Enumerable.Range(0, bands).Select(_ => new List<int>()).ToList();
+        for (int y = 0; y < rows; y++)
+            for (int x = 0; x < columns; x++)
+            {
+                int a = y * (columns + 1) + x, b = a + 1, c = a + columns + 1, d = c + 1;
+                lists[y * bands / rows].AddRange(new[] { a, c, b, b, c, d });
+            }
+        var mesh = Own(new Mesh { name = "Three materials" });
+        mesh.SetVertices(vertices);
+        mesh.SetUVs(0, uvs);
+        mesh.subMeshCount = bands;
+        for (int s = 0; s < bands; s++) mesh.SetTriangles(lists[s], s);
+        mesh.RecalculateNormals();
+        var run = SimplificationRun.Prepare(mesh, SimplificationOptions.Default);
+        run.Run();
+        Debug.Log("[AlterMesh] " + run.LockedPoints + " of " + vertices.Count + " vertices locked by " + (bands - 1) + " shared material boundaries.");
+        Assert.That(run.LockedPoints, Is.EqualTo((bands - 1) * (columns + 1)));
+        var kept = new HashSet<int>(run.KeptVertices(run.Count));
+        for (int band = 1; band < bands; band++)
+            for (int x = 0; x <= columns; x++)
+                Assert.That(kept.Contains(band * rows / bands * (columns + 1) + x), Is.True, "boundary row " + band + ", vertex " + x);
+        // Locked borders add the plane's border.
+        var options = SimplificationOptions.Default;
+        options.LockBorders = true;
+        var bordered = SimplificationRun.Prepare(mesh, options);
+        bordered.Run();
+        Assert.That(bordered.LockedPoints, Is.EqualTo((bands - 1) * (columns - 1) + 2 * (columns + rows)));
+    }
+
+    // The source triangles of a prefix are the written mesh's, through the kept vertices.
+    [Test] public void SourceTrianglesAreTheWrittenOnes()
+    {
+        var mesh = Own(Sheet(10, 6, 4));
+        var run = SimplificationRun.Prepare(mesh, SimplificationOptions.Default);
+        run.Run();
+        foreach (int k in new[] { 0, run.Count / 2, run.Count })
+        {
+            var kept = run.KeptVertices(k);
+            var written = Own(run.Write(k, new Mesh()));
+            var expected = Enumerable.Range(0, written.subMeshCount).Where(s => written.GetTopology(s) == MeshTopology.Triangles)
+                .SelectMany(s => written.GetIndices(s)).Select(i => kept[i]).ToArray();
+            CollectionAssert.AreEqual(expected, run.SourceTriangles(k), "prefix " + k);
+        }
+    }
 }

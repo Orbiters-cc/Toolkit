@@ -58,8 +58,21 @@ namespace Orbiters.Toolkit.Editor.VRChat
             typeof(BuildCopyAssetsHook).FullName,
             typeof(Manifest.AvatarManifestExporter).FullName,
             "VF.Hooks.WhenBlueprintIdReadyHook+VrcPreuploadHook",
+            // Until the Mixer console calls LeaveOut for its probes itself.
             "Orbiters.Logger.Editor.VRChat.LoggerBuildStepProbe",
         };
+        // Callbacks their own packages leave out (LeaveOut).
+        private static readonly HashSet<string> LeftByOwners = new HashSet<string>(StringComparer.Ordinal);
+
+        /// <summary>
+        /// Leaves the caller's own build callback or step out of every hidden build: one that only times or watches real
+        /// builds, or belongs to the upload itself. The package that owns it calls this when it loads, so the Toolkit names
+        /// no tool above it.
+        /// </summary>
+        public static void LeaveOut(Type step)
+        {
+            if (step?.FullName != null) LeftByOwners.Add(step.FullName);
+        }
         // By type name, as VRCFury blocks them outside uploads: shader locks that write shaders and materials into the
         // project, Poiyomi's (in Thry.ThryEditor.ShaderOptimizer, Thry.ShaderOptimizer in older versions) and lilToon's.
         private static readonly string[] Locks = { "LockMaterialsOnUpload", "VRChatModule" };
@@ -187,7 +200,7 @@ namespace Orbiters.Toolkit.Editor.VRChat
         }
 
         /// <summary>Whether a hidden build always leaves this build step out (see the lists above).</summary>
-        internal static bool LeftOut(Type type) => Left.Contains(type.FullName) || Locks.Contains(type.Name);
+        internal static bool LeftOut(Type type) => Left.Contains(type.FullName) || LeftByOwners.Contains(type.FullName) || Locks.Contains(type.Name);
 
         /// <summary>
         /// What makes VRCFury stop a build of <paramref name="source"/> with a dialog when it isn't an upload, seen before

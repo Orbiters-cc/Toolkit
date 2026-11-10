@@ -120,8 +120,7 @@ namespace Orbiters.Toolkit.Editor
 
         internal static void AddStyleSheet(VisualElement element)
         {
-            var sheet = AssetDatabase.LoadAssetAtPath<StyleSheet>(StyleSheetPath);
-            if (sheet && !element.styleSheets.Contains(sheet)) element.styleSheets.Add(sheet);
+            UiStyles.Attach(element, StyleSheetPath);
         }
 
         private static Label TitleLine(VisualElement parent)

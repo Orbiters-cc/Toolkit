@@ -54,6 +54,10 @@ namespace Orbiters.Toolkit.Meshes
         [NativeDisableUnsafePtrRestriction] public BvhNode* Nodes;
         [NativeDisableUnsafePtrRestriction] public BvhTriangle* Corners;
         [NativeDisableUnsafePtrRestriction] public int* TriangleOfSlot;
+        /// <summary>Per mesh triangle, its slot (-1 for a triangle left out of the tree): where a seeded query starts.</summary>
+        [NativeDisableUnsafePtrRestriction] public int* SlotOfTriangle;
+        /// <summary>How many triangles the mesh has (in the tree or not).</summary>
+        public int TriangleCount;
         public int NodeCount;
         /// <summary>1 when the corners went through a mirroring transform (front faces wind the other way).</summary>
         public int Mirrored;
@@ -63,6 +67,15 @@ namespace Orbiters.Toolkit.Meshes
     /// The flat BVH's build, refit and queries, Burst-compiled (called directly from managed code, from any thread; the same
     /// code runs managed only where Burst is off). Ties are deterministic whatever the tree's layout: among equally
     /// near hits the lowest triangle index wins.
+    /// <para>
+    /// The contract every layout keeps: a closest-point query returns, among the accepted triangles nearer than the range, the
+    /// one at the least computed distance, the lowest triangle index among equal ones; a ray the least hit distance below the
+    /// range, the lowest index among equal ones. Each triangle's distance comes from one routine (<see cref="Triangle"/>) on
+    /// its corners, and every node's bounds are widened by a rounding slack (a few ulps of the largest coordinate): a
+    /// triangle's computed distance can lie a few ulps below the computed distance of its exact box, and without the slack a
+    /// node holding an equally near, lower-indexed triangle could be pruned. So the answer depends only on the triangles and
+    /// the query, never on how the tree was built, refitted, traversed or seeded.
+    /// </para>
     /// <para>
     /// Floats: every entry is FloatMode.Strict with standard precision (no fast math, no reordering, no contraction into
     /// fused multiply-adds), so a query gives the same bits on every machine; compiled synchronously, so the editor never
@@ -91,13 +104,16 @@ namespace Orbiters.Toolkit.Meshes
         /// Builds the tree over <paramref name="count"/> triangles: <paramref name="corners"/> holds each one's corners in
         /// input order and is reordered into leaf order with <paramref name="triangleOfSlot"/> (which starts as each input
         /// triangle's mesh index). <paramref name="nodes"/> and <paramref name="parents"/> need room for 2 * count - 1
-        /// nodes; <paramref name="nodeCount"/> says how many were made.
+        /// nodes; <paramref name="nodeCount"/> says how many were made. <paramref name="slack"/> receives the rounding slack
+        /// every node's bounds are widened by (see the class remarks).
         /// </summary>
         [BurstCompile(FloatMode = FloatMode.Strict, FloatPrecision = FloatPrecision.Standard, CompileSynchronously = true)]
-        public static void Build(BvhTriangle* corners, int* triangleOfSlot, int count, BvhNode* nodes, int* parents, int* nodeCount)
+        public static void Build(BvhTriangle* corners, int* triangleOfSlot, int count, BvhNode* nodes, int* parents, int* nodeCount, float* slack)
         {
             *nodeCount = 0;
+            *slack = Slack(Extent(corners, 0, count));
             if (count <= 0) return;
+            float widen = *slack;
             long bytes3 = (long)count * UnsafeUtility.SizeOf<float3>();
             var centroids = (float3*)UnsafeUtility.Malloc(bytes3, 16, Allocator.Persistent);
             var order = (int*)UnsafeUtility.Malloc((long)count * sizeof(int), 4, Allocator.Persistent);
@@ -134,8 +150,8 @@ namespace Orbiters.Toolkit.Meshes
                     cmax = math.max(cmax, centroids[k]);
                 }
                 ref var node = ref nodes[range.Node];
-                node.Min = min;
-                node.Max = max;
+                node.Min = min - widen;
+                node.Max = max + widen;
                 if (range.Count <= LeafSize)
                 {
                     node.LeftOrFirst = range.Start;
@@ -238,6 +254,28 @@ namespace Orbiters.Toolkit.Meshes
             UnsafeUtility.Free(centroids, Allocator.Persistent);
         }
 
+        // The largest finite coordinate magnitude of slots [first, first + count) (a corner at infinity or NaN adds nothing).
+        private static float Extent(BvhTriangle* corners, int first, int count)
+        {
+            float extent = 0f;
+            for (int s = first; s < first + count; s++)
+            {
+                var t = corners[s];
+                extent = math.max(extent, Finite(t.A));
+                extent = math.max(extent, Finite(t.B));
+                extent = math.max(extent, Finite(t.C));
+            }
+            return extent;
+        }
+
+        private static float Finite(float3 v) => math.cmax(math.select(float3.zero, math.abs(v), math.isfinite(v)));
+
+        /// <summary>
+        /// The bounds slack for corners up to <paramref name="extent"/> in magnitude: a few ulps of it (float epsilon is 1.2e-7),
+        /// and something above zero for a surface at the origin.
+        /// </summary>
+        public static float Slack(float extent) => extent * 1e-6f + 1e-9f;
+
         private static float HalfArea(float3 min, float3 max)
         {
             float3 d = math.max(max - min, 0f);
@@ -262,21 +300,24 @@ namespace Orbiters.Toolkit.Meshes
 
         /// <summary>
         /// Copies each slot's corners from the vertices again (<paramref name="slotVertices"/>: three vertex indices per slot)
-        /// and recomputes every node's bounds, children before parents.
+        /// and recomputes every node's bounds, children before parents, widened by the slack of the new corners (written to
+        /// <paramref name="slack"/>).
         /// </summary>
         [BurstCompile(FloatMode = FloatMode.Strict, FloatPrecision = FloatPrecision.Standard, CompileSynchronously = true)]
-        public static void Refit(BvhNode* nodes, int nodeCount, BvhTriangle* corners, float3* vertices, int3* slotVertices, int slotCount)
+        public static void Refit(BvhNode* nodes, int nodeCount, BvhTriangle* corners, float3* vertices, int3* slotVertices, int slotCount, float* slack)
         {
             for (int s = 0; s < slotCount; s++)
             {
                 int3 v = slotVertices[s];
                 corners[s] = new BvhTriangle { A = vertices[v.x], B = vertices[v.y], C = vertices[v.z] };
             }
+            *slack = Slack(Extent(corners, 0, slotCount));
+            float widen = *slack;
             // Nodes are made parents before children, so a reverse pass sees children first.
             for (int i = nodeCount - 1; i >= 0; i--)
             {
                 ref var node = ref nodes[i];
-                if (node.Count > 0) LeafBounds(corners, node.LeftOrFirst, node.Count, out node.Min, out node.Max);
+                if (node.Count > 0) LeafBounds(corners, node.LeftOrFirst, node.Count, widen, out node.Min, out node.Max);
                 else
                 {
                     node.Min = math.min(nodes[node.LeftOrFirst].Min, nodes[node.LeftOrFirst + 1].Min);
@@ -288,21 +329,31 @@ namespace Orbiters.Toolkit.Meshes
         /// <summary>
         /// Refits only <paramref name="leaves"/> (each once): their corners from the vertices, their bounds, and their
         /// ancestors up to the first one whose bounds come out unchanged (the tree was consistent before, so nothing above
-        /// it changes). No sorting: a walk recomputes each ancestor from its children as they are now.
+        /// it changes). No sorting: a walk recomputes each ancestor from its children as they are now. The slack only grows
+        /// (to cover the moved corners): what was enough for the corners that did not move still is.
         /// </summary>
         [BurstCompile(FloatMode = FloatMode.Strict, FloatPrecision = FloatPrecision.Standard, CompileSynchronously = true)]
-        public static void RefitLeaves(BvhNode* nodes, int* parents, BvhTriangle* corners, float3* vertices, int3* slotVertices, int* leaves, int leafCount)
+        public static void RefitLeaves(BvhNode* nodes, int* parents, BvhTriangle* corners, float3* vertices, int3* slotVertices, int* leaves, int leafCount,
+            float* slack)
         {
+            float extent = 0f;
             for (int l = 0; l < leafCount; l++)
             {
-                int index = leaves[l];
-                ref var leaf = ref nodes[index];
-                for (int s = leaf.LeftOrFirst; s < leaf.LeftOrFirst + leaf.Count; s++)
+                ref var moved = ref nodes[leaves[l]];
+                for (int s = moved.LeftOrFirst; s < moved.LeftOrFirst + moved.Count; s++)
                 {
                     int3 v = slotVertices[s];
                     corners[s] = new BvhTriangle { A = vertices[v.x], B = vertices[v.y], C = vertices[v.z] };
                 }
-                LeafBounds(corners, leaf.LeftOrFirst, leaf.Count, out float3 min, out float3 max);
+                extent = math.max(extent, Extent(corners, moved.LeftOrFirst, moved.Count));
+            }
+            *slack = math.max(*slack, Slack(extent));
+            float widen = *slack;
+            for (int l = 0; l < leafCount; l++)
+            {
+                int index = leaves[l];
+                ref var leaf = ref nodes[index];
+                LeafBounds(corners, leaf.LeftOrFirst, leaf.Count, widen, out float3 min, out float3 max);
                 if (Same(min, leaf.Min) && Same(max, leaf.Max)) continue;
                 leaf.Min = min;
                 leaf.Max = max;
@@ -320,7 +371,7 @@ namespace Orbiters.Toolkit.Meshes
 
         private static bool Same(float3 a, float3 b) => math.all(a == b);
 
-        private static void LeafBounds(BvhTriangle* corners, int first, int count, out float3 min, out float3 max)
+        private static void LeafBounds(BvhTriangle* corners, int first, int count, float slack, out float3 min, out float3 max)
         {
             min = new float3(float.MaxValue);
             max = new float3(float.MinValue);
@@ -330,6 +381,8 @@ namespace Orbiters.Toolkit.Meshes
                 min = math.min(min, math.min(t.A, math.min(t.B, t.C)));
                 max = math.max(max, math.max(t.A, math.max(t.B, t.C)));
             }
+            min -= slack;
+            max += slack;
         }
 
         // ---- Queries ------------------------------------------------------------------------------------------------------
@@ -351,11 +404,38 @@ namespace Orbiters.Toolkit.Meshes
         }
 
         /// <summary>The closest-point walk with a triangle filter (managed callers instantiate it with their own filter).</summary>
-        public static void ClosestPoint<TFilter>(in BvhView view, float3 point, float maxDistance, ref TFilter filter, out BvhHit hit) where TFilter : struct, ITriangleFilter
+        public static void ClosestPoint<TFilter>(in BvhView view, float3 point, float maxDistance, ref TFilter filter, out BvhHit hit) where TFilter : struct, ITriangleFilter =>
+            ClosestPoint(view, point, maxDistance, ref filter, -1, out hit);
+
+        /// <summary>
+        /// The closest-point walk starting from <paramref name="seed"/> (a mesh triangle, typically the previous answer for a
+        /// point that moved a little, or -1): its distance bounds the search from the start, so nearly everything farther is
+        /// pruned. The answer is the unseeded one (see the class remarks): the seed is a candidate like any other.
+        /// </summary>
+        public static void ClosestPoint<TFilter>(in BvhView view, float3 point, float maxDistance, ref TFilter filter, int seed, out BvhHit hit)
+            where TFilter : struct, ITriangleFilter
         {
             hit = new BvhHit { Triangle = -1, Distance = maxDistance };
             if (view.NodeCount == 0) return;
             float best2 = maxDistance * maxDistance;
+            if (seed >= 0 && seed < view.TriangleCount && view.SlotOfTriangle != null)
+            {
+                int slot = view.SlotOfTriangle[seed];
+                if (slot >= 0 && filter.Accept(seed))
+                {
+                    var corners = view.Corners[slot];
+                    float3 q = Triangle.ClosestPoint(point, corners.A, corners.B, corners.C, out float3 bary);
+                    float d2 = math.lengthsq(q - point);
+                    if (d2 < best2)
+                    {
+                        best2 = d2;
+                        hit.Triangle = seed;
+                        hit.Position = q;
+                        hit.Bary = bary;
+                        hit.Distance = math.sqrt(d2);
+                    }
+                }
+            }
             int* stack = stackalloc int[StackSize];
             int top = 0;
             stack[top++] = 0;
@@ -416,7 +496,12 @@ namespace Orbiters.Toolkit.Meshes
         }
 
         /// <summary>The ray walk with a triangle filter.</summary>
-        public static void Raycast<TFilter>(in BvhView view, float3 origin, float3 direction, float maxDistance, bool backfaces, ref TFilter filter, out BvhHit hit) where TFilter : struct, ITriangleFilter
+        public static void Raycast<TFilter>(in BvhView view, float3 origin, float3 direction, float maxDistance, bool backfaces, ref TFilter filter, out BvhHit hit) where TFilter : struct, ITriangleFilter =>
+            Raycast(view, origin, direction, maxDistance, backfaces, false, ref filter, out hit);
+
+        /// <summary>The ray walk; with <paramref name="contact"/> a triangle the origin lies on is met at distance 0.</summary>
+        public static void Raycast<TFilter>(in BvhView view, float3 origin, float3 direction, float maxDistance, bool backfaces, bool contact, ref TFilter filter,
+            out BvhHit hit) where TFilter : struct, ITriangleFilter
         {
             hit = new BvhHit { Triangle = -1, Distance = maxDistance };
             if (view.NodeCount == 0) return;
@@ -442,7 +527,7 @@ namespace Orbiters.Toolkit.Meshes
                         int t = view.TriangleOfSlot[s];
                         if (!filter.Accept(t)) continue;
                         var c = view.Corners[s];
-                        if (!Triangle.Raycast(origin, direction, c.A, c.B, c.C, backfaces, mirrored, out float d, out float3 bary)) continue;
+                        if (!Triangle.Raycast(origin, direction, c.A, c.B, c.C, backfaces, mirrored, contact, out float d, out float3 bary)) continue;
                         if (d < hit.Distance || (hit.Triangle >= 0 && d == hit.Distance && t < hit.Triangle))
                         {
                             hit.Triangle = t; hit.Distance = d; hit.Bary = bary;
@@ -462,6 +547,101 @@ namespace Orbiters.Toolkit.Meshes
                         if (r) { stack[top] = left + 1; entries[top++] = rightEntry; }
                         if (l) { stack[top] = left; entries[top++] = leftEntry; }
                     }
+                }
+            }
+        }
+
+        // ---- Queries under a TriangleRule: Burst entries, so filtered answers are as reproducible as unfiltered ones -------
+
+        /// <summary>The closest point among the triangles <paramref name="rule"/> accepts, from <paramref name="seed"/> (or -1).</summary>
+        [BurstCompile(FloatMode = FloatMode.Strict, FloatPrecision = FloatPrecision.Standard, CompileSynchronously = true)]
+        public static void ClosestPointByRule(in BvhView view, in float3 point, float maxDistance, in TriangleRuleView rule, int seed, out BvhHit hit)
+        {
+            var filter = rule;
+            ClosestPoint(view, point, maxDistance, ref filter, seed, out hit);
+        }
+
+        /// <summary>
+        /// The first triangle along a ray among those <paramref name="rule"/> accepts; <paramref name="contact"/> 1: a triangle the
+        /// origin lies on counts, at distance 0.
+        /// </summary>
+        [BurstCompile(FloatMode = FloatMode.Strict, FloatPrecision = FloatPrecision.Standard, CompileSynchronously = true)]
+        public static void RaycastByRule(in BvhView view, in float3 origin, in float3 direction, float maxDistance, int backfaces, int contact,
+            in TriangleRuleView rule, out BvhHit hit)
+        {
+            var filter = rule;
+            Raycast(view, origin, direction, maxDistance, backfaces != 0, contact != 0, ref filter, out hit);
+        }
+
+        /// <summary>The closest point of each of the classes of <paramref name="rule"/> (its ClassCount) into <paramref name="hits"/>.</summary>
+        [BurstCompile(FloatMode = FloatMode.Strict, FloatPrecision = FloatPrecision.Standard, CompileSynchronously = true)]
+        public static void ClosestPointsByClass(in BvhView view, in float3 point, float maxDistance, in TriangleRuleView rule, BvhHit* hits)
+        {
+            var classifier = rule;
+            ClosestPoints(view, point, maxDistance, ref classifier, rule.ClassCount, hits);
+        }
+
+        /// <summary>
+        /// For each of <paramref name="classCount"/> (1 to 4) acceptance classes, the closest point among the triangles of that
+        /// class within <paramref name="maxDistance"/>, written to <paramref name="hits"/>[class]: what one filtered closest-point
+        /// walk per class would return, in one traversal (a node is pruned only when it is farther than the best of every
+        /// class so far, and each class keeps its own tie rule).
+        /// </summary>
+        public static void ClosestPoints<TClassifier>(in BvhView view, float3 point, float maxDistance, ref TClassifier classifier, int classCount, BvhHit* hits)
+            where TClassifier : struct, ITriangleClassifier
+        {
+            if (classCount < 1) return;
+            if (classCount > 4) classCount = 4;
+            float limit = maxDistance * maxDistance;
+            float4 best = new float4(limit);
+            for (int k = 0; k < classCount; k++) hits[k] = new BvhHit { Triangle = -1, Distance = maxDistance };
+            if (view.NodeCount == 0) return;
+            int all = (1 << classCount) - 1;
+            // The bound: the farthest best of the classes (all start at the range).
+            float bound = limit;
+            int* stack = stackalloc int[StackSize];
+            int top = 0;
+            stack[top++] = 0;
+            var nodes = view.Nodes;
+            while (top > 0)
+            {
+                ref var node = ref nodes[stack[--top]];
+                if (BoxDistance2(point, node.Min, node.Max) > bound) continue;
+                if (node.Count > 0)
+                {
+                    bool improved = false;
+                    for (int s = node.LeftOrFirst; s < node.LeftOrFirst + node.Count; s++)
+                    {
+                        int t = view.TriangleOfSlot[s];
+                        int classes = classifier.Classes(t) & all;
+                        if (classes == 0) continue;
+                        var c = view.Corners[s];
+                        float3 q = Triangle.ClosestPoint(point, c.A, c.B, c.C, out float3 bary);
+                        float d2 = math.lengthsq(q - point);
+                        for (int k = 0; k < classCount; k++)
+                        {
+                            if ((classes & (1 << k)) == 0) continue;
+                            if (d2 < best[k] || (hits[k].Triangle >= 0 && d2 == best[k] && t < hits[k].Triangle))
+                            {
+                                best[k] = d2;
+                                hits[k] = new BvhHit { Triangle = t, Position = q, Bary = bary, Distance = math.sqrt(d2) };
+                                improved = true;
+                            }
+                        }
+                    }
+                    if (improved)
+                    {
+                        bound = best[0];
+                        for (int k = 1; k < classCount; k++) bound = math.max(bound, best[k]);
+                    }
+                }
+                else
+                {
+                    int left = node.LeftOrFirst;
+                    float dl = BoxDistance2(point, nodes[left].Min, nodes[left].Max);
+                    float dr = BoxDistance2(point, nodes[left + 1].Min, nodes[left + 1].Max);
+                    if (dl < dr) { stack[top++] = left + 1; stack[top++] = left; }
+                    else { stack[top++] = left; stack[top++] = left + 1; }
                 }
             }
         }

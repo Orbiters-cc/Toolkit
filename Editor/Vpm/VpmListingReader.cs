@@ -12,12 +12,14 @@ namespace Orbiters.Toolkit.Editor.Vpm
 {
     /// <summary>
     /// Reads a VPM repository listing (index.json) without adding it to the user's VPM settings, so a dependency plan can
-    /// show every package and version before anything changes. Answers are kept for ten minutes.
+    /// show every package and version before anything changes. Answers are kept for ten minutes in memory, and each
+    /// listing's last copy on disk (<see cref="ListingStore"/>): the repository is asked whether it changed since
+    /// (If-None-Match / If-Modified-Since) and only a changed listing is downloaded again.
     /// </summary>
     public static class VpmListingReader
     {
         private static readonly Dictionary<string, (DateTime at, List<VpmCandidate> packages)> Cache =
-            new Dictionary<string, (DateTime, List<VpmCandidate>)>(StringComparer.OrdinalIgnoreCase);
+            new Dictionary<string, (DateTime, List<VpmCandidate>)>(ListingUrls.Comparer);
 
         public static async Task<List<VpmCandidate>> ReadAsync(string url, CancellationToken cancellation = default)
         {
@@ -27,11 +29,34 @@ namespace Orbiters.Toolkit.Editor.Vpm
             try
             {
                 if (!Uri.TryCreate(url, UriKind.Absolute, out var uri) || uri.Scheme != Uri.UriSchemeHttps) return packages;
-                string json;
-                // An error answer: nothing listed, and asked again next time.
-                try { json = await OrbitersHttp.TextAsync(uri.AbsoluteUri, null, cancellation, OrbitersHttpKind.Listing); }
-                catch (OrbitersHttpException error) when (!error.Offline) { return packages; }
-                packages = await Task.Run(() => Parse(json, url), cancellation);
+                var stored = await Task.Run(() => ListingStore.Read(url), cancellation);
+                // Twice at most: a "not changed" whose kept copy is missing or no longer reads is asked again without validators.
+                for (int attempt = 0; ; attempt++)
+                {
+                    OrbitersConditionalText answer;
+                    // An error answer: nothing listed, and asked again next time.
+                    try { answer = await OrbitersHttp.ConditionalTextAsync(uri.AbsoluteUri, stored?.etag, stored?.lastModified, cancellation); }
+                    catch (OrbitersHttpException error) when (!error.Offline) { return packages; }
+                    var kept = stored;
+                    var parsed = await Task.Run(() =>
+                    {
+                        if (!answer.NotModified)
+                        {
+                            var fresh = Parse(answer.Text, url);
+                            if (answer.ETag != null || answer.LastModified != null) ListingStore.Write(url, answer.Text, answer.ETag, answer.LastModified);
+                            else ListingStore.Forget(url);
+                            return fresh;
+                        }
+                        if (kept != null)
+                            try { return Parse(kept.body, url); }
+                            catch (Exception) { }
+                        ListingStore.Forget(url);
+                        return null;
+                    }, cancellation);
+                    if (parsed != null) { packages = parsed; break; }
+                    if (attempt >= 1) return packages;
+                    stored = null;
+                }
             }
             catch (Exception ex) when (!(ex is OperationCanceledException))
             {
@@ -62,6 +87,79 @@ namespace Orbiters.Toolkit.Editor.Vpm
                 }
             }
             return VpmCandidates.Newest(result);
+        }
+    }
+
+    /// <summary>
+    /// Which listing URLs are the same listing: scheme and host compared without case (as DNS does), port, path and query
+    /// exactly (servers may tell "/Index.json" from "/index.json").
+    /// </summary>
+    internal static class ListingUrls
+    {
+        public static readonly IEqualityComparer<string> Comparer = new Same();
+
+        /// <summary>The URL with its scheme and host in lower case, the rest as written; the URL itself when it is not one.</summary>
+        public static string Key(string url)
+        {
+            if (string.IsNullOrEmpty(url) || !Uri.TryCreate(url, UriKind.Absolute, out var uri)) return url ?? "";
+            return uri.Scheme.ToLowerInvariant() + "://" + uri.Host.ToLowerInvariant() + (uri.IsDefaultPort ? "" : ":" + uri.Port) + uri.PathAndQuery;
+        }
+
+        private sealed class Same : IEqualityComparer<string>
+        {
+            public bool Equals(string a, string b) => string.Equals(Key(a), Key(b), StringComparison.Ordinal);
+            public int GetHashCode(string url) => StringComparer.Ordinal.GetHashCode(Key(url));
+        }
+    }
+
+    /// <summary>
+    /// The last copy of each VPM listing read, with the validators its server sent (ETag, Last-Modified), one file per
+    /// listing in the user's local application data (listings are the same for every project). A copy that cannot be
+    /// read, or that is another listing's, counts as none.
+    /// </summary>
+    internal static class ListingStore
+    {
+        [Serializable]
+        internal sealed class Entry
+        {
+            public string url, etag, lastModified, body;
+        }
+
+        private static string folder;
+
+        internal static string Folder
+        {
+            get => folder ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Orbiters", "VpmListings");
+            // Tests: another folder (null: the user's).
+            set => folder = value;
+        }
+
+        private static string FileOf(string url) => Path.Combine(Folder, Hashing.Sha256(ListingUrls.Key(url)).Substring(0, 32) + ".json");
+
+        public static Entry Read(string url)
+        {
+            try
+            {
+                string file = FileOf(url);
+                if (!File.Exists(file)) return null;
+                var entry = JsonUtility.FromJson<Entry>(File.ReadAllText(file));
+                return entry != null && ListingUrls.Comparer.Equals(entry.url, url) && entry.body != null &&
+                       (!string.IsNullOrEmpty(entry.etag) || !string.IsNullOrEmpty(entry.lastModified)) ? entry : null;
+            }
+            catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException || ex is ArgumentException) { return null; }
+        }
+
+        public static void Write(string url, string body, string etag, string lastModified)
+        {
+            try { Orbiters.Toolkit.Storage.SafePaths.ReplaceFile(FileOf(url), JsonUtility.ToJson(new Entry { url = url, etag = etag, lastModified = lastModified, body = body })); }
+            // Without a copy the listing is only downloaded whole next time.
+            catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException) { }
+        }
+
+        public static void Forget(string url)
+        {
+            try { File.Delete(FileOf(url)); }
+            catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException) { }
         }
     }
 

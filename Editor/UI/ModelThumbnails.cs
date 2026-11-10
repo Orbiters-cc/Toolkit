@@ -36,6 +36,11 @@ namespace Orbiters.Toolkit.Editor
         private static readonly TimeSpan KeptOnDisk = TimeSpan.FromDays(30);
         private const string PrunedKey = "Orbiters.Toolkit.Thumbnails.Pruned";
         private static bool pumping, hooked;
+        // One preview stage for the pictures queued together (made by the pump, cleaned up when the queue is empty and
+        // before a script reload): a picture no longer creates and destroys a preview scene of its own.
+        private static PreviewRenderUtility stage;
+        // The parts' vertices, read into one kept list instead of a new array per part.
+        private static readonly List<Vector3> Vertices = new List<Vector3>();
 
         /// <summary>The picture of <paramref name="root"/> for <paramref name="key"/>, or null while it is made.</summary>
         public static Texture2D Get(GameObject root, string key) => Get(root, key, false);
@@ -112,6 +117,9 @@ namespace Orbiters.Toolkit.Editor
                 var oldest = DateTime.UtcNow - KeptOnDisk;
                 foreach (var file in new DirectoryInfo(Folder).GetFiles("*.png"))
                     if (file.LastWriteTimeUtc < oldest) file.Delete();
+                // Pictures being written when the scripts reloaded (see Save): never finished, never read.
+                foreach (var file in new DirectoryInfo(Folder).GetFiles("*.png.tmp"))
+                    if (file.LastWriteTimeUtc < DateTime.UtcNow - TimeSpan.FromHours(1)) file.Delete();
             }
             catch (IOException) { }
             catch (UnauthorizedAccessException) { }
@@ -119,6 +127,7 @@ namespace Orbiters.Toolkit.Editor
 
         private static void ReleaseAll()
         {
+            ReleaseStage();
             foreach (var texture in Made.Values)
                 if (texture != null) Object.DestroyImmediate(texture);
             Made.Clear();
@@ -129,9 +138,16 @@ namespace Orbiters.Toolkit.Editor
         public static string KeyFor(string assetPath) =>
             string.IsNullOrEmpty(assetPath) ? null : assetPath + "|" + AssetDatabase.GetAssetDependencyHash(assetPath);
 
+        private static void ReleaseStage()
+        {
+            if (stage == null) return;
+            stage.Cleanup();
+            stage = null;
+        }
+
         private static void Pump()
         {
-            if (Queue.Count == 0) { EditorApplication.update -= Pump; pumping = false; return; }
+            if (Queue.Count == 0) { EditorApplication.update -= Pump; pumping = false; ReleaseStage(); return; }
             if (EditorApplication.isCompiling || EditorApplication.isUpdating) return;
             string key = null;
             foreach (var pair in Queue) { key = pair.Key; break; }
@@ -139,7 +155,8 @@ namespace Orbiters.Toolkit.Editor
             Queue.Remove(key);
             try
             {
-                var texture = root != null ? Render(root, Clear.Contains(key)) : null;
+                if (root != null && stage == null) stage = new PreviewRenderUtility();
+                var texture = root != null ? Render(root, Clear.Contains(key), stage) : null;
                 if (texture == null) { Failed.Add(key); return; }
                 Made[key] = texture;
                 if (!SessionOnly.Contains(key)) Save(key, texture);
@@ -154,10 +171,12 @@ namespace Orbiters.Toolkit.Editor
         // Baked: a mesh made here (a skinned renderer's pose), destroyed afterwards. Any other mesh is the renderer's own.
         private struct Part { public Mesh Mesh; public Matrix4x4 Matrix; public Material[] Materials; public bool Baked; }
 
-        private static Texture2D Render(GameObject root, bool transparent)
+        /// <param name="shared">A preview stage kept between pictures (every setting a picture reads is set here, so a
+        /// picture is the same on a fresh stage or after others), or null for one made and cleaned up for this picture.</param>
+        internal static Texture2D Render(GameObject root, bool transparent, PreviewRenderUtility shared = null)
         {
             var parts = new List<Part>();
-            var preview = new PreviewRenderUtility();
+            var preview = shared ?? new PreviewRenderUtility();
             try
             {
                 var bounds = new Bounds();
@@ -211,11 +230,15 @@ namespace Orbiters.Toolkit.Editor
                 camera.transform.LookAt(bounds.center, facing * Vector3.up);
                 float half = 0f;
                 foreach (var part in parts)
-                foreach (var vertex in part.Mesh.vertices)
                 {
-                    var point = camera.transform.InverseTransformPoint(part.Matrix.MultiplyPoint3x4(vertex));
-                    half = Mathf.Max(half, Mathf.Abs(point.x), Mathf.Abs(point.y));
+                    part.Mesh.GetVertices(Vertices);
+                    foreach (var vertex in Vertices)
+                    {
+                        var point = camera.transform.InverseTransformPoint(part.Matrix.MultiplyPoint3x4(vertex));
+                        half = Mathf.Max(half, Mathf.Abs(point.x), Mathf.Abs(point.y));
+                    }
                 }
+                Vertices.Clear();
                 camera.orthographicSize = Mathf.Max(half, 0.005f) * 1.12f;
                 camera.nearClipPlane = 0.001f;
                 camera.farClipPlane = radius * 8f;
@@ -248,7 +271,7 @@ namespace Orbiters.Toolkit.Editor
             }
             finally
             {
-                preview.Cleanup();
+                if (shared == null) preview.Cleanup();
                 // Only the meshes baked here: a renderer's own mesh may be another tool's in-memory mesh (Mixer's
                 // working mesh has the same flags).
                 foreach (var part in parts)
@@ -328,14 +351,101 @@ namespace Orbiters.Toolkit.Editor
             return null;
         }
 
+        // The pixels are copied here; the PNG is encoded and written on a worker (the same encoder EncodeToPNG uses), into a
+        // file of its own that then replaces the picture, so a reader never sees half a file. A picture not yet on the disk
+        // is only made again by a later session.
+        // A picture waiting to be written: its raw pixels and where they go.
+        private readonly struct PendingSave
+        {
+            public readonly string Path;
+            public readonly byte[] Pixels;
+            public readonly UnityEngine.Experimental.Rendering.GraphicsFormat Format;
+            public readonly uint Width, Height;
+            public PendingSave(string path, byte[] pixels, UnityEngine.Experimental.Rendering.GraphicsFormat format, uint width, uint height)
+            {
+                Path = path; Pixels = pixels; Format = format; Width = width; Height = height;
+            }
+        }
+
+        /// <summary>The most pixel bytes waiting for the save worker; past it a picture is encoded and written at once, here.</summary>
+        internal const long MaxPendingSaveBytes = 32L * 1024 * 1024;
+        // One worker writes the pictures in order; the queue and its byte count are guarded by the queue itself.
+        private static readonly Queue<PendingSave> Saves = new Queue<PendingSave>();
+        private static long pendingSaveBytes;
+        private static bool saving;
+        // An unexpected save failure is said once per session (a full disk would otherwise say it for every picture).
+        private static int saveFailureLogged;
+
+        /// <summary>Pixel bytes waiting to be written (tests).</summary>
+        internal static long PendingSaveBytes { get { lock (Saves) return pendingSaveBytes; } }
+
+        // The pixels are copied here; the PNG is encoded and written by one save worker (the same encoder EncodeToPNG uses),
+        // into a file of its own that then replaces the picture, so a reader never sees half a file. Past
+        // MaxPendingSaveBytes waiting (a slow disk), the picture is encoded and written here instead, as before, so neither
+        // threads nor memory pile up. A picture not yet on the disk is only made again by a later session.
         private static void Save(string key, Texture2D texture)
         {
+            var save = new PendingSave(Path.Combine(Folder, key + ".png"), texture.GetRawTextureData(), texture.graphicsFormat,
+                (uint)texture.width, (uint)texture.height);
+            bool startWorker = false;
+            lock (Saves)
+            {
+                if (pendingSaveBytes + save.Pixels.Length <= MaxPendingSaveBytes)
+                {
+                    Saves.Enqueue(save);
+                    pendingSaveBytes += save.Pixels.Length;
+                    if (!saving) saving = startWorker = true;
+                    save = default;
+                }
+            }
+
+            if (save.Pixels != null) Write(save);
+            else if (startWorker) DedicatedTask.Run(DrainSaves);
+        }
+
+        private static void DrainSaves()
+        {
+            while (true)
+            {
+                PendingSave save;
+                lock (Saves)
+                {
+                    if (Saves.Count == 0) { saving = false; return; }
+                    save = Saves.Dequeue();
+                }
+
+                Write(save);
+                lock (Saves) pendingSaveBytes -= save.Pixels.Length;
+            }
+        }
+
+        private static void Write(PendingSave save)
+        {
+            string written = save.Path + "." + Guid.NewGuid().ToString("N").Substring(0, 8) + ".png.tmp";
             try
             {
-                Directory.CreateDirectory(Folder);
-                File.WriteAllBytes(Path.Combine(Folder, key + ".png"), texture.EncodeToPNG());
+                byte[] png = ImageConversion.EncodeArrayToPNG(save.Pixels, save.Format, save.Width, save.Height);
+                Directory.CreateDirectory(Path.GetDirectoryName(save.Path));
+                File.WriteAllBytes(written, png);
+                if (File.Exists(save.Path)) File.Replace(written, save.Path, null);
+                else File.Move(written, save.Path);
             }
+            catch (IOException) { TryDelete(written); }
+            catch (UnauthorizedAccessException) { TryDelete(written); }
+            catch (Exception ex)
+            {
+                TryDelete(written);
+                if (System.Threading.Interlocked.Exchange(ref saveFailureLogged, 1) == 0)
+                    Debug.LogWarning("[Orbiters] Could not save a model picture (said once): " + ex.Message);
+            }
+        }
+
+        // Only the temporary file Save wrote in the same call.
+        private static void TryDelete(string written)
+        {
+            try { if (File.Exists(written)) File.Delete(written); }
             catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
         }
 
         private static string Hash(string key)

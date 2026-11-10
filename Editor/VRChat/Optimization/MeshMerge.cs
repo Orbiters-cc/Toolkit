@@ -4,6 +4,7 @@ using System.Linq;
 using System.Text;
 using Orbiters.Toolkit.Editor.VRChat.Attachments;
 using Orbiters.Toolkit.Editor.VRChat.BlendShapes;
+using Orbiters.Toolkit.Meshes;
 using Unity.Collections;
 using UnityEditor;
 using UnityEngine;
@@ -419,6 +420,9 @@ namespace Orbiters.Toolkit.Editor.VRChat.Optimization
             var poses = target.sharedMesh.bindposes.ToList();
             var parts = new List<Part> { PartOf(target) };
             parts[0].BoneMap = Enumerable.Range(0, bones.Count).ToArray();
+            // Each bone's first place in the list (what IndexOf found), kept as bones are added.
+            var places = new Dictionary<Transform, int>();
+            for (int i = 0; i < bones.Count; i++) if (bones[i] != null && !places.ContainsKey(bones[i])) places[bones[i]] = i;
             int vertices = target.sharedMesh.vertexCount;
             foreach (var source in sources)
             {
@@ -428,7 +432,7 @@ namespace Orbiters.Toolkit.Editor.VRChat.Optimization
                 part.Offset = vertices;
                 result.Ranges[source] = (vertices, part.Mesh.vertexCount);
                 vertices += part.Mesh.vertexCount;
-                Map(part, bones, poses);
+                Map(part, bones, poses, places);
                 parts.Add(part);
             }
 
@@ -494,47 +498,19 @@ namespace Orbiters.Toolkit.Editor.VRChat.Optimization
             for (int i = 0; i < submeshes.Count; i++) merged.SetIndices(submeshes[i], MeshTopology.Triangles, i, false, 0);
 
             // The target's blendshapes first, under their names; the joining meshes' after it, renamed when the name is taken.
+            // Read once per part, written once.
             var weightsAfter = new List<float>();
             var names = new HashSet<string>(StringComparer.Ordinal);
-            var mv = new Vector3[vertices]; var mn = new Vector3[vertices]; var mt = new Vector3[vertices];
+            var shapes = new List<BlendShapeTable.Shape>();
             foreach (var part in parts)
             {
                 if (part.Renderer != target && !keepShapes) continue;
-                var shaped = part.Mesh;
-                int count = shaped.vertexCount;
-                var kept = new Dictionary<string, string>(StringComparer.Ordinal);
-                var dv = new Vector3[count]; var dn = new Vector3[count]; var dt = new Vector3[count];
+                var kept = AddShapes(part.Mesh, part.Offset, part.Space, part.Renderer.name, names, shapes);
                 var skinned = part.Renderer as SkinnedMeshRenderer;
-                bool same = part.Space == Matrix4x4.identity;
-                // Shape offsets add to a vertex's normal and tangent before Unity skins and normalizes them: carried through
-                // the part's space and scaled like the part's own (unit length again), they turn them as they did.
-                var normalScale = same ? null : Lengths(shaped.normals, count, part.Space);
-                var tangentScale = same ? null : Lengths(shaped.tangents.Select(t => (Vector3)t).ToArray(), count, part.Space);
-                for (int shape = 0; shape < shaped.blendShapeCount; shape++)
-                {
-                    string name = shaped.GetBlendShapeName(shape), unique = name;
-                    for (int n = 2; names.Contains(unique); n++) unique = name + " " + part.Renderer.name + (n > 2 ? " " + n : "");
-                    names.Add(unique);
-                    kept[name] = unique;
-                    for (int frame = 0; frame < shaped.GetBlendShapeFrameCount(shape); frame++)
-                    {
-                        shaped.GetBlendShapeFrameVertices(shape, frame, dv, dn, dt);
-                        if (same) { Array.Copy(dv, 0, mv, part.Offset, count); Array.Copy(dn, 0, mn, part.Offset, count); Array.Copy(dt, 0, mt, part.Offset, count); }
-                        else
-                            for (int v = 0; v < count; v++)
-                            {
-                                mv[part.Offset + v] = part.Space.MultiplyVector(dv[v]);
-                                mn[part.Offset + v] = part.Space.MultiplyVector(dn[v]) * normalScale[v];
-                                mt[part.Offset + v] = part.Space.MultiplyVector(dt[v]) * tangentScale[v];
-                            }
-                        merged.AddBlendShapeFrame(unique, shaped.GetBlendShapeFrameWeight(shape, frame), mv, mn, mt);
-                    }
-                    weightsAfter.Add(skinned != null ? skinned.GetBlendShapeWeight(shape) : 0f);
-                }
-                // The next part's shapes move nothing here.
-                Array.Clear(mv, part.Offset, count); Array.Clear(mn, part.Offset, count); Array.Clear(mt, part.Offset, count);
+                for (int shape = 0; shape < part.Mesh.blendShapeCount; shape++) weightsAfter.Add(skinned != null ? skinned.GetBlendShapeWeight(shape) : 0f);
                 if (part.Renderer != target && kept.Count > 0) result.Shapes.Add((part.Renderer.transform, kept));
             }
+            if (shapes.Count > 0) MeshShapes.Write(merged, new BlendShapeTable(vertices, shapes));
             merged.RecalculateBounds();
 
             // Culling bounds around every part's own box as it stands (a hidden renderer's world bounds are empty), in the
@@ -550,10 +526,65 @@ namespace Orbiters.Toolkit.Editor.VRChat.Optimization
             return result;
         }
 
+        /// <summary>
+        /// The blendshapes of <paramref name="mesh"/>, a part of a merged mesh from vertex <paramref name="offset"/> on, added to
+        /// <paramref name="into"/> under names <paramref name="names"/> doesn't hold yet (a taken name gets the renderer's).
+        /// Through the part's <paramref name="space"/>, shape offsets add to a vertex's normal and tangent before Unity skins
+        /// and normalizes them: carried through it and scaled like the part's own (unit length again), they turn them as they
+        /// did. Returns each shape's name in the merged mesh, by its own.
+        /// </summary>
+        internal static Dictionary<string, string> AddShapes(Mesh mesh, int offset, Matrix4x4 space, string rendererName, HashSet<string> names,
+            List<BlendShapeTable.Shape> into)
+        {
+            var kept = new Dictionary<string, string>(StringComparer.Ordinal);
+            if (mesh.blendShapeCount == 0) return kept;
+            var table = MeshShapes.Of(mesh);
+            int count = mesh.vertexCount;
+            bool same = space == Matrix4x4.identity;
+            var normalScale = same ? null : Lengths(mesh.normals, count, space);
+            var tangentScale = same ? null : Lengths(mesh.tangents.Select(t => (Vector3)t).ToArray(), count, space);
+            var frame = new MeshShapes.FrameBuilder();
+            foreach (var shape in table.Shapes)
+            {
+                string name = shape.Name, unique = name;
+                for (int n = 2; names.Contains(unique); n++) unique = name + " " + rendererName + (n > 2 ? " " + n : "");
+                names.Add(unique);
+                kept[name] = unique;
+                var frames = new List<BlendShapeTable.Frame>(shape.FrameCount);
+                foreach (var source in shape.Frames)
+                {
+                    frame.Clear();
+                    if (same) frame.AddCopy(source, offset);
+                    else
+                    {
+                        var indices = source.Indices; var deltas = source.Deltas; var normals = source.Normals; var tangents = source.Tangents;
+                        for (int k = 0; k < indices.Length; k++)
+                        {
+                            int v = indices[k];
+                            frame.Add(offset + v, space.MultiplyVector(deltas[k]),
+                                space.MultiplyVector(source.HasNormals ? normals[k] : Vector3.zero) * normalScale[v],
+                                space.MultiplyVector(source.HasTangents ? tangents[k] : Vector3.zero) * tangentScale[v],
+                                source.HasNormals, source.HasTangents);
+                        }
+                    }
+                    frames.Add(frame.Build(source.Weight));
+                }
+                into.Add(new BlendShapeTable.Shape(unique, frames));
+            }
+            return kept;
+        }
+
         // A part bound in the same rest pose as what it joins (most clothing) moves into its mesh space and shares its
         // bones; one bound otherwise keeps its space and brings its own bind poses (the same bone listed twice).
-        private static void Map(Part part, List<Transform> bones, List<Matrix4x4> poses)
+        private static void Map(Part part, List<Transform> bones, List<Matrix4x4> poses, Dictionary<Transform, int> places)
         {
+            int IndexOf(Transform bone) => places.TryGetValue(bone, out int at) ? at : -1;
+            void Add(Transform bone, Matrix4x4 pose)
+            {
+                if (bone != null && !places.ContainsKey(bone)) places[bone] = bones.Count;
+                bones.Add(bone);
+                poses.Add(pose);
+            }
             var own = part.Bones;
             var ownPoses = part.Poses;
             part.BoneMap = new int[own.Length];
@@ -561,8 +592,9 @@ namespace Orbiters.Toolkit.Editor.VRChat.Optimization
             bool consistent = true;
             for (int i = 0; i < own.Length && consistent; i++)
             {
-                int at = bones.IndexOf(own[i]);
-                if (own[i] == null || at < 0) continue;
+                if (own[i] == null) continue;
+                int at = IndexOf(own[i]);
+                if (at < 0) continue;
                 // poses[at] * space == ownPoses[i]: the part's mesh space seen from the merged one.
                 var candidate = poses[at].inverse * ownPoses[i];
                 if (space == null) space = candidate;
@@ -574,8 +606,8 @@ namespace Orbiters.Toolkit.Editor.VRChat.Optimization
                 var back = space.Value.inverse;
                 for (int i = 0; i < own.Length; i++)
                 {
-                    int at = own[i] != null ? bones.IndexOf(own[i]) : -1;
-                    if (at < 0) { at = bones.Count; bones.Add(own[i]); poses.Add(ownPoses[i] * back); }
+                    int at = own[i] != null ? IndexOf(own[i]) : -1;
+                    if (at < 0) { at = bones.Count; Add(own[i], ownPoses[i] * back); }
                     part.BoneMap[i] = at;
                 }
                 return;
@@ -583,8 +615,7 @@ namespace Orbiters.Toolkit.Editor.VRChat.Optimization
             for (int i = 0; i < own.Length; i++)
             {
                 part.BoneMap[i] = bones.Count;
-                bones.Add(own[i]);
-                poses.Add(ownPoses[i]);
+                Add(own[i], ownPoses[i]);
             }
         }
 

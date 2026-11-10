@@ -18,6 +18,19 @@ namespace Orbiters.Toolkit.Editor.VRChat.Attachments
         public Matrix4x4 Offset;
     }
 
+    /// <summary>The rule a <see cref="FollowLink"/> comes from.</summary>
+    public enum FollowKind
+    {
+        /// <summary>A VRCFury Armature Link the creator set up.</summary>
+        VrcFury,
+        /// <summary>An accessory My Avatar attached (its bone links, or its root on its parent).</summary>
+        MyAvatar,
+        /// <summary>A bone matched by name, nothing set up.</summary>
+        NameMatch,
+        /// <summary>Clothing fitted to the avatar (ReFit's kept fit): its bones follow where they were fitted.</summary>
+        FittedClothing,
+    }
+
     /// <summary>One transform that follows an avatar bone, at a fixed offset in that bone's space.</summary>
     public struct FollowLink
     {
@@ -25,8 +38,22 @@ namespace Orbiters.Toolkit.Editor.VRChat.Attachments
         public Matrix4x4 Offset;
         /// <summary>The follower's world scale as a multiple of the target's, or null to keep its own scale.</summary>
         public Vector3? Scale;
-        /// <summary>Which rule produced the link, for the accessory list ("VRCFury", "My Avatar", "Name match").</summary>
-        public string Source;
+        /// <summary>Which rule produced the link: what the build does with it is decided by this, never by its label.</summary>
+        public FollowKind Kind;
+        /// <summary>The rule's name as people read it, for the accessory list ("VRCFury", "My Avatar", "Name match").</summary>
+        public string Source => Label(Kind);
+
+        public static string Label(FollowKind kind)
+        {
+            switch (kind)
+            {
+                case FollowKind.VrcFury: return "VRCFury";
+                case FollowKind.MyAvatar: return "My Avatar";
+                case FollowKind.NameMatch: return "Name match";
+                case FollowKind.FittedClothing: return "Fitted clothing";
+                default: return kind.ToString();
+            }
+        }
         public Transform Accessory;
         /// <summary>
         /// Stuck to the skin (<see cref="SkinStick"/>): the follower is blended between these bones, as the build's VRChat
@@ -123,7 +150,7 @@ namespace Orbiters.Toolkit.Editor.VRChat.Attachments
                         foreach (var pair in fit.Pairs)
                         {
                             result.Add(new FollowLink { Follower = pair.source, Target = pair.target,
-                                Offset = Current(pair.source, pair.target), Source = "Fitted clothing", Accessory = root });
+                                Offset = Current(pair.source, pair.target), Kind = FollowKind.FittedClothing, Accessory = root });
                             handled.Add(pair.source);
                         }
                         // Hood strings, tentacle chains and other unmatched deforming bones inherit their
@@ -136,12 +163,12 @@ namespace Orbiters.Toolkit.Editor.VRChat.Attachments
                     var rest = ArmatureRest.Frames(attachment.GetComponentsInChildren<SkinnedMeshRenderer>(true));
                     foreach (var link in attachment.links)
                         if (link.from != null && link.to != null)
-                            result.Add(new FollowLink { Follower = link.from, Target = link.to, Offset = AttachmentFit.Fitted(attachment) ? Current(link.from, link.to) : RestOffset(link.from, link.to, rest, avatarRest), Source = "My Avatar", Accessory = root });
+                            result.Add(new FollowLink { Follower = link.from, Target = link.to, Offset = AttachmentFit.Fitted(attachment) ? Current(link.from, link.to) : RestOffset(link.from, link.to, rest, avatarRest), Kind = FollowKind.MyAvatar, Accessory = root });
                     handled.UnionWith(root.GetComponentsInChildren<Transform>(true));
                 }
                 else if (attachment.mode == OrbitersAttachment.AttachMode.Parent && attachment.parent != null)
                 {
-                    result.Add(new FollowLink { Follower = root, Target = attachment.parent, Offset = Current(root, attachment.parent), Source = "My Avatar", Accessory = root,
+                    result.Add(new FollowLink { Follower = root, Target = attachment.parent, Offset = Current(root, attachment.parent), Kind = FollowKind.MyAvatar, Accessory = root,
                         Blend = SkinStick.Blend(attachment, root.localToWorldMatrix) });
                     handled.UnionWith(root.GetComponentsInChildren<Transform>(true));
                 }
@@ -191,7 +218,7 @@ namespace Orbiters.Toolkit.Editor.VRChat.Attachments
                 var accessory = Accessory(group.Key, avatarRoot);
                 foreach (var match in BoneMatcher.MatchHierarchy(bones, index, BoneMatcher.DetectAffixes(bones, index)))
                     if (match.Matched)
-                        result.Add(new FollowLink { Follower = match.Source, Target = match.Target, Offset = RestOffset(match.Source, match.Target, rest, avatarRest), Source = "Name match", Accessory = accessory });
+                        result.Add(new FollowLink { Follower = match.Source, Target = match.Target, Offset = RestOffset(match.Source, match.Target, rest, avatarRest), Kind = FollowKind.NameMatch, Accessory = accessory });
             }
             return result;
         }
@@ -219,7 +246,7 @@ namespace Orbiters.Toolkit.Editor.VRChat.Attachments
             var followerScale = follower.lossyScale;
             return new FollowLink
             {
-                Follower = follower, Target = target, Source = "VRCFury", Accessory = accessory,
+                Follower = follower, Target = target, Kind = FollowKind.VrcFury, Accessory = accessory,
                 Offset = Matrix4x4.TRS(target.InverseTransformPoint(position), Quaternion.Inverse(target.rotation) * rotation, Vector3.one),
                 Scale = link.ForceOneWorldScale ? new Vector3(1 / targetScale.x, 1 / targetScale.y, 1 / targetScale.z)
                     : link.AlignScale ? Vector3.one * scaleFactor

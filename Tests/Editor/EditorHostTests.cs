@@ -282,4 +282,24 @@ public sealed class EditorHostTests
         Assert.AreNotEqual(AvatarSignature.Hash64("abc"), AvatarSignature.Hash64("abd"));
         Assert.AreNotEqual(AvatarSignature.Hash64("Ā"), AvatarSignature.Hash64("\u0001"), "both bytes of a character count");
     }
+    // TKV-13: an extension point says who registered what, undoes a registration on Dispose, and one failing extension
+    // neither stops the others nor the feature.
+    [Test] public void AnExtensionPointRegistersByOwnerAndSurvivesAFailingExtension()
+    {
+        var point = new ExtensionPoint<Func<int, int>>("Test extensions");
+        Func<int, int> twice = x => x * 2, broken = _ => throw new InvalidOperationException("broken");
+        var first = point.Register("Test", twice);
+        point.Add(x => x + 1);
+        using (point.Register("Broken", broken))
+        {
+            UnityEngine.TestTools.LogAssert.Expect(LogType.Exception, new System.Text.RegularExpressions.Regex(@"Test extensions \(Broken\) failed: broken"));
+            Assert.That(point.Each(f => f(5), -1), Is.EqualTo(new[] { 10, 6, -1 }));
+        }
+        Assert.That(point.Count, Is.EqualTo(2));
+        first.Dispose();
+        first.Dispose();
+        Assert.That(point.Each(f => f(5)), Is.EqualTo(new[] { 6 }));
+        Assert.That(point.Remove(twice), Is.False);
+        Assert.That(point.ToList(), Has.Count.EqualTo(1));
+    }
 }

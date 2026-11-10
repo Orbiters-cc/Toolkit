@@ -59,7 +59,8 @@ namespace Orbiters.Toolkit.Editor.VRChat.Optimization
                 parameters.UnionWith(names);
                 if (playable) playableParameters.UnionWith(names);
             }
-            Animations = AnimationsOf(root);
+            // During a build, the build's own index (every step shares it, and it reads again only the clips that changed).
+            Animations = Build.BuildContext.Of(root)?.Clips ?? AnimationsOf(root);
             foreach (var (clip, animatorRoot) in Animations.Clips)
             {
                 var bindings = Animations.Bindings(clip);

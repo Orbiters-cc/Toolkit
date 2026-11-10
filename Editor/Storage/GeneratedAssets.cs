@@ -43,17 +43,33 @@ namespace Orbiters.Toolkit.Editor.Storage
 
         static GeneratedAssets()
         {
+            bool newSession = !SessionState.GetBool(StartedKey, false);
+            if (newSession)
+            {
+                // A new editor session: no Undo can bring back what an earlier one put aside.
+                SessionState.SetBool(StartedKey, true);
+                Write(new Trash());
+                try { if (Directory.Exists(TrashFolder)) Directory.Delete(TrashFolder, true); }
+                catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException) { }
+            }
+            // Nothing listens until a file is tracked or put aside: a project no tool generated files in costs nothing.
+            if (ReadList().guids.Count == 0 && ReadTrash().items.Count == 0) return;
+            Activate();
+            if (newSession) SweepSoon();
+        }
+
+        private static bool active;
+
+        private static void Activate()
+        {
+            if (active) return;
+            active = true;
             // Straight from Unity, not from the change bus a frame later: the object an Undo brings back finds its file at once.
             Undo.undoRedoPerformed += UndoRedo;
             EditorChangeBus.Changed += _ => revision++;
             EditorSceneManager.sceneSaved += _ => SweepSoon();
-            if (SessionState.GetBool(StartedKey, false)) return;
-            // A new editor session: no Undo can bring back what an earlier one put aside.
-            SessionState.SetBool(StartedKey, true);
-            Write(new Trash());
-            try { if (Directory.Exists(TrashFolder)) Directory.Delete(TrashFolder, true); }
-            catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException) { }
-            SweepSoon();
+            // What changed before is not known: the next sweep runs.
+            swept = null;
         }
 
         /// <summary>
@@ -69,7 +85,7 @@ namespace Orbiters.Toolkit.Editor.Storage
                 string guid = string.IsNullOrEmpty(path) ? null : AssetDatabase.AssetPathToGUID(path);
                 if (!string.IsNullOrEmpty(guid) && !list.guids.Contains(guid)) list.guids.Add(guid);
             }
-            if (list.guids.Count != count) { WriteList(list); revision++; }
+            if (list.guids.Count != count) { WriteList(list); revision++; Activate(); }
         }
 
         public static void Track(params string[] paths) => Track((IEnumerable<string>)paths);
@@ -92,6 +108,7 @@ namespace Orbiters.Toolkit.Editor.Storage
         /// </summary>
         internal static async Task<bool> SweepIfChangedAsync()
         {
+            Activate();
             EditorChangeBus.Flush();
             if (swept == revision) return false;
             long at = revision;
@@ -126,20 +143,20 @@ namespace Orbiters.Toolkit.Editor.Storage
                 candidates.RemoveAll(Rendered().Contains);
                 if (candidates.Count == 0) { PutAside(removed); completed = true; return removed; }
                 var references = await ProjectReferences.ScanAsync();
-                // The scan spans editor frames: what is loaded now decides.
+                // From here to the deletion, one synchronous step: the scan spans editor frames, so the files changed since
+                // it read them are read again, and what is loaded now decides.
+                AfterScan?.Invoke();
                 var loaded = Loaded();
-                var removable = new HashSet<string>(candidates.Where(p => !loaded.Contains(p) && File.Exists(Path.Combine(Root, p))), StringComparer.OrdinalIgnoreCase);
                 // Files only used by other files going go together; anything used from outside that set stays.
-                for (bool changed = true; changed;)
-                {
-                    changed = false;
-                    foreach (string path in removable.ToList())
-                        if (references.UsersOf(path, removable).Count > 0) { removable.Remove(path); changed = true; }
-                }
+                var removable = references.Removable(candidates.Where(p => File.Exists(Path.Combine(Root, p))), loaded.Contains, out string uncertain);
+                if (uncertain != null) return removed;
                 removed.AddRange(removable);
                 PutAside(removed);
                 completed = true;
             }
+            // Unity has not imported a file's latest version yet (or it cannot be read): everything stays, and the sweep is
+            // tried again later.
+            catch (UncertainReferencesException) { }
             catch (Exception ex) when (!(ex is OperationCanceledException)) { Debug.LogWarning("[Orbiters] Unused generated files were kept: " + ex.Message); }
             finally
             {
@@ -148,6 +165,9 @@ namespace Orbiters.Toolkit.Editor.Storage
             }
             return removed;
         }
+
+        /// <summary>Tests: runs after a sweep's scan, in the synchronous step that ends with its deletions.</summary>
+        internal static Action AfterScan;
 
         private static bool Exists(string path) => !string.IsNullOrEmpty(path) && path.StartsWith("Assets/", StringComparison.Ordinal) &&
             (File.Exists(Path.Combine(Root, path)) || Directory.Exists(Path.Combine(Root, path)));

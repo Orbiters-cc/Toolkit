@@ -27,8 +27,7 @@ namespace Orbiters.Toolkit.Editor
             this.min = min; this.max = max; this.rest = rest; this.tick = tick; this.majorEvery = Mathf.Max(1, majorEvery); this.loops = loops;
             this.pixelsPerUnit = pixelsPerUnit; this.snapRange = snapRange; this.format = format; this.changed = changed;
             AddToClassList("orbiters-dial");
-            var sheet = UnityEditor.AssetDatabase.LoadAssetAtPath<StyleSheet>("Packages/orbiters.toolkit/Editor/UI/scrub-dial.uss");
-            if (sheet) styleSheets.Add(sheet);
+            UiStyles.Attach(this, "Packages/orbiters.toolkit/Editor/UI/scrub-dial.uss");
 
             var name = new Label(label);
             name.AddToClassList("orbiters-dial__label");

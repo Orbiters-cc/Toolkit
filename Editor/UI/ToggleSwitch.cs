@@ -16,8 +16,7 @@ namespace Orbiters.Toolkit.Editor
         public ToggleSwitch(bool value, Action<bool> changed)
         {
             this.changed = changed;
-            var sheet = AssetDatabase.LoadAssetAtPath<StyleSheet>(StyleSheetPath);
-            if (sheet) styleSheets.Add(sheet);
+            UiStyles.Attach(this, StyleSheetPath);
             AddToClassList("orbiters-switch");
             focusable = true;
             var knob = new VisualElement(); knob.AddToClassList("orbiters-switch__knob"); knob.pickingMode = PickingMode.Ignore; Add(knob);

@@ -39,11 +39,15 @@ namespace Orbiters.Toolkit.Editor.XRay
                 if (bone == null) continue;
                 parents[i] = bone.parent;
                 childCounts[i] = bone.childCount;
-                foreach (Transform child in bone)
+                for (int k = 0; k < childCounts[i]; k++)
+                {
+                    var child = bone.GetChild(k);
                     children.Add(new ChildState(child, !boneSet.Contains(child)));
+                }
             }
         }
 
+        // Polled while the gizmo shows: index loops, no child enumerator per bone.
         internal bool Matches(SkinnedMeshRenderer renderer)
         {
             if (renderer == null || rootBone != renderer.rootBone) return false;
@@ -55,9 +59,11 @@ namespace Orbiters.Toolkit.Editor.XRay
                 var bone = current[i];
                 if (bone != bones[i]) return false;
                 if (bone == null) continue;
-                if (bone.parent != parents[i] || bone.childCount != childCounts[i]) return false;
-                foreach (Transform child in bone)
+                int count = bone.childCount;
+                if (bone.parent != parents[i] || count != childCounts[i]) return false;
+                for (int k = 0; k < count; k++)
                 {
+                    var child = bone.GetChild(k);
                     if (childIndex >= children.Count) return false;
                     var previous = children[childIndex++];
                     if (child != previous.Child ||

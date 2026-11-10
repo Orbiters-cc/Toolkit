@@ -282,7 +282,15 @@ namespace Orbiters.Toolkit.Editor.LiveLink
         private static void Close(Connection connection)
         {
             try { connection?.Client.Close(); }
-            catch (Exception) { }
+            // Closed already, or the socket went away under it: closed either way.
+            catch (Exception ex) when (ex is ObjectDisposedException || ex is SocketException || ex is IOException) { }
+            catch (Exception ex) { Unexpected("closing a connection", ex); }
+        }
+
+        // A failure no path above expects: said in the Console (from any thread), never thrown on a link thread.
+        private static void Unexpected(string what, Exception ex)
+        {
+            UnityEngine.Debug.LogWarning("[Orbiters] Live link: unexpected failure " + what + ": " + ex.GetType().Name + ": " + ex.Message);
         }
 
         private static bool Write(Connection connection, byte[] data)
@@ -391,7 +399,8 @@ namespace Orbiters.Toolkit.Editor.LiveLink
             finally
             {
                 try { if (File.Exists(temp)) File.Delete(temp); }
-                catch (Exception) { }
+                // Only the temporary file written above; one left behind is harmless.
+                catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException) { }
             }
         }
 
@@ -415,7 +424,8 @@ namespace Orbiters.Toolkit.Editor.LiveLink
                 {
                     // That connection went away while it was set up.
                     try { accepted.Close(); }
-                    catch (Exception) { }
+                    catch (Exception ex) when (ex is ObjectDisposedException || ex is SocketException || ex is IOException) { }
+                    catch (Exception ex) { Unexpected("closing a connection being set up", ex); }
                 }
             }
         }
@@ -569,7 +579,9 @@ namespace Orbiters.Toolkit.Editor.LiveLink
                 ThreadPool.QueueUserWorkItem(_ =>
                 {
                     try { writer?.Join(ReplacedDrainMilliseconds); }
-                    catch (Exception) { }
+                    // The writer never started (or this pool thread is interrupted): closed below all the same.
+                    catch (Exception ex) when (ex is ThreadStateException || ex is ThreadInterruptedException) { }
+                    catch (Exception ex) { Unexpected("waiting for a replaced connection", ex); }
                     Close(old);
                 });
             }
@@ -641,7 +653,8 @@ namespace Orbiters.Toolkit.Editor.LiveLink
             }
             foreach (var connection in all) Close(connection);
             try { listener.Stop(); }
-            catch (Exception) { }
+            catch (SocketException) { }
+            catch (Exception ex) { Unexpected("stopping the listener", ex); }
         }
     }
 }

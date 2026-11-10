@@ -162,6 +162,15 @@ namespace Orbiters.Toolkit.Editor.VRChat.Build
     }
 
     internal sealed class BuildStartCallback : BuildPhaseCallback { internal override BuildPhase Phase => BuildPhase.Start; }
+    internal sealed class BuildBeforeNdmfCallback : BuildPhaseCallback { internal override BuildPhase Phase => BuildPhase.BeforeNdmf; }
+    internal sealed class BuildAfterNdmfCallback : BuildPhaseCallback { internal override BuildPhase Phase => BuildPhase.AfterNdmf; }
+    internal sealed class BuildBeforeRefitKeptFitsCallback : BuildPhaseCallback { internal override BuildPhase Phase => BuildPhase.BeforeRefitKeptFits; }
+    internal sealed class BuildLastBeforeVrcFuryCallback : BuildPhaseCallback { internal override BuildPhase Phase => BuildPhase.LastBeforeVrcFury; }
+    internal sealed class BuildAfterBuiltAnimationsCallback : BuildPhaseCallback { internal override BuildPhase Phase => BuildPhase.AfterBuiltAnimations; }
+    internal sealed class BuildBeforeBlendShapeLinksCallback : BuildPhaseCallback { internal override BuildPhase Phase => BuildPhase.BeforeBlendShapeLinks; }
+    internal sealed class BuildBlendShapeLinksCallback : BuildPhaseCallback { internal override BuildPhase Phase => BuildPhase.BlendShapeLinks; }
+    internal sealed class BuildVersionsCallback : BuildPhaseCallback { internal override BuildPhase Phase => BuildPhase.Versions; }
+    internal sealed class BuildMaterialsCallback : BuildPhaseCallback { internal override BuildPhase Phase => BuildPhase.Materials; }
     internal sealed class BuildBeforeVrcFuryCallback : BuildPhaseCallback { internal override BuildPhase Phase => BuildPhase.BeforeVrcFury; }
     internal sealed class BuildAfterVrcFuryCallback : BuildPhaseCallback { internal override BuildPhase Phase => BuildPhase.AfterVrcFury; }
     internal sealed class BuildAccessoriesCallback : BuildPhaseCallback { internal override BuildPhase Phase => BuildPhase.Accessories; }
