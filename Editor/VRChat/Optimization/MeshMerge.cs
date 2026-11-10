@@ -420,6 +420,9 @@ namespace Orbiters.Toolkit.Editor.VRChat.Optimization
             var poses = target.sharedMesh.bindposes.ToList();
             var parts = new List<Part> { PartOf(target) };
             parts[0].BoneMap = Enumerable.Range(0, bones.Count).ToArray();
+            // Each bone's first place in the list (what IndexOf found), kept as bones are added.
+            var places = new Dictionary<Transform, int>();
+            for (int i = 0; i < bones.Count; i++) if (bones[i] != null && !places.ContainsKey(bones[i])) places[bones[i]] = i;
             int vertices = target.sharedMesh.vertexCount;
             foreach (var source in sources)
             {
@@ -429,7 +432,7 @@ namespace Orbiters.Toolkit.Editor.VRChat.Optimization
                 part.Offset = vertices;
                 result.Ranges[source] = (vertices, part.Mesh.vertexCount);
                 vertices += part.Mesh.vertexCount;
-                Map(part, bones, poses);
+                Map(part, bones, poses, places);
                 parts.Add(part);
             }
 
@@ -573,8 +576,15 @@ namespace Orbiters.Toolkit.Editor.VRChat.Optimization
 
         // A part bound in the same rest pose as what it joins (most clothing) moves into its mesh space and shares its
         // bones; one bound otherwise keeps its space and brings its own bind poses (the same bone listed twice).
-        private static void Map(Part part, List<Transform> bones, List<Matrix4x4> poses)
+        private static void Map(Part part, List<Transform> bones, List<Matrix4x4> poses, Dictionary<Transform, int> places)
         {
+            int IndexOf(Transform bone) => places.TryGetValue(bone, out int at) ? at : -1;
+            void Add(Transform bone, Matrix4x4 pose)
+            {
+                if (bone != null && !places.ContainsKey(bone)) places[bone] = bones.Count;
+                bones.Add(bone);
+                poses.Add(pose);
+            }
             var own = part.Bones;
             var ownPoses = part.Poses;
             part.BoneMap = new int[own.Length];
@@ -582,8 +592,9 @@ namespace Orbiters.Toolkit.Editor.VRChat.Optimization
             bool consistent = true;
             for (int i = 0; i < own.Length && consistent; i++)
             {
-                int at = bones.IndexOf(own[i]);
-                if (own[i] == null || at < 0) continue;
+                if (own[i] == null) continue;
+                int at = IndexOf(own[i]);
+                if (at < 0) continue;
                 // poses[at] * space == ownPoses[i]: the part's mesh space seen from the merged one.
                 var candidate = poses[at].inverse * ownPoses[i];
                 if (space == null) space = candidate;
@@ -595,8 +606,8 @@ namespace Orbiters.Toolkit.Editor.VRChat.Optimization
                 var back = space.Value.inverse;
                 for (int i = 0; i < own.Length; i++)
                 {
-                    int at = own[i] != null ? bones.IndexOf(own[i]) : -1;
-                    if (at < 0) { at = bones.Count; bones.Add(own[i]); poses.Add(ownPoses[i] * back); }
+                    int at = own[i] != null ? IndexOf(own[i]) : -1;
+                    if (at < 0) { at = bones.Count; Add(own[i], ownPoses[i] * back); }
                     part.BoneMap[i] = at;
                 }
                 return;
@@ -604,8 +615,7 @@ namespace Orbiters.Toolkit.Editor.VRChat.Optimization
             for (int i = 0; i < own.Length; i++)
             {
                 part.BoneMap[i] = bones.Count;
-                bones.Add(own[i]);
-                poses.Add(ownPoses[i]);
+                Add(own[i], ownPoses[i]);
             }
         }
 
