@@ -63,13 +63,16 @@ public sealed class VirtualListTests
         var list = new VirtualList(10f, () => new VisualElement(), (row, item) => binds.Add(item)) { SpanOf = i => spans[i] };
         list.SetItemCount(20, keepAtEnd: false);
         list.LayoutFor(100f);
-        binds.Clear();
         foreach (int span in new[] { 3, 1 })
         {
+            binds.Clear();
             spans[2] = span;
             list.InvalidateSpans(2);
             list.LayoutFor(100f);
-            Assert.That(binds, Is.Empty, "no rebinding");
+            // Growing hides items 8 and 9; shrinking brings only those two back.
+            Assert.That(binds, Is.EqualTo(span == 3 ? new int[0] : new[] { 8, 9 }), "only newly visible items bind");
+            var visible = list.Rows.Where(row => row.style.display.value != DisplayStyle.None).Select(list.ItemOf).OrderBy(i => i);
+            Assert.That(visible, Is.EqualTo(Enumerable.Range(0, span == 3 ? 8 : 10)), "visible range after resizing");
             Assert.That(list.RowOf(2).style.height.value.value, Is.EqualTo(10f * span), "the item's own height");
             Assert.That(list.RowOf(3).style.top.value.value, Is.EqualTo(10f * (2 + span)), "the next item below it");
         }
