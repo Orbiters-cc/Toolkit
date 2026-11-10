@@ -24,6 +24,8 @@ namespace Orbiters.Toolkit.Editor.Vpm
         private readonly Dictionary<string, List<VpmCandidate>> known;
         // The packages in Packages/ by name: the VPM dependencies their package.json declares.
         private readonly Dictionary<string, Dictionary<string, string>> copies = new Dictionary<string, Dictionary<string, string>>(StringComparer.OrdinalIgnoreCase);
+        // The git clones in Packages/ (packages developed here) by name, with their version: read once with the copies.
+        private readonly Dictionary<string, string> developed = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         private Dictionary<string, List<VpmCandidate>> repositories;
 
         /// <param name="knownPackages">Orbiters' approved packages, already limited to their supported versions.</param>
@@ -40,6 +42,7 @@ namespace Orbiters.Toolkit.Editor.Vpm
         private sealed class Manifest
         {
             [JsonProperty("name")] public string name;
+            [JsonProperty("version")] public string version;
             [JsonProperty("vpmDependencies")] public Dictionary<string, string> vpmDependencies;
         }
 
@@ -54,8 +57,11 @@ namespace Orbiters.Toolkit.Editor.Vpm
                 try
                 {
                     var manifest = JsonConvert.DeserializeObject<Manifest>(File.ReadAllText(file));
-                    if (!string.IsNullOrWhiteSpace(manifest?.name))
-                        copies[manifest.name] = new Dictionary<string, string>(manifest.vpmDependencies ?? new Dictionary<string, string>(), StringComparer.OrdinalIgnoreCase);
+                    if (string.IsNullOrWhiteSpace(manifest?.name)) continue;
+                    copies[manifest.name] = new Dictionary<string, string>(manifest.vpmDependencies ?? new Dictionary<string, string>(), StringComparer.OrdinalIgnoreCase);
+                    // VPM never installs a .git folder (VpmDependencies.LocalDevelopmentCopy); the first clone of a name counts.
+                    if ((Directory.Exists(Path.Combine(folder, ".git")) || File.Exists(Path.Combine(folder, ".git"))) && !developed.ContainsKey(manifest.name))
+                        developed[manifest.name] = manifest.version;
                 }
                 catch (Exception e) when (e is JsonException || e is IOException || e is UnauthorizedAccessException) { }
             }
@@ -69,10 +75,10 @@ namespace Orbiters.Toolkit.Editor.Vpm
         public string Installed(string id)
         {
             if (installed.TryGetValue(id, out var version)) return version;
-            return VpmDependencies.LocalDevelopmentCopy(id, out version) ? version : null;
+            return developed.TryGetValue(id, out version) ? version : null;
         }
 
-        public bool Developed(string id) => VpmDependencies.LocalDevelopmentCopy(id, out _);
+        public bool Developed(string id) => id != null && developed.ContainsKey(id);
 
         public string DisplayName(string id) => known.TryGetValue(id, out var list) ? list.FirstOrDefault()?.DisplayName : Local(id, null)?.Title;
 
@@ -139,7 +145,9 @@ namespace Orbiters.Toolkit.Editor.Vpm
             var list = (requirements ?? Enumerable.Empty<VpmDependencyPlan.Requirement>()).ToList();
             var candidates = new List<VpmCandidate>(known ?? Enumerable.Empty<VpmCandidate>());
             var catalog = new VpmProjectCatalog(candidates);
-            var plan = VpmDependencyPlan.ResolveForApproval(list, catalog);
+            // The search runs on a worker: the catalog read the project above, on the editor's thread; what it reads later is
+            // VPM's repositories (VPM's own library, as ApplyAsync uses it on workers).
+            var plan = await System.Threading.Tasks.Task.Run(() => VpmDependencyPlan.ResolveForApproval(list, catalog), cancellation);
             if (plan.CanApply && Removals(plan) == 0) return plan;
             var stranded = catalog.InstalledPackages()
                 .Where(id => !catalog.Developed(id) && !VpmDependencyPlan.Protected(id) && !catalog.Versions(id).Any(c => c.Version != catalog.Installed(id)))
@@ -151,7 +159,8 @@ namespace Orbiters.Toolkit.Editor.Vpm
                 extra.AddRange((await VpmListingReader.ReadAsync(url, cancellation))
                     .Where(c => offering.TryGetValue(c.Id, out var urls) && urls.Contains(url, StringComparer.OrdinalIgnoreCase)));
             if (extra.Count == 0) return plan;
-            var wider = VpmDependencyPlan.ResolveForApproval(list, new VpmProjectCatalog(candidates.Concat(extra)));
+            var widerCatalog = new VpmProjectCatalog(candidates.Concat(extra));
+            var wider = await System.Threading.Tasks.Task.Run(() => VpmDependencyPlan.ResolveForApproval(list, widerCatalog), cancellation);
             return wider.CanApply && (!plan.CanApply || Removals(wider) < Removals(plan)) ? wider : plan;
         }
 

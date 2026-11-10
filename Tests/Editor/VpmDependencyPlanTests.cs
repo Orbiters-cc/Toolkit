@@ -273,6 +273,30 @@ namespace Orbiters.Toolkit.Editor.Tests
             Assert.That(plan.Steps.Single(s => s.Id == "z").Action, Is.EqualTo(VpmStepAction.Blocked));
             Assert.That(watch.ElapsedMilliseconds, Is.LessThan(5000));
         }
+
+        // TKV-29: the planner asks the catalog each question once per plan (a project's catalog reads the disk and VPM's
+        // repositories), and plans as it did when it asked every time.
+        private sealed class Counting : IVpmCatalog
+        {
+            private readonly IVpmCatalog inner;
+            public readonly Dictionary<string, int> Asked = new Dictionary<string, int>();
+            public Counting(IVpmCatalog inner) => this.inner = inner;
+            private void Count(string what) => Asked[what] = Asked.TryGetValue(what, out int n) ? n + 1 : 1;
+            public string Installed(string id) { Count("Installed " + id); return inner.Installed(id); }
+            public bool Developed(string id) { Count("Developed " + id); return inner.Developed(id); }
+            public IEnumerable<VpmCandidate> Versions(string id) { Count("Versions " + id); return inner.Versions(id); }
+            public string DisplayName(string id) { Count("DisplayName " + id); return inner.DisplayName(id); }
+            public IReadOnlyDictionary<string, string> InstalledDependencies(string id) { Count("InstalledDependencies " + id); return inner.InstalledDependencies(id); }
+            public IEnumerable<string> InstalledPackages() { Count("InstalledPackages"); return inner.InstalledPackages(); }
+        }
+
+        [Test] public void ThePlannerAsksTheCatalogEachThingOnce()
+        {
+            var counting = new Counting(SampleProject());
+            var plan = VpmDependencyPlan.ResolveForApproval(N4N0.Select(r => new VpmDependencyPlan.Requirement(r.id, r.range, "N4N0")), counting);
+            Assert.That(counting.Asked.Where(p => p.Value > 1).Select(p => p.Key + " x" + p.Value), Is.Empty);
+            Assert.That(Changes(plan), Is.EqualTo(Changes(Approved(SampleProject(), N4N0))));
+        }
     }
 }
 #endif
