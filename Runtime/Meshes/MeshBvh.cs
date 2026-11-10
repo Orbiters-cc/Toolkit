@@ -111,6 +111,7 @@ namespace Orbiters.Toolkit.Meshes
         /// <summary>Recomputes every node's bounds from the current vertex positions (same topology).</summary>
         public unsafe void Refit()
         {
+            RefuseWhilePinned();
             if (nodeCount == 0) return;
             fixed (BvhNode* n = nodes)
             fixed (BvhTriangle* c = corners)
@@ -122,6 +123,7 @@ namespace Orbiters.Toolkit.Meshes
         /// <summary>Refits only the leaves holding <paramref name="movedTriangles"/> and their ancestors.</summary>
         public void RefitTriangles(IReadOnlyList<int> movedTriangles)
         {
+            RefuseWhilePinned();
             if (movedTriangles == null || movedTriangles.Count == 0 || nodeCount == 0) return;
             NextStamp();
             dirtyLeaves.Clear();
@@ -132,6 +134,7 @@ namespace Orbiters.Toolkit.Meshes
         /// <summary>Refits the leaves holding the triangles around <paramref name="movedVertices"/>.</summary>
         public void RefitVertices(IReadOnlyList<int> movedVertices, MeshNeighbors neighbors)
         {
+            RefuseWhilePinned();
             if (movedVertices == null || movedVertices.Count == 0 || nodeCount == 0) return;
             NextStamp();
             dirtyLeaves.Clear();
@@ -193,22 +196,37 @@ namespace Orbiters.Toolkit.Meshes
         }
 
         /// <summary>
-        /// The tree's memory pinned for Burst jobs and other kernels (<see cref="BvhKernels"/>): dispose the result as soon as
-        /// the work using <see cref="PinnedBvh.View"/> is done, and do not refit meanwhile.
+        /// The tree's memory pinned for Burst jobs and other kernels (<see cref="BvhKernels"/>), until the lease is disposed.
+        /// The lease owns the pins: hand <see cref="PinnedBvh.View"/> only to work that ends before it is disposed, and register
+        /// every job that reads it with <see cref="PinnedBvh.DependsOn"/> (disposing completes them first). While any lease
+        /// is out the tree refuses refits.
         /// </summary>
         public PinnedBvh Pin() => new PinnedBvh(this);
 
-        public struct PinnedBvh : IDisposable
+        private int leases;
+
+        private void RefuseWhilePinned()
         {
+            if (System.Threading.Volatile.Read(ref leases) > 0) throw new InvalidOperationException("The BVH is pinned for queries: dispose its leases before refitting.");
+        }
+
+        /// <summary>A pin of a <see cref="MeshBvh"/>'s arrays (see <see cref="Pin"/>). Disposing it more than once does nothing.</summary>
+        public sealed class PinnedBvh : IDisposable
+        {
+            private readonly MeshBvh bvh;
             private GCHandle nodes, corners, triangles;
-            public readonly BvhView View;
+            private readonly BvhView view;
+            private Unity.Jobs.JobHandle jobs;
+            private bool hasJobs;
+            private int disposed;
 
             internal unsafe PinnedBvh(MeshBvh bvh)
             {
+                this.bvh = bvh;
                 nodes = GCHandle.Alloc(bvh.nodes, GCHandleType.Pinned);
                 corners = GCHandle.Alloc(bvh.corners, GCHandleType.Pinned);
                 triangles = GCHandle.Alloc(bvh.triangleOfSlot, GCHandleType.Pinned);
-                View = new BvhView
+                view = new BvhView
                 {
                     Nodes = (BvhNode*)nodes.AddrOfPinnedObject(),
                     Corners = (BvhTriangle*)corners.AddrOfPinnedObject(),
@@ -216,13 +234,36 @@ namespace Orbiters.Toolkit.Meshes
                     NodeCount = bvh.nodeCount,
                     Mirrored = bvh.Mirrored ? 1 : 0
                 };
+                System.Threading.Interlocked.Increment(ref bvh.leases);
+            }
+
+            /// <summary>The pinned memory; refused once the lease is disposed.</summary>
+            public BvhView View
+            {
+                get
+                {
+                    if (System.Threading.Volatile.Read(ref disposed) != 0) throw new ObjectDisposedException(nameof(PinnedBvh));
+                    return view;
+                }
+            }
+
+            /// <summary>A job that reads <see cref="View"/>: disposing the lease completes it before unpinning (main thread).</summary>
+            public void DependsOn(Unity.Jobs.JobHandle job)
+            {
+                if (System.Threading.Volatile.Read(ref disposed) != 0) throw new ObjectDisposedException(nameof(PinnedBvh));
+                jobs = Unity.Jobs.JobHandle.CombineDependencies(jobs, job);
+                hasJobs = true;
             }
 
             public void Dispose()
             {
-                if (nodes.IsAllocated) nodes.Free();
-                if (corners.IsAllocated) corners.Free();
-                if (triangles.IsAllocated) triangles.Free();
+                if (System.Threading.Interlocked.Exchange(ref disposed, 1) != 0) return;
+                // Every job that may still read the memory finishes before it can move.
+                if (hasJobs) jobs.Complete();
+                nodes.Free();
+                corners.Free();
+                triangles.Free();
+                System.Threading.Interlocked.Decrement(ref bvh.leases);
             }
         }
 

@@ -311,6 +311,54 @@ namespace Orbiters.Toolkit.Editor.Tests
             }
         }
 
+        // Review: a ray parallel to an axis that meets a triangle on its box's face (the review's case and its mirrors, and
+        // axis-aligned rays onto the edges and corners of a grid) is found as testing every triangle finds it.
+        [Test]
+        public void AxisParallelRaysOnBoxFacesAreFound()
+        {
+            var cases = new List<(Vector3[] Vertices, int[] Triangles, Vector3 Origin, Vector3 Direction)>();
+            Vector3 Swap(Vector3 v, int order, Vector3 sign)
+            {
+                var axes = new[] { new[] { 0, 1, 2 }, new[] { 1, 2, 0 }, new[] { 2, 0, 1 }, new[] { 0, 2, 1 }, new[] { 2, 1, 0 }, new[] { 1, 0, 2 } }[order];
+                return Vector3.Scale(new Vector3(v[axes[0]], v[axes[1]], v[axes[2]]), sign);
+            }
+            var triangle = new[] { new Vector3(0, 0, 1), new Vector3(1, 0, 1), new Vector3(1, 1, 1) };
+            foreach (var sign in new[] { Vector3.one, new Vector3(-1, 1, 1), new Vector3(1, -1, 1), new Vector3(1, 1, -1), -Vector3.one })
+                for (int order = 0; order < 6; order++)
+                    cases.Add((triangle.Select(v => Swap(v, order, sign)).ToArray(), new[] { 0, 1, 2 }, Swap(new Vector3(1, .25f, 0), order, sign), Swap(new Vector3(0, 0, 1), order, sign)));
+            // A grid of unit squares at z = 1, rays along z through its lines and corners.
+            var grid = new List<Vector3>();
+            var gridTriangles = new List<int>();
+            for (int y = 0; y <= 4; y++) for (int x = 0; x <= 4; x++) grid.Add(new Vector3(x, y, 1));
+            for (int y = 0; y < 4; y++)
+                for (int x = 0; x < 4; x++)
+                {
+                    int a = y * 5 + x;
+                    gridTriangles.AddRange(new[] { a, a + 5, a + 1, a + 1, a + 5, a + 6 });
+                }
+            for (float x = 0; x <= 4f; x += .5f)
+                for (float y = 0; y <= 4f; y += .5f)
+                    cases.Add((grid.ToArray(), gridTriangles.ToArray(), new Vector3(x, y, 0), Vector3.forward));
+            for (int c = 0; c < cases.Count; c++)
+            {
+                var (vertices, triangles, origin, direction) = cases[c];
+                var bvh = MeshBvh.Build(vertices, triangles);
+                float nearest = float.PositiveInfinity;
+                for (int t = 0; t < triangles.Length / 3; t++)
+                    if (Triangle.Raycast(origin, direction, vertices[triangles[t * 3]], vertices[triangles[t * 3 + 1]], vertices[triangles[t * 3 + 2]], true, false, out float d, out _))
+                        nearest = Mathf.Min(nearest, d);
+                var hit = bvh.Raycast(origin, direction, 10f);
+                Assert.That(hit.Found, Is.EqualTo(!float.IsPositiveInfinity(nearest)), "case " + c + ": " + origin + " along " + direction);
+                if (hit.Found) Assert.That(hit.Distance, Is.EqualTo(nearest).Within(1e-6f), "case " + c);
+                var batch = new MeshBvh.Hit[1];
+                bvh.Raycasts(new[] { origin }, new[] { direction }, 10f, true, batch);
+                Assert.That(batch[0].Found, Is.EqualTo(hit.Found), "case " + c + " (batch)");
+                var filtered = bvh.Raycast(origin, direction, 10f, true, new AcceptAllTriangles());
+                Assert.That(filtered.Found, Is.EqualTo(hit.Found), "case " + c + " (filtered)");
+            }
+            Assert.That(MeshBvh.Build(triangle, new[] { 0, 1, 2 }).Raycast(new Vector3(1, .25f, 0), Vector3.forward, 10f).Distance, Is.EqualTo(1f).Within(1e-6f), "the review's case");
+        }
+
         private struct EveryThirdLeftOut : ITriangleFilter
         {
             public bool Accept(int triangle) => triangle % 3 != 0;

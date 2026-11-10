@@ -61,10 +61,17 @@ namespace Orbiters.Toolkit.Meshes
 
     /// <summary>
     /// The flat BVH's build, refit and queries, Burst-compiled (called directly from managed code, from any thread; the same
-    /// code runs managed until Burst has compiled it). Ties are deterministic whatever the tree's layout: among equally
+    /// code runs managed only where Burst is off). Ties are deterministic whatever the tree's layout: among equally
     /// near hits the lowest triangle index wins.
+    /// <para>
+    /// Floats: every entry is FloatMode.Strict with standard precision (no fast math, no reordering, no contraction into
+    /// fused multiply-adds), so a query gives the same bits on every machine; compiled synchronously, so the editor never
+    /// answers from the managed fallback while Burst compiles. The filtered queries (generic, managed filters) run as
+    /// managed code, which may round differently in the last bit: callers that need answers identical across machines
+    /// use the Burst entries (whole tree, or a subset tree from Build's include) rather than a managed filter.
+    /// </para>
     /// </summary>
-    [BurstCompile]
+    [BurstCompile(FloatMode = FloatMode.Strict, FloatPrecision = FloatPrecision.Standard, CompileSynchronously = true)]
     public static unsafe class BvhKernels
     {
         public const int LeafSize = 4;
@@ -86,7 +93,7 @@ namespace Orbiters.Toolkit.Meshes
         /// triangle's mesh index). <paramref name="nodes"/> and <paramref name="parents"/> need room for 2 * count - 1
         /// nodes; <paramref name="nodeCount"/> says how many were made.
         /// </summary>
-        [BurstCompile]
+        [BurstCompile(FloatMode = FloatMode.Strict, FloatPrecision = FloatPrecision.Standard, CompileSynchronously = true)]
         public static void Build(BvhTriangle* corners, int* triangleOfSlot, int count, BvhNode* nodes, int* parents, int* nodeCount)
         {
             *nodeCount = 0;
@@ -257,7 +264,7 @@ namespace Orbiters.Toolkit.Meshes
         /// Copies each slot's corners from the vertices again (<paramref name="slotVertices"/>: three vertex indices per slot)
         /// and recomputes every node's bounds, children before parents.
         /// </summary>
-        [BurstCompile]
+        [BurstCompile(FloatMode = FloatMode.Strict, FloatPrecision = FloatPrecision.Standard, CompileSynchronously = true)]
         public static void Refit(BvhNode* nodes, int nodeCount, BvhTriangle* corners, float3* vertices, int3* slotVertices, int slotCount)
         {
             for (int s = 0; s < slotCount; s++)
@@ -283,7 +290,7 @@ namespace Orbiters.Toolkit.Meshes
         /// ancestors up to the first one whose bounds come out unchanged (the tree was consistent before, so nothing above
         /// it changes). No sorting: a walk recomputes each ancestor from its children as they are now.
         /// </summary>
-        [BurstCompile]
+        [BurstCompile(FloatMode = FloatMode.Strict, FloatPrecision = FloatPrecision.Standard, CompileSynchronously = true)]
         public static void RefitLeaves(BvhNode* nodes, int* parents, BvhTriangle* corners, float3* vertices, int3* slotVertices, int* leaves, int leafCount)
         {
             for (int l = 0; l < leafCount; l++)
@@ -328,7 +335,7 @@ namespace Orbiters.Toolkit.Meshes
         // ---- Queries ------------------------------------------------------------------------------------------------------
 
         /// <summary>The nearest point of the surface within <paramref name="maxDistance"/> (not found: Triangle -1).</summary>
-        [BurstCompile]
+        [BurstCompile(FloatMode = FloatMode.Strict, FloatPrecision = FloatPrecision.Standard, CompileSynchronously = true)]
         public static void ClosestPoint(in BvhView view, in float3 point, float maxDistance, out BvhHit hit)
         {
             var filter = new AcceptAllTriangles();
@@ -336,7 +343,7 @@ namespace Orbiters.Toolkit.Meshes
         }
 
         /// <summary><see cref="ClosestPoint(in BvhView, in float3, float, out BvhHit)"/> for each of <paramref name="count"/> points.</summary>
-        [BurstCompile]
+        [BurstCompile(FloatMode = FloatMode.Strict, FloatPrecision = FloatPrecision.Standard, CompileSynchronously = true)]
         public static void ClosestPoints(in BvhView view, float3* points, int count, float maxDistance, BvhHit* hits)
         {
             var filter = new AcceptAllTriangles();
@@ -393,7 +400,7 @@ namespace Orbiters.Toolkit.Meshes
         /// The first triangle along a ray (unit <paramref name="direction"/>) within <paramref name="maxDistance"/>;
         /// <paramref name="backfaces"/> 0 skips triangles facing away.
         /// </summary>
-        [BurstCompile]
+        [BurstCompile(FloatMode = FloatMode.Strict, FloatPrecision = FloatPrecision.Standard, CompileSynchronously = true)]
         public static void Raycast(in BvhView view, in float3 origin, in float3 direction, float maxDistance, int backfaces, out BvhHit hit)
         {
             var filter = new AcceptAllTriangles();
@@ -401,7 +408,7 @@ namespace Orbiters.Toolkit.Meshes
         }
 
         /// <summary><see cref="Raycast(in BvhView, in float3, in float3, float, int, out BvhHit)"/> for each ray.</summary>
-        [BurstCompile]
+        [BurstCompile(FloatMode = FloatMode.Strict, FloatPrecision = FloatPrecision.Standard, CompileSynchronously = true)]
         public static void Raycasts(in BvhView view, float3* origins, float3* directions, int count, float maxDistance, int backfaces, BvhHit* hits)
         {
             var filter = new AcceptAllTriangles();
@@ -415,12 +422,13 @@ namespace Orbiters.Toolkit.Meshes
             if (view.NodeCount == 0) return;
             var nodes = view.Nodes;
             bool mirrored = view.Mirrored != 0;
-            float3 inv = new float3(1f / (direction.x == 0f ? 1e-20f : direction.x), 1f / (direction.y == 0f ? 1e-20f : direction.y), 1f / (direction.z == 0f ? 1e-20f : direction.z));
+            // Infinite on an axis the ray runs parallel to: RayBox handles that axis by the origin alone.
+            float3 inv = 1f / direction;
             int* stack = stackalloc int[StackSize];
             // Where the ray enters each node on the stack: one entered past the best hit so far is skipped.
             float* entries = stackalloc float[StackSize];
             int top = 0;
-            if (!RayBox(origin, inv, nodes[0].Min, nodes[0].Max, hit.Distance, out float rootEntry)) return;
+            if (!RayBox(origin, direction, inv, nodes[0].Min, nodes[0].Max, hit.Distance, out float rootEntry)) return;
             stack[top] = 0; entries[top++] = rootEntry;
             while (top > 0)
             {
@@ -446,8 +454,8 @@ namespace Orbiters.Toolkit.Meshes
                 {
                     // The child the ray enters first is searched first: a hit in it rules out more of the other.
                     int left = node.LeftOrFirst;
-                    bool l = RayBox(origin, inv, nodes[left].Min, nodes[left].Max, hit.Distance, out float leftEntry);
-                    bool r = RayBox(origin, inv, nodes[left + 1].Min, nodes[left + 1].Max, hit.Distance, out float rightEntry);
+                    bool l = RayBox(origin, direction, inv, nodes[left].Min, nodes[left].Max, hit.Distance, out float leftEntry);
+                    bool r = RayBox(origin, direction, inv, nodes[left + 1].Min, nodes[left + 1].Max, hit.Distance, out float rightEntry);
                     if (l && r && leftEntry > rightEntry) { stack[top] = left; entries[top++] = leftEntry; stack[top] = left + 1; entries[top++] = rightEntry; }
                     else
                     {
@@ -464,13 +472,28 @@ namespace Orbiters.Toolkit.Meshes
             return math.lengthsq(d);
         }
 
-        private static bool RayBox(float3 origin, float3 inv, float3 min, float3 max, float maxDistance, out float entry)
+        // Slabs, conservatively: an axis the ray is parallel to only asks whether the origin lies within the box there (no
+        // 0 x infinity), and the interval is widened by a few float steps so a hit on a box's face (a flat box, a triangle in
+        // a slab's plane) is never lost to rounding. Widening only lets more nodes be searched, so ties are untouched.
+        private static bool RayBox(float3 origin, float3 direction, float3 inv, float3 min, float3 max, float maxDistance, out float entry)
         {
-            float3 t1 = (min - origin) * inv, t2 = (max - origin) * inv;
-            float3 lo = math.min(t1, t2), hi = math.max(t1, t2);
-            float tmin = math.cmax(lo), tmax = math.cmin(hi);
+            float tmin = float.NegativeInfinity, tmax = float.PositiveInfinity;
+            for (int axis = 0; axis < 3; axis++)
+            {
+                if (direction[axis] == 0f)
+                {
+                    if (origin[axis] < min[axis] || origin[axis] > max[axis]) { entry = 0f; return false; }
+                    continue;
+                }
+                float t1 = (min[axis] - origin[axis]) * inv[axis], t2 = (max[axis] - origin[axis]) * inv[axis];
+                tmin = math.max(tmin, math.min(t1, t2));
+                tmax = math.min(tmax, math.max(t1, t2));
+            }
+            const float Widen = 4e-7f;
+            tmin -= math.abs(tmin) * Widen;
+            tmax += math.abs(tmax) * Widen;
             entry = math.max(tmin, 0f);
-            return tmax >= entry && tmin <= maxDistance;
+            return tmax >= entry && entry <= maxDistance;
         }
     }
 }
