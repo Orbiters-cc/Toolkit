@@ -164,7 +164,7 @@ namespace Orbiters.Toolkit.Editor.VRChat.Build
     internal sealed class BuildStartCallback : BuildPhaseCallback { internal override BuildPhase Phase => BuildPhase.Start; }
     internal sealed class BuildBeforeNdmfCallback : BuildPhaseCallback { internal override BuildPhase Phase => BuildPhase.BeforeNdmf; }
     internal sealed class BuildAfterNdmfCallback : BuildPhaseCallback { internal override BuildPhase Phase => BuildPhase.AfterNdmf; }
-    internal sealed class BuildAfterRefitCapturesCallback : BuildPhaseCallback { internal override BuildPhase Phase => BuildPhase.AfterRefitCaptures; }
+    internal sealed class BuildBeforeRefitKeptFitsCallback : BuildPhaseCallback { internal override BuildPhase Phase => BuildPhase.BeforeRefitKeptFits; }
     internal sealed class BuildLastBeforeVrcFuryCallback : BuildPhaseCallback { internal override BuildPhase Phase => BuildPhase.LastBeforeVrcFury; }
     internal sealed class BuildAfterBuiltAnimationsCallback : BuildPhaseCallback { internal override BuildPhase Phase => BuildPhase.AfterBuiltAnimations; }
     internal sealed class BuildBeforeBlendShapeLinksCallback : BuildPhaseCallback { internal override BuildPhase Phase => BuildPhase.BeforeBlendShapeLinks; }

@@ -16,14 +16,15 @@ namespace Orbiters.Toolkit.Editor.VRChat.Build
         BeforeNdmf,
         /// <summary>
         /// After NDMF (−11000), just before N4N0's platform step (−10200, with which MCB's native meshes formerly shared
-        /// its number): MCB's native mesh avatar definitions.
+        /// its number; the SDK ran MCB's first, its assembly being listed before the Toolkit's): MCB's native mesh avatar
+        /// definitions.
         /// </summary>
         AfterNdmf,
         /// <summary>
-        /// After ReFit's captures (−10110, −10105, with which MCB's version capture formerly shared its number), before the
-        /// attachment copies (<see cref="BeforeVrcFury"/>): MCB's version capture.
+        /// After ReFit's capture (−10110), just before its kept fits (−10105, with which MCB's version capture formerly
+        /// shared its number; the SDK ran MCB's first, as for the native meshes): MCB's version capture.
         /// </summary>
-        AfterRefitCaptures,
+        BeforeRefitKeptFits,
         /// <summary>
         /// Just before VRCFury builds the avatar (−10000): after N4N0 and ReFit prepared theirs (−10200 to −10105, MCB's
         /// captures among them); before My Avatar's Novabeast options (−10060) and face tracking capture (−10050).
@@ -86,7 +87,7 @@ namespace Orbiters.Toolkit.Editor.VRChat.Build
                 case BuildPhase.Start: return -20000;
                 case BuildPhase.BeforeNdmf: return -11005;
                 case BuildPhase.AfterNdmf: return -10201;
-                case BuildPhase.AfterRefitCaptures: return -10104;
+                case BuildPhase.BeforeRefitKeptFits: return -10106;
                 case BuildPhase.BeforeVrcFury: return -10100;
                 case BuildPhase.LastBeforeVrcFury: return -10070;
                 case BuildPhase.AfterVrcFury: return -9999;
