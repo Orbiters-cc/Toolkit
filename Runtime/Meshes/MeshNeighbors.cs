@@ -39,6 +39,24 @@ namespace Orbiters.Toolkit.Meshes
         /// <summary>The triangles that use welded vertex <paramref name="welded"/>, ascending.</summary>
         public ReadOnlySpan<int> TrianglesAround(int welded) => new ReadOnlySpan<int>(trianglesOf, triangleOffsets[welded], triangleOffsets[welded + 1] - triangleOffsets[welded]);
 
+        /// <summary>
+        /// The relations as compressed rows, for kernels that read them whole (pin a span with <c>fixed</c>): welded vertex w's
+        /// members are <see cref="MemberValues"/>[<see cref="MemberStarts"/>[w] .. <see cref="MemberStarts"/>[w + 1]), and the same
+        /// for adjacency and triangles. Starts hold <see cref="WeldedCount"/> + 1 entries; values are what the per-vertex spans
+        /// read. Read-only.
+        /// </summary>
+        public ReadOnlySpan<int> MemberStarts => memberOffsets;
+        /// <inheritdoc cref="MemberStarts"/>
+        public ReadOnlySpan<int> MemberValues => members;
+        /// <inheritdoc cref="MemberStarts"/>
+        public ReadOnlySpan<int> AdjacentStarts => adjacentOffsets;
+        /// <inheritdoc cref="MemberStarts"/>
+        public ReadOnlySpan<int> AdjacentValues => adjacent;
+        /// <inheritdoc cref="MemberStarts"/>
+        public ReadOnlySpan<int> TriangleStarts => triangleOffsets;
+        /// <inheritdoc cref="MemberStarts"/>
+        public ReadOnlySpan<int> TriangleValues => trianglesOf;
+
         /// <summary>Welded vertex to the mesh vertices that share its position (an array per welded vertex, made on first use: prefer <see cref="MembersOf"/>).</summary>
         public int[][] Members => membersJagged ?? Jagged(ref membersJagged, memberOffsets, members);
         /// <summary>Welded vertex to its adjacent welded vertices (made on first use: prefer <see cref="AdjacentTo"/>).</summary>
