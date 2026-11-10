@@ -115,6 +115,16 @@ namespace Orbiters.Toolkit.Editor.Refit
         string Inputs(RefitJob job);
     }
 
+    /// <summary>
+    /// An engine that keeps what it derives from the bodies while a batch of refits runs (an outfit's pieces fitted between
+    /// the same bodies), instead of deriving it again for each piece.
+    /// </summary>
+    public interface IRefitBatching
+    {
+        /// <summary>Main thread. Keeps the engine's per-body data until the returned scope is disposed.</summary>
+        IDisposable BeginBatch();
+    }
+
     public static class RefitEngine
     {
         public const string PackageId = "orbiters.refit";
