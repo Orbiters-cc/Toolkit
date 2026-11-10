@@ -61,6 +61,19 @@ namespace Orbiters.Toolkit.Editor.Storage
             return IsProjectPath(relative) && relative != "Packages" ? relative : null;
         }
 
+        /// <summary>
+        /// Where the file or folder at <paramref name="assetPath"/> ("Assets/…", "Packages/<name>/…" of any package,
+        /// "ProjectSettings/…") is on disk, as a full path; null when it is not a path of the project.
+        /// </summary>
+        public static string FullPath(string assetPath)
+        {
+            if (string.IsNullOrEmpty(assetPath)) return null;
+            string physical = FileUtil.GetPhysicalPath(Normalize(assetPath));
+            if (string.IsNullOrEmpty(physical)) return null;
+            try { return Path.GetFullPath(Path.Combine(ProjectPaths.Root, physical)); }
+            catch (Exception ex) when (ex is ArgumentException || ex is NotSupportedException || ex is PathTooLongException) { return null; }
+        }
+
         /// <summary>Whether an asset, or a file or folder Unity has not imported yet, is at <paramref name="assetPath"/>.</summary>
         public static bool Exists(string assetPath)
         {

@@ -151,13 +151,8 @@ namespace Orbiters.Toolkit.Editor
         }
 
         /// <summary>SHA-256 of a file, lowercase hex.</summary>
-        public static string FileHash(string path)
-        {
-            using (var sha = SHA256.Create())
-            using (var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite, 1 << 20))
-                return Hex(sha.ComputeHash(stream));
-        }
+        public static string FileHash(string path) => Orbiters.Toolkit.Hashing.Sha256File(path);
 
-        private static string Hex(byte[] hash) => BitConverter.ToString(hash).Replace("-", "").ToLowerInvariant();
+        private static string Hex(byte[] hash) => Orbiters.Toolkit.Hashing.Hex(hash);
     }
 }

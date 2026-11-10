@@ -17,7 +17,6 @@ namespace Orbiters.Toolkit.Editor.VRChat.Posing
     /// links yet. It is temporary: the accessories go back where they were when it is switched off, before a scene is saved,
     /// on a script reload and on entering Play Mode, and while their own edits run (<see cref="Pause"/>).
     /// </summary>
-    [InitializeOnLoad]
     public static class AccessoryPoseSync
     {
         public sealed class Accessory
@@ -60,6 +59,7 @@ namespace Orbiters.Toolkit.Editor.VRChat.Posing
             private set
             {
                 root = value;
+                if (value != null) Hook();
                 if (value != null && watching == null) watching = OrbitersEditorHost.EveryFrame("Accessory pose preview", FollowChangedPose);
                 else if (value == null && watching != null) { watching.Dispose(); watching = null; }
             }
@@ -69,8 +69,13 @@ namespace Orbiters.Toolkit.Editor.VRChat.Posing
         public static string LastStatus { get; private set; } = "Off";
         public static event Action Changed;
 
-        static AccessoryPoseSync()
+        private static bool hooked;
+
+        // Unity's events, from the first time the preview is on (each handler returns at once while it is off).
+        private static void Hook()
         {
+            if (hooked) return;
+            hooked = true;
             Undo.postprocessModifications += Follow;
             Undo.undoRedoPerformed += UndoRedo;
             EditorApplication.playModeStateChanged += state => { if (state == PlayModeStateChange.ExitingEditMode) Disable(); };
@@ -350,11 +355,6 @@ namespace Orbiters.Toolkit.Editor.VRChat.Posing
             return false;
         }
 
-        private static int Depth(Transform t)
-        {
-            int depth = 0;
-            for (; t != null; t = t.parent) depth++;
-            return depth;
-        }
+        private static int Depth(Transform t) => Orbiters.Toolkit.HierarchyPaths.Depth(t);
     }
 }

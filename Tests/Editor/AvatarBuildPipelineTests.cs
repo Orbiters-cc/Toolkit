@@ -213,6 +213,85 @@ public sealed class AvatarBuildPipelineTests
         }
     }
 
+    // The phase each of MCB's and My Avatar's callbacks can move into as a BuildStep and run where it runs today. Two
+    // shared a number with a Toolkit callback; the SDK lists assemblies in AppDomain order and sorts stably, and the
+    // recorded build steps of 2026-10-30 (Library/OrbitersToolkit/Validation/avatar-build-speed, build-after-steps.json and
+    // timing-logs.json) show mcb.Editor listed first: NativeMeshAvatarBuildHook ran before N4N0's (then Orb's) platform
+    // step, VersionCustomizationCaptureHook before RefitKeptFitsHook. Both phases keep that side (FormerTies).
+    private static readonly (string Name, BuildPhase Phase)[] Landings =
+    {
+        ("Orbiters.MyAvatar.Editor.Expressions.MenuUploadBuild+Capture", BuildPhase.BeforeNdmf),
+        ("NativeMeshAvatarBuildHook", BuildPhase.AfterNdmf),
+        ("VersionCustomizationCaptureHook", BuildPhase.BeforeRefitKeptFits),
+        ("Orbiters.MyAvatar.Editor.NovabeastOptions+Restore", BuildPhase.LastBeforeVrcFury),
+        ("Orbiters.MyAvatar.Editor.FaceTracking.FaceTrackingBuild+Capture", BuildPhase.LastBeforeVrcFury),
+        ("VersionCustomizationSurveyHook", BuildPhase.AfterBuiltAnimations),
+        ("Orbiters.MyAvatar.Editor.FaceTracking.FaceTrackingBuild+Apply", BuildPhase.BeforeBlendShapeLinks),
+        ("Orbiters.MyAvatar.Editor.Expressions.MenuUploadBuild+Apply", BuildPhase.BeforeBlendShapeLinks),
+        ("BlendShapeLinkPostVrcfuryHook", BuildPhase.BlendShapeLinks),
+        ("VersionCustomizationLockHook", BuildPhase.BlendShapeLinks),
+        ("VersionCustomizationApplyHook", BuildPhase.Versions),
+        ("Orbiters.MyAvatar.Editor.Optimization.UploadOptimizer+Structure", BuildPhase.Structure),
+        ("Orbiters.MyAvatar.Editor.Optimization.UploadOptimizer+Materials", BuildPhase.Materials),
+    };
+
+    // The side each former tie ran on (-1: the landing first), as recorded; checked against the SDK's own list below.
+    private static readonly (string Landing, string Other, int Side)[] FormerTies =
+    {
+        ("NativeMeshAvatarBuildHook", "Orbiters.Toolkit.Editor.VRChat.N4N0PlatformHook", -1),
+        ("VersionCustomizationCaptureHook", "Orbiters.Toolkit.Editor.VRChat.Refit.RefitKeptFitsHook", -1),
+    };
+
+    // While both callbacks of a former tie are still SDK callbacks, the SDK's own sequence (assemblies in AppDomain order,
+    // each one's types in metadata order, a stable sort by number) runs them on the side FormerTies records.
+    [Test] public void FormerTiesRunTodayOnTheSideTheirPhasesKeep()
+    {
+        var assemblies = AppDomain.CurrentDomain.GetAssemblies().ToList();
+        var sequence = SdkCallbacks().OrderBy(c => assemblies.IndexOf(c.GetType().Assembly)).ThenBy(c => c.GetType().MetadataToken)
+            .OrderBy(c => c.callbackOrder).Select(c => c.GetType().FullName).ToList();
+        int checkedTies = 0;
+        foreach (var (landing, other, side) in FormerTies)
+        {
+            int a = sequence.IndexOf(landing), b = sequence.IndexOf(other);
+            if (a < 0 || b < 0) continue;
+            Assert.That(Math.Sign(a - b), Is.EqualTo(side), landing + " and " + other + " run in another order than recorded: move " + landing + "'s phase to the other side");
+            checkedTies++;
+        }
+        if (checkedTies == 0) Assert.Ignore("MCB is not installed here, or its callbacks are steps already.");
+    }
+
+    // Each landing phase keeps its callback on its former side of every other tool's callback, of every Toolkit step and
+    // of every other landing (steps sharing a phase are ordered by their package, which also owns both).
+    [Test] public void MoreOrbitersCallbacksHaveAPhaseThatKeepsTheirPlace()
+    {
+        int FormerOf(string name) => Others.Single(o => o.Name == name).Order;
+
+        foreach (var (name, phase) in Landings)
+        {
+            int now = BuildPhases.Order(phase), was = FormerOf(name);
+            foreach (var (_, other, order) in Others)
+            {
+                if (other == name) continue;
+                var landed = Landings.Where(l => l.Name == other).Select(l => (BuildPhase?)l.Phase).SingleOrDefault();
+                if (landed == phase) continue;
+                int otherNow = landed.HasValue ? BuildPhases.Order(landed.Value) : order;
+                Assert.That(now, Is.Not.EqualTo(otherNow), name + " would share its order with " + other);
+                int side = Math.Sign(was - order);
+                if (side == 0)
+                {
+                    var tie = FormerTies.Where(t => t.Landing == name && t.Other == other).Select(t => (int?)t.Side).SingleOrDefault();
+                    Assert.That(tie, Is.Not.Null, "unexpected former tie of " + name + " with " + other);
+                    side = tie.Value;
+                }
+                Assert.That(Math.Sign(now - otherNow), Is.EqualTo(side), name + " in " + phase + " moves to the other side of " + other);
+            }
+            foreach (var (step, former) in Former)
+                Assert.That(Math.Sign(now - Order(step)), Is.EqualTo(Math.Sign(was - former)), name + " in " + phase + " moves to the other side of " + step.Name);
+            Assert.That(AvatarBuildPipeline.StepsIn(phase).Any(s => s.GetType().Assembly == typeof(BuildStep).Assembly), Is.False,
+                phase + " holds a Toolkit step: " + name + " could not name it to keep their order");
+        }
+    }
+
     [Test] public void NoTwoPhasesShareAnOrder()
     {
         var orders = BuildPhases.All.Select(BuildPhases.Order).ToList();

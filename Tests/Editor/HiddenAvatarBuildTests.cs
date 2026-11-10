@@ -206,4 +206,15 @@ public sealed class HiddenAvatarBuildTests
     // Stand-ins for Poiyomi's lock in both of its namespaces: only the step's own name tells it.
     private static class OldShaderOptimizer { public sealed class LockMaterialsOnUpload { } }
     private static class NewShaderOptimizer { public sealed class LockMaterialsOnUpload { } }
+
+    // TKV-8: a package leaves its own callback out of hidden builds; the Toolkit no longer needs its name.
+    private sealed class WatchingProbe { }
+
+    [Test] public void APackageLeavesItsOwnCallbackOutOfHiddenBuilds()
+    {
+        Assert.That(HiddenAvatarBuild.LeftOut(typeof(WatchingProbe)), Is.False);
+        HiddenAvatarBuild.LeaveOut(typeof(WatchingProbe));
+        Assert.That(HiddenAvatarBuild.LeftOut(typeof(WatchingProbe)), Is.True);
+        Assert.That(HiddenAvatarBuild.LeftOut(typeof(HiddenAvatarBuildTests)), Is.False);
+    }
 }

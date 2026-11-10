@@ -1,6 +1,6 @@
 using System;
 using System.Collections.Generic;
-using System.IO;
+using System.Diagnostics;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -9,60 +9,203 @@ using UnityEditor;
 namespace Orbiters.Toolkit.Editor
 {
     /// <summary>
-    /// Which project assets use which: every file under Assets/ that can use another (all but folders and the kinds that
-    /// never do, as pictures, sounds and scripts: override controllers, sprite atlases, shaders and whatever comes next count
-    /// too) is asked for its direct dependencies, a slice per editor tick so the editor stays responsive. Tools use it before
-    /// replacing or removing files (an imported material another avatar's prefab still uses is kept).
+    /// Which project files use which. Every file a user of the project can change is read: everything under Assets/, the
+    /// embedded and local packages, and ProjectSettings/, each file with its .meta (a script's default references, a
+    /// model's remapped materials). A file counts as using every asset whose GUID its text or its .meta names, and every
+    /// asset Unity's import says it depends on. A file whose own content cannot be read (Unity's binary format) is trusted
+    /// only while it is exactly as Unity last imported it; otherwise the scan cannot say what uses what and fails with
+    /// <see cref="UncertainReferencesException"/>. Files are read on a worker and Unity is asked a slice per editor frame,
+    /// so the editor stays responsive. Tools use it before removing files, through <see cref="Removable"/> in the step that
+    /// deletes: a material another avatar's prefab still uses is kept.
     /// </summary>
     public sealed partial class ProjectReferences
     {
-        // Files that never use another asset: not asked (a picture, a sound, a script, plain data).
-        private static readonly HashSet<string> Leaves = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        // GUID (lower case) → the files naming it, by asset-style path ("Assets/…", "Packages/<name>/…", "ProjectSettings/…").
+        private readonly Dictionary<string, HashSet<string>> usedBy = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
+        // Each file as it was read: its stamp then and the GUIDs it names.
+        private readonly Dictionary<string, FileRead> files = new Dictionary<string, FileRead>(StringComparer.OrdinalIgnoreCase);
+        private List<Root> roots;
+
+        /// <summary>The files read.</summary>
+        public int Scanned => files.Count;
+
+        /// <summary>The files directly using <paramref name="path"/>, leaving out <paramref name="ignore"/> and the file itself.</summary>
+        public IReadOnlyCollection<string> UsersOf(string path, ICollection<string> ignore = null)
         {
-            ".png", ".jpg", ".jpeg", ".tga", ".psd", ".tif", ".tiff", ".exr", ".hdr", ".bmp", ".gif", ".iff", ".pict",
-            ".wav", ".mp3", ".ogg", ".aif", ".aiff", ".flac", ".mod", ".it", ".s3m", ".xm",
-            ".cs", ".dll", ".txt", ".json", ".bytes", ".md", ".csv", ".xml", ".yaml", ".html", ".htm", ".py",
-        };
+            string guid = string.IsNullOrEmpty(path) ? null : AssetDatabase.AssetPathToGUID(path);
+            if (string.IsNullOrEmpty(guid) || !usedBy.TryGetValue(guid, out var users)) return Array.Empty<string>();
+            return users.Where(u => !string.Equals(u, path, StringComparison.OrdinalIgnoreCase) && (ignore == null || !ignore.Contains(u))).ToList();
+        }
 
-        /// <summary>True when the scan asks <paramref name="path"/> what it uses (it may use another asset).</summary>
-        public static bool MayUseOthers(string path) => !string.IsNullOrEmpty(path) && !Leaves.Contains(Path.GetExtension(path));
-
-        private readonly Dictionary<string, HashSet<string>> usedBy = new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase);
-
-        public int Scanned { get; private set; }
-
-        /// <summary>The assets directly using <paramref name="path"/>, leaving out <paramref name="ignore"/>.</summary>
-        public IReadOnlyCollection<string> UsersOf(string path, ICollection<string> ignore = null) =>
-            usedBy.TryGetValue(path, out var users) ? (IReadOnlyCollection<string>)users.Where(u => ignore == null || !ignore.Contains(u)).ToList() : Array.Empty<string>();
-
-        /// <summary>Builds the map. <paramref name="progress"/> receives 0..1. Main thread; yields between slices.</summary>
+        /// <summary>
+        /// Builds the map. <paramref name="progress"/> receives 0..1. Call on the main thread; the files are listed and read
+        /// on a worker and Unity is asked a slice per editor frame; at the end the project is listed again (on the worker)
+        /// and what changed meanwhile is read again, until a listing finds nothing new. Throws
+        /// <see cref="UncertainReferencesException"/> when what uses what cannot be known (a binary file whose bytes are not
+        /// known to be what Unity imported, a file that cannot be read or decoded): a caller deciding a deletion then keeps
+        /// everything.
+        /// A deletion must be decided by <see cref="Removable"/>, in the same synchronous step as the deletion itself: it
+        /// checks the project once more and answers which candidates may go. Deleting on <see cref="UsersOf"/> after the
+        /// scan returned, without that call, is a bug: files may have changed since.
+        /// </summary>
         public static async Task<ProjectReferences> ScanAsync(Action<float, string> progress = null, CancellationToken cancellation = default)
         {
-            var map = new ProjectReferences();
-            // Every asset, not a list of types: a kind left out (an override controller using a clip) would make what it uses
-            // look unused.
-            var assets = AssetDatabase.FindAssets("", new[] { "Assets" }).Select(AssetDatabase.GUIDToAssetPath)
-                .Where(p => MayUseOthers(p) && !AssetDatabase.IsValidFolder(p)).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
-            var started = DateTime.UtcNow;
-            for (int i = 0; i < assets.Count; i++)
+            var map = new ProjectReferences { roots = Roots() };
+            ImportStamps.Load();
+            var reader = new Reader(map.roots, cancellation);
+            var reading = Task.Run(reader.Run, cancellation);
+            while (!reading.IsCompleted)
+            {
+                progress?.Invoke(0.5f * reader.Fraction, $"Reading the project's files… {reader.Read} of {reader.Found}");
+                await Task.Yield();
+            }
+            await map.AddSlicedAsync(await reading, 0.5f, 0.45f, progress, cancellation);
+            // Files changed while the scan ran are read again, until a listing finds nothing new.
+            for (int round = 0; ; round++)
+            {
+                var known = map.files.ToDictionary(p => p.Key, p => p.Value.Stamp, StringComparer.OrdinalIgnoreCase);
+                var roots = map.roots;
+                var diff = await Task.Run(() => Diff(roots, known, null, cancellation, true), cancellation);
+                if (diff.Uncertain != null) throw new UncertainReferencesException(diff.Uncertain);
+                if (diff.Changed.Count == 0 && diff.Gone.Count == 0) break;
+                if (round >= 4) throw new UncertainReferencesException("Files kept changing while the project was checked.");
+                foreach (string gone in diff.Gone) map.Remove(gone);
+                foreach (var read in diff.Changed) map.Remove(read.Path);
+                await map.AddSlicedAsync(diff.Changed, 0.95f, 0f, progress, cancellation);
+            }
+            if (!SameRoots(Roots(), map.roots)) throw new UncertainReferencesException("The project's packages changed while it was checked.");
+            progress?.Invoke(1f, "Checked " + map.files.Count + " files");
+            return map;
+        }
+
+        // Unity's part of reading each file, a slice per editor frame.
+        private async Task AddSlicedAsync(List<FileRead> found, float from, float span, Action<float, string> progress, CancellationToken cancellation)
+        {
+            var slice = Stopwatch.StartNew();
+            for (int i = 0; i < found.Count; i++)
             {
                 cancellation.ThrowIfCancellationRequested();
-                foreach (string dependency in AssetDatabase.GetDependencies(assets[i], false))
+                Add(found[i]);
+                if (slice.Elapsed.TotalMilliseconds <= 12) continue;
+                progress?.Invoke(from + span * (i + 1f) / found.Count, $"Checking what uses what… {i + 1} of {found.Count}");
+                await Task.Yield();
+                slice.Restart();
+            }
+        }
+
+        /// <summary>
+        /// Checks the project once more and answers which of <paramref name="candidates"/> may go, in one synchronous call
+        /// to make right before deleting them, in the same step: those not used by any file outside the candidates (files
+        /// only used by other candidates going go together) and not kept by <paramref name="keep"/> (used by an object
+        /// loaded in the editor, say). None when the project cannot be checked again now: it changed too much since the
+        /// scan, the check would take too long, a file cannot be read, the packages changed.
+        /// </summary>
+        public List<string> Removable(IEnumerable<string> candidates, Func<string, bool> keep = null) => Removable(candidates, keep, out _);
+
+        /// <summary><see cref="Removable(IEnumerable{string}, Func{string, bool})"/>, saying why it answered none when it could not check (else null).</summary>
+        public List<string> Removable(IEnumerable<string> candidates, Func<string, bool> keep, out string uncertain)
+        {
+            uncertain = null;
+            var removable = new HashSet<string>(candidates ?? Enumerable.Empty<string>(), StringComparer.OrdinalIgnoreCase);
+            if (removable.Count == 0) return new List<string>();
+            uncertain = Recheck(out _);
+            if (uncertain != null) return new List<string>();
+            if (keep != null) removable.RemoveWhere(p => keep(p));
+            for (bool changed = true; changed;)
+            {
+                changed = false;
+                foreach (string path in removable.ToList())
+                    if (UsersOf(path, removable).Count > 0) { removable.Remove(path); changed = true; }
+            }
+            return removable.ToList();
+        }
+
+        /// <summary>
+        /// Brings the map up to date at once, on the main thread: the project is listed again and the files new or changed
+        /// since the map read them (by their stamp) are read again, those gone forgotten. Bounded: it lists for at most
+        /// <see cref="RecheckMilliseconds"/> and reads at most <see cref="RecheckFiles"/> files and <see cref="RecheckBytes"/>
+        /// bytes; past that it answers false instead of holding the editor. False also when a file cannot be read, a binary
+        /// file is not as Unity imported it, or the packages changed: keep everything then. <see cref="Removable"/> calls it.
+        /// </summary>
+        public bool Recheck() => Recheck(out _) == null;
+
+        internal const double RecheckMilliseconds = 250;
+        internal const int RecheckFiles = 64;
+        internal const long RecheckBytes = 8L * 1024 * 1024;
+
+        internal string Recheck(out int reread)
+        {
+            reread = 0;
+            var now = Roots();
+            if (!SameRoots(now, roots)) return "The project's packages changed while it was checked.";
+            var known = files.ToDictionary(p => p.Key, p => p.Value.Stamp, StringComparer.OrdinalIgnoreCase);
+            var diff = Diff(now, known, Stopwatch.StartNew(), CancellationToken.None, false);
+            if (diff.Uncertain != null) return diff.Uncertain;
+            foreach (string gone in diff.Gone) Remove(gone);
+            try
+            {
+                foreach (var read in diff.Changed)
                 {
-                    if (string.Equals(dependency, assets[i], StringComparison.OrdinalIgnoreCase)) continue;
-                    if (!map.usedBy.TryGetValue(dependency, out var users)) map.usedBy[dependency] = users = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-                    users.Add(assets[i]);
-                }
-                map.Scanned++;
-                if ((DateTime.UtcNow - started).TotalMilliseconds > 12)
-                {
-                    progress?.Invoke((i + 1f) / assets.Count, $"Checking what uses what… {i + 1} of {assets.Count}");
-                    await Task.Yield();
-                    started = DateTime.UtcNow;
+                    Remove(read.Path);
+                    Add(read);
+                    reread++;
                 }
             }
-            progress?.Invoke(1f, "Checked " + assets.Count + " assets");
-            return map;
+            catch (UncertainReferencesException ex) { return ex.Message; }
+            return null;
+        }
+
+        private sealed class Changes
+        {
+            public readonly List<FileRead> Changed = new List<FileRead>();
+            public readonly List<string> Gone = new List<string>();
+            public string Uncertain;
+        }
+
+        // Lists the roots and reads the files whose stamp differs from the one they were read with (new ones too); no
+        // Unity call, so it may run on a worker. With a clock, bounded by the recheck limits.
+        private static Changes Diff(List<Root> roots, Dictionary<string, Stamp> known, Stopwatch clock, CancellationToken cancellation, bool unbounded)
+        {
+            var changes = new Changes();
+            var listing = Listing.Of(roots, cancellation, unbounded ? double.PositiveInfinity : RecheckMilliseconds, clock);
+            if (listing.Uncertain != null) { changes.Uncertain = listing.Uncertain; return changes; }
+            var present = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var changed = new List<Listing.Entry>();
+            long bytes = 0;
+            foreach (var entry in listing.Entries)
+            {
+                present.Add(entry.Path);
+                if (known.TryGetValue(entry.Path, out var stamp) && stamp.Equals(entry.Stamp)) continue;
+                changed.Add(entry);
+                bytes += Math.Max(0, entry.Stamp.Size) + Math.Max(0, entry.Stamp.MetaSize);
+            }
+            // At once, a few files a save or an import just wrote, not a project copied in.
+            if (!unbounded && (changed.Count > RecheckFiles || bytes > RecheckBytes))
+            {
+                changes.Uncertain = $"{changed.Count} files changed since the project was checked.";
+                return changes;
+            }
+            changes.Gone.AddRange(known.Keys.Where(p => !present.Contains(p)));
+            foreach (var entry in changed)
+            {
+                if (!unbounded && clock != null && clock.Elapsed.TotalMilliseconds > RecheckMilliseconds * 2)
+                {
+                    changes.Uncertain = "Checking the project again took too long.";
+                    return changes;
+                }
+                var read = Reader.ReadOne(entry, cancellation);
+                if (read != null) changes.Changed.Add(read);
+                else changes.Gone.Add(entry.Path);
+            }
+            return changes;
+        }
+
+        private void Remove(string path)
+        {
+            if (!files.TryGetValue(path, out var read)) return;
+            files.Remove(path);
+            foreach (string guid in read.Guids)
+                if (usedBy.TryGetValue(guid, out var users)) users.Remove(path);
         }
 
         // Each asset's direct dependencies, read again only when the asset or what it uses changed.
@@ -90,5 +233,11 @@ namespace Orbiters.Toolkit.Editor
             }
             return users;
         }
+    }
+
+    /// <summary>What uses what in the project cannot be known right now; whoever was about to delete keeps everything.</summary>
+    public sealed class UncertainReferencesException : Exception
+    {
+        public UncertainReferencesException(string message) : base(message) { }
     }
 }

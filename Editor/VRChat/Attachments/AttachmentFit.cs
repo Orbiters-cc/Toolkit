@@ -268,11 +268,6 @@ namespace Orbiters.Toolkit.Editor.VRChat.Attachments
         private static bool Same(LocalPose a, LocalPose b) =>
             (a.position - b.position).sqrMagnitude < 1e-8f && (a.scale - b.scale).sqrMagnitude < 1e-8f && Quaternion.Angle(a.rotation, b.rotation) < 0.01f;
 
-        private static int Depth(Transform t)
-        {
-            int depth = 0;
-            for (; t != null; t = t.parent) depth++;
-            return depth;
-        }
+        private static int Depth(Transform t) => Orbiters.Toolkit.HierarchyPaths.Depth(t);
     }
 }
