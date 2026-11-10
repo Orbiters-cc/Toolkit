@@ -31,15 +31,21 @@ namespace Orbiters.Toolkit.Editor.Storage
         [Serializable] private sealed class Item { public string guid, path; public List<int> ids = new List<int>(); }
         [Serializable] private sealed class Trash { public List<Item> items = new List<Item>(); }
 
-        private static bool sweeping, again;
+        private static bool sweeping, again, completed;
         private static IDisposable sweep;
-        // The tracked list, read from disk once per script session and written through.
-        private static Tracked tracked;
+        // Counts what may change a sweep's result: any change the editor reports (objects, assets, imports, Undo and Redo,
+        // scenes opened or closed), files tracked or brought back. A sweep is skipped while it stands where the last
+        // complete one started; after a script reload nothing is known, and the first sweep runs.
+        private static long revision;
+        private static long? swept;
+        // Sweeps in a row that could not complete: each waits twice as long as the one before.
+        private static int failures;
 
         static GeneratedAssets()
         {
             // Straight from Unity, not from the change bus a frame later: the object an Undo brings back finds its file at once.
             Undo.undoRedoPerformed += UndoRedo;
+            EditorChangeBus.Changed += _ => revision++;
             EditorSceneManager.sceneSaved += _ => SweepSoon();
             if (SessionState.GetBool(StartedKey, false)) return;
             // A new editor session: no Undo can bring back what an earlier one put aside.
@@ -63,7 +69,7 @@ namespace Orbiters.Toolkit.Editor.Storage
                 string guid = string.IsNullOrEmpty(path) ? null : AssetDatabase.AssetPathToGUID(path);
                 if (!string.IsNullOrEmpty(guid) && !list.guids.Contains(guid)) list.guids.Add(guid);
             }
-            if (list.guids.Count != count) WriteList(list);
+            if (list.guids.Count != count) { WriteList(list); revision++; }
         }
 
         public static void Track(params string[] paths) => Track((IEnumerable<string>)paths);
@@ -71,11 +77,38 @@ namespace Orbiters.Toolkit.Editor.Storage
         public static bool IsTracked(string path) => ReadList().guids.Contains(AssetDatabase.AssetPathToGUID(path ?? ""));
 
         /// <summary>Sweeps once the editor has been quiet for a moment (after a removal, a cancel, an Undo, a save).</summary>
-        public static void SweepSoon()
+        public static void SweepSoon() => Schedule(Quiet);
+
+        // Not while scripts compile, assets import, a player builds or Play Mode runs; a new request starts the wait again.
+        private static void Schedule(double seconds)
         {
-            // A new change starts the quiet moment again.
             sweep?.Dispose();
-            sweep = OrbitersEditorHost.Once("Generated assets sweep", () => { sweep = null; _ = SweepAsync(); }, Quiet, HostWhen.Idle);
+            sweep = OrbitersEditorHost.Once("Generated assets sweep", () => { sweep = null; _ = SweepIfChangedAsync(); }, seconds, HostWhen.Idle);
+        }
+
+        /// <summary>
+        /// Sweeps unless nothing changed since the last complete sweep started (which could only find what it found then).
+        /// A sweep that does not complete is tried again later, each time after a longer wait. True when it swept.
+        /// </summary>
+        internal static async Task<bool> SweepIfChangedAsync()
+        {
+            EditorChangeBus.Flush();
+            if (swept == revision) return false;
+            long at = revision;
+            completed = false;
+            try { await SweepAsync(); }
+            catch (OperationCanceledException) { completed = false; }
+            if (completed)
+            {
+                swept = at;
+                failures = 0;
+            }
+            else if (!sweeping)
+            {
+                failures = Math.Min(failures + 1, 8);
+                Schedule(Quiet * (1 << failures));
+            }
+            return true;
         }
 
         /// <summary>Puts aside the tracked assets nothing uses; returns their paths.</summary>
@@ -91,12 +124,8 @@ namespace Orbiters.Toolkit.Editor.Storage
                 if (list.guids.RemoveAll(g => !Exists(AssetDatabase.GUIDToAssetPath(g))) > 0) WriteList(list);
                 var candidates = list.guids.Select(AssetDatabase.GUIDToAssetPath).Where(p => File.Exists(Path.Combine(Root, p))).ToList();
                 candidates.RemoveAll(Rendered().Contains);
-                if (candidates.Count == 0) { PutAside(removed); return removed; }
+                if (candidates.Count == 0) { PutAside(removed); completed = true; return removed; }
                 var references = await ProjectReferences.ScanAsync();
-                // Checked against the disk itself before anything goes: a file changed behind Unity's back (or reported
-                // changed) may use a candidate. When that cannot be checked for certain nothing goes, and the sweep runs
-                // again once the editor is quiet.
-                if (!references.Current || !await references.RefreshAsync()) { again = true; return removed; }
                 // The scan spans editor frames: what is loaded now decides.
                 var loaded = Loaded();
                 var removable = new HashSet<string>(candidates.Where(p => !loaded.Contains(p) && File.Exists(Path.Combine(Root, p))), StringComparer.OrdinalIgnoreCase);
@@ -109,6 +138,7 @@ namespace Orbiters.Toolkit.Editor.Storage
                 }
                 removed.AddRange(removable);
                 PutAside(removed);
+                completed = true;
             }
             catch (Exception ex) when (!(ex is OperationCanceledException)) { Debug.LogWarning("[Orbiters] Unused generated files were kept: " + ex.Message); }
             finally
@@ -215,6 +245,7 @@ namespace Orbiters.Toolkit.Editor.Storage
         private static void Restore(List<Item> items)
         {
             if (items.Count == 0) return;
+            revision++;
             var trash = ReadTrash();
             var list = ReadList();
             foreach (var item in items)
@@ -268,20 +299,14 @@ namespace Orbiters.Toolkit.Editor.Storage
             catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException) { return null; }
         }
 
-        // A copy of the list: callers change it and write it back.
         private static Tracked ReadList()
         {
-            if (tracked == null)
-            {
-                try { tracked = File.Exists(ListFile) ? JsonUtility.FromJson<Tracked>(File.ReadAllText(ListFile)) ?? new Tracked() : new Tracked(); }
-                catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException || ex is ArgumentException) { tracked = new Tracked(); }
-            }
-            return new Tracked { guids = new List<string>(tracked.guids) };
+            try { return File.Exists(ListFile) ? JsonUtility.FromJson<Tracked>(File.ReadAllText(ListFile)) ?? new Tracked() : new Tracked(); }
+            catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException || ex is ArgumentException) { return new Tracked(); }
         }
 
         private static void WriteList(Tracked list)
         {
-            tracked = new Tracked { guids = new List<string>(list.guids) };
             try { Directory.CreateDirectory(Path.GetDirectoryName(ListFile)); File.WriteAllText(ListFile, JsonUtility.ToJson(list)); }
             catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException) { Debug.LogWarning("[Orbiters] Could not remember generated files: " + ex.Message); }
         }
