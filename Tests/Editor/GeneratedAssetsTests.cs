@@ -393,4 +393,104 @@ public sealed class GeneratedAssetsTests
         }
         finally { if (temporary.Contains("OrbitersEncodings-") && Directory.Exists(temporary)) Directory.Delete(temporary, true); }
     }
+
+    // The kept scan: after a script reload, a scan reads only the files whose stamp (size, write time, of the file and
+    // of its .meta) changed; one changed by size or by time alone is read again; a deleted file's entry goes.
+    [UnityTest] public IEnumerator AScanAfterAReloadReadsOnlyWhatChanged()
+    {
+        string kept = Path.Combine(Path.GetTempPath(), "OrbitersKeptScan-" + Guid.NewGuid().ToString("N").Substring(0, 8) + ".bin");
+        string a = folder + "/A.txt", b = folder + "/B.txt", c = folder + "/C.txt";
+        File.WriteAllText(a, "a");
+        File.WriteAllText(b, "b");
+        File.WriteAllText(c, "c");
+        AssetDatabase.Refresh(ImportAssetOptions.ForceSynchronousImport);
+        using (ProjectReferences.KeptScan.Use(kept))
+        {
+            try
+            {
+                var first = ProjectReferences.ScanAsync();
+                yield return Wait(first);
+                TaskResults.Done(first);
+                yield return Wait(ProjectReferences.KeptScan.Saving);
+                Assert.That(TaskResults.Done(ProjectReferences.KeptScan.Saving), Is.True, "kept on disk");
+
+                ProjectReferences.KeptScan.ForgetMemory();
+                var second = ProjectReferences.ScanAsync();
+                yield return Wait(second);
+                TaskResults.Done(second);
+                var stats = ProjectReferences.LastScan;
+                Assert.That(stats.KeptLoaded, Is.True);
+                Assert.That(stats.ReadPaths, Does.Not.Contain(a).And.Not.Contain(b).And.Not.Contain(c), "unchanged: not read again");
+                Assert.That(stats.FromKept, Is.GreaterThanOrEqualTo(3));
+                yield return Wait(ProjectReferences.KeptScan.Saving);
+
+                File.WriteAllText(a, "a, longer now");
+                File.SetLastWriteTimeUtc(b, File.GetLastWriteTimeUtc(b).AddSeconds(5));
+                AssetDatabase.DeleteAsset(c);
+                ProjectReferences.KeptScan.ForgetMemory();
+                var third = ProjectReferences.ScanAsync();
+                yield return Wait(third);
+                TaskResults.Done(third);
+                Assert.That(ProjectReferences.LastScan.ReadPaths, Does.Contain(a), "another size");
+                Assert.That(ProjectReferences.LastScan.ReadPaths, Does.Contain(b), "another write time");
+                yield return Wait(ProjectReferences.KeptScan.Saving);
+                ProjectReferences.KeptScan.ForgetMemory();
+                var reloaded = ProjectReferences.KeptScan.Load(kept, new ProjectReferences.ScanStats());
+                Assert.That(reloaded.ContainsKey(a) && reloaded.ContainsKey(b), Is.True);
+                Assert.That(reloaded.ContainsKey(c), Is.False, "a deleted file's entry is dropped");
+            }
+            finally { if (File.Exists(kept)) File.Delete(kept); }
+        }
+    }
+
+    // A cut or corrupt kept file is ignored (every file is read) and written anew; past its size bound it is not kept.
+    [Test] public void ACorruptOrTooLargeKeptScanIsIgnored()
+    {
+        string kept = Path.Combine(Path.GetTempPath(), "OrbitersKeptScan-" + Guid.NewGuid().ToString("N").Substring(0, 8) + ".bin");
+        long bound = ProjectReferences.KeptScan.MaxBytes;
+        try
+        {
+            using (ProjectReferences.KeptScan.Use(kept))
+            {
+                var reads = Enumerable.Range(0, 50).Select(i =>
+                {
+                    var read = new ProjectReferences.FileRead { Path = "Assets/Kept/" + i + ".prefab", Imported = true, ContentRead = true, Stamp = new ProjectReferences.Stamp(i, i * 10, 5, 50) };
+                    read.Guids.Add(i.ToString("x32"));
+                    return read;
+                }).ToList();
+                Assert.That(ProjectReferences.KeptScan.Save(kept, reads), Is.True);
+                ProjectReferences.KeptScan.ForgetMemory();
+                var stats = new ProjectReferences.ScanStats();
+                var loaded = ProjectReferences.KeptScan.Load(kept, stats);
+                Assert.That(stats.KeptLoaded, Is.True);
+                Assert.That(loaded["Assets/Kept/7.prefab"].Guids, Is.EquivalentTo(new[] { 7.ToString("x32") }));
+                Assert.That(loaded["Assets/Kept/7.prefab"].Stamp, Is.EqualTo(new ProjectReferences.Stamp(7, 70, 5, 50)));
+
+                var whole = File.ReadAllBytes(kept);
+                File.WriteAllBytes(kept, whole.Take(whole.Length / 2).ToArray());
+                ProjectReferences.KeptScan.ForgetMemory();
+                stats = new ProjectReferences.ScanStats();
+                Assert.That(ProjectReferences.KeptScan.Load(kept, stats), Is.Empty, "cut: ignored");
+                Assert.That(stats.KeptLoaded, Is.False);
+                var garbage = (byte[])whole.Clone();
+                for (int i = 8; i < garbage.Length; i += 7) garbage[i] ^= 0x5A;
+                File.WriteAllBytes(kept, garbage);
+                ProjectReferences.KeptScan.ForgetMemory();
+                Assert.That(() => ProjectReferences.KeptScan.Load(kept, new ProjectReferences.ScanStats()), Throws.Nothing, "corrupt: ignored, never thrown");
+
+                Assert.That(ProjectReferences.KeptScan.Save(kept, reads), Is.True, "written anew");
+                ProjectReferences.KeptScan.ForgetMemory();
+                Assert.That(ProjectReferences.KeptScan.Load(kept, new ProjectReferences.ScanStats()), Has.Count.EqualTo(50));
+
+                ProjectReferences.KeptScan.MaxBytes = 512;
+                Assert.That(ProjectReferences.KeptScan.Save(kept, reads), Is.False, "past its bound");
+                Assert.That(File.Exists(kept), Is.False, "and no old copy left");
+            }
+        }
+        finally
+        {
+            ProjectReferences.KeptScan.MaxBytes = bound;
+            if (File.Exists(kept)) File.Delete(kept);
+        }
+    }
 }
