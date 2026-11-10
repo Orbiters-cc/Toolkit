@@ -110,6 +110,16 @@ namespace Orbiters.Toolkit.Editor
             "AssemblyDefinitionReferenceImporter", "PackageManifestImporter",
         };
 
+        // The importers of Unity's own serialized files, and the extensions Unity gives them (for a file not imported yet,
+        // or outside Assets/): assets, prefabs, scenes and the kinds of asset with an extension of their own.
+        private static readonly HashSet<string> UnitySerializedImporters = new HashSet<string>(StringComparer.Ordinal) { "NativeFormatImporter", "PrefabImporter" };
+        private static readonly HashSet<string> UnitySerializedExtensions = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ".asset", ".prefab", ".unity", ".mat", ".anim", ".controller", ".overrideController", ".mask", ".playable", ".physicMaterial",
+            ".physicsMaterial2D", ".lighting", ".spriteatlas", ".spriteatlasv2", ".terrainlayer", ".mixer", ".renderTexture", ".cubemap",
+            ".flare", ".fontsettings", ".guiskin", ".giparams", ".brush", ".preset", ".signal", ".shadervariants", ".scenetemplate",
+        };
+
         // Of those, the ones Unity's dependency list says nothing more about than their .meta.
         private static readonly HashSet<string> NoDependencies = new HashSet<string>(StringComparer.Ordinal)
         {
@@ -165,14 +175,21 @@ namespace Orbiters.Toolkit.Editor
             // from inside the file; their .meta is read), and binary files. In a Force Text project (VRChat's default) Unity
             // writes few of those itself: types marked [PreferBinarySerialization] (LightingData, NavMesh data, and tools'
             // own caches), terrain data, files brought in by a .unitypackage or copied from a Force Binary project that
-            // Unity has not written since, and binary formats of tools' ScriptedImporters. Only those can make the scan
-            // uncertain, and only while they are not as Unity last imported them (checked afresh every time).
+            // Unity has not written since. Only those can make the scan uncertain, and only while they are not as Unity
+            // last imported them (checked afresh every time).
             if (!read.ContentRead && read.Stamp.Size >= 0)
             {
-                // A file not yet imported keeps the importer its kind gets by default.
-                bool plain = !string.IsNullOrEmpty(read.Importer) ? NoInnerReferences.Contains(read.Importer) : Media.Contains(Path.GetExtension(read.Path));
-                // Whatever its type: a file whose bytes are not known to be what Unity imported may use what its import does not say.
-                if (!plain && !ImportStamps.Current(read.Path, read.Stamp))
+                // Only Unity's own serialized files name assets in their bytes: a binary file of any other format (a
+                // Substance Painter project, a VRM, a tool's cache with its own importer) names none there, whatever
+                // importer reads it, and what its import settings name is in its .meta, read above. So only a serialized
+                // file whose bytes are not known to be what Unity imported may use what its import does not say. A file
+                // not yet imported is judged by its extension.
+                string extension = Path.GetExtension(read.Path);
+                bool serialized = !string.IsNullOrEmpty(read.Importer)
+                    ? UnitySerializedImporters.Contains(read.Importer) || string.Equals(extension, ".unity", StringComparison.OrdinalIgnoreCase)
+                    : UnitySerializedExtensions.Contains(extension);
+                bool plain = !string.IsNullOrEmpty(read.Importer) ? NoInnerReferences.Contains(read.Importer) : Media.Contains(extension);
+                if (serialized && !plain && !ImportStamps.Current(read.Path, read.Stamp))
                     throw new UncertainReferencesException(string.IsNullOrEmpty(read.Importer)
                         ? read.Path + " is in a binary format Unity has not imported: what it uses cannot be read."
                         : read.Path + " changed since Unity last imported it: what it uses is known once Unity imports it again.");
