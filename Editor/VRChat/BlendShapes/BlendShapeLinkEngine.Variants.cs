@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using Orbiters.Toolkit.Editor.Animations;
 using UnityEditor;
 using UnityEditor.Animations;
 using UnityEngine;
@@ -10,8 +11,134 @@ namespace Orbiters.Toolkit.Editor.VRChat.BlendShapes
 {
     public static partial class BlendShapeLinkEngine
     {
+        // One Apply: what every link asks of the clips, read once. Each clip's bindings come from the index (the build's
+        // during a build), and each effect clip's curves and the avatar's values they start from are read once, not once
+        // per clip they are copied into.
+        private sealed class Pass
+        {
+            private readonly AnimationIndex index;
+            public readonly GameObject AnimatorRoot;
+            public int ClipsWrapped, StatesRewritten;
+            // The blendshape curves some clip of the controllers animates (path, property), clips made since included, and
+            // the factors some wrapper tree there already blends.
+            private readonly HashSet<(string Path, string Property)> shapes = new HashSet<(string, string)>();
+            private readonly HashSet<string> wrapperFactors = new HashSet<string>(StringComparer.Ordinal);
+            private readonly Dictionary<AnimationClip, Effect> effects = new Dictionary<AnimationClip, Effect>();
+            private readonly Dictionary<EditorCurveBinding, float> baselines = new Dictionary<EditorCurveBinding, float>();
+            private readonly Dictionary<EditorCurveBinding, Object> objectBaselines = new Dictionary<EditorCurveBinding, Object>();
+
+            public sealed class Effect
+            {
+                public EditorCurveBinding[] Floats;
+                public AnimationCurve[] Curves;
+                public EditorCurveBinding[] Objects;
+                public ObjectReferenceKeyframe[][] Keys;
+            }
+
+            public Pass(AnimationIndex index, GameObject animatorRoot)
+            {
+                this.index = index;
+                AnimatorRoot = animatorRoot;
+            }
+
+            // Before the controllers are detached: their clips, and the wrapper trees their states hold.
+            public void Survey(List<AnimatorController> controllers, Dictionary<AnimatorController, AnimatorControllerLayer[]> layersOf)
+            {
+                foreach (var controller in controllers)
+                {
+                    foreach (var clip in controller.animationClips)
+                        if (clip != null) Learn(clip);
+                    var machines = new HashSet<AnimatorStateMachine>();
+                    var trees = new HashSet<BlendTree>();
+                    foreach (var layer in layersOf[controller])
+                        if (layer?.stateMachine != null) Visit(layer.stateMachine, machines, trees);
+                }
+            }
+
+            private void Visit(AnimatorStateMachine machine, HashSet<AnimatorStateMachine> machines, HashSet<BlendTree> trees)
+            {
+                if (!machines.Add(machine)) return;
+                foreach (var child in machine.states)
+                    if (child.state != null) Visit(child.state.motion, trees);
+                foreach (var child in machine.stateMachines)
+                    if (child.stateMachine != null) Visit(child.stateMachine, machines, trees);
+            }
+
+            private void Visit(Motion motion, HashSet<BlendTree> trees)
+            {
+                if (!(motion is BlendTree tree) || !trees.Add(tree)) return;
+                if (tree.name.StartsWith(WrapperPrefix, StringComparison.Ordinal) && tree.blendType == BlendTreeType.Simple1D && tree.children != null &&
+                    tree.children.Length == 2 && tree.blendParameter != null) wrapperFactors.Add(tree.blendParameter);
+                foreach (var child in tree.children) Visit(child.motion, trees);
+            }
+
+            /// <summary>A clip the controllers play now (made by a link, say): its blendshape curves may trigger later links.</summary>
+            public void Learn(AnimationClip clip)
+            {
+                foreach (var binding in index.Bindings(clip).Floats)
+                    if (binding.type == typeof(SkinnedMeshRenderer)) shapes.Add((binding.path, binding.propertyName));
+            }
+
+            public BlendTree Wrapped(BlendTree wrapper)
+            {
+                wrapperFactors.Add(wrapper.blendParameter);
+                return wrapper;
+            }
+
+            /// <summary>
+            /// Whether walking the controllers' states for <paramref name="link"/> can change anything: a blendshape
+            /// trigger some clip animates, a wrapper of its factor (a state holding one is rewritten even without a new
+            /// match), or a trigger matched by clip, which only reading each clip tells.
+            /// </summary>
+            public bool MayMatch(BlendShapeLink link) =>
+                link.TriggerType != BlendShapeLinkEndpoint.BlendShape || shapes.Contains((link.SourcePath, link.SourceProperty)) ||
+                link.FactorParameter != null && wrapperFactors.Contains(link.FactorParameter);
+
+            /// <summary>The clip's blendshape curve at this path and property, or null.</summary>
+            public AnimationCurve ShapeCurve(AnimationClip clip, string path, string property)
+            {
+                if (clip == null || path == null || string.IsNullOrWhiteSpace(property)) return null;
+                return index.Bindings(clip).TryFind(path, typeof(SkinnedMeshRenderer), property, out var binding) ? AnimationUtility.GetEditorCurve(clip, binding) : null;
+            }
+
+            public EditorCurveBinding[] FloatBindings(AnimationClip clip) => index.Bindings(clip).Floats;
+
+            public Effect EffectOf(AnimationClip clip)
+            {
+                if (effects.TryGetValue(clip, out var effect)) return effect;
+                var bindings = index.Bindings(clip);
+                effect = new Effect
+                {
+                    Floats = bindings.Floats,
+                    Curves = bindings.Floats.Select(b => AnimationUtility.GetEditorCurve(clip, b)).ToArray(),
+                    Objects = bindings.Objects,
+                    Keys = bindings.Objects.Select(b => AnimationUtility.GetObjectReferenceCurve(clip, b)).ToArray(),
+                };
+                effects[clip] = effect;
+                return effect;
+            }
+
+            // The avatar's own value of a property a trigger clip does not animate.
+            public float Baseline(EditorCurveBinding binding)
+            {
+                if (baselines.TryGetValue(binding, out float known)) return known;
+                float baseline = AnimatorRoot != null && AnimationUtility.GetFloatValue(AnimatorRoot, binding, out float value) ? value : 0f;
+                baselines[binding] = baseline;
+                return baseline;
+            }
+
+            public Object ObjectBaseline(EditorCurveBinding binding)
+            {
+                if (objectBaselines.TryGetValue(binding, out var known)) return known;
+                Object baseline = null;
+                if (AnimatorRoot != null) AnimationUtility.GetObjectReferenceValue(AnimatorRoot, binding, out baseline);
+                objectBaselines[binding] = baseline;
+                return baseline;
+            }
+        }
+
         // Returns a clone of the clip with the link applied, or null when the clip does not trigger the link.
-        private static AnimationClip TryCreateVariantClip(AnimatorController controller, AnimationClip clip, BlendShapeLink link, GameObject animatorRoot)
+        private static AnimationClip TryCreateVariantClip(Pass pass, AnimatorController controller, AnimationClip clip, BlendShapeLink link)
         {
             if (clip == null) return null;
             if (link.EffectType == BlendShapeLinkEndpoint.Animation && link.EffectClip == null) return null;
@@ -22,9 +149,10 @@ namespace Orbiters.Toolkit.Editor.VRChat.BlendShapes
             bool hasDestination = link.DestinationPath != null && !string.IsNullOrWhiteSpace(link.DestinationProperty);
             if (shapeTrigger && shapeEffect)
             {
-                if (!TryGetBlendShapeCurve(clip, link.SourcePath, link.SourceProperty, out var source)) return null;
+                var source = pass.ShapeCurve(clip, link.SourcePath, link.SourceProperty);
+                if (source == null) return null;
                 // A direct copy already present (repeated preprocess) needs no new clip.
-                if (link.DirectCopy && TryGetBlendShapeCurve(clip, link.DestinationPath, link.DestinationProperty, out var existing) &&
+                if (link.DirectCopy && pass.ShapeCurve(clip, link.DestinationPath, link.DestinationProperty) is AnimationCurve existing &&
                     source.preWrapMode == existing.preWrapMode && source.postWrapMode == existing.postWrapMode && source.keys.SequenceEqual(existing.keys)) return null;
                 if (!hasDestination) return null;
                 return Variant(controller, clip, v => AnimationUtility.SetEditorCurve(v, ShapeBinding(link), source));
@@ -35,42 +163,51 @@ namespace Orbiters.Toolkit.Editor.VRChat.BlendShapes
                 float end = Mathf.Max(clip.length, 1f / 60f);
                 return Variant(controller, clip, v => AnimationUtility.SetEditorCurve(v, ShapeBinding(link), new AnimationCurve(new Keyframe(0f, 100f), new Keyframe(end, 100f))));
             }
+            var effect = pass.EffectOf(link.EffectClip);
             if (shapeTrigger)
             {
-                if (!TryGetBlendShapeCurve(clip, link.SourcePath, link.SourceProperty, out var activation)) return null;
+                var activation = pass.ShapeCurve(clip, link.SourcePath, link.SourceProperty);
+                if (activation == null) return null;
                 float length = Mathf.Max(clip.length, link.EffectClip.length, 1f / 60f);
                 return Variant(controller, clip, v =>
                 {
-                    foreach (var binding in AnimationUtility.GetCurveBindings(link.EffectClip))
+                    var bindings = new List<EditorCurveBinding>();
+                    var curves = new List<AnimationCurve>();
+                    for (int i = 0; i < effect.Floats.Length; i++)
                     {
-                        var overlay = AnimationUtility.GetEditorCurve(link.EffectClip, binding);
+                        var overlay = effect.Curves[i];
                         if (overlay == null) continue;
+                        var binding = effect.Floats[i];
                         // A property the trigger clip does not animate keeps the avatar's value, not 0.
-                        float baseline = animatorRoot != null && AnimationUtility.GetFloatValue(animatorRoot, binding, out float value) ? value : 0f;
-                        AnimationUtility.SetEditorCurve(v, binding, BlendByActivation(AnimationUtility.GetEditorCurve(clip, binding), baseline, overlay, activation, length));
+                        bindings.Add(binding);
+                        curves.Add(BlendByActivation(AnimationUtility.GetEditorCurve(clip, binding), pass.Baseline(binding), overlay, activation, length));
                     }
-                    foreach (var binding in AnimationUtility.GetObjectReferenceCurveBindings(link.EffectClip))
+                    if (bindings.Count > 0) AnimationUtility.SetEditorCurves(v, bindings.ToArray(), curves.ToArray());
+                    for (int i = 0; i < effect.Objects.Length; i++)
                     {
-                        var overlay = AnimationUtility.GetObjectReferenceCurve(link.EffectClip, binding);
+                        var overlay = effect.Keys[i];
                         if (overlay == null || overlay.Length == 0) continue;
-                        Object baseline = null;
-                        if (animatorRoot != null) AnimationUtility.GetObjectReferenceValue(animatorRoot, binding, out baseline);
-                        var keys = SwitchByActivation(AnimationUtility.GetObjectReferenceCurve(clip, binding), baseline, overlay, activation, length);
+                        var binding = effect.Objects[i];
+                        var keys = SwitchByActivation(AnimationUtility.GetObjectReferenceCurve(clip, binding), pass.ObjectBaseline(binding), overlay, activation, length);
                         if (keys.Length > 0) AnimationUtility.SetObjectReferenceCurve(v, binding, keys);
                     }
                 });
             }
             return Variant(controller, clip, v =>
             {
-                foreach (var binding in AnimationUtility.GetCurveBindings(link.EffectClip))
+                var bindings = new List<EditorCurveBinding>();
+                var curves = new List<AnimationCurve>();
+                for (int i = 0; i < effect.Floats.Length; i++)
+                    if (effect.Curves[i] != null)
+                    {
+                        bindings.Add(effect.Floats[i]);
+                        curves.Add(effect.Curves[i]);
+                    }
+                if (bindings.Count > 0) AnimationUtility.SetEditorCurves(v, bindings.ToArray(), curves.ToArray());
+                for (int i = 0; i < effect.Objects.Length; i++)
                 {
-                    var overlay = AnimationUtility.GetEditorCurve(link.EffectClip, binding);
-                    if (overlay != null) AnimationUtility.SetEditorCurve(v, binding, overlay);
-                }
-                foreach (var binding in AnimationUtility.GetObjectReferenceCurveBindings(link.EffectClip))
-                {
-                    var curve = AnimationUtility.GetObjectReferenceCurve(link.EffectClip, binding);
-                    if (curve != null && curve.Length > 0) AnimationUtility.SetObjectReferenceCurve(v, binding, curve);
+                    var curve = effect.Keys[i];
+                    if (curve != null && curve.Length > 0) AnimationUtility.SetObjectReferenceCurve(v, effect.Objects[i], curve);
                 }
             });
         }
@@ -87,20 +224,6 @@ namespace Orbiters.Toolkit.Editor.VRChat.BlendShapes
             AttachAsSubAsset(controller, variant);
             EditorUtility.SetDirty(variant);
             return variant;
-        }
-
-        private static bool TryGetBlendShapeCurve(AnimationClip clip, string path, string property, out AnimationCurve curve)
-        {
-            curve = null;
-            if (clip == null || path == null || string.IsNullOrWhiteSpace(property)) return false;
-            foreach (var binding in AnimationUtility.GetCurveBindings(clip))
-            {
-                if (binding.type != typeof(SkinnedMeshRenderer) || !string.Equals(binding.path, path, StringComparison.Ordinal) ||
-                    !string.Equals(binding.propertyName, property, StringComparison.Ordinal)) continue;
-                curve = AnimationUtility.GetEditorCurve(clip, binding);
-                return curve != null;
-            }
-            return false;
         }
 
         // Lerps from the base curve (or the baseline without one) to the overlay by the trigger blendshape's activation (0..100).

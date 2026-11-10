@@ -225,6 +225,73 @@ public sealed class BlendShapeLinkEngineTests
         finally { copy.Destroy(); }
     }
 
+    // The links read each clip's curves once: a link triggered by a shape an earlier link of the same pass adds still sees it.
+    [Test]
+    public void LinksChainThroughTheShapesEarlierLinksAdd()
+    {
+        AddRenderer(Child("Body"), "Smile", "Fix", "Other");
+        var controller = Controller("fx");
+        root.AddComponent<Animator>().runtimeAnimatorController = controller;
+        var state = controller.layers[0].stateMachine.AddState("Smile");
+        state.motion = Clip("smile", Shape("Body", "Smile", 0, 100));
+
+        var result = BlendShapeLinkEngine.Apply(root, new[]
+        {
+            BlendShapeLink.Copy("Body", "Smile", "Body", "Fix"),
+            BlendShapeLink.Copy("Body", "Fix", "Body", "Other"),
+        }, "test");
+
+        Assert.That(result.Success, Is.True, result.Message);
+        Assert.That(result.Links, Is.EqualTo(2));
+        var output = (AnimationClip)state.motion;
+        Assert.That(AnimationUtility.GetCurveBindings(output).Select(b => b.propertyName), Is.EquivalentTo(new[] { "blendShape.Smile", "blendShape.Fix", "blendShape.Other" }));
+    }
+
+    // A link nothing triggers changes no state, yet every controller gets its factor, as before the links were indexed.
+    [Test]
+    public void ALinkNothingTriggersAddsItsFactorAndNothingElse()
+    {
+        AddRenderer(Child("Body"), "Smile", "Fix");
+        var controller = Controller("fx");
+        root.AddComponent<Animator>().runtimeAnimatorController = controller;
+        var smile = Clip("smile", Shape("Body", "Smile", 0, 100));
+        var state = controller.layers[0].stateMachine.AddState("Smile");
+        state.motion = smile;
+        var link = FactorLink(BlendShapeLinkEndpoint.BlendShape, "Fix", null);
+        link.SourceProperty = "blendShape.Frown";
+
+        var result = BlendShapeLinkEngine.Apply(root, new[] { link }, "test");
+
+        Assert.That(result.Success, Is.False);
+        Assert.That(state.motion, Is.SameAs(smile));
+        Assert.That(controller.parameters.Select(p => p.name), Has.Member("UP_Test_Factor"));
+    }
+
+    // A state already holding a wrapper of the link's factor (an earlier pass) still has its FX mask cleared, though the
+    // link's own trigger is animated nowhere.
+    [Test]
+    public void AWrapperOfTheFactorStillClearsTheFxMask()
+    {
+        AddRenderer(Child("Body"), "Smile", "Fix");
+        var fxMask = Asset(new AvatarMask(), "fx.mask");
+        var fx = Controller("fx");
+        fx.layers[0].stateMachine.AddState("Smile").motion = Clip("smile", Shape("Body", "Smile", 0, 100));
+        var descriptor = root.AddComponent<VRCAvatarDescriptor>();
+        descriptor.baseAnimationLayers = new[] { new VRCAvatarDescriptor.CustomAnimLayer { type = VRCAvatarDescriptor.AnimLayerType.FX, animatorController = fx } };
+        Assert.That(BlendShapeLinkEngine.Apply(root, new[] { FactorLink(BlendShapeLinkEndpoint.BlendShape, "Fix", null) }, "first").Success, Is.True);
+        Assert.That(fx.layers[0].stateMachine.states[0].state.motion, Is.InstanceOf<BlendTree>());
+        var layers = fx.layers;
+        layers[0].avatarMask = fxMask;
+        fx.layers = layers;
+
+        var other = FactorLink(BlendShapeLinkEndpoint.BlendShape, "Fix", null);
+        other.SourceProperty = "blendShape.Frown";
+        var result = BlendShapeLinkEngine.Apply(root, new[] { other }, "second");
+
+        Assert.That(result.Success, Is.True, result.Message);
+        Assert.That(fx.layers[0].avatarMask, Is.Null, "the layer plays the wrapper's blendshape curves unmasked");
+    }
+
     // Body/Smile goes from 0 to 100 over a second and triggers the effect through a factor link.
     private AnimationClip ApplyShapeTriggeredEffect(AnimationClip effect)
     {

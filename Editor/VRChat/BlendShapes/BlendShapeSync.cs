@@ -115,8 +115,10 @@ namespace Orbiters.Toolkit.Editor.VRChat.BlendShapes
 
             // Only shapes some clip animates: linking the others would walk every controller for nothing.
             var animated = new HashSet<(string, string)>();
+            // During a build its index, which the links read again.
+            var index = Build.BuildContext.Of(avatarRoot)?.Clips;
             foreach (var clip in controllers.SelectMany(c => c.animationClips).Where(c => c != null).Distinct())
-                foreach (var binding in AnimationUtility.GetCurveBindings(clip))
+                foreach (var binding in index != null ? index.Bindings(clip).Floats : AnimationUtility.GetCurveBindings(clip))
                     if (binding.type == typeof(SkinnedMeshRenderer)) animated.Add((binding.path, binding.propertyName));
             var links = new List<BlendShapeLink>();
             foreach (var copy in valid)
