@@ -109,6 +109,9 @@ public sealed class AvatarBuildPipelineTests
         "Orbiters.Toolkit.Editor.VRChat.Refit.RefitLinkHook", "Orbiters.Toolkit.Editor.VRChat.Refit.RefitShrinkHook",
     };
 
+    // Which side a is of b (-1 before, 0 with, 1 after); never by subtraction: the orders reach int.MaxValue.
+    private static int Side(int a, int b) => a.CompareTo(b);
+
     private static int Order(Type step) => BuildPhases.Order(AvatarBuildPipeline.Steps.Single(s => s.GetType() == step).Phase);
 
     [Test] public void EveryToolkitStepKeepsItsPlaceAmongTheOtherToolsCallbacks()
@@ -122,9 +125,9 @@ public sealed class AvatarBuildPipelineTests
                 int today = Today(name, other);
                 Assert.That(now, Is.Not.EqualTo(today), step.Name + " shares its order with " + name + ": the SDK would order them by type.");
                 // The one former tie inside the Toolkit, broken as it ran.
-                int was = former != other ? Math.Sign(former - other) : step == typeof(SkinStickHook) && name.EndsWith("RefitLinkHook") ? 1 : 0;
+                int was = former != other ? Side(former, other) : step == typeof(SkinStickHook) && name.EndsWith("RefitLinkHook") ? 1 : 0;
                 Assert.That(was, Is.Not.Zero, "unexpected former tie of " + step.Name + " with " + name);
-                Assert.That(Math.Sign(now - today), Is.EqualTo(was), step.Name + " moved to the other side of " + name + " (" + today + ")");
+                Assert.That(Side(now, today), Is.EqualTo(was), step.Name + " moved to the other side of " + name + " (" + today + ")");
             }
         }
     }
@@ -242,9 +245,9 @@ public sealed class AvatarBuildPipelineTests
                 // A former tie with another tool's callback, at a number the phase kept (the manifest's at int.MaxValue,
                 // X-Ray's copy at -20000): the old callback was in this assembly's place.
                 if (TieKeptByAssembly(step, former, order, other.GetType().Assembly == typeof(BuildStep).Assembly)) continue;
-                int was = former != order ? Math.Sign(former - order) : step == typeof(SkinStickHook) && name.EndsWith("RefitLinkHook") ? 1 : 0;
+                int was = former != order ? Side(former, order) : step == typeof(SkinStickHook) && name.EndsWith("RefitLinkHook") ? 1 : 0;
                 Assert.That(was, Is.Not.Zero, "unexpected former tie of " + step.Name + " with " + name);
-                Assert.That(Math.Sign(at - i), Is.EqualTo(was), step.Name + " runs on the other side of " + name + " (" + order + ")");
+                Assert.That(Side(at, i), Is.EqualTo(was), step.Name + " runs on the other side of " + name + " (" + order + ")");
             }
         }
     }
@@ -290,7 +293,7 @@ public sealed class AvatarBuildPipelineTests
         {
             int a = sequence.IndexOf(landing), b = sequence.IndexOf(other);
             if (a < 0 || b < 0) continue;
-            Assert.That(Math.Sign(a - b), Is.EqualTo(side), landing + " and " + other + " run in another order than recorded: move " + landing + "'s phase to the other side");
+            Assert.That(Side(a, b), Is.EqualTo(side), landing + " and " + other + " run in another order than recorded: move " + landing + "'s phase to the other side");
             checkedTies++;
         }
         if (checkedTies == 0) Assert.Ignore("MCB is not installed here, or its callbacks are steps already.");
@@ -312,17 +315,17 @@ public sealed class AvatarBuildPipelineTests
                 if (landed == phase) continue;
                 int otherNow = landed.HasValue ? BuildPhases.Order(landed.Value) : order;
                 Assert.That(now, Is.Not.EqualTo(otherNow), name + " would share its order with " + other);
-                int side = Math.Sign(was - order);
+                int side = Side(was, order);
                 if (side == 0)
                 {
                     var tie = FormerTies.Where(t => t.Landing == name && t.Other == other).Select(t => (int?)t.Side).SingleOrDefault();
                     Assert.That(tie, Is.Not.Null, "unexpected former tie of " + name + " with " + other);
                     side = tie.Value;
                 }
-                Assert.That(Math.Sign(now - otherNow), Is.EqualTo(side), name + " in " + phase + " moves to the other side of " + other);
+                Assert.That(Side(now, otherNow), Is.EqualTo(side), name + " in " + phase + " moves to the other side of " + other);
             }
             foreach (var (step, former) in Former)
-                Assert.That(Math.Sign(now - Order(step)), Is.EqualTo(Math.Sign(was - former)), name + " in " + phase + " moves to the other side of " + step.Name);
+                Assert.That(Side(now, Order(step)), Is.EqualTo(Side(was, former)), name + " in " + phase + " moves to the other side of " + step.Name);
             Assert.That(AvatarBuildPipeline.StepsIn(phase).Any(s => s.GetType().Assembly == typeof(BuildStep).Assembly), Is.False,
                 phase + " holds a Toolkit step: " + name + " could not name it to keep their order");
         }
