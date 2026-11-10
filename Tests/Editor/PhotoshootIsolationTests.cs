@@ -99,6 +99,39 @@ public sealed class PhotoshootIsolationTests
         }
     }
 
+    // A capture renders into targets of its own: it shows what the live preview shows (the old capture read the preview's
+    // own render), and leaves the preview's targets, their size and their image as they were.
+    [Test]
+    public void CaptureMatchesThePreviewAndLeavesItsTargets()
+    {
+        var avatar = Avatar("Unlit/Color", Color.red, 1f);
+        using (var session = new PhotoshootService.LivePreviewSession())
+        {
+            session.UpdatePreview(Request(avatar));
+            var preview = session.GetPreviewTexture(PhotoshootService.ShotKind.Thumbnail);
+            var shown = Read(preview);
+            Assert.That(Own(session.Capture(Request(avatar))).GetPixels32(), Is.EqualTo(shown), "the capture is the preview's picture");
+
+            var large = Request(avatar);
+            large.width = large.height = 128;
+            var captured = Own(session.Capture(large));
+            Assert.That(captured.width, Is.EqualTo(128));
+            Assert.That(session.GetPreviewTexture(PhotoshootService.ShotKind.Thumbnail), Is.SameAs(preview), "the preview keeps its texture");
+            Assert.That(preview.width, Is.EqualTo(64), "and its size");
+            Assert.That(Read(preview), Is.EqualTo(shown), "and its picture");
+        }
+    }
+
+    private Color32[] Read(Texture texture)
+    {
+        var previous = RenderTexture.active;
+        RenderTexture.active = (RenderTexture)texture;
+        var read = Own(new Texture2D(texture.width, texture.height, TextureFormat.RGBA32, false, false));
+        read.ReadPixels(new Rect(0, 0, texture.width, texture.height), 0, 0, false);
+        RenderTexture.active = previous;
+        return read.GetPixels32();
+    }
+
     private static PhotoshootService.RenderRequest Request(GameObject avatar) => new PhotoshootService.RenderRequest
     {
         avatarRoot = avatar, shotKind = PhotoshootService.ShotKind.Thumbnail, width = 64, height = 64

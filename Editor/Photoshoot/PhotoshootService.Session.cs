@@ -53,7 +53,13 @@ namespace Orbiters.Toolkit.Editor.Photoshoot
             private RenderRequest lastRequest;
             private Color? lastAmbient;
             private Transform[] sourceTransforms, copyTransforms;
-            private int[] sourceAppearance;
+            // The source's fingerprint the copy was made from, and the one measured now (two lists swapped, so a preview
+            // frame that measures it allocates nothing).
+            private List<int> sourceAppearance;
+            private List<int> appearanceNow = new List<int>();
+            private readonly List<Transform> appearanceTransforms = new List<Transform>();
+            private readonly List<Renderer> appearanceRenderers = new List<Renderer>();
+            private readonly List<Material> appearanceMaterials = new List<Material>();
             private int bodyPoseRevision;
             private bool hasHeadRegion, hasTorsoRegion, hasBodyRegion;
             private Bounds headRegion, torsoRegion, bodyRegion;
@@ -85,6 +91,13 @@ namespace Orbiters.Toolkit.Editor.Photoshoot
                 EnsureScene();
                 PreviewRenderTarget target = GetRenderTarget(request.shotKind);
                 EnsureRenderTexture(target, request.width, request.height, request.shotKind);
+                Render(request, target);
+                lastPreviewShotKind = request.shotKind;
+            }
+
+            // Poses, frames, lights and renders the shot of request into target (sized for it).
+            private void Render(RenderRequest request, PreviewRenderTarget target)
+            {
                 EnsureCamera();
                 // A new copy is made for each avatar or pose; framing, light and background changes reuse it as posed.
                 bool avatarChanged = EnsureAvatarCopy(request.avatarRoot, request.bodyPose, out bool poseChanged);
@@ -173,19 +186,23 @@ namespace Orbiters.Toolkit.Editor.Photoshoot
                 }
                 ApplyShotPostProcess(request, target);
                 MarkRenderTargetUpdated(target);
-                lastPreviewShotKind = request.shotKind;
             }
 
             /// <param name="withShotEffect">False: the shot as rendered, without the banner effect (for a server that applies it).</param>
+            /// <remarks>
+            /// Rendered into targets of the capture's size made for it and released after: the live preview's targets keep
+            /// their size (a capture used to resize them, and the next preview frame resized them back) and their image.
+            /// </remarks>
             public Texture2D Capture(RenderRequest request, bool withShotEffect = true)
             {
                 ValidateRequest(request);
-                UpdatePreview(request);
-
-                var target = GetRenderTarget(request.shotKind);
+                EnsureScene();
+                var target = new PreviewRenderTarget();
                 RenderTexture previousActiveTexture = RenderTexture.active;
                 try
                 {
+                    EnsureRenderTexture(target, request.width, request.height, request.shotKind);
+                    Render(request, target);
                     // Without the banner effect: the shot with its effects, already resolved.
                     RenderTexture.active = withShotEffect ? target.renderTexture : target.gradedRenderTexture;
                     var texture = new Texture2D(request.width, request.height, TextureFormat.RGBA32, false, false)
@@ -199,6 +216,8 @@ namespace Orbiters.Toolkit.Editor.Photoshoot
                 finally
                 {
                     RenderTexture.active = previousActiveTexture;
+                    if (camera != null) camera.targetTexture = null;
+                    ReleaseRenderTarget(target);
                 }
             }
 
@@ -308,8 +327,8 @@ namespace Orbiters.Toolkit.Editor.Photoshoot
             private bool EnsureAvatarCopy(GameObject avatarRoot, AnimationClip bodyPose, out bool poseChanged)
             {
                 poseChanged = false;
-                int[] currentAppearance = CaptureSourceAppearance(avatarRoot);
-                bool sourceUnchanged = sourceAppearance != null && sourceAppearance.SequenceEqual(currentAppearance);
+                CaptureSourceAppearance(avatarRoot, appearanceNow);
+                bool sourceUnchanged = sourceAppearance != null && SameValues(sourceAppearance, appearanceNow);
                 int currentPoseRevision = bodyPose != null ? EditorUtility.GetDirtyCount(bodyPose) : 0;
                 // By reference: a removed pose of the user's is destroyed, and would equal the default pose (null) otherwise.
                 if (avatarCopy != null && lastAvatarRoot == avatarRoot && sourceUnchanged && ReferenceEquals(lastBodyPose, bodyPose) && bodyPoseRevision == currentPoseRevision)
@@ -349,7 +368,9 @@ namespace Orbiters.Toolkit.Editor.Photoshoot
                 HideEditorHelpers(sourceTransforms, copyTransforms);
 
                 lastAvatarRoot = avatarRoot;
-                sourceAppearance = currentAppearance;
+                var kept = sourceAppearance ?? new List<int>();
+                sourceAppearance = appearanceNow;
+                appearanceNow = kept;
                 bodyPoseRevision = currentPoseRevision;
                 lastBodyPose = bodyPose;
                 lastFaceBlendshapeKey = null;
@@ -364,19 +385,29 @@ namespace Orbiters.Toolkit.Editor.Photoshoot
                     if ((source[i].gameObject.hideFlags & HideFlags.DontSaveInEditor) != 0) copy[i].gameObject.SetActive(false);
             }
 
+            private static bool SameValues(List<int> a, List<int> b)
+            {
+                if (a.Count != b.Count) return false;
+                for (int i = 0; i < a.Count; i++) if (a[i] != b[i]) return false;
+                return true;
+            }
+
             // Compare source state, not the posed clone. Rebuilding only after a source edit keeps camera-only
             // previews cheap while captures always reflect current meshes, materials, visibility and hierarchy.
-            private static int[] CaptureSourceAppearance(GameObject root)
+            // Measured at every preview frame (so a change raising no editor event is never missed), into lists the
+            // session keeps: the same values in the same order as ever, without a new list or array per frame.
+            private void CaptureSourceAppearance(GameObject root, List<int> values)
             {
-                var values = new List<int>();
+                values.Clear();
                 void ObjectState(UnityEngine.Object value)
                 {
                     values.Add(value != null ? value.GetInstanceID() : 0);
                     values.Add(value != null ? EditorUtility.GetDirtyCount(value) : 0);
                 }
                 void Vector(Vector3 value) { values.Add(value.x.GetHashCode()); values.Add(value.y.GetHashCode()); values.Add(value.z.GetHashCode()); }
-                var transforms = root.GetComponentsInChildren<Transform>(true);
-                values.Add(transforms.Length);
+                var transforms = appearanceTransforms;
+                root.GetComponentsInChildren(true, transforms);
+                values.Add(transforms.Count);
                 foreach (var transform in transforms)
                 {
                     values.Add(transform.GetInstanceID());
@@ -388,14 +419,16 @@ namespace Orbiters.Toolkit.Editor.Photoshoot
                     values.Add(rotation.x.GetHashCode()); values.Add(rotation.y.GetHashCode());
                     values.Add(rotation.z.GetHashCode()); values.Add(rotation.w.GetHashCode());
                 }
-                var renderers = root.GetComponentsInChildren<Renderer>(true);
-                values.Add(renderers.Length);
+                var renderers = appearanceRenderers;
+                root.GetComponentsInChildren(true, renderers);
+                values.Add(renderers.Count);
                 foreach (var renderer in renderers)
                 {
                     values.Add(renderer.GetInstanceID());
                     values.Add(renderer.enabled ? 1 : 0);
-                    var materials = renderer.sharedMaterials;
-                    values.Add(materials.Length);
+                    var materials = appearanceMaterials;
+                    renderer.GetSharedMaterials(materials);
+                    values.Add(materials.Count);
                     foreach (var material in materials) ObjectState(material);
                     if (renderer is SkinnedMeshRenderer skinned)
                     {
@@ -416,7 +449,9 @@ namespace Orbiters.Toolkit.Editor.Photoshoot
                         ObjectState(filter != null ? filter.sharedMesh : null);
                     }
                 }
-                return values.ToArray();
+                transforms.Clear();
+                renderers.Clear();
+                appearanceMaterials.Clear();
             }
 
             // One bake per skinned mesh gives both its posed culling bounds and the head and torso regions, measured on
