@@ -40,6 +40,8 @@ namespace Orbiters.Toolkit.Editor.VRChat.XRay
         private readonly VisualElement legend, metrics;
         private IVisualElementScheduledItem pending;
         private bool warned;
+        // The avatar counted last: changes elsewhere in the scene don't count it again.
+        private VRCAvatarDescriptor counted;
 
         /// <param name="avatar">The avatar to show; by default the selected one, else the scene's only active one.</param>
         public XRayAvatarBudgetPanel(Func<VRCAvatarDescriptor> avatar = null)
@@ -62,19 +64,15 @@ namespace Orbiters.Toolkit.Editor.VRChat.XRay
             RegisterCallback<AttachToPanelEvent>(_ =>
             {
                 Frame();
-                EditorApplication.hierarchyChanged += ScheduleRefresh;
-                ObjectChangeEvents.changesPublished += OnObjectsChanged;
-                Undo.undoRedoPerformed += ScheduleRefresh;
-                Selection.selectionChanged += ScheduleRefresh;
+                EditorChangeBus.Changed += OnChanges;
+                Selection.selectionChanged += OnSelectionChanged;
                 CustomBases.Changed += OnCustomBaseChanged;
                 ScheduleRefresh();
             });
             RegisterCallback<DetachFromPanelEvent>(_ =>
             {
-                EditorApplication.hierarchyChanged -= ScheduleRefresh;
-                ObjectChangeEvents.changesPublished -= OnObjectsChanged;
-                Undo.undoRedoPerformed -= ScheduleRefresh;
-                Selection.selectionChanged -= ScheduleRefresh;
+                EditorChangeBus.Changed -= OnChanges;
+                Selection.selectionChanged -= OnSelectionChanged;
                 CustomBases.Changed -= OnCustomBaseChanged;
             });
         }
@@ -93,7 +91,18 @@ namespace Orbiters.Toolkit.Editor.VRChat.XRay
 
         private void OnCustomBaseChanged(Transform _) => ScheduleRefresh();
 
-        private void OnObjectsChanged(ref ObjectChangeEventStream _) => ScheduleRefresh();
+        // Changes to the counted avatar, to assets (menus, parameters, VRCFury's settings), or to what decides which avatar is
+        // shown (avatars added, removed or moved); every change while none is counted.
+        private void OnChanges(EditorChanges changes)
+        {
+            if (counted == null || changes.AssetsChanged || changes.Touches(counted.transform) || (changes.StructureChanged || changes.Hierarchy) && avatar() != counted)
+                ScheduleRefresh();
+        }
+
+        private void OnSelectionChanged()
+        {
+            if (counted == null || avatar() != counted) ScheduleRefresh();
+        }
 
         private void ScheduleRefresh() => ScheduleRefresh(400);
 
@@ -120,6 +129,7 @@ namespace Orbiters.Toolkit.Editor.VRChat.XRay
             try { Recount(); }
             catch (Exception ex)
             {
+                counted = null;
                 foreach (var part in new VisualElement[] { avatarName, legend, metrics, compression }) part.style.display = DisplayStyle.None;
                 empty.text = "Budget unavailable for now.";
                 empty.style.display = DisplayStyle.Flex;
@@ -133,6 +143,7 @@ namespace Orbiters.Toolkit.Editor.VRChat.XRay
         {
             empty.text = "Select an avatar to see its budget.";
             var shownAvatar = avatar();
+            counted = shownAvatar;
             bool shown = shownAvatar != null;
             empty.style.display = shown ? DisplayStyle.None : DisplayStyle.Flex;
             foreach (var part in new VisualElement[] { avatarName, metrics }) part.style.display = shown ? DisplayStyle.Flex : DisplayStyle.None;

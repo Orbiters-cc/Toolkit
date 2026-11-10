@@ -50,7 +50,20 @@ namespace Orbiters.Toolkit.Editor.VRChat.Posing
         // The links followed when the preview paused, with their followers' rest: offsets kept across the pause.
         private static List<(FollowLink link, Matrix4x4 rest)> held;
 
-        public static Transform Root { get; private set; }
+        private static Transform root;
+        // Watches the followed bones at every frame only while the preview is on.
+        private static IDisposable watching;
+
+        public static Transform Root
+        {
+            get => root;
+            private set
+            {
+                root = value;
+                if (value != null && watching == null) watching = OrbitersEditorHost.EveryFrame("Accessory pose preview", FollowChangedPose);
+                else if (value == null && watching != null) { watching.Dispose(); watching = null; }
+            }
+        }
         public static bool Enabled => Root != null;
         public static IReadOnlyList<Accessory> Accessories => Found;
         public static string LastStatus { get; private set; } = "Off";
@@ -59,7 +72,6 @@ namespace Orbiters.Toolkit.Editor.VRChat.Posing
         static AccessoryPoseSync()
         {
             Undo.postprocessModifications += Follow;
-            EditorApplication.update += FollowChangedPose;
             Undo.undoRedoPerformed += UndoRedo;
             EditorApplication.playModeStateChanged += state => { if (state == PlayModeStateChange.ExitingEditMode) Disable(); };
             AssemblyReloadEvents.beforeAssemblyReload += Disable;
