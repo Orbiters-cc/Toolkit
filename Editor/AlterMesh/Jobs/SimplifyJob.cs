@@ -42,7 +42,7 @@ namespace Orbiters.AlterMesh
         public NativeArray<float> VertexBlendWeightBuffer;
         public NativeArray<uint> VertexBlendIndicesBuffer;
 
-        public NativeArray<uint> VertexContainingSubMeshIndices;
+        public NativeArray<ulong> VertexContainingSubMeshIndices;
 
 
         public NativeList<BlendShapeData> BlendShapes;

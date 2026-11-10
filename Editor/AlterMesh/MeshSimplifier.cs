@@ -40,7 +40,7 @@ namespace Orbiters.AlterMesh
         NativeList<float> VertexBlendWeightBuffer;
         NativeList<uint> VertexBlendIndicesBuffer;
 
-        NativeList<uint> VertexContainingSubMeshIndices;
+        NativeList<ulong> VertexContainingSubMeshIndices;
 
         NativeList<ErrorQuadric> VertexErrorQuadrics;
 
@@ -167,6 +167,8 @@ namespace Orbiters.AlterMesh
             public void Start(Mesh mesh, MeshSimplificationTarget target, MeshSimplifierOptions options, BitArray? preserveBorderEdgesBoneIndices,
                 Unity.Collections.Allocator allocator, bool preserveOnLoad)
             {
+                // Each vertex keeps its submeshes as bits of a 64-bit mask.
+                if (mesh.subMeshCount > 64) throw new ArgumentException("A mesh of more than 64 submeshes (" + mesh.subMeshCount + ") can't be simplified.", nameof(mesh));
                 original = Mesh.AcquireReadOnlyMeshData(mesh);
                 hasOriginal = true;
                 var originalMeshData = original[0];

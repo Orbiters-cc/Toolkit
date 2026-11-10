@@ -45,7 +45,7 @@ namespace Orbiters.AlterMesh
         public NativeArray<uint> VertexBlendIndicesBuffer;
         [ReadOnly]
 
-        public NativeArray<uint> VertexContainingSubMeshIndices;
+        public NativeArray<ulong> VertexContainingSubMeshIndices;
         [ReadOnly]
 
 
@@ -146,7 +146,7 @@ namespace Orbiters.AlterMesh
                     destinationToSourceVertexIndex[destinationVertexIndex] = sourceVertexIndex;
                     sourceToDestinationVertexIndex[sourceVertexIndex] = destinationVertexIndex;
 
-                    for (uint indexMask = VertexContainingSubMeshIndices[sourceVertexIndex]; indexMask != 0u; indexMask &= indexMask - 1)
+                    for (ulong indexMask = VertexContainingSubMeshIndices[sourceVertexIndex]; indexMask != 0UL; indexMask &= indexMask - 1)
                     {
                         var subMeshIndex = math.tzcnt(indexMask);
                         ref var destinationSubMesh = ref destinationSubMeshes.ElementAt(subMeshIndex);
