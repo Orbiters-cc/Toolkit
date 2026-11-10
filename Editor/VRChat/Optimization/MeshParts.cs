@@ -18,17 +18,35 @@ namespace Orbiters.Toolkit.Editor.VRChat.Optimization
         /// <summary>How many vertices each blendshape moves (in some frame, by more than a hundredth of a millimetre).</summary>
         public static int[] Reach(Mesh mesh, out bool[][] moved)
         {
-            var reach = new int[mesh.blendShapeCount];
-            moved = new bool[mesh.blendShapeCount][];
-            var deltas = new Vector3[mesh.vertexCount];
-            for (int shape = 0; shape < mesh.blendShapeCount; shape++)
+            var table = MeshShapes.Of(mesh);
+            moved = new bool[table.ShapeCount][];
+            for (int shape = 0; shape < moved.Length; shape++) moved[shape] = new bool[mesh.vertexCount];
+            return Reach(table, moved);
+        }
+
+        /// <summary>
+        /// The same from a table (any thread); <paramref name="moved"/>, when given, receives the vertices each shape moves
+        /// (one array per shape, as long as the mesh).
+        /// </summary>
+        public static int[] Reach(BlendShapeTable table, bool[][] moved = null)
+        {
+            var reach = new int[table.ShapeCount];
+            var scratch = moved == null ? new bool[table.VertexCount] : null;
+            for (int shape = 0; shape < reach.Length; shape++)
             {
-                var by = moved[shape] = new bool[mesh.vertexCount];
-                for (int frame = 0; frame < mesh.GetBlendShapeFrameCount(shape); frame++)
+                var marks = moved != null ? moved[shape] : scratch;
+                var frames = table.Shapes[shape].Frames;
+                foreach (var frame in frames)
                 {
-                    mesh.GetBlendShapeFrameVertices(shape, frame, deltas, null, null);
-                    for (int v = 0; v < deltas.Length; v++) if (!by[v] && deltas[v].sqrMagnitude > 1e-10f) { by[v] = true; reach[shape]++; }
+                    var indices = frame.Indices;
+                    var deltas = frame.Deltas;
+                    for (int k = 0; k < indices.Length; k++)
+                        if (!marks[indices[k]] && deltas[k].sqrMagnitude > 1e-10f) { marks[indices[k]] = true; reach[shape]++; }
                 }
+                // The scratch marks go back to false: only what this shape marked.
+                if (moved == null)
+                    foreach (var frame in frames)
+                        foreach (int v in frame.Indices) scratch[v] = false;
             }
             return reach;
         }
@@ -79,22 +97,9 @@ namespace Orbiters.Toolkit.Editor.VRChat.Optimization
             Copy(mesh, part, used);
             part.subMeshCount = submeshes.Count;
             for (int s = 0; s < submeshes.Count; s++) part.SetIndices(submeshes[s].Indices, submeshes[s].Topology, s, false);
-            if (shape != null)
-            {
-                var picked = vertices;
-                var dv = new Vector3[mesh.vertexCount]; var dn = new Vector3[mesh.vertexCount]; var dt = new Vector3[mesh.vertexCount];
-                var mv = new Vector3[used.Count]; var mn = new Vector3[used.Count]; var mt = new Vector3[used.Count];
-                for (int index = 0; index < mesh.blendShapeCount; index++)
-                {
-                    if (!shape(index)) continue;
-                    for (int frame = 0; frame < mesh.GetBlendShapeFrameCount(index); frame++)
-                    {
-                        mesh.GetBlendShapeFrameVertices(index, frame, dv, dn, dt);
-                        for (int i = 0; i < picked.Length; i++) { mv[i] = dv[picked[i]]; mn[i] = dn[picked[i]]; mt[i] = dt[picked[i]]; }
-                        part.AddBlendShapeFrame(mesh.GetBlendShapeName(index), mesh.GetBlendShapeFrameWeight(index, frame), mv, mn, mt);
-                    }
-                }
-            }
+            // The picked shapes on the part's vertices, written once.
+            if (shape != null && mesh.blendShapeCount > 0)
+                MeshShapes.Write(part, MeshShapes.Picked(MeshShapes.Of(mesh), shape).Remap(map, used.Count));
             part.bindposes = mesh.bindposes;
             part.RecalculateBounds();
             return part;
@@ -143,32 +148,31 @@ namespace Orbiters.Toolkit.Editor.VRChat.Optimization
 
             var names = Enumerable.Range(0, first.blendShapeCount).Select(first.GetBlendShapeName)
                 .Concat(Enumerable.Range(0, second.blendShapeCount).Select(second.GetBlendShapeName)).Distinct().ToList();
-            var mv = new Vector3[total]; var mn = new Vector3[total]; var mt = new Vector3[total];
-            var dv = new Vector3[Math.Max(a, second.vertexCount)]; var dn = new Vector3[dv.Length]; var dt = new Vector3[dv.Length];
-            foreach (var name in names)
+            if (names.Count > 0)
             {
-                int i1 = first.GetBlendShapeIndex(name), i2 = second.GetBlendShapeIndex(name);
-                // Frames at every weight either mesh has one at; each mesh moves there as Unity would blend it.
-                var weights = new SortedSet<float>();
-                if (i1 >= 0) for (int f = 0; f < first.GetBlendShapeFrameCount(i1); f++) weights.Add(first.GetBlendShapeFrameWeight(i1, f));
-                if (i2 >= 0) for (int f = 0; f < second.GetBlendShapeFrameCount(i2); f++) weights.Add(second.GetBlendShapeFrameWeight(i2, f));
-                foreach (float weight in weights)
+                var one = MeshShapes.Of(first);
+                var two = MeshShapes.Of(second);
+                var frame = new MeshShapes.FrameBuilder();
+                var joinedShapes = new List<BlendShapeTable.Shape>(names.Count);
+                foreach (var name in names)
                 {
-                    Array.Clear(mv, 0, total); Array.Clear(mn, 0, total); Array.Clear(mt, 0, total);
-                    if (i1 >= 0)
+                    int i1 = one.IndexOf(name), i2 = two.IndexOf(name);
+                    // Frames at every weight either mesh has one at; each mesh moves there as Unity would blend it.
+                    var weights = new SortedSet<float>();
+                    if (i1 >= 0) foreach (var f in one.Shapes[i1].Frames) weights.Add(f.Weight);
+                    if (i2 >= 0) foreach (var f in two.Shapes[i2].Frames) weights.Add(f.Weight);
+                    var frames = new List<BlendShapeTable.Frame>(weights.Count);
+                    foreach (float weight in weights)
                     {
-                        ShapeAt(first, i1, weight, dv, dn, dt);
-                        Array.Copy(dv, 0, mv, 0, a); Array.Copy(dn, 0, mn, 0, a); Array.Copy(dt, 0, mt, 0, a);
+                        frame.Clear();
+                        if (i1 >= 0) MeshShapes.AddShapeAt(one, i1, weight, 0, frame);
+                        if (i2 >= 0) MeshShapes.AddShapeAt(two, i2, weight, a, frame);
+                        frames.Add(frame.Build(weight));
                     }
-                    if (i2 >= 0)
-                    {
-                        ShapeAt(second, i2, weight, dv, dn, dt);
-                        Array.Copy(dv, 0, mv, a, second.vertexCount); Array.Copy(dn, 0, mn, a, second.vertexCount); Array.Copy(dt, 0, mt, a, second.vertexCount);
-                    }
-                    joined.AddBlendShapeFrame(name, weight, mv, mn, mt);
+                    joinedShapes.Add(new BlendShapeTable.Shape(name, frames));
                 }
+                MeshShapes.Write(joined, new BlendShapeTable(total, joinedShapes));
             }
-            joined.bindposes = first.bindposes;
             joined.RecalculateBounds();
             return joined;
         }
@@ -186,28 +190,31 @@ namespace Orbiters.Toolkit.Editor.VRChat.Optimization
             try
             {
                 var joined = Join(kept, replacement, slots, false);
-                int offset = kept.vertexCount, total = joined.vertexCount, extra = replacement.vertexCount;
-                var dv = new Vector3[mesh.vertexCount]; var dn = new Vector3[mesh.vertexCount]; var dt = new Vector3[mesh.vertexCount];
-                var rv = new Vector3[extra]; var rn = new Vector3[extra]; var rt = new Vector3[extra];
-                var mv = new Vector3[total]; var mn = new Vector3[total]; var mt = new Vector3[total];
-                for (int index = 0; index < mesh.blendShapeCount; index++)
+                if (mesh.blendShapeCount == 0) return joined;
+                int offset = kept.vertexCount, total = joined.vertexCount;
+                var extra = MeshShapes.Of(replacement);
+                // The kept part's shapes on its vertices (vertices[i] is new vertex i's source).
+                var oldToNew = new int[mesh.vertexCount];
+                for (int v = 0; v < oldToNew.Length; v++) oldToNew[v] = -1;
+                for (int i = 0; i < vertices.Length; i++) oldToNew[vertices[i]] = i;
+                var keptShapes = MeshShapes.Picked(MeshShapes.Of(mesh), shape).Remap(oldToNew, offset);
+                var frame = new MeshShapes.FrameBuilder();
+                var shapes = new List<BlendShapeTable.Shape>(keptShapes.ShapeCount);
+                foreach (var own in keptShapes.Shapes)
                 {
-                    if (!shape(index)) continue;
-                    string name = mesh.GetBlendShapeName(index);
-                    int other = replacement.GetBlendShapeIndex(name);
-                    for (int frame = 0; frame < mesh.GetBlendShapeFrameCount(index); frame++)
+                    int other = extra.IndexOf(own.Name);
+                    var frames = new List<BlendShapeTable.Frame>(own.FrameCount);
+                    for (int f = 0; f < own.FrameCount; f++)
                     {
-                        mesh.GetBlendShapeFrameVertices(index, frame, dv, dn, dt);
-                        for (int i = 0; i < vertices.Length; i++) { mv[i] = dv[vertices[i]]; mn[i] = dn[vertices[i]]; mt[i] = dt[vertices[i]]; }
-                        if (other >= 0 && frame < replacement.GetBlendShapeFrameCount(other))
-                        {
-                            replacement.GetBlendShapeFrameVertices(other, frame, rv, rn, rt);
-                            Array.Copy(rv, 0, mv, offset, extra); Array.Copy(rn, 0, mn, offset, extra); Array.Copy(rt, 0, mt, offset, extra);
-                        }
-                        else { Array.Clear(mv, offset, extra); Array.Clear(mn, offset, extra); Array.Clear(mt, offset, extra); }
-                        joined.AddBlendShapeFrame(name, mesh.GetBlendShapeFrameWeight(index, frame), mv, mn, mt);
+                        // The replacement's frame of the same index moves its vertices, at the mesh's frame weight.
+                        frame.Clear();
+                        frame.AddCopy(own.Frames[f], 0);
+                        if (other >= 0 && f < extra.Shapes[other].FrameCount) frame.AddCopy(extra.Shapes[other].Frames[f], offset);
+                        frames.Add(frame.Build(own.Frames[f].Weight));
                     }
+                    shapes.Add(new BlendShapeTable.Shape(own.Name, frames));
                 }
+                MeshShapes.Write(joined, new BlendShapeTable(total, shapes));
                 return joined;
             }
             finally { UnityEngine.Object.DestroyImmediate(kept); }
@@ -305,30 +312,53 @@ namespace Orbiters.Toolkit.Editor.VRChat.Optimization
                 return new Matches { Corners = corners, Weights = weights };
             }
 
-            /// <summary>Gives <paramref name="to"/> the blendshapes <paramref name="shape"/> picks, as matched.</summary>
+            /// <summary>Gives <paramref name="to"/> the blendshapes <paramref name="shape"/> picks, as matched (after those it has).</summary>
             public void Apply(Mesh to, Matches matches, Func<int, bool> shape)
             {
                 var corners = matches.Corners; var weights = matches.Weights;
                 int count = corners.Length / 3;
+                var table = MeshShapes.Of(from);
+                // Per source vertex, the made vertices it is a corner of: a frame reaches only the made vertices around
+                // what it moves (the others come out zero, as from the dense frames).
+                var starts = new int[from.vertexCount + 1];
+                foreach (int corner in corners) starts[corner + 1]++;
+                for (int v = 0; v < from.vertexCount; v++) starts[v + 1] += starts[v];
+                var fill = (int[])starts.Clone();
+                var users = new int[corners.Length];
+                for (int c = 0; c < corners.Length; c++) users[fill[corners[c]]++] = c / 3;
                 var dv = new Vector3[from.vertexCount]; var dn = new Vector3[from.vertexCount]; var dt = new Vector3[from.vertexCount];
-                var mv = new Vector3[count]; var mn = new Vector3[count]; var mt = new Vector3[count];
-                for (int index = 0; index < from.blendShapeCount; index++)
+                var reached = new bool[count];
+                var list = new List<int>();
+                var frame = new MeshShapes.FrameBuilder();
+                var shapes = new List<BlendShapeTable.Shape>();
+                if (to.blendShapeCount > 0) shapes.AddRange(MeshShapes.Of(to).Shapes);
+                for (int index = 0; index < table.ShapeCount; index++)
                 {
                     if (!shape(index)) continue;
-                    for (int frame = 0; frame < from.GetBlendShapeFrameCount(index); frame++)
+                    var source = table.Shapes[index];
+                    var frames = new List<BlendShapeTable.Frame>(source.FrameCount);
+                    foreach (var f in source.Frames)
                     {
-                        from.GetBlendShapeFrameVertices(index, frame, dv, dn, dt);
-                        for (int i = 0; i < count; i++)
+                        f.Densify(dv, dn, dt);
+                        list.Clear();
+                        foreach (int v in f.Indices)
+                            for (int u = starts[v]; u < starts[v + 1]; u++)
+                                if (!reached[users[u]]) { reached[users[u]] = true; list.Add(users[u]); }
+                        list.Sort();
+                        frame.Clear();
+                        foreach (int i in list)
                         {
+                            reached[i] = false;
                             int a = corners[3 * i], b = corners[3 * i + 1], c = corners[3 * i + 2];
                             float wa = weights[3 * i], wb = weights[3 * i + 1], wc = weights[3 * i + 2];
-                            mv[i] = dv[a] * wa + dv[b] * wb + dv[c] * wc;
-                            mn[i] = dn[a] * wa + dn[b] * wb + dn[c] * wc;
-                            mt[i] = dt[a] * wa + dt[b] * wb + dt[c] * wc;
+                            frame.Add(i, dv[a] * wa + dv[b] * wb + dv[c] * wc, dn[a] * wa + dn[b] * wb + dn[c] * wc, dt[a] * wa + dt[b] * wb + dt[c] * wc,
+                                f.HasNormals, f.HasTangents);
                         }
-                        to.AddBlendShapeFrame(from.GetBlendShapeName(index), from.GetBlendShapeFrameWeight(index, frame), mv, mn, mt);
+                        frames.Add(frame.Build(f.Weight));
                     }
+                    shapes.Add(new BlendShapeTable.Shape(source.Name, frames));
                 }
+                MeshShapes.Write(to, new BlendShapeTable(count, shapes));
             }
         }
 
