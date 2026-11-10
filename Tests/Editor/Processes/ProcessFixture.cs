@@ -28,6 +28,50 @@ internal static class ProcessFixture
             return;
         }
         if (mode == "stdin") { Console.Write(Console.In.ReadToEnd().Length); return; }
+        if (mode == "echo")
+        {
+            // Stdin to stdout, byte for byte, in small steps: both pipes fill while the other side works.
+            using (var input = Console.OpenStandardInput())
+            using (var output = Console.OpenStandardOutput())
+            {
+                var buffer = new byte[4096];
+                int read;
+                while ((read = input.Read(buffer, 0, buffer.Length)) > 0) output.Write(buffer, 0, read);
+            }
+            return;
+        }
+        if (mode == "answer")
+        {
+            string line;
+            var reader = new System.IO.StreamReader(Console.OpenStandardInput(), new UTF8Encoding(false));
+            while ((line = reader.ReadLine()) != null) { Console.Write("got:" + line + "\n"); Console.Out.Flush(); }
+            return;
+        }
+        if (mode == "endless")
+        {
+            using (var output = Console.OpenStandardOutput())
+            {
+                var chunk = new byte[8192];
+                while (true) output.Write(chunk, 0, chunk.Length);
+            }
+        }
+        if (mode == "stderr-flood")
+        {
+            using (var error = Console.OpenStandardError())
+            {
+                var line = Encoding.ASCII.GetBytes(new string('e', 63) + "\n");
+                while (true) error.Write(line, 0, line.Length);
+            }
+        }
+        if (mode == "fail-early") { Console.Error.Write("refused"); Environment.Exit(3); }
+        if (mode == "slow")
+        {
+            Console.WriteLine(Process.GetCurrentProcess().Id);
+            Console.Out.Flush();
+            Thread.Sleep(int.Parse(args[2]));
+            Console.Write("done");
+            return;
+        }
         if (mode == "child-pipe" || mode == "child-sleep")
         {
             var child = Process.Start(new ProcessStartInfo(args[1], "\"" + Assembly.GetExecutingAssembly().Location + "\" sleep")

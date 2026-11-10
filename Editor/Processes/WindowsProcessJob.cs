@@ -39,6 +39,28 @@ namespace Orbiters.Toolkit.Editor.Processes
 
         protected override bool ReleaseHandle() => CloseHandle(handle);
 
+        /// <summary>How many processes of the job still run; -1 when it cannot be asked (closed).</summary>
+        internal int ActiveProcesses()
+        {
+            if (IsClosed || IsInvalid) return -1;
+            var accounting = new Accounting();
+            return QueryInformationJobObject(this, 1, ref accounting, (uint)Marshal.SizeOf(typeof(Accounting)), IntPtr.Zero)
+                ? (int)accounting.ActiveProcesses
+                : -1;
+        }
+
+        // JOBOBJECT_BASIC_ACCOUNTING_INFORMATION
+        [StructLayout(LayoutKind.Sequential)]
+        private struct Accounting
+        {
+            public long TotalUserTime, TotalKernelTime, ThisPeriodTotalUserTime, ThisPeriodTotalKernelTime;
+            public uint TotalPageFaultCount, TotalProcesses, ActiveProcesses, TotalTerminatedProcesses;
+        }
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool QueryInformationJobObject(WindowsProcessJob job, int infoClass, ref Accounting info, uint size, IntPtr returned);
+
         [StructLayout(LayoutKind.Sequential)]
         private struct BasicLimits
         {
