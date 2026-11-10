@@ -28,15 +28,11 @@ namespace Orbiters.Toolkit.Editor.Processes
         private static readonly ConditionalWeakTable<OwnedProcess, object> StoppedRunning = new ConditionalWeakTable<OwnedProcess, object>();
         private static readonly List<Action> StopListeners = new List<Action>();
 
-        // Every start in this domain goes through this lock, from Process.Start until the child's ends of its pipes are
-        // closed (Process.Start returns). Windows passes every inheritable handle of the editor to a process created with
-        // bInheritHandles, which Mono's Process.Start always sets (the child needs its own pipe ends); Mono creates both
-        // ends of each pipe inheritable and only then makes the editor's end private and closes the child's after
-        // CreateProcess. A second start in that window would take the first one's pipe ends with it: a stdout write end
-        // keeps the first process's output open after it exits, a stdin write end keeps its input from ever ending.
-        // A start that waits longer than this goes ahead without the lock rather than hold the editor up.
+        // Every start the runner makes goes through this lock. A child inherits only its own pipe ends (OwnedProcess names
+        // them in a handle list), so the runner's own starts are safe without it; it is kept so that its cleanup helpers,
+        // started by .NET with every inheritable handle passed on, never run inside another start's short window when that
+        // child's ends are inheritable. Held for microseconds; never skipped.
         private static readonly object StartSync = new object();
-        private const int StartLockWaitMilliseconds = 10000;
 
         /// <summary>How long a reload or quit waits for writes in flight to finish before it stops them.</summary>
         internal const int WriteGraceMilliseconds = 10000;
@@ -73,15 +69,10 @@ namespace Orbiters.Toolkit.Editor.Processes
             bool owned = false;
             try
             {
-                bool locked = Monitor.TryEnter(StartSync, StartLockWaitMilliseconds);
-                try
+                lock (StartSync)
                 {
                     if (stopping) { job?.Dispose(); return null; }
                     process = OwnedProcess.Create(info);
-                }
-                finally
-                {
-                    if (locked) Monitor.Exit(StartSync);
                 }
 
                 lock (Sync)
@@ -124,18 +115,10 @@ namespace Orbiters.Toolkit.Editor.Processes
             }
         }
 
-        // Process.Start of a cleanup helper under the start lock, waiting a short while only.
-        private static bool StartLocked(Process process, int waitMilliseconds)
+        // Process.Start of a cleanup helper under the start lock.
+        private static bool StartLocked(Process process)
         {
-            bool locked = Monitor.TryEnter(StartSync, waitMilliseconds);
-            try
-            {
-                return process.Start();
-            }
-            finally
-            {
-                if (locked) Monitor.Exit(StartSync);
-            }
+            lock (StartSync) return process.Start();
         }
 
         /// <summary>Whether this process ended because it was stopped (timeout, cancel, reload), not by itself.</summary>
@@ -288,7 +271,7 @@ namespace Orbiters.Toolkit.Editor.Processes
                            }
                        })
                 {
-                    if (!StartLocked(process, 500)) return null;
+                    if (!StartLocked(process)) return null;
                     var elapsed = Stopwatch.StartNew();
                     var output = new MemoryStream();
                     var pipe = readOutput ? new ProcessPipe(process.StandardOutput.BaseStream) : null;

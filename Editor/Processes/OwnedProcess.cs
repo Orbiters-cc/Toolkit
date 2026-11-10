@@ -93,62 +93,132 @@ namespace Orbiters.Toolkit.Editor.Processes
             this.id = id;
         }
 
+        /// <summary>For tests: called with the child's id right after it was created (suspended), before it is handed over.</summary>
+        internal static Action<int> CreatedForTests;
+
+        /// <summary>
+        /// Creates the process suspended. It inherits exactly the three pipe ends meant for it and nothing else of the editor
+        /// (PROC_THREAD_ATTRIBUTE_HANDLE_LIST): no other process's pipes, no unrelated handle. A slot that is not redirected
+        /// gets no handle. The child's ends are made inheritable only for the CreateProcess call and closed right after it:
+        /// a process started at that moment elsewhere in the editor by .NET (which passes every inheritable handle) could
+        /// still take them with it, which nothing on this side can prevent; the window is kept that short. From the moment
+        /// CreateProcess succeeds until the caller holds the owning object, a failure terminates the child (it has run no
+        /// instruction yet) and closes its handles.
+        /// </summary>
         internal static NativeProcess CreateSuspended(ProcessStartInfo info)
         {
             var created = new List<SafeFileHandle>();
             SafeFileHandle inRead = null, inWrite = null, outRead = null, outWrite = null, errRead = null, errWrite = null;
-            IntPtr environment = IntPtr.Zero;
+            IntPtr environment = IntPtr.Zero, attributes = IntPtr.Zero, handleArray = IntPtr.Zero;
+            bool attributesReady = false, unowned = false;
+            var started = new ProcessInformation();
+            NativeProcess owned = null;
             try
             {
                 if (info.RedirectStandardInput) Pipe(out inWrite, out inRead, false, created); // the editor writes, the child reads
                 if (info.RedirectStandardOutput) Pipe(out outRead, out outWrite, true, created);
                 if (info.RedirectStandardError) Pipe(out errRead, out errWrite, true, created);
-                bool redirected = info.RedirectStandardInput || info.RedirectStandardOutput || info.RedirectStandardError;
-                var startup = new StartupInfo { cb = Marshal.SizeOf(typeof(StartupInfo)) };
-                if (redirected)
+                var childEnds = new[] { inRead, outWrite, errWrite }.Where(handle => handle != null).ToList();
+                var startup = new StartupInfoEx();
+                startup.StartupInfo.cb = Marshal.SizeOf(typeof(StartupInfoEx));
+                uint flags = 0x4 | 0x400; // CREATE_SUSPENDED, CREATE_UNICODE_ENVIRONMENT
+                if (info.CreateNoWindow) flags |= 0x08000000; // CREATE_NO_WINDOW
+                if (childEnds.Count > 0)
                 {
-                    startup.dwFlags = 0x100; // STARTF_USESTDHANDLES
-                    startup.hStdInput = inRead?.DangerousGetHandle() ?? GetStdHandle(-10);
-                    startup.hStdOutput = outWrite?.DangerousGetHandle() ?? GetStdHandle(-11);
-                    startup.hStdError = errWrite?.DangerousGetHandle() ?? GetStdHandle(-12);
+                    startup.StartupInfo.dwFlags = 0x100; // STARTF_USESTDHANDLES
+                    startup.StartupInfo.hStdInput = inRead?.DangerousGetHandle() ?? IntPtr.Zero;
+                    startup.StartupInfo.hStdOutput = outWrite?.DangerousGetHandle() ?? IntPtr.Zero;
+                    startup.StartupInfo.hStdError = errWrite?.DangerousGetHandle() ?? IntPtr.Zero;
+                    IntPtr size = IntPtr.Zero;
+                    InitializeProcThreadAttributeList(IntPtr.Zero, 1, 0, ref size);
+                    attributes = Marshal.AllocHGlobal(size);
+                    if (!InitializeProcThreadAttributeList(attributes, 1, 0, ref size)) throw new Win32Exception(Marshal.GetLastWin32Error());
+                    attributesReady = true;
+                    handleArray = Marshal.AllocHGlobal(IntPtr.Size * childEnds.Count);
+                    for (int i = 0; i < childEnds.Count; i++) Marshal.WriteIntPtr(handleArray, i * IntPtr.Size, childEnds[i].DangerousGetHandle());
+                    if (!UpdateProcThreadAttribute(attributes, 0, (IntPtr)0x20002, handleArray, (IntPtr)(IntPtr.Size * childEnds.Count), IntPtr.Zero, IntPtr.Zero))
+                        throw new Win32Exception(Marshal.GetLastWin32Error()); // PROC_THREAD_ATTRIBUTE_HANDLE_LIST
+                    startup.lpAttributeList = attributes;
+                    flags |= 0x80000; // EXTENDED_STARTUPINFO_PRESENT
                 }
 
                 environment = EnvironmentBlock(info);
-                uint flags = 0x4 | 0x400; // CREATE_SUSPENDED, CREATE_UNICODE_ENVIRONMENT
-                if (info.CreateNoWindow) flags |= 0x08000000; // CREATE_NO_WINDOW
                 var commandLine = new StringBuilder(CommandLine(info));
                 string directory = string.IsNullOrEmpty(info.WorkingDirectory) ? null : info.WorkingDirectory;
-                if (!CreateProcessW(null, commandLine, IntPtr.Zero, IntPtr.Zero, true, flags, environment, directory, ref startup, out ProcessInformation started))
-                    throw new Win32Exception(Marshal.GetLastWin32Error());
+                bool createdProcess;
+                try
+                {
+                    foreach (SafeFileHandle end in childEnds)
+                        if (!SetHandleInformation(end, 1, 1)) throw new Win32Exception(Marshal.GetLastWin32Error()); // inheritable, now only
+                    createdProcess = CreateProcessW(null, commandLine, IntPtr.Zero, IntPtr.Zero, childEnds.Count > 0, flags, environment, directory,
+                        ref startup, out started);
+                    if (createdProcess) unowned = true;
+                }
+                finally
+                {
+                    // The child's ends belong to the child now (or to nobody): the editor's copies go at once.
+                    foreach (SafeFileHandle end in childEnds) { end.Dispose(); created.Remove(end); }
+                }
+                if (!createdProcess) throw new Win32Exception(Marshal.GetLastWin32Error());
 
-                var owned = new NativeProcess(started.hProcess, started.hThread, started.dwProcessId);
+                CreatedForTests?.Invoke(started.dwProcessId);
+                owned = new NativeProcess(started.hProcess, started.hThread, started.dwProcessId);
                 if (inWrite != null) { owned.Input = new FileStream(inWrite, FileAccess.Write, 4096, false); owned.inputHandle = inWrite; created.Remove(inWrite); }
                 if (outRead != null) { owned.Output = new FileStream(outRead, FileAccess.Read, 4096, false); owned.outputHandle = outRead; created.Remove(outRead); }
                 if (errRead != null) { owned.Error = new FileStream(errRead, FileAccess.Read, 4096, false); owned.errorHandle = errRead; created.Remove(errRead); }
                 owned.OutputEncoding = info.StandardOutputEncoding ?? Console.OutputEncoding;
                 owned.ErrorEncoding = info.StandardErrorEncoding ?? Console.OutputEncoding;
+                unowned = false; // handed over: the caller owns it from here
                 return owned;
             }
             finally
             {
-                // The child's ends belong to the child now (or to nobody, when it did not start); the editor's ends are
-                // kept only by the streams made above.
+                if (unowned)
+                {
+                    // Created, never handed over: it is still suspended, so it has run nothing. Terminate it, close its handles.
+                    if (owned != null) owned.Abandon();
+                    TerminateProcess(started.hProcess, 1);
+                    CloseHandle(started.hThread);
+                    CloseHandle(started.hProcess);
+                }
                 foreach (SafeFileHandle handle in created) handle.Dispose();
                 if (environment != IntPtr.Zero) Marshal.FreeHGlobal(environment);
+                if (attributesReady) DeleteProcThreadAttributeList(attributes);
+                if (attributes != IntPtr.Zero) Marshal.FreeHGlobal(attributes);
+                if (handleArray != IntPtr.Zero) Marshal.FreeHGlobal(handleArray);
             }
         }
 
-        // A pipe whose child end is inheritable and whose editor end is not. childWrites: the child writes (stdout, stderr).
+        // Forgets the handles without closing them (the creation's cleanup closes them).
+        private void Abandon()
+        {
+            process = thread = IntPtr.Zero;
+            GC.SuppressFinalize(this);
+        }
+
+        // A domain unload between creation and resume: the child, still suspended, never ran; it is terminated, not left
+        // suspended for ever. A child that runs belongs to its job, whose closing stops it.
+        ~NativeProcess()
+        {
+            if (thread != IntPtr.Zero)
+            {
+                if (process != IntPtr.Zero) TerminateProcess(process, 1);
+                CloseHandle(thread);
+            }
+            if (process != IntPtr.Zero) CloseHandle(process);
+        }
+
+        // A pipe whose two ends are not inheritable (the child's end becomes so only for its CreateProcess). childWrites: the
+        // child writes (stdout, stderr).
         private static void Pipe(out SafeFileHandle editorEnd, out SafeFileHandle childEnd, bool childWrites, List<SafeFileHandle> created)
         {
-            var attributes = new SecurityAttributes { nLength = Marshal.SizeOf(typeof(SecurityAttributes)), bInheritHandle = true };
+            var attributes = new SecurityAttributes { nLength = Marshal.SizeOf(typeof(SecurityAttributes)), bInheritHandle = false };
             if (!CreatePipe(out SafeFileHandle read, out SafeFileHandle write, ref attributes, 0))
                 throw new Win32Exception(Marshal.GetLastWin32Error());
             created.Add(read);
             created.Add(write);
             editorEnd = childWrites ? read : write;
             childEnd = childWrites ? write : read;
-            if (!SetHandleInformation(editorEnd, 1, 0)) throw new Win32Exception(Marshal.GetLastWin32Error()); // not inherited
         }
 
         // The command line as .NET builds it: the file name (quoted when it holds a space), then the arguments as given.
@@ -223,6 +293,7 @@ namespace Orbiters.Toolkit.Editor.Processes
 
         public override void Dispose()
         {
+            GC.SuppressFinalize(this);
             if (thread != IntPtr.Zero) { CloseHandle(thread); thread = IntPtr.Zero; }
             bool ended = HasExited; // keeps the exit code when it has ended
             if (process != IntPtr.Zero) { CloseHandle(process); process = IntPtr.Zero; }
@@ -253,6 +324,13 @@ namespace Orbiters.Toolkit.Editor.Processes
         }
 
         [StructLayout(LayoutKind.Sequential)]
+        private struct StartupInfoEx
+        {
+            public StartupInfo StartupInfo;
+            public IntPtr lpAttributeList;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
         private struct ProcessInformation
         {
             public IntPtr hProcess, hThread;
@@ -272,6 +350,23 @@ namespace Orbiters.Toolkit.Editor.Processes
         private static extern bool CreateProcessW(string application, StringBuilder commandLine, IntPtr processAttributes, IntPtr threadAttributes,
             [MarshalAs(UnmanagedType.Bool)] bool inheritHandles, uint flags, IntPtr environment, string directory, ref StartupInfo startup,
             out ProcessInformation information);
+
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true, EntryPoint = "CreateProcessW")]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool CreateProcessW(string application, StringBuilder commandLine, IntPtr processAttributes, IntPtr threadAttributes,
+            [MarshalAs(UnmanagedType.Bool)] bool inheritHandles, uint flags, IntPtr environment, string directory, ref StartupInfoEx startup,
+            out ProcessInformation information);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool InitializeProcThreadAttributeList(IntPtr list, int count, int flags, ref IntPtr size);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool UpdateProcThreadAttribute(IntPtr list, uint flags, IntPtr attribute, IntPtr value, IntPtr size, IntPtr previous, IntPtr returned);
+
+        [DllImport("kernel32.dll")]
+        private static extern void DeleteProcThreadAttributeList(IntPtr list);
 
         [DllImport("kernel32.dll", SetLastError = true)]
         private static extern uint ResumeThread(IntPtr thread);
