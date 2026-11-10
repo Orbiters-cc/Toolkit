@@ -22,7 +22,8 @@ public sealed class AvatarBuildPipelineTests
 {
     // Every other avatar build callback around Orbiters' steps, with its number: its type's full name and the assembly (by
     // name prefix) it comes with, or only a description where the tool is not in this project (checked by number only).
-    // Ties: the order the SDK ran them in.
+    // Ties: the order the SDK ran them in. My Avatar's optimizer is a step now (Structure, and SaveBuildData before
+    // BuildCopyAssetsHook): its tests pin where it runs.
     private static readonly (string Assembly, string Name, int Order)[] Others =
     {
         ("Orbiters.Mixer", "Orbiters.Mixer.Editor.VRChat.MixerBuildHook", -20001),
@@ -47,14 +48,12 @@ public sealed class AvatarBuildPipelineTests
         ("Orbiters.Toolkit", "Orbiters.Toolkit.Editor.VRChat.Refit.RefitLinkHook", -8960),
         ("Orbiters.Toolkit", "Orbiters.Toolkit.Editor.VRChat.Refit.RefitShrinkHook", -8956),
         ("mcb", "VersionCustomizationApplyHook", -8800),
-        ("Orbiters.MyAvatar", "Orbiters.MyAvatar.Editor.Optimization.UploadOptimizer+Structure", -1100),
         (null, "NDMF optimize", -1025),
         ("VRCFury", "VF.Hooks.VrcsdkFixes.KeepEditorOnlyComponentsLongerHook+VrcfRemoveEditorOnlyObjects", -1024),
         (null, "Lazy Optimiser's first pass", -100),
         (null, "Lazy Optimiser's last pass", -90),
         ("Thry", "Thry.ThryEditor.UploadCallbacks.VRCAutoAnchor", 0),
         ("Thry", "Thry.ThryEditor.ShaderOptimizer+LockMaterialsOnUpload", 100),
-        ("Orbiters.MyAvatar", "Orbiters.MyAvatar.Editor.Optimization.UploadOptimizer+Materials", 9000),
         ("VRCFury", "VF.Hooks.ParameterCompressorHook", int.MaxValue - 100),
     };
 
