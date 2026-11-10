@@ -93,8 +93,6 @@ public sealed class GeneratedAssetsTests
         var scan = ProjectReferences.ScanAsync();
         yield return Wait(scan);
         Assert.That(scan.Result.UsersOf(folder + "/Wave.anim"), Does.Contain(folder + "/Override.overrideController"));
-        Assert.That(ProjectReferences.MayUseOthers(folder + "/Override.overrideController"), Is.True);
-        Assert.That(ProjectReferences.MayUseOthers(folder + "/Picture.png"), Is.False);
     }
 
     // Review of TKV-28: a scan cancelled after an import never lets the map from before the import decide a sweep; a
@@ -199,5 +197,152 @@ public sealed class GeneratedAssetsTests
         yield return Wait(tracked);
         Assert.That(tracked.Result, Is.True, "runs after a file is tracked");
         Assert.True(File.Exists(path));
+    }
+
+    // Round 2 (reference scan limits, a): files of kinds that never use another asset by Unity's account are read too:
+    // a .meta names what its file uses (a script's default references, here an importer's user data), and a text file's
+    // content names GUIDs (a JSON or text manifest of a tool).
+    [UnityTest] public IEnumerator MetaFilesAndTextFilesNameWhatTheyUse()
+    {
+        string path = folder + "/Fit.asset";
+        AssetDatabase.CreateAsset(new Mesh { name = "Fit" }, path);
+        string guid = AssetDatabase.AssetPathToGUID(path);
+        string json = folder + "/Settings.json", notes = folder + "/Notes.txt";
+        File.WriteAllText(json, "{ \"name\": \"settings\" }");
+        File.WriteAllText(notes, "Generated for " + guid + "\n");
+        AssetDatabase.ImportAsset(json, ImportAssetOptions.ForceSynchronousImport);
+        AssetDatabase.ImportAsset(notes, ImportAssetOptions.ForceSynchronousImport);
+        var importer = AssetImporter.GetAtPath(json);
+        importer.userData = guid;
+        importer.SaveAndReimport();
+        StringAssert.Contains(guid, File.ReadAllText(json + ".meta"));
+
+        var scan = ProjectReferences.ScanAsync();
+        yield return Wait(scan);
+        Assert.That(scan.Result.UsersOf(path), Does.Contain(json), "its .meta names the mesh");
+        Assert.That(scan.Result.UsersOf(path), Does.Contain(notes), "its text names the mesh");
+        Assert.That(scan.Result.UsersOf(path), Does.Not.Contain(path), "a file is not its own user");
+    }
+
+    // Round 2 (b): what users can edit outside Assets/ counts: ProjectSettings/ and the embedded and local packages.
+    [Test] public void ProjectSettingsAndEditablePackagesAreRead()
+    {
+        var roots = ProjectReferences.Roots();
+        Assert.That(roots.Select(r => r.Prefix), Does.Contain("Assets").And.Contain("ProjectSettings"));
+        foreach (var package in UnityEditor.PackageManager.PackageInfo.GetAllRegisteredPackages()
+                     .Where(p => p.source == UnityEditor.PackageManager.PackageSource.Embedded || p.source == UnityEditor.PackageManager.PackageSource.Local))
+            Assert.That(roots.Select(r => r.Prefix), Does.Contain(package.assetPath.TrimEnd('/')), package.name);
+        Assert.That(roots.Single(r => r.Prefix == "ProjectSettings").Imported, Is.False);
+
+        // A root outside Assets/ is read as it is on disk: a file with its .meta, names Unity leaves out skipped.
+        string temporary = Path.Combine(Path.GetTempPath(), "OrbitersReferences-" + Guid.NewGuid().ToString("N").Substring(0, 8));
+        try
+        {
+            Directory.CreateDirectory(Path.Combine(temporary, "Prefabs"));
+            Directory.CreateDirectory(Path.Combine(temporary, "Samples~"));
+            const string used = "0123456789abcdef0123456789abcdef", inMeta = "fedcba9876543210fedcba9876543210";
+            File.WriteAllText(Path.Combine(temporary, "Prefabs", "User.prefab"), "%YAML 1.1\n  m_Mesh: {fileID: 4300000, guid: " + used + ", type: 2}\n");
+            File.WriteAllText(Path.Combine(temporary, "Prefabs", "User.prefab.meta"), "fileFormatVersion: 2\nuserData: " + inMeta + "\n");
+            File.WriteAllText(Path.Combine(temporary, "Samples~", "Ignored.prefab"), "guid: " + used);
+            File.WriteAllBytes(Path.Combine(temporary, "Binary.bytes"), new byte[] { 1, 0, 2, 0 });
+            var root = new ProjectReferences.Root("Packages/orbiters.test-local", temporary, false);
+            var read = new ProjectReferences.Reader(new System.Collections.Generic.List<ProjectReferences.Root> { root }, default).Run();
+            var prefab = read.Single(f => f.Path == "Packages/orbiters.test-local/Prefabs/User.prefab");
+            Assert.That(prefab.Guids, Is.EquivalentTo(new[] { used, inMeta }));
+            Assert.That(prefab.ContentRead, Is.True);
+            Assert.That(read.Any(f => f.Path.Contains("Samples~")), Is.False, "Unity leaves out names ending in ~");
+            Assert.That(read.Single(f => f.Path.EndsWith("Binary.bytes", StringComparison.Ordinal)).ContentRead, Is.False, "a NUL byte: not text");
+        }
+        finally { if (temporary.Contains("OrbitersReferences-") && Directory.Exists(temporary)) Directory.Delete(temporary, true); }
+    }
+
+    // Exactly 32 hexadecimal digits make a GUID; longer runs (a SHA-256) and shorter ones do not, at any chunk boundary.
+    [Test] public void GuidTokensAreExactRunsOf32HexDigits()
+    {
+        string file = Path.Combine(Path.GetTempPath(), "OrbitersTokens-" + Guid.NewGuid().ToString("N") + ".txt");
+        try
+        {
+            const string guid = "0123456789ABCDEF0123456789abcdef";
+            // The GUID straddles the reader's 64 KB chunk boundary.
+            string padding = new string(' ', 64 * 1024 - 88);
+            File.WriteAllText(file, "guid: " + new string('a', 64) + " x" + padding + guid + "\n" + new string('b', 31) + " end " + guid.Substring(1));
+            var found = new System.Collections.Generic.HashSet<string>();
+            Assert.That(ProjectReferences.Reader.Tokens(file, found, true, default), Is.True);
+            Assert.That(found, Is.EquivalentTo(new[] { guid.ToLowerInvariant() }));
+        }
+        finally { if (File.Exists(file)) File.Delete(file); }
+    }
+
+    // Round 2 (c): a file in Unity's binary format changed on disk since Unity imported it cannot say what it uses: the
+    // scan says so, and a sweep keeps everything until Unity imports the file again.
+    [UnityTest] public IEnumerator ABinaryFileChangedSinceItsImportKeepsEverything()
+    {
+        string path = folder + "/Fit.asset";
+        AssetDatabase.CreateAsset(new Mesh { name = "Fit" }, path);
+        GeneratedAssets.Track(path);
+        string binary = folder + "/Binary.asset";
+        UnityEditorInternal.InternalEditorUtility.SaveToSerializedFileAndForget(new Object[] { new Mesh { name = "Binary" } }, binary, false);
+        AssetDatabase.ImportAsset(binary, ImportAssetOptions.ForceSynchronousImport | ImportAssetOptions.ForceUpdate);
+        Assert.That(File.ReadAllBytes(binary).Take(8192).Contains((byte)0), Is.True, "written in Unity's binary format");
+
+        var fresh = ProjectReferences.ScanAsync();
+        yield return Wait(fresh);
+        Assert.That(fresh.Result.UsersOf(path), Is.Empty);
+
+        File.SetLastWriteTimeUtc(binary, DateTime.UtcNow.AddMinutes(5));
+        var stale = ProjectReferences.ScanAsync();
+        while (!stale.IsCompleted) yield return null;
+        Assert.That(stale.Exception?.GetBaseException(), Is.InstanceOf<UncertainReferencesException>());
+        var sweep = GeneratedAssets.SweepAsync();
+        yield return Wait(sweep);
+        Assert.That(sweep.Result, Is.Empty, "nothing goes while a file's import is out of date");
+        Assert.True(File.Exists(path));
+
+        AssetDatabase.ImportAsset(binary, ImportAssetOptions.ForceSynchronousImport | ImportAssetOptions.ForceUpdate);
+        sweep = GeneratedAssets.SweepAsync();
+        yield return Wait(sweep);
+        Assert.That(sweep.Result, Does.Contain(path), "imported again: what it uses is known, and nothing uses the mesh");
+    }
+
+    // Round 2 (c, text): a prefab edited on disk and not imported yet already counts with what it now uses.
+    [UnityTest] public IEnumerator APrefabEditedAndNotImportedKeepsWhatItUses()
+    {
+        string path = folder + "/Fit.asset";
+        AssetDatabase.CreateAsset(new Mesh { name = "Fit" }, path);
+        GeneratedAssets.Track(path);
+        string guid = AssetDatabase.AssetPathToGUID(path);
+        var go = new GameObject("Generated mesh user");
+        go.AddComponent<MeshFilter>();
+        string prefab = folder + "/User.prefab";
+        PrefabUtility.SaveAsPrefabAsset(go, prefab);
+        Object.DestroyImmediate(go);
+        string text = File.ReadAllText(prefab);
+        StringAssert.Contains("m_Mesh: {fileID: 0}", text);
+        File.WriteAllText(prefab, text.Replace("m_Mesh: {fileID: 0}", "m_Mesh: {fileID: 4300000, guid: " + guid + ", type: 2}"));
+        var sweep = GeneratedAssets.SweepAsync();
+        yield return Wait(sweep);
+        Assert.That(sweep.Result, Does.Not.Contain(path), "the prefab's text uses it");
+        Assert.True(File.Exists(path));
+    }
+
+    // Round 2 (d): a file written after the scan read the project, before the deletion, is read again in the step that
+    // deletes: a prefab saved meanwhile keeps the file it uses.
+    [UnityTest] public IEnumerator AFileWrittenBetweenTheScanAndTheDeleteKeepsWhatItUses()
+    {
+        string path = folder + "/Fit.asset";
+        AssetDatabase.CreateAsset(new Mesh { name = "Fit" }, path);
+        GeneratedAssets.Track(path);
+        string guid = AssetDatabase.AssetPathToGUID(path);
+        string late = folder + "/Late.prefab";
+        GeneratedAssets.AfterScan = () => File.WriteAllText(late,
+            "%YAML 1.1\n%TAG !u! tag:unity3d.com,2011:\n--- !u!33 &1\nMeshFilter:\n  m_Mesh: {fileID: 4300000, guid: " + guid + ", type: 2}\n");
+        try
+        {
+            var sweep = GeneratedAssets.SweepAsync();
+            yield return Wait(sweep);
+            Assert.That(sweep.Result, Does.Not.Contain(path), "the prefab written after the scan uses it");
+            Assert.True(File.Exists(path));
+        }
+        finally { GeneratedAssets.AfterScan = null; }
     }
 }

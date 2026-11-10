@@ -126,7 +126,10 @@ namespace Orbiters.Toolkit.Editor.Storage
                 candidates.RemoveAll(Rendered().Contains);
                 if (candidates.Count == 0) { PutAside(removed); completed = true; return removed; }
                 var references = await ProjectReferences.ScanAsync();
-                // The scan spans editor frames: what is loaded now decides.
+                // From here to the deletion, one synchronous step: the scan spans editor frames, so the files changed since
+                // it read them are read again, and what is loaded now decides.
+                AfterScan?.Invoke();
+                if (!references.Recheck()) return removed;
                 var loaded = Loaded();
                 var removable = new HashSet<string>(candidates.Where(p => !loaded.Contains(p) && File.Exists(Path.Combine(Root, p))), StringComparer.OrdinalIgnoreCase);
                 // Files only used by other files going go together; anything used from outside that set stays.
@@ -140,6 +143,9 @@ namespace Orbiters.Toolkit.Editor.Storage
                 PutAside(removed);
                 completed = true;
             }
+            // Unity has not imported a file's latest version yet (or it cannot be read): everything stays, and the sweep is
+            // tried again later.
+            catch (UncertainReferencesException) { }
             catch (Exception ex) when (!(ex is OperationCanceledException)) { Debug.LogWarning("[Orbiters] Unused generated files were kept: " + ex.Message); }
             finally
             {
@@ -148,6 +154,9 @@ namespace Orbiters.Toolkit.Editor.Storage
             }
             return removed;
         }
+
+        /// <summary>Tests: runs after a sweep's scan, in the synchronous step that ends with its deletions.</summary>
+        internal static Action AfterScan;
 
         private static bool Exists(string path) => !string.IsNullOrEmpty(path) && path.StartsWith("Assets/", StringComparison.Ordinal) &&
             (File.Exists(Path.Combine(Root, path)) || Directory.Exists(Path.Combine(Root, path)));
