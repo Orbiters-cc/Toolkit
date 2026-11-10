@@ -37,6 +37,19 @@ namespace Orbiters.Toolkit.Editor
         /// <summary>The archive's size once decompressed, headers and padding included.</summary>
         public long ExpandedBytes { get; private set; }
 
+        // The last indexes read without contents, by file, its size and time, and the limits: an install reads its package's
+        // index more than once (a gallery item checks it, then attaches it), and each read decompresses the whole archive.
+        private static readonly List<((string Path, long Length, long Ticks, long Expanded, int Entries, long Pathnames, bool FirstLine) Key, UnityPackageIndex Index)> Recent =
+            new List<((string, long, long, long, int, long, bool), UnityPackageIndex)>();
+        private const int RecentCount = 4;
+
+        private UnityPackageIndex Copy()
+        {
+            var copy = new UnityPackageIndex { ExpandedBytes = ExpandedBytes };
+            foreach (var entry in Entries) copy.Entries.Add(new Entry { Guid = entry.Guid, Path = entry.Path, Content = entry.Content });
+            return copy;
+        }
+
         /// <param name="keepContent">Which asset paths to keep the bytes of (at most <paramref name="maxContentBytes"/> each).</param>
         /// <param name="maxPathnameTotalBytes">The pathnames of all entries together, as the archive stores them.</param>
         /// <param name="firstLinePathname">Read only the first line of each pathname (<see cref="UnityPackageReader.Options.FirstLinePathname"/>).</param>
@@ -45,6 +58,19 @@ namespace Orbiters.Toolkit.Editor
             bool firstLinePathname = false)
         {
             if (maxContentBytes < 0) throw new ArgumentOutOfRangeException(nameof(maxContentBytes));
+            // Without contents to keep, the same file read with the same limits gives the same index (any thread).
+            (string, long, long, long, int, long, bool)? key = null;
+            if (keepContent == null)
+            {
+                var file = new FileInfo(path);
+                if (file.Exists)
+                {
+                    key = (file.FullName, file.Length, file.LastWriteTimeUtc.Ticks, maxExpandedBytes, maxEntries, maxPathnameTotalBytes, firstLinePathname);
+                    lock (Recent)
+                        foreach (var recent in Recent)
+                            if (recent.Key.Equals(key.Value)) return recent.Index.Copy();
+                }
+            }
             var contents = new Dictionary<string, byte[]>(StringComparer.OrdinalIgnoreCase);
             long kept = 0;
             // Small assets are kept until their pathname says whether they are wanted: bounded in total too.
@@ -64,6 +90,13 @@ namespace Orbiters.Toolkit.Editor
                 contents.TryGetValue(pair.Key, out var content);
                 index.Entries.Add(new Entry { Guid = pair.Key, Path = pair.Value, Content = content != null && keepContent(pair.Value) ? content : null });
             }
+            if (key != null)
+                lock (Recent)
+                {
+                    Recent.RemoveAll(r => r.Key.Path == key.Value.Item1);
+                    Recent.Add((key.Value, index.Copy()));
+                    if (Recent.Count > RecentCount) Recent.RemoveAt(0);
+                }
             return index;
         }
 

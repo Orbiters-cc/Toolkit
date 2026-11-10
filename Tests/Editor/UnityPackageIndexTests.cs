@@ -43,6 +43,19 @@ public sealed class UnityPackageIndexTests
         Assert.Throws<InvalidDataException>(() => UnityPackageIndex.Read(file));
     }
 
+    // TKV-38: an index read again from the same unchanged file is the one read before (a copy); a changed file is read again.
+    [Test] public void AnUnchangedPackageIsNotDecompressedAgain()
+    {
+        Write(("g1/pathname", Encoding.UTF8.GetBytes("Assets/Hat/Hat.prefab")), ("g1/asset", new byte[10]));
+        var first = UnityPackageIndex.Read(file);
+        first.Entries.Clear();
+        CollectionAssert.AreEqual(new[] { "Assets/Hat/Hat.prefab" }, UnityPackageIndex.Read(file).Paths.ToArray(), "a copy: the caller's changes stay its own");
+
+        Write(("g2/pathname", Encoding.UTF8.GetBytes("Assets/Scarf/Scarf.prefab")), ("g2/asset", new byte[20]));
+        File.SetLastWriteTimeUtc(file, DateTime.UtcNow.AddMinutes(1));
+        CollectionAssert.AreEqual(new[] { "Assets/Scarf/Scarf.prefab" }, UnityPackageIndex.Read(file).Paths.ToArray());
+    }
+
     [Test] public void ExpandedSizeIsBounded()
     {
         Write(("g1/pathname", Encoding.UTF8.GetBytes("Assets/a.bin")), ("g1/asset", new byte[4096]));

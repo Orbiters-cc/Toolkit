@@ -227,7 +227,10 @@ namespace Orbiters.Toolkit.Editor.VRChat.Optimization
         public bool Moves(Transform transform)
         {
             string path = PathOf(transform);
-            return transformPaths.Any(p => p == path || path.Length == 0 || p.StartsWith(path + "/", StringComparison.Ordinal));
+            if (path.Length == 0) return transformPaths.Count > 0;
+            foreach (string p in transformPaths)
+                if (p.Length >= path.Length && p.StartsWith(path, StringComparison.Ordinal) && (p.Length == path.Length || p[path.Length] == '/')) return true;
+            return false;
         }
 
         /// <summary>Whether an animation moves, turns or scales this transform itself.</summary>

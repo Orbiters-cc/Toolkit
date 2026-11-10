@@ -42,14 +42,20 @@ namespace Orbiters.Toolkit.Editor.Net
         }
 
         /// <summary>Whether <paramref name="exe"/> runs (its tray service or a window).</summary>
-        public static bool Running(string exe) => exe != null && Process.GetProcessesByName(Path.GetFileNameWithoutExtension(exe)).Length > 0;
+        public static bool Running(string exe)
+        {
+            if (exe == null) return false;
+            var processes = Process.GetProcessesByName(Path.GetFileNameWithoutExtension(exe));
+            foreach (var process in processes) process.Dispose();
+            return processes.Length > 0;
+        }
 
         /// <summary>Starts the installed app in the tray, without its window, unless it runs already. False when it is not installed.</summary>
         public static bool StartInTray()
         {
             string exe = Installed;
             if (exe == null) return false;
-            if (!Running(exe)) Process.Start(new ProcessStartInfo(exe, "--hidden") { UseShellExecute = false, CreateNoWindow = true });
+            if (!Running(exe)) Process.Start(new ProcessStartInfo(exe, "--hidden") { UseShellExecute = false, CreateNoWindow = true })?.Dispose();
             return true;
         }
 
