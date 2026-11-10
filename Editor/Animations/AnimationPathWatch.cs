@@ -114,9 +114,7 @@ namespace Orbiters.Toolkit.Editor.Animations
                     case ObjectChangeKind.ChangeGameObjectParent: stream.GetChangeGameObjectParentEvent(i, out var parent); id = parent.instanceId; break;
                     case ObjectChangeKind.ChangeGameObjectOrComponentProperties:
                         stream.GetChangeGameObjectOrComponentPropertiesEvent(i, out var properties);
-                        // Only a GameObject's own properties hold a path (its name): a component's change (a slider dragged on a
-                        // renderer, a transform moved) renames nothing.
-                        if (!(EditorUtility.InstanceIDToObject(properties.instanceId) is GameObject)) continue;
+                        if (!Marks(EditorUtility.InstanceIDToObject(properties.instanceId))) continue;
                         id = properties.instanceId;
                         break;
                     case ObjectChangeKind.ChangeGameObjectStructureHierarchy: stream.GetChangeGameObjectStructureHierarchyEvent(i, out var hierarchy); id = hierarchy.instanceId; break;
@@ -132,6 +130,20 @@ namespace Orbiters.Toolkit.Editor.Animations
                 Dirty.Add(root.gameObject.GetInstanceID());
                 Later();
             }
+        }
+
+        /// <summary>
+        /// Whether a property change of <paramref name="changed"/> calls for its avatar's paths to be compared again. Only a
+        /// GameObject's own properties hold a path (its name): a component's change (a slider dragged on a renderer, a
+        /// transform moved) renames nothing. On an avatar holding a notice, a component's change may change what plays its
+        /// animations (an Animator given another controller, the descriptor's layers): its notice is checked again.
+        /// </summary>
+        internal static bool Marks(UnityEngine.Object changed)
+        {
+            if (changed is GameObject) return true;
+            if (Pending.Count == 0 || !(changed is Component component) || component == null || component is Transform) return false;
+            var root = AnimationPaths.AvatarRootOf?.Invoke(component.transform);
+            return root != null && Pending.ContainsKey(root.gameObject.GetInstanceID());
         }
 
         private static void Tick()
