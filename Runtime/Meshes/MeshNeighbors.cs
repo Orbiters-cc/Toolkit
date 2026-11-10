@@ -24,6 +24,9 @@ namespace Orbiters.Toolkit.Meshes
         public int[] Representative;
         public int WeldedCount => Members.Length;
 
+        /// <summary>The triangles that use welded vertex <paramref name="welded"/>.</summary>
+        public ReadOnlySpan<int> TrianglesAround(int welded) => TrianglesOf[welded];
+
         /// <param name="normals">With <paramref name="minNormalDot"/>: vertices at one place weld only when their normals
         /// agree that much with every vertex already welded there (two sheets that touch, as the front and back of
         /// double-sided cloth or closed lips, face apart and stay apart; UV seams and hard edges still weld), into the group
