@@ -301,10 +301,11 @@ namespace Orbiters.Toolkit.Editor
                 if (k >= needed || item >= itemCount || Start(item) >= end) break;
                 int slot = item % poolSize;
                 var row = pool[slot];
+                // The height follows the item's span at every pass, bound again or not (InvalidateSpans keeps bindings).
+                row.style.height = rowHeight * Span(item);
                 if (bound[slot] != item)
                 {
                     bound[slot] = item;
-                    row.style.height = rowHeight * Span(item);
                     bindRow(row, item);
                 }
                 row.style.top = (float)((Start(item) - first) * rowHeight);

@@ -54,6 +54,27 @@ public sealed class VirtualListTests
         Assert.That(binds.OrderBy(i => i), Is.EqualTo(new[] { 1, 3 }));
     }
 
+    // A visible item that grows or shrinks keeps its binding and takes its new height; the rows after it move.
+    [Test]
+    public void AVisibleItemTakesItsNewSpanWithoutRebinding()
+    {
+        var spans = Enumerable.Repeat(1, 20).ToList();
+        var binds = new List<int>();
+        var list = new VirtualList(10f, () => new VisualElement(), (row, item) => binds.Add(item)) { SpanOf = i => spans[i] };
+        list.SetItemCount(20, keepAtEnd: false);
+        list.LayoutFor(100f);
+        binds.Clear();
+        foreach (int span in new[] { 3, 1 })
+        {
+            spans[2] = span;
+            list.InvalidateSpans(2);
+            list.LayoutFor(100f);
+            Assert.That(binds, Is.Empty, "no rebinding");
+            Assert.That(list.RowOf(2).style.height.value.value, Is.EqualTo(10f * span), "the item's own height");
+            Assert.That(list.RowOf(3).style.top.value.value, Is.EqualTo(10f * (2 + span)), "the next item below it");
+        }
+    }
+
     [Test]
     public void SpansCountedFromAnItemMatchAFullCount()
     {
