@@ -17,13 +17,13 @@ namespace Orbiters.Toolkit.Editor.Processes
     public sealed class EditorLiveProcess : IDisposable
     {
         internal const int MaxErrorCharacters = 64 * 1024;
-        private readonly Process process;
+        private readonly OwnedProcess process;
         private readonly ProcessPipe output, error;
         private readonly ProcessText errorText;
         private readonly byte[] errorChunk = new byte[16 * 1024];
         private readonly Stream input;
         private readonly bool write;
-        private StreamWriter writer;
+        private int inputClosed;
         // Bytes read from stdout and not yet consumed by a Read* call: buffer[start..end).
         private byte[] buffer = new byte[64 * 1024];
         private int start, end;
@@ -32,24 +32,19 @@ namespace Orbiters.Toolkit.Editor.Processes
         /// <summary>The last bytes <see cref="ReadOutput"/> read.</summary>
         internal readonly byte[] Chunk = new byte[64 * 1024];
 
-        private EditorLiveProcess(Process process, bool write, Action<string> errorLine, int maxErrorCharacters)
+        private EditorLiveProcess(OwnedProcess process, bool write, Action<string> errorLine, int maxErrorCharacters)
         {
             this.process = process;
             this.write = write;
-            ProcessStartInfo info = process.StartInfo;
-            if (info.RedirectStandardOutput) output = new ProcessPipe(process.StandardOutput.BaseStream);
-            if (info.RedirectStandardError)
+            if (process.Output != null) output = new ProcessPipe(process.Output);
+            if (process.Error != null)
             {
-                error = new ProcessPipe(process.StandardError.BaseStream);
-                errorText = new ProcessText(process.StandardError.CurrentEncoding, errorLine, true, maxErrorCharacters);
+                error = new ProcessPipe(process.Error);
+                errorText = new ProcessText(process.ErrorEncoding, errorLine, true, maxErrorCharacters);
             }
-            if (info.RedirectStandardInput)
-            {
-                // Bytes go to the base stream; the writer (which never buffers anything) is what closes it, so the process's
-                // own Dispose finds it closed and has nothing to flush.
-                writer = process.StandardInput;
-                input = writer.BaseStream;
-            }
+            // The bytes written are all the process reads: no writer, so no preamble.
+            input = process.Input;
+            if (input == null) inputClosed = 1;
         }
 
         /// <summary>
@@ -68,17 +63,15 @@ namespace Orbiters.Toolkit.Editor.Processes
 
         internal static EditorLiveProcess Start(ProcessStartInfo startInfo, bool write, Action<string> errorLine, int maxErrorCharacters)
         {
-            var process = new Process { StartInfo = startInfo };
-            bool started = false;
+            OwnedProcess process = EditorProcessLifetime.Start(startInfo, write);
+            if (process == null) return null;
             try
             {
-                started = EditorProcessLifetime.Start(process, write);
-                if (!started) { process.Dispose(); return null; }
                 return new EditorLiveProcess(process, write, errorLine, maxErrorCharacters);
             }
             catch
             {
-                if (started) EditorProcessLifetime.Stop(process);
+                EditorProcessLifetime.Stop(process);
                 process.Dispose();
                 throw;
             }
@@ -86,8 +79,8 @@ namespace Orbiters.Toolkit.Editor.Processes
 
         /// <summary>The process's stdin (null when not redirected). Write the bytes themselves: no writer, no preamble.</summary>
         public Stream Input => input;
-        public bool HasExited { get { try { return process.HasExited; } catch (InvalidOperationException) { return true; } } }
-        public int ExitCode { get { try { return process.ExitCode; } catch (InvalidOperationException) { return -1; } } }
+        public bool HasExited => process.HasExited;
+        public int ExitCode => process.ExitCode;
         /// <summary>What it wrote to stderr so far (read by the Read* calls and <see cref="DrainError"/>), at most 64K characters.</summary>
         public string StandardError => errorText?.Text ?? string.Empty;
         public bool IsDisposed => disposed != 0;
@@ -97,24 +90,30 @@ namespace Orbiters.Toolkit.Editor.Processes
         internal bool OutputClosed => (output == null || output.Closed) && start == end;
         internal bool ErrorClosed => error == null || error.Closed;
         internal bool JobEmpty => EditorProcessLifetime.RunningInJob(process) == 0;
-        internal Encoding OutputEncoding => process.StartInfo.RedirectStandardOutput ? process.StandardOutput.CurrentEncoding : null;
+        internal Encoding OutputEncoding => process.OutputEncoding;
         internal void FinishError() => errorText?.Finish();
 
         /// <summary>Closes stdin: the process reads its end. Safe to call more than once.</summary>
         public void CloseInput()
         {
-            StreamWriter closing = Interlocked.Exchange(ref writer, null);
-            try { closing?.Close(); }
-            catch (IOException) { }
-            catch (ObjectDisposedException) { }
+            if (Interlocked.Exchange(ref inputClosed, 1) != 0) return;
+            process.CloseInput();
         }
 
         /// <summary>Writes to stdin and flushes. A request to a kept-alive process is small: it never fills the pipe.</summary>
         public void Write(byte[] bytes)
         {
-            if (writer == null) throw new IOException("The process's input is closed.");
-            input.Write(bytes, 0, bytes.Length);
-            input.Flush();
+            if (inputClosed != 0) throw new IOException("The process's input is closed.");
+            try
+            {
+                input.Write(bytes, 0, bytes.Length);
+                input.Flush();
+            }
+            catch (UnauthorizedAccessException ex)
+            {
+                // A closed pipe (the process ended): Mono reports it on a raw handle as access denied.
+                throw new IOException(ex.Message, ex);
+            }
         }
 
         /// <summary>Reads what stdout has waiting into <see cref="Chunk"/>: the count, 0 when nothing waits, -1 at its end.
@@ -227,9 +226,7 @@ namespace Orbiters.Toolkit.Editor.Processes
             finally
             {
                 CloseInput();
-                try { process.Dispose(); }
-                catch (InvalidOperationException) { } // ObjectDisposedException included
-                catch (IOException) { }
+                process.Dispose();
             }
         }
     }

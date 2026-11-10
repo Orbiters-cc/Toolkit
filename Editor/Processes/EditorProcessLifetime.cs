@@ -19,13 +19,13 @@ namespace Orbiters.Toolkit.Editor.Processes
     internal static class EditorProcessLifetime
     {
         private static readonly object Sync = new object();
-        private static readonly Dictionary<Process, WindowsProcessJob> Active = new Dictionary<Process, WindowsProcessJob>();
+        private static readonly Dictionary<OwnedProcess, WindowsProcessJob> Active = new Dictionary<OwnedProcess, WindowsProcessJob>();
         // Processes that change something: at a reload or quit they get time to finish before they are stopped.
-        private static readonly HashSet<Process> Writes = new HashSet<Process>();
+        private static readonly HashSet<OwnedProcess> Writes = new HashSet<OwnedProcess>();
         // Processes whose assignment to their job succeeded: only for them does an empty job mean nothing of theirs runs.
-        private static readonly HashSet<Process> Assigned = new HashSet<Process>();
+        private static readonly HashSet<OwnedProcess> Assigned = new HashSet<OwnedProcess>();
         // Processes stopped while they still ran: a job closed under them makes them exit with code 0, which is no success.
-        private static readonly ConditionalWeakTable<Process, object> StoppedRunning = new ConditionalWeakTable<Process, object>();
+        private static readonly ConditionalWeakTable<OwnedProcess, object> StoppedRunning = new ConditionalWeakTable<OwnedProcess, object>();
         private static readonly List<Action> StopListeners = new List<Action>();
 
         // Every start in this domain goes through this lock, from Process.Start until the child's ends of its pipes are
@@ -61,23 +61,33 @@ namespace Orbiters.Toolkit.Editor.Processes
             lock (Sync) StopListeners.Add(listener);
         }
 
-        /// <summary>Starts the process in a job of its own and owns it; false when the editor is stopping (reload, quit).</summary>
-        internal static bool Start(Process process, bool write)
+        /// <summary>
+        /// Starts the process in a job of its own and owns it; null when the editor is stopping (reload, quit). On Windows it
+        /// is created suspended, assigned to its job, then resumed: what it starts can never run outside the job.
+        /// </summary>
+        internal static OwnedProcess Start(ProcessStartInfo info, bool write)
         {
-            if (stopping) return false;
+            if (stopping) return null;
             WindowsProcessJob job = Path.DirectorySeparatorChar == '\\' ? WindowsProcessJob.Create() : null;
-            bool started = false, owned = false;
+            OwnedProcess process = null;
+            bool owned = false;
             try
             {
-                if (!StartLocked(process, StartLockWaitMilliseconds, true, out started))
+                bool locked = Monitor.TryEnter(StartSync, StartLockWaitMilliseconds);
+                try
                 {
-                    job?.Dispose();
-                    return false;
+                    if (stopping) { job?.Dispose(); return null; }
+                    process = OwnedProcess.Create(info);
                 }
+                finally
+                {
+                    if (locked) Monitor.Exit(StartSync);
+                }
+
                 lock (Sync)
                 {
-                    // A reload that began while this one started has already listed what it stops: this one is a few
-                    // microseconds old and stops here instead of escaping it.
+                    // A reload that began while this one started has already listed what it stops: this one has not run yet
+                    // (or, off Windows, only for a few microseconds) and stops here instead of escaping it.
                     if (!stopping)
                     {
                         Active.Add(process, job);
@@ -88,21 +98,18 @@ namespace Orbiters.Toolkit.Editor.Processes
                 if (!owned)
                 {
                     job?.Dispose();
-                    KillRoot(process);
-                    return false;
+                    process.Kill();
+                    process.Dispose();
+                    return null;
                 }
-                try
+                if (job != null)
                 {
-                    job?.Assign(process);
-                    if (job != null) lock (Sync) Assigned.Add(process);
+                    // Suspended until here: the assignment cannot meet an ended process, and nothing ran outside the job.
+                    job.Assign(process.Handle);
+                    lock (Sync) Assigned.Add(process);
                 }
-                catch (System.ComponentModel.Win32Exception) when (HasExited(process))
-                {
-                    // Windows refuses to assign a process that already ended (a quick command can end before this line).
-                    // It may have started a child first, which is in no job: the job proves nothing about it (see
-                    // RunningInJob), so its output counts as complete only when its pipes close.
-                }
-                return true;
+                process.Resume();
+                return process;
             }
             catch
             {
@@ -110,22 +117,20 @@ namespace Orbiters.Toolkit.Editor.Processes
                 else
                 {
                     job?.Dispose();
-                    if (started) KillRoot(process);
+                    process?.Kill();
                 }
+                process?.Dispose();
                 throw;
             }
         }
 
-        // Process.Start under the start lock; false when the editor began stopping while it waited, or Start returned false.
-        private static bool StartLocked(Process process, int waitMilliseconds, bool refuseWhileStopping, out bool started)
+        // Process.Start of a cleanup helper under the start lock, waiting a short while only.
+        private static bool StartLocked(Process process, int waitMilliseconds)
         {
-            started = false;
             bool locked = Monitor.TryEnter(StartSync, waitMilliseconds);
             try
             {
-                if (refuseWhileStopping && stopping) return false;
-                started = process.Start();
-                return started;
+                return process.Start();
             }
             finally
             {
@@ -134,7 +139,7 @@ namespace Orbiters.Toolkit.Editor.Processes
         }
 
         /// <summary>Whether this process ended because it was stopped (timeout, cancel, reload), not by itself.</summary>
-        internal static bool WasStopped(Process process)
+        internal static bool WasStopped(OwnedProcess process)
         {
             lock (Sync) return StoppedRunning.TryGetValue(process, out _);
         }
@@ -145,7 +150,7 @@ namespace Orbiters.Toolkit.Editor.Processes
         /// Unknown (-1) too when the process was not provably put in its job: a process that exited before its assignment may
         /// have started a child that still writes, outside the job.
         /// </summary>
-        internal static int RunningInJob(Process process)
+        internal static int RunningInJob(OwnedProcess process)
         {
             WindowsProcessJob job;
             lock (Sync)
@@ -157,7 +162,7 @@ namespace Orbiters.Toolkit.Editor.Processes
         }
 
         /// <summary>Stops the process and everything it started (if it still runs), then forgets it.</summary>
-        internal static void Stop(Process process)
+        internal static void Stop(OwnedProcess process)
         {
             if (process == null) return;
             WindowsProcessJob job;
@@ -168,22 +173,18 @@ namespace Orbiters.Toolkit.Editor.Processes
                 Writes.Remove(process);
                 Assigned.Remove(process);
             }
-            bool running;
-            try { running = !process.HasExited; }
-            catch (InvalidOperationException) { running = false; }
+            bool running = !process.HasExited;
             if (running)
                 lock (Sync)
                     if (!StoppedRunning.TryGetValue(process, out _)) StoppedRunning.Add(process, null);
             // Closing the job kills what is left of it even when the root exited by itself (a descendant holding a pipe).
-            if (job != null) { job.Dispose(); KillRoot(process); }
+            if (job != null) { job.Dispose(); process.Kill(); }
             else if (running) StopTreeWithoutJob(process);
             if (!running) return;
-            try { process.WaitForExit(2000); }
-            catch (InvalidOperationException) { }
-            catch (System.ComponentModel.Win32Exception) { }
+            process.WaitForExit(2000);
         }
 
-        private static void StopTreeWithoutJob(Process process)
+        private static void StopTreeWithoutJob(OwnedProcess process)
         {
             try
             {
@@ -199,21 +200,8 @@ namespace Orbiters.Toolkit.Editor.Processes
             { /* Already exited or inaccessible; still try the owned root below. */ }
             finally
             {
-                KillRoot(process);
+                process.Kill();
             }
-        }
-
-        private static bool HasExited(Process process)
-        {
-            try { return process.HasExited; }
-            catch (InvalidOperationException) { return true; }
-        }
-
-        private static void KillRoot(Process process)
-        {
-            try { if (!process.HasExited) process.Kill(); }
-            catch (InvalidOperationException) { }
-            catch (System.ComponentModel.Win32Exception) { }
         }
 
         private static void StopAll() => StopAll(WriteGraceMilliseconds);
@@ -225,7 +213,7 @@ namespace Orbiters.Toolkit.Editor.Processes
         /// </summary>
         internal static void StopAll(int graceMilliseconds)
         {
-            Process[] reads;
+            OwnedProcess[] reads;
             Action[] listeners;
             lock (Sync)
             {
@@ -239,24 +227,19 @@ namespace Orbiters.Toolkit.Editor.Processes
                 try { listener(); }
                 catch (Exception) { /* Stopping goes on for the others. */ }
             }
-            foreach (Process process in reads) Stop(process);
+            foreach (OwnedProcess process in reads) Stop(process);
             var waited = Stopwatch.StartNew();
-            Process[] writes;
+            OwnedProcess[] writes;
             lock (Sync) writes = Writes.ToArray();
-            foreach (Process process in writes)
+            foreach (OwnedProcess process in writes)
             {
-                try
-                {
-                    int left = (int)Math.Max(0, graceMilliseconds - waited.ElapsedMilliseconds);
-                    if (left > 0) process.WaitForExit(left);
-                }
-                catch (InvalidOperationException) { }
-                catch (System.ComponentModel.Win32Exception) { }
+                int left = (int)Math.Max(0, graceMilliseconds - waited.ElapsedMilliseconds);
+                if (left > 0) process.WaitForExit(left);
             }
             stoppingAllowsWrites = false;
-            Process[] rest;
+            OwnedProcess[] rest;
             lock (Sync) rest = Active.Keys.ToArray();
-            foreach (Process process in rest) Stop(process);
+            foreach (OwnedProcess process in rest) Stop(process);
         }
 
         /// <summary>For tests only: <see cref="StopAll(int)"/> as a reload runs it, then starting processes is allowed again.</summary>
@@ -305,7 +288,7 @@ namespace Orbiters.Toolkit.Editor.Processes
                            }
                        })
                 {
-                    if (!StartLocked(process, 500, false, out _)) return null;
+                    if (!StartLocked(process, 500)) return null;
                     var elapsed = Stopwatch.StartNew();
                     var output = new MemoryStream();
                     var pipe = readOutput ? new ProcessPipe(process.StandardOutput.BaseStream) : null;
@@ -322,7 +305,7 @@ namespace Orbiters.Toolkit.Editor.Processes
                         if (read > 0) output.Write(chunk, 0, read);
                         else Thread.Sleep(5);
                     }
-                    KillRoot(process);
+                    try { if (!process.HasExited) process.Kill(); } catch (InvalidOperationException) { } catch (System.ComponentModel.Win32Exception) { }
                     return System.Text.Encoding.UTF8.GetString(output.ToArray());
                 }
             }
