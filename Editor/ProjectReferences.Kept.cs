@@ -62,7 +62,7 @@ namespace Orbiters.Toolkit.Editor
             // Bump on any change to what the reader recognises as a reference (the GUID tokens, which files' content is
             // read, the encodings), to the stamp, to Unity's part that is kept, or to this file's layout: a file of
             // another version is then ignored and every file read again.
-            internal const int Version = 2;
+            internal const int Version = 3;
             private const uint Magic = 0x5250524F; // "ORPR"
             internal static long MaxBytes = 128L * 1024 * 1024;
             private static string overridePath;

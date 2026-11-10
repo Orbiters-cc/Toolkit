@@ -204,7 +204,9 @@ namespace Orbiters.Toolkit.Editor
         /// </summary>
         public bool Recheck() => Recheck(out _) == null;
 
-        internal const double RecheckMilliseconds = 250;
+        // Listing a project of 18,000 files took 470 ms on a hard disk (measured): the check runs once, right before a
+        // deletion, so it may take the time a large project's listing takes rather than refuse there every time.
+        internal const double RecheckMilliseconds = 1500;
         internal const int RecheckFiles = 64;
         internal const long RecheckBytes = 8L * 1024 * 1024;
 
