@@ -146,6 +146,52 @@ public sealed class GeneratedAssetsTests
         Assert.True(File.Exists(path));
     }
 
+    // Review 2 of TKV-28: a prefab edited behind Unity's back (written on disk, not imported) to use a tracked file keeps
+    // it: the sweep checks the files themselves before deleting, not only what the editor reported.
+    [UnityTest] public IEnumerator AFileEditedBehindUnitysBackKeepsWhatItNowUses()
+    {
+        string path = folder + "/Fit.asset";
+        var mesh = new Mesh { name = "Fit" };
+        AssetDatabase.CreateAsset(mesh, path);
+        GeneratedAssets.Track(path);
+        string guid = AssetDatabase.AssetPathToGUID(path);
+        var go = new GameObject("Generated mesh user");
+        go.AddComponent<MeshFilter>();
+        string prefab = folder + "/User.prefab";
+        PrefabUtility.SaveAsPrefabAsset(go, prefab);
+        Object.DestroyImmediate(go);
+        var before = ProjectReferences.ScanAsync();
+        yield return Wait(before);
+        Assert.That(before.Result.UsersOf(path), Is.Empty);
+
+        string text = File.ReadAllText(prefab);
+        StringAssert.Contains("m_Mesh: {fileID: 0}", text);
+        File.WriteAllText(prefab, text.Replace("m_Mesh: {fileID: 0}", "m_Mesh: {fileID: 4300000, guid: " + guid + ", type: 2}"));
+        File.SetLastWriteTimeUtc(prefab, DateTime.UtcNow.AddMinutes(1));
+        var sweep = GeneratedAssets.SweepAsync();
+        yield return Wait(sweep);
+        Assert.That(sweep.Result, Does.Not.Contain(path), "the prefab on disk uses it now");
+        Assert.True(File.Exists(path));
+    }
+
+    // Review 2 of TKV-28: an Undo or Redo and an asset edited in the editor make the kept map out of date too.
+    [UnityTest] public IEnumerator UndoAndAssetEditsMakeTheMapOutOfDate()
+    {
+        var first = ProjectReferences.ScanAsync();
+        yield return Wait(first);
+        EditorChangeBus.Report(c => c.SetUndoRedo());
+        Assert.That(first.Result.Current, Is.False, "an Undo may bring back a reference");
+        var second = ProjectReferences.ScanAsync();
+        yield return Wait(second);
+        Assert.AreNotSame(first.Result, second.Result);
+        EditorChangeBus.Report(c => c.AddAsset("0123456789abcdef0123456789abcdef"));
+        Assert.That(second.Result.Current, Is.False, "an asset edited in the editor");
+        var third = ProjectReferences.ScanAsync();
+        yield return Wait(third);
+        Assert.AreNotSame(second.Result, third.Result);
+        Assert.That(third.Result.Current, Is.True);
+    }
+
     // A file imported while a scan runs leaves that scan's map out of date: it is not kept, and says so.
     [UnityTest] public IEnumerator AnImportDuringAScanMakesItsMapNotCurrent()
     {

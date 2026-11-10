@@ -174,14 +174,14 @@ namespace Orbiters.Toolkit.Editor
                 return result;
             }
 
-            private static bool IsText(string fullPath)
+            internal static bool IsText(string fullPath)
             {
                 var start = new byte[5];
                 using (var stream = new FileStream(fullPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
                     return stream.Read(start, 0, 5) == 5 && Encoding.ASCII.GetString(start) == "%YAML";
             }
 
-            private static bool IsNative(string path) =>
+            internal static bool IsNative(string path) =>
                 path.EndsWith(".unity", StringComparison.OrdinalIgnoreCase) || path.EndsWith(".prefab", StringComparison.OrdinalIgnoreCase) ||
                 AssetImporter.GetAtPath(path)?.GetType().Name == "NativeFormatImporter";
 

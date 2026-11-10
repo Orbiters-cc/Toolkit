@@ -28,6 +28,60 @@ namespace Orbiters.Toolkit.Editor
         public static bool MayUseOthers(string path) => !string.IsNullOrEmpty(path) && !Leaves.Contains(Path.GetExtension(path));
 
         private readonly Dictionary<string, HashSet<string>> usedBy = new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase);
+        // What each file read uses (paths), and its file, .meta and import as they were when it was read: what
+        // RefreshAsync compares the disk with.
+        private readonly Dictionary<string, string[]> uses = new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase);
+        private readonly Dictionary<string, Stamp> stamps = new Dictionary<string, Stamp>(StringComparer.OrdinalIgnoreCase);
+
+        private readonly struct Stamp : IEquatable<Stamp>
+        {
+            public readonly long Size, Ticks, MetaSize, MetaTicks;
+            public readonly string Import;
+
+            public Stamp(string path)
+            {
+                var file = new FileInfo(path);
+                var meta = new FileInfo(path + ".meta");
+                Size = file.Exists ? file.Length : -1;
+                Ticks = file.Exists ? file.LastWriteTimeUtc.Ticks : 0;
+                MetaSize = meta.Exists ? meta.Length : -1;
+                MetaTicks = meta.Exists ? meta.LastWriteTimeUtc.Ticks : 0;
+                Import = AssetDatabase.GetAssetDependencyHash(path).ToString();
+            }
+
+            public bool SameFiles(Stamp other) => Size == other.Size && Ticks == other.Ticks && MetaSize == other.MetaSize && MetaTicks == other.MetaTicks;
+            public bool Equals(Stamp other) => SameFiles(other) && Import == other.Import;
+        }
+
+        // Reads what a file uses (stamped first: a change while it is read shows as a change later) into the map.
+        private void Read(string path)
+        {
+            var stamp = new Stamp(path);
+            var used = new List<string>();
+            foreach (string guid in Store.Uses(path))
+            {
+                string dependency = AssetDatabase.GUIDToAssetPath(guid);
+                if (string.IsNullOrEmpty(dependency) || string.Equals(dependency, path, StringComparison.OrdinalIgnoreCase)) continue;
+                used.Add(dependency);
+            }
+            Forget(path);
+            stamps[path] = stamp;
+            uses[path] = used.ToArray();
+            foreach (string dependency in used)
+            {
+                if (!usedBy.TryGetValue(dependency, out var users)) usedBy[dependency] = users = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                users.Add(path);
+            }
+        }
+
+        private void Forget(string path)
+        {
+            if (uses.TryGetValue(path, out var old))
+                foreach (string dependency in old)
+                    if (usedBy.TryGetValue(dependency, out var users)) users.Remove(path);
+            uses.Remove(path);
+            stamps.Remove(path);
+        }
 
         public int Scanned { get; private set; }
 
@@ -46,9 +100,12 @@ namespace Orbiters.Toolkit.Editor
             if (!watching)
             {
                 watching = true;
+                // Anything that may change what a file uses: an import, a deletion or a move, an asset edited in the editor, an
+                // Undo or Redo, an unknown change.
                 EditorChangeBus.Changed += changes =>
                 {
-                    if (changes.Project || changes.Imported.Count + changes.Deleted.Count + changes.Moved.Count + changes.MovedFrom.Count > 0) filesRevision++;
+                    if (changes.Project || changes.Everything || changes.UndoRedo || changes.Assets.Count > 0 ||
+                        changes.Imported.Count + changes.Deleted.Count + changes.Moved.Count + changes.MovedFrom.Count > 0) filesRevision++;
                 };
             }
             // Nothing imported, deleted or moved since the last complete scan of this script session: its map still stands.
@@ -73,13 +130,7 @@ namespace Orbiters.Toolkit.Editor
                 for (int i = 0; i < assets.Count; i++)
                 {
                     cancellation.ThrowIfCancellationRequested();
-                    foreach (string guid in Store.Uses(assets[i]))
-                    {
-                        string dependency = AssetDatabase.GUIDToAssetPath(guid);
-                        if (string.IsNullOrEmpty(dependency) || string.Equals(dependency, assets[i], StringComparison.OrdinalIgnoreCase)) continue;
-                        if (!map.usedBy.TryGetValue(dependency, out var users)) map.usedBy[dependency] = users = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-                        users.Add(assets[i]);
-                    }
+                    map.Read(assets[i]);
                     map.Scanned++;
                     if ((DateTime.UtcNow - started).TotalMilliseconds > 12)
                     {
@@ -115,6 +166,55 @@ namespace Orbiters.Toolkit.Editor
             {
                 EditorChangeBus.Flush();
                 return revision == filesRevision;
+            }
+        }
+
+        /// <summary>
+        /// Checks the map against the disk itself before anything is deleted on its word: every file under Assets/ that may
+        /// use another is looked at again (its size, time, .meta and import), and those new or changed since they were read
+        /// are read again, also when Unity has not imported the change yet (their text and their .meta name what they use).
+        /// False when that cannot be done for certain: a file in Unity's binary format changed on disk and not imported
+        /// again yet (what it names cannot be read), a file that cannot be read, a change reported meanwhile, cancellation.
+        /// Main thread; yields between slices.
+        /// </summary>
+        public async Task<bool> RefreshAsync(CancellationToken cancellation = default)
+        {
+            try
+            {
+                string root = Path.GetDirectoryName(Path.GetFullPath(UnityEngine.Application.dataPath));
+                string assets = Path.Combine(root, "Assets");
+                var present = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                var started = DateTime.UtcNow;
+                Store.Load();
+                foreach (string full in Directory.EnumerateFiles(assets, "*", SearchOption.AllDirectories))
+                {
+                    cancellation.ThrowIfCancellationRequested();
+                    if (full.EndsWith(".meta", StringComparison.OrdinalIgnoreCase)) continue;
+                    string path = full.Substring(root.Length + 1).Replace('\\', '/');
+                    if (!MayUseOthers(path)) continue;
+                    present.Add(path);
+                    var now = new Stamp(path);
+                    if (stamps.TryGetValue(path, out var known) && known.Equals(now)) continue;
+                    // Changed on disk and not imported again: Unity's own answer is the old one. Text names what it uses; a
+                    // file in Unity's binary format cannot be read.
+                    if (!Store.IsText(full) && Store.IsNative(path) && (!stamps.TryGetValue(path, out known) || known.Import == now.Import)) return false;
+                    Read(path);
+                    if ((DateTime.UtcNow - started).TotalMilliseconds > 12)
+                    {
+                        await Task.Yield();
+                        started = DateTime.UtcNow;
+                    }
+                }
+                // Files gone use nothing.
+                foreach (string gone in uses.Keys.Where(p => !present.Contains(p)).ToList()) Forget(gone);
+                Store.Save();
+                return Current;
+            }
+            catch (OperationCanceledException) { return false; }
+            catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException)
+            {
+                UnityEngine.Debug.LogWarning("[Orbiters] Could not check what the project's files use: " + ex.Message);
+                return false;
             }
         }
 
