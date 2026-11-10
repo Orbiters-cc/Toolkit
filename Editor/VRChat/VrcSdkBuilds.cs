@@ -51,6 +51,60 @@ namespace Orbiters.Toolkit.Editor.VRChat
 
         private static IVRCSdkAvatarBuilderApi attached;
         private static GameObject started;
+        private static readonly Operation operation = new Operation();
+        // ActiveBuildType ("Test" or "Publish", "None" outside the SDK's builds) came with VRChat SDK 3.7.5.
+        private static readonly System.Reflection.PropertyInfo BuildType =
+            typeof(VRC_SdkBuilder).GetProperty("ActiveBuildType", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static);
+
+        /// <summary>
+        /// The builder's operation under way: from a build's start to its end, or for a publish to its upload's end. The
+        /// panel may close meanwhile (an upload goes on without it): the builder is let go, or another one followed, only
+        /// once the operation is over, so its end (the upload's id) still reaches the listeners.
+        /// </summary>
+        internal sealed class Operation
+        {
+            private bool building, publishing, uploading, detach, attach;
+
+            public bool Busy => building || publishing || uploading;
+
+            public void BuildStarted(bool publish) { building = true; publishing = publish; uploading = false; }
+            public void BuildEnded(bool failed) { building = false; if (failed) publishing = false; }
+            public void UploadStarted() { uploading = true; }
+            public void UploadEnded() { uploading = false; publishing = false; }
+
+            /// <summary>The panel closed: true to let the builder go now, else once the operation is over.</summary>
+            public bool PanelClosed()
+            {
+                if (!Busy) return true;
+                detach = true;
+                return false;
+            }
+
+            /// <summary>
+            /// Another builder is there: true to follow it now, else once the operation is over. <paramref name="idle"/>: the
+            /// builder followed has nothing under way by its own account (a publish build that never uploaded).
+            /// </summary>
+            public bool NewBuilder(bool idle)
+            {
+                if (!Busy || idle)
+                {
+                    building = publishing = uploading = false;
+                    detach = attach = false;
+                    return true;
+                }
+                attach = true;
+                return false;
+            }
+
+            /// <summary>What to do now the operation may be over: let the builder go, look for another one.</summary>
+            public (bool Detach, bool Attach) Settle()
+            {
+                if (Busy) return (false, false);
+                var result = (detach, attach);
+                detach = attach = false;
+                return result;
+            }
+        }
 
         static VrcSdkBuilds()
         {
@@ -69,7 +123,10 @@ namespace Orbiters.Toolkit.Editor.VRChat
             EditorApplication.delayCall += TryAttach;
         }
 
-        private static void OnPanelDisable(object sender, EventArgs args) => Detach();
+        private static void OnPanelDisable(object sender, EventArgs args)
+        {
+            if (operation.PanelClosed()) Detach();
+        }
 
         private static void TryAttach()
         {
@@ -78,12 +135,17 @@ namespace Orbiters.Toolkit.Editor.VRChat
                 if (VRCSdkControlPanel.window == null || !VRCSdkControlPanel.TryGetBuilder<IVRCSdkAvatarBuilderApi>(out var builder) || builder == null ||
                     ReferenceEquals(builder, attached))
                     return;
+                if (attached != null && !operation.NewBuilder(attached.BuildState != SdkBuildState.Building && attached.UploadState != SdkUploadState.Uploading)) return;
                 Detach();
                 attached = builder;
                 attached.OnSdkBuildStart += OnBuildStart;
                 attached.OnSdkBuildSuccess += OnBuildSuccess;
                 attached.OnSdkBuildFinish += OnBuildFinish;
+                attached.OnSdkBuildError += OnBuildError;
+                attached.OnSdkUploadStart += OnUploadStart;
                 attached.OnSdkUploadSuccess += OnUploadSuccess;
+                attached.OnSdkUploadFinish += OnUploadEnd;
+                attached.OnSdkUploadError += OnUploadEnd;
             }
             catch (Exception ex)
             {
@@ -98,9 +160,35 @@ namespace Orbiters.Toolkit.Editor.VRChat
             attached.OnSdkBuildStart -= OnBuildStart;
             attached.OnSdkBuildSuccess -= OnBuildSuccess;
             attached.OnSdkBuildFinish -= OnBuildFinish;
+            attached.OnSdkBuildError -= OnBuildError;
+            attached.OnSdkUploadStart -= OnUploadStart;
             attached.OnSdkUploadSuccess -= OnUploadSuccess;
+            attached.OnSdkUploadFinish -= OnUploadEnd;
+            attached.OnSdkUploadError -= OnUploadEnd;
             attached = null;
             Building = false;
+        }
+
+        // The operation may be over: the builder is let go, or another one followed, as the panel asked meanwhile.
+        private static void Settle()
+        {
+            var (detach, attach) = operation.Settle();
+            if (detach) Detach();
+            if (attach) TryAttach();
+        }
+
+        private static void OnBuildError(object sender, string message)
+        {
+            operation.BuildEnded(true);
+            Settle();
+        }
+
+        private static void OnUploadStart(object sender, EventArgs args) => operation.UploadStarted();
+
+        private static void OnUploadEnd(object sender, string message)
+        {
+            operation.UploadEnded();
+            Settle();
         }
 
         private static void Raise<T>(Action<T> listeners, T value)
@@ -113,7 +201,9 @@ namespace Orbiters.Toolkit.Editor.VRChat
         internal static void OnBuildFinish(object sender, string message)
         {
             Building = false;
+            operation.BuildEnded(false);
             Raise(Finished, message);
+            Settle();
         }
 
         private static void OnUploadSuccess(object sender, string avatarId) => Raise(Uploaded, avatarId);
@@ -121,6 +211,8 @@ namespace Orbiters.Toolkit.Editor.VRChat
         internal static void OnBuildStart(object sender, object target)
         {
             Building = true;
+            // A publish uploads once built: the operation lasts until the upload ends.
+            operation.BuildStarted(BuildType == null || BuildType.GetValue(null)?.ToString() == "Publish");
             started = target as GameObject;
             foreach (Action<GameObject> listener in Starting?.GetInvocationList() ?? Array.Empty<Delegate>())
                 try { listener(started); }
