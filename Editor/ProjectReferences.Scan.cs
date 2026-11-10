@@ -110,6 +110,15 @@ namespace Orbiters.Toolkit.Editor
             "AssemblyDefinitionReferenceImporter", "PackageManifestImporter",
         };
 
+        // The extensions of Unity's own serialized files: assets, prefabs, scenes and the kinds of asset with an extension of
+        // their own. Only these name assets in their bytes when they are binary.
+        private static readonly HashSet<string> UnitySerializedExtensions = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ".asset", ".prefab", ".unity", ".mat", ".anim", ".controller", ".overrideController", ".mask", ".playable", ".physicMaterial",
+            ".physicsMaterial2D", ".lighting", ".spriteatlas", ".spriteatlasv2", ".terrainlayer", ".mixer", ".renderTexture", ".cubemap",
+            ".flare", ".fontsettings", ".guiskin", ".giparams", ".brush", ".preset", ".signal", ".shadervariants", ".scenetemplate",
+        };
+
         // Marks, in a reading's importer name, an importer a tool wrote (a ScriptedImporter): its files are in that tool's
         // own format.
         private const string ScriptedImporterPrefix = "ScriptedImporter:";
@@ -179,8 +188,12 @@ namespace Orbiters.Toolkit.Editor
                 // A binary file read by a tool's own importer (a Substance Painter project, a VRM) is in that tool's format:
                 // it names no asset in its bytes, and what its import uses comes from Unity's dependencies and its .meta.
                 bool foreign = read.Importer != null && read.Importer.StartsWith(ScriptedImporterPrefix, StringComparison.Ordinal);
-                // Any other: a file whose bytes are not known to be what Unity imported may use what its import does not say.
-                if (!plain && !foreign && !ImportStamps.Current(read.Path, read.Stamp))
+                // Unity's own serialized files are told by their extension: Unity names the importer of an asset and of a
+                // file it has no importer for alike, so the importer's name cannot tell a binary asset from a Substance
+                // Painter project. Only a serialized file whose bytes are not known to be what Unity imported may use what
+                // its import does not say.
+                bool serialized = UnitySerializedExtensions.Contains(Path.GetExtension(read.Path));
+                if (serialized && !plain && !foreign && !ImportStamps.Current(read.Path, read.Stamp))
                     throw new UncertainReferencesException(string.IsNullOrEmpty(read.Importer)
                         ? read.Path + " is in a binary format Unity has not imported: what it uses cannot be read."
                         : read.Path + " changed since Unity last imported it: what it uses is known once Unity imports it again.");
