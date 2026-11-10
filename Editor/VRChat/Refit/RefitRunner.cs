@@ -144,6 +144,8 @@ namespace Orbiters.Toolkit.Editor.VRChat.Refit
                 (batch.CoverageByRenderer.TryGetValue(r, out var enabled) ? enabled : batch.CoverDifferentBaseBody);
             var renderers = batch.Renderers.Where(r => r != null).Distinct()
                 .OrderBy(r => coverageFor(r) ? ClothingCoverage.Layer(r) : 0).ToList();
+            // The pieces are fitted between the same bodies: the engine derives them once for the batch.
+            using (engine is IRefitBatching batching ? batching.BeginBatch() : null)
             for (int i = 0; i < renderers.Count; i++)
             {
                 if (cancellation.IsCancellationRequested) { result.Cancelled = true; break; }
