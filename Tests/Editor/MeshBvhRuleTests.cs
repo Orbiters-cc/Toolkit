@@ -371,6 +371,29 @@ namespace Orbiters.Toolkit.Editor.Tests
         [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
         private static void DropALease(MeshBvh bvh) => bvh.Pin();
 
+        // Labels outside the table (a triangle of no particular kind, -1) pass only when the rule says so, in either label test.
+        [Test]
+        public void LabelsOutsideTheTableFollowTheRule()
+        {
+            DoubledSphere(10, 20, 17, out var vertices, out var triangles);
+            int count = triangles.Length / 3, half = count / 2;
+            var random = new System.Random(3);
+            var labels = new int[count];
+            for (int t = 0; t < half; t++) labels[t] = labels[t + half] = random.Next(-1, 4);
+            var table = new[] { false, true, true };
+            var bvh = MeshBvh.Build(vertices, triangles);
+            for (int i = 0; i < 200; i++)
+            {
+                var p = RandomPoint(random, 1.5f);
+                bool outside = i % 2 == 0;
+                Func<int, bool> accepted = t => (uint)labels[t] < (uint)table.Length ? table[labels[t]] : outside;
+                var first = bvh.ClosestPoint(p, 10f, TriangleRule.All.Labelled(labels, table, outsideAccepted: outside));
+                var second = bvh.ClosestPoint(p, 10f, TriangleRule.All.AlsoLabelled(labels, table, outside));
+                AssertBruteForce(first, vertices, triangles, p, 10f, accepted, "point " + i);
+                Assert.That(second.Triangle, Is.EqualTo(first.Triangle), "point " + i + ": both label tests agree");
+            }
+        }
+
         [Test]
         public void RulesRefuseArraysThatDoNotCoverTheMesh()
         {

@@ -59,8 +59,10 @@ namespace Orbiters.Toolkit.Meshes
         internal bool[] acceptedLabels;
         internal int excludedLabel;
         internal bool hasExcludedLabel;
+        internal bool outsideLabelsAccepted;
         internal int[] moreLabels;
         internal bool[] acceptedMoreLabels;
+        internal bool outsideMoreLabelsAccepted;
         internal bool[] allowed;
         internal int[] ranks;
         internal int minimumRank;
@@ -109,13 +111,15 @@ namespace Orbiters.Toolkit.Meshes
 
         /// <summary>
         /// Triangles whose label (<paramref name="labels"/>) is accepted: with <paramref name="accepted"/> (one flag per label),
-        /// a label within it and flagged; without it, any label. With <paramref name="excluded"/>, never that label.
+        /// a label within it and flagged, or with <paramref name="outsideAccepted"/> any label outside it (a negative one: none
+        /// in particular); without it, any label. With <paramref name="excluded"/>, never that label.
         /// </summary>
-        public TriangleRule Labelled(int[] labels, bool[] accepted, int? excluded = null)
+        public TriangleRule Labelled(int[] labels, bool[] accepted, int? excluded = null, bool outsideAccepted = false)
         {
             var rule = this;
             rule.labels = labels ?? throw new ArgumentNullException(nameof(labels));
             rule.acceptedLabels = accepted;
+            rule.outsideLabelsAccepted = outsideAccepted;
             rule.hasExcludedLabel = excluded.HasValue;
             rule.excludedLabel = excluded ?? 0;
             rule.set |= TriangleTests.Labels;
@@ -123,11 +127,12 @@ namespace Orbiters.Toolkit.Meshes
         }
 
         /// <summary>A second label test (<see cref="Labelled"/> without an excluded label): both must accept.</summary>
-        public TriangleRule AlsoLabelled(int[] labels, bool[] accepted)
+        public TriangleRule AlsoLabelled(int[] labels, bool[] accepted, bool outsideAccepted = false)
         {
             var rule = this;
             rule.moreLabels = labels ?? throw new ArgumentNullException(nameof(labels));
             rule.acceptedMoreLabels = accepted ?? throw new ArgumentNullException(nameof(accepted));
+            rule.outsideMoreLabelsAccepted = outsideAccepted;
             rule.set |= TriangleTests.MoreLabels;
             return rule;
         }
@@ -245,10 +250,12 @@ namespace Orbiters.Toolkit.Meshes
         [NativeDisableUnsafePtrRestriction] public int* Labels;
         [NativeDisableUnsafePtrRestriction] public byte* AcceptedLabels;
         public int AcceptedLabelCount;
+        public int OutsideLabelsAccepted;
         public int HasExcludedLabel, ExcludedLabel;
         [NativeDisableUnsafePtrRestriction] public int* MoreLabels;
         [NativeDisableUnsafePtrRestriction] public byte* AcceptedMoreLabels;
         public int AcceptedMoreLabelCount;
+        public int OutsideMoreLabelsAccepted;
         [NativeDisableUnsafePtrRestriction] public byte* Allowed;
         [NativeDisableUnsafePtrRestriction] public int* Ranks;
         public int MinimumRank;
@@ -298,13 +305,14 @@ namespace Orbiters.Toolkit.Meshes
         {
             int label = Labels[triangle];
             if (HasExcludedLabel != 0 && label == ExcludedLabel) return false;
-            return AcceptedLabels == null || ((uint)label < (uint)AcceptedLabelCount && AcceptedLabels[label] != 0);
+            if (AcceptedLabels == null) return true;
+            return (uint)label < (uint)AcceptedLabelCount ? AcceptedLabels[label] != 0 : OutsideLabelsAccepted != 0;
         }
 
         private bool MoreLabelAccepted(int triangle)
         {
             int label = MoreLabels[triangle];
-            return (uint)label < (uint)AcceptedMoreLabelCount && AcceptedMoreLabels[label] != 0;
+            return (uint)label < (uint)AcceptedMoreLabelCount ? AcceptedMoreLabels[label] != 0 : OutsideMoreLabelsAccepted != 0;
         }
 
         private bool MaskAccepted(int triangle)
