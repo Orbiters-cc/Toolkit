@@ -31,11 +31,14 @@ namespace Orbiters.Toolkit.Editor.Storage
         [Serializable] private sealed class Item { public string guid, path; public List<int> ids = new List<int>(); }
         [Serializable] private sealed class Trash { public List<Item> items = new List<Item>(); }
 
-        private static bool scheduled, sweeping, again;
-        private static double due;
+        private static bool sweeping, again;
+        private static IDisposable sweep;
+        // The tracked list, read from disk once per script session and written through.
+        private static Tracked tracked;
 
         static GeneratedAssets()
         {
+            // Straight from Unity, not from the change bus a frame later: the object an Undo brings back finds its file at once.
             Undo.undoRedoPerformed += UndoRedo;
             EditorSceneManager.sceneSaved += _ => SweepSoon();
             if (SessionState.GetBool(StartedKey, false)) return;
@@ -70,19 +73,9 @@ namespace Orbiters.Toolkit.Editor.Storage
         /// <summary>Sweeps once the editor has been quiet for a moment (after a removal, a cancel, an Undo, a save).</summary>
         public static void SweepSoon()
         {
-            due = EditorApplication.timeSinceStartup + Quiet;
-            if (scheduled) return;
-            scheduled = true;
-            EditorApplication.update += Tick;
-        }
-
-        private static void Tick()
-        {
-            if (EditorApplication.timeSinceStartup < due || EditorApplication.isCompiling || EditorApplication.isUpdating ||
-                EditorApplication.isPlayingOrWillChangePlaymode) return;
-            EditorApplication.update -= Tick;
-            scheduled = false;
-            _ = SweepAsync();
+            // A new change starts the quiet moment again.
+            sweep?.Dispose();
+            sweep = OrbitersEditorHost.Once("Generated assets sweep", () => { sweep = null; _ = SweepAsync(); }, Quiet, HostWhen.Idle);
         }
 
         /// <summary>Puts aside the tracked assets nothing uses; returns their paths.</summary>
@@ -253,9 +246,13 @@ namespace Orbiters.Toolkit.Editor.Storage
                 using (var serialized = new SerializedObject(component))
                 {
                     var property = serialized.GetIterator();
-                    while (property.Next(true))
+                    for (bool enter = true; property.Next(enter);)
+                    {
+                        // A skin's bones are scene transforms, never a file: their list (hundreds long) is not looked into.
+                        enter = !(property.isArray && property.name == "m_Bones" && component is SkinnedMeshRenderer);
                         if (property.propertyType == SerializedPropertyType.ObjectReference && ids.Contains(property.objectReferenceInstanceIDValue))
                             found.Add(property.objectReferenceInstanceIDValue);
+                    }
                 }
             }
             return found;
@@ -267,14 +264,20 @@ namespace Orbiters.Toolkit.Editor.Storage
             catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException) { return null; }
         }
 
+        // A copy of the list: callers change it and write it back.
         private static Tracked ReadList()
         {
-            try { return File.Exists(ListFile) ? JsonUtility.FromJson<Tracked>(File.ReadAllText(ListFile)) ?? new Tracked() : new Tracked(); }
-            catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException || ex is ArgumentException) { return new Tracked(); }
+            if (tracked == null)
+            {
+                try { tracked = File.Exists(ListFile) ? JsonUtility.FromJson<Tracked>(File.ReadAllText(ListFile)) ?? new Tracked() : new Tracked(); }
+                catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException || ex is ArgumentException) { tracked = new Tracked(); }
+            }
+            return new Tracked { guids = new List<string>(tracked.guids) };
         }
 
         private static void WriteList(Tracked list)
         {
+            tracked = new Tracked { guids = new List<string>(list.guids) };
             try { Directory.CreateDirectory(Path.GetDirectoryName(ListFile)); File.WriteAllText(ListFile, JsonUtility.ToJson(list)); }
             catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException) { Debug.LogWarning("[Orbiters] Could not remember generated files: " + ex.Message); }
         }

@@ -96,4 +96,24 @@ public sealed class GeneratedAssetsTests
         Assert.That(ProjectReferences.MayUseOthers(folder + "/Override.overrideController"), Is.True);
         Assert.That(ProjectReferences.MayUseOthers(folder + "/Picture.png"), Is.False);
     }
+
+    // TKV-28: a scan with nothing imported since the last one gives that one's map at once; an import is seen by the next.
+    [UnityTest] public IEnumerator AScanReusesTheLastMapUntilAFileIsImported()
+    {
+        var clip = new AnimationClip { name = "Idle" };
+        AssetDatabase.CreateAsset(clip, folder + "/Idle.anim");
+        var first = ProjectReferences.ScanAsync();
+        yield return Wait(first);
+        var again = ProjectReferences.ScanAsync();
+        yield return Wait(again);
+        Assert.AreSame(first.Result, again.Result, "nothing imported since");
+        Assert.That(again.Result.UsersOf(folder + "/Idle.anim"), Is.Empty);
+
+        UnityEditor.Animations.AnimatorController.CreateAnimatorControllerAtPathWithClip(folder + "/Idle.controller", clip);
+        AssetDatabase.SaveAssets();
+        var after = ProjectReferences.ScanAsync();
+        yield return Wait(after);
+        Assert.AreNotSame(first.Result, after.Result);
+        Assert.That(after.Result.UsersOf(folder + "/Idle.anim"), Does.Contain(folder + "/Idle.controller"));
+    }
 }
