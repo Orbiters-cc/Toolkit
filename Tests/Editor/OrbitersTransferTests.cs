@@ -222,12 +222,70 @@ public sealed class OrbitersTransferTests
         Assert.That(OrbitersHttp.ServerError(null), Is.Null);
     }
 
+    // Review of XPK-18: credentials in custom headers follow the token's rule: never to another port or host.
+    [UnityTest] public IEnumerator CredentialHeadersNeverGoToAnotherServer()
+    {
+        using (var other = new Server())
+        {
+            var headers = new Dictionary<string, string> { ["Authorization"] = "Bearer custom", ["X-Api-Key"] = "k", ["Cookie"] = "c=1", ["X-Trace"] = "t" };
+            server.Routes["/api/port"] = _ => Server.Redirect(other.Url + "/api/landed");
+            other.Routes["/api/landed"] = _ => Server.Answer(200, "{}");
+            var port = OrbitersHttp.TextAsync(server.Url + "/api/port", null, default, OrbitersHttpKind.Api, headers);
+            yield return Wait(port);
+            Assert.That(port.Exception, Is.Null);
+            Assert.That(other.Asked("/api/landed"), Is.True);
+            foreach (string name in new[] { "Authorization", "X-Api-Key", "Cookie" }) Assert.That(other.Header("/api/landed", name), Is.Null, name + " to another port");
+            Assert.That(other.Header("/api/landed", "X-Trace"), Is.EqualTo("t"), "headers without credentials go on");
+
+            server.Routes["/api/host"] = _ => Server.Redirect("http://localhost:" + server.Port + "/api/landed-host");
+            server.Routes["/api/landed-host"] = _ => Server.Answer(200, "{}");
+            var host = OrbitersHttp.TextAsync(server.Url + "/api/host", null, default, OrbitersHttpKind.Api, headers);
+            yield return Wait(host);
+            Assert.That(host.Exception, Is.Null);
+            foreach (string name in new[] { "Authorization", "X-Api-Key", "Cookie" }) Assert.That(server.Header("/api/landed-host", name), Is.Null, name + " to another host");
+
+            server.Routes["/api/same"] = _ => Server.Redirect("/api/landed-same");
+            server.Routes["/api/landed-same"] = _ => Server.Answer(200, "{}");
+            var same = OrbitersHttp.TextAsync(server.Url + "/api/same", null, default, OrbitersHttpKind.Api, headers);
+            yield return Wait(same);
+            Assert.That(server.Header("/api/landed-same", "X-Api-Key"), Is.EqualTo("k"), "an API call keeps them on the same server");
+        }
+    }
+
+    // Review of XPK-18: an answer whose body stops arriving ends with the caller's cancellation, a success or an error.
+    [UnityTest] public IEnumerator AStalledBodyEndsWithTheCancellation()
+    {
+        server.Routes["/api/stalled"] = _ => Server.Partial(200, 1000, "{\"a\":");
+        server.Routes["/api/stalled-error"] = _ => Server.Partial(409, 1000, "{\"error\":");
+        server.Holds["/api/stalled"] = true;
+        server.Holds["/api/stalled-error"] = true;
+        foreach (string path in new[] { "/api/stalled", "/api/stalled-error" })
+        {
+            var watch = System.Diagnostics.Stopwatch.StartNew();
+            var cancel = new CancellationTokenSource(1500);
+            var task = OrbitersHttp.JsonAsync<object>(System.Net.Http.HttpMethod.Post, server.Url + path, new { a = 1 }, null, cancel.Token);
+            yield return Wait(task);
+            Assert.That(task.IsCanceled, Is.True, path + ": " + task.Exception?.GetBaseException().Message);
+            Assert.That(watch.ElapsedMilliseconds, Is.LessThan(15000), path);
+        }
+        server.Routes["/stalled-file"] = _ => Server.Partial(200, 100000, "partial");
+        server.Holds["/stalled-file"] = true;
+        var download = new CancellationTokenSource(1500);
+        var file = OrbitersTransfer.DownloadFileAsync(server.Url + "/stalled-file", Path.Combine(folder, "file"), null, null, download.Token, retries: 0);
+        yield return Wait(file);
+        Assert.That(file.Result.Cancelled, Is.True, file.Result.Error);
+    }
+
     // A minimal HTTP/1.1 server: one request per connection, answers from Routes, remembers each path's Authorization.
     private sealed class Server : IDisposable
     {
         public readonly ConcurrentDictionary<string, Func<string, byte[]>> Routes = new ConcurrentDictionary<string, Func<string, byte[]>>();
         private readonly ConcurrentDictionary<string, string> authorization = new ConcurrentDictionary<string, string>();
         private readonly ConcurrentDictionary<string, long> received = new ConcurrentDictionary<string, long>();
+        private readonly ConcurrentDictionary<string, string> heads = new ConcurrentDictionary<string, string>();
+        /// <summary>Paths whose answer is written and then left open, unfinished, until the server stops.</summary>
+        public readonly ConcurrentDictionary<string, bool> Holds = new ConcurrentDictionary<string, bool>();
+        public readonly int Port;
         private readonly TcpListener listener;
         private readonly CancellationTokenSource stop = new CancellationTokenSource();
         public readonly string Url;
@@ -236,12 +294,26 @@ public sealed class OrbitersTransferTests
         {
             listener = new TcpListener(IPAddress.Loopback, 0);
             listener.Start();
-            Url = "http://127.0.0.1:" + ((IPEndPoint)listener.LocalEndpoint).Port;
+            Port = ((IPEndPoint)listener.LocalEndpoint).Port;
+            Url = "http://127.0.0.1:" + Port;
             Task.Run(Loop);
         }
 
         public string Authorization(string path) => authorization.TryGetValue(path, out var value) ? value : null;
         public long Received(string path) => received.TryGetValue(path, out var value) ? value : 0;
+        /// <summary>The value of a request header the path received last, or null.</summary>
+        public string Header(string path, string name)
+        {
+            if (!heads.TryGetValue(path, out var head)) return null;
+            foreach (string line in head.Split(new[] { "\r\n" }, StringSplitOptions.None))
+                if (line.StartsWith(name + ":", StringComparison.OrdinalIgnoreCase)) return line.Substring(name.Length + 1).Trim();
+            return null;
+        }
+        public bool Asked(string path) => heads.ContainsKey(path);
+
+        /// <summary>An answer announcing <paramref name="announced"/> bytes and bringing only <paramref name="start"/>.</summary>
+        public static byte[] Partial(int status, int announced, string start) =>
+            Encoding.ASCII.GetBytes("HTTP/1.1 " + status + " Status\r\nContent-Type: application/json\r\nContent-Length: " + announced + "\r\n\r\n" + start);
 
         public static byte[] Ok(byte[] body, bool announce = true)
         {
@@ -293,6 +365,7 @@ public sealed class OrbitersTransferTests
                     var lines = head.ToString().Split(new[] { "\r\n" }, StringSplitOptions.None);
                     string target = lines[0].Split(' ')[1];
                     string path = target.Split('?')[0];
+                    heads[path] = head.ToString();
                     long length = 0;
                     foreach (string line in lines)
                     {
@@ -305,6 +378,8 @@ public sealed class OrbitersTransferTests
                     received[path] = total;
                     var answer = Routes.TryGetValue(path, out var route) ? route(target) : Encoding.ASCII.GetBytes("HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
                     stream.Write(answer, 0, answer.Length);
+                    stream.Flush();
+                    if (Holds.ContainsKey(path)) stop.Token.WaitHandle.WaitOne();
                 }
                 catch (IOException) { }
                 catch (ObjectDisposedException) { }
