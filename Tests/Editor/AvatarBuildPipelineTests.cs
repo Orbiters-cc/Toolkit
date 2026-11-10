@@ -60,6 +60,8 @@ public sealed class AvatarBuildPipelineTests
         ("Thry", "Thry.ThryEditor.UploadCallbacks.VRCAutoAnchor", 0),
         ("Thry", "Thry.ThryEditor.ShaderOptimizer+LockMaterialsOnUpload", 100),
         ("Orbiters.MyAvatar", "Orbiters.MyAvatar.Editor.Optimization.UploadOptimizer+Materials", 9000),
+        // N4N0 hides its wearer from its own recordings (Toolkit 0.4.18): after every material step, before the build data.
+        ("Orbiters.Toolkit", "Orbiters.Toolkit.Editor.VRChat.N4N0HideSelfHook", 9500),
         ("VRCFury", "VF.Hooks.ParameterCompressorHook", int.MaxValue - 100),
     };
 
@@ -105,6 +107,7 @@ public sealed class AvatarBuildPipelineTests
     {
         "Orbiters.Toolkit.Editor.VRChat.N4N0PlatformHook", "Orbiters.Toolkit.Editor.VRChat.N4N0CaptureHook",
         "Orbiters.Toolkit.Editor.VRChat.N4N0MirrorHook", "Orbiters.Toolkit.Editor.VRChat.N4N0PicturesHook",
+        "Orbiters.Toolkit.Editor.VRChat.N4N0HideSelfHook",
         "Orbiters.Toolkit.Editor.VRChat.Refit.RefitCaptureHook", "Orbiters.Toolkit.Editor.VRChat.Refit.RefitKeptFitsHook",
         "Orbiters.Toolkit.Editor.VRChat.Refit.RefitLinkHook", "Orbiters.Toolkit.Editor.VRChat.Refit.RefitShrinkHook",
     };
