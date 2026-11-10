@@ -166,6 +166,22 @@ namespace Orbiters.Toolkit.Editor.Tests
             Assert.That(signatures[3], Is.EqualTo(0UL), "not moved");
         }
 
+        // Review: the lowest old vertex is the source even where a frame leaves it still (its zero wins over another's move).
+        [Test]
+        public void RemapKeepsTheLowestVertexEvenWhenItIsStill()
+        {
+            var moving = new BlendShapeTable.Frame(100f, new[] { 1 }, new[] { Vector3.up });
+            var both = new BlendShapeTable.Frame(50f, new[] { 0, 1 }, new[] { Vector3.right, Vector3.up });
+            var table = new BlendShapeTable(2, new[] { new BlendShapeTable.Shape("a", new[] { both, moving }) });
+            var remapped = table.Remap(new[] { 0, 0 }, 1);
+            var dense = new Vector3[1];
+            remapped.Densify(0, 0, dense);
+            Assert.That(dense[0], Is.EqualTo(Vector3.right), "vertex 0's offset, not vertex 1's");
+            remapped.Densify(0, 1, dense);
+            Assert.That(dense[0], Is.EqualTo(Vector3.zero), "vertex 0 is still in this frame, so the new vertex is too");
+            Assert.That(remapped.Shapes[0].Frames[1].Count, Is.EqualTo(0));
+        }
+
         [Test]
         public void FramesRejectUnsortedIndices()
         {

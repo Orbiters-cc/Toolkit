@@ -344,6 +344,17 @@ namespace Orbiters.Toolkit.Meshes
         {
             if (oldToNew == null) throw new ArgumentNullException(nameof(oldToNew));
             if (oldToNew.Length != VertexCount) throw new ArgumentException("One entry per vertex of the table.", nameof(oldToNew));
+            // Each new vertex's source, decided once for every frame: the lowest old vertex mapped onto it, whether a frame
+            // moves it or not (a frame that leaves it still leaves the new vertex still).
+            var sourceOf = new int[newVertexCount];
+            for (int v = 0; v < newVertexCount; v++) sourceOf[v] = -1;
+            for (int v = 0; v < oldToNew.Length; v++)
+            {
+                int to = oldToNew[v];
+                if (to < 0) continue;
+                if (to >= newVertexCount) throw new ArgumentException("A vertex maps past " + newVertexCount + ".", nameof(oldToNew));
+                if (sourceOf[to] < 0) sourceOf[to] = v;
+            }
             var result = new Shape[shapes.Length];
             var keys = new List<long>();
             for (int s = 0; s < shapes.Length; s++)
@@ -360,32 +371,25 @@ namespace Orbiters.Toolkit.Meshes
                     for (int k = 0; k < indices.Length; k++)
                     {
                         int to = oldToNew[indices[k]];
-                        if (to < 0) continue;
-                        if (to >= newVertexCount) throw new ArgumentException("A vertex maps past " + newVertexCount + ".", nameof(oldToNew));
+                        if (to < 0 || sourceOf[to] != indices[k]) continue;
                         if (to <= last) sorted = false;
                         last = to;
-                        // New index first, then the entry: sorting keeps the lowest old vertex first among equals.
                         keys.Add((long)to << 32 | (uint)k);
                     }
                     if (!sorted) keys.Sort();
-                    int count = 0;
-                    for (int k = 0; k < keys.Count; k++)
-                        if (k == 0 || (int)(keys[k] >> 32) != (int)(keys[k - 1] >> 32)) count++;
+                    int count = keys.Count;
                     var newIndices = new int[count];
                     var deltas = new Vector3[count];
                     var normals = frame.HasNormals ? new Vector3[count] : null;
                     var tangents = frame.HasTangents ? new Vector3[count] : null;
                     ReadOnlySpan<Vector3> sd = frame.Deltas, sn = frame.Normals, st = frame.Tangents;
-                    for (int k = 0, o = 0; k < keys.Count; k++)
+                    for (int o = 0; o < count; o++)
                     {
-                        int to = (int)(keys[k] >> 32);
-                        if (k > 0 && to == (int)(keys[k - 1] >> 32)) continue;
-                        int from = (int)(keys[k] & 0xFFFFFFFF);
-                        newIndices[o] = to;
+                        int from = (int)(keys[o] & 0xFFFFFFFF);
+                        newIndices[o] = (int)(keys[o] >> 32);
                         deltas[o] = sd[from];
                         if (normals != null) normals[o] = sn[from];
                         if (tangents != null) tangents[o] = st[from];
-                        o++;
                     }
                     frames[f] = new Frame(frame.Weight, newIndices, deltas, normals, tangents);
                 }
