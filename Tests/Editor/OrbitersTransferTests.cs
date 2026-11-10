@@ -9,6 +9,8 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using NUnit.Framework;
+using Orbiters.Toolkit;
+using Orbiters.Toolkit.Editor;
 using Orbiters.Toolkit.Editor.Net;
 using UnityEditor;
 using UnityEngine.TestTools;
@@ -133,6 +135,93 @@ public sealed class OrbitersTransferTests
         Assert.That(returned, Is.LessThan(Math.Max(50, done / 4)), "the editor thread is not held while the body is written");
     }
 
+    // XPK-18: the shared client hashes a download as it arrives (no second read of the file).
+    [UnityTest] public IEnumerator ADownloadIsHashedAsItArrives()
+    {
+        var bytes = new byte[300000];
+        new Random(7).NextBytes(bytes);
+        server.Routes["/file"] = _ => Server.Ok(bytes);
+        string destination = Path.Combine(folder, "file");
+        var task = OrbitersTransfer.DownloadFileAsync(server.Url + "/file", destination, null);
+        yield return Wait(task);
+        Assert.That(task.Result.Success, Is.True, task.Result.Error);
+        Assert.That(task.Result.Sha256, Is.EqualTo(UnityPackageFiles.FileHash(destination)));
+        Assert.That(task.Result.Bytes, Is.EqualTo(bytes.Length));
+    }
+
+    // The upload streams the same bytes the temporary-file writer wrote: same parts, same length (boundaries are as long).
+    [UnityTest] public IEnumerator AnUploadSendsTheSameBodyAsTheFileWriter()
+    {
+        server.Routes["/upload"] = _ => Server.Answer(200, "{\"id\":1}");
+        string file = Path.Combine(folder, "package.bin");
+        File.WriteAllBytes(file, new byte[12345]);
+        var parts = new[] { OrbitersTransfer.Part.Field("metadata", "{\"name\":\"Hat é\"}"), OrbitersTransfer.Part.File("package", file) };
+        var task = OrbitersTransfer.UploadMultipartAsync(server.Url + "/upload", "secret-token", parts);
+        yield return Wait(task);
+        Assert.That(task.Result.Success, Is.True, task.Result.Error);
+        Assert.That(task.Result.Body, Is.EqualTo("{\"id\":1}"));
+        string written = Path.Combine(folder, "body.tmp");
+        OrbitersTransfer.WriteMultipart(written, "----OrbitersUpload" + Guid.NewGuid().ToString("N"), parts);
+        Assert.That(server.Received("/upload"), Is.EqualTo(new FileInfo(written).Length));
+        Assert.That(server.Authorization("/upload"), Is.EqualTo("Bearer secret-token"));
+    }
+
+    [UnityTest] public IEnumerator ApiErrorsCarryTheServersMessage()
+    {
+        server.Routes["/api/broken"] = _ => Server.Answer(409, "{\"error\":\"Taken \\u00e9\",\"detail\":{\"error\":\"inner\"}}");
+        var task = OrbitersHttp.JsonAsync<object>(System.Net.Http.HttpMethod.Post, server.Url + "/api/broken", new { a = 1 });
+        yield return Wait(task);
+        var error = task.Exception?.GetBaseException() as OrbitersHttpException;
+        Assert.That(error, Is.Not.Null);
+        Assert.That(error.StatusCode, Is.EqualTo(409));
+        Assert.That(error.Message, Is.EqualTo("Taken é"), "the top-level error, escapes decoded");
+        Assert.That(error, Is.InstanceOf<InvalidOperationException>(), "as the API client's errors always were");
+
+        var old = OrbitersApi.SendAsync<object>(server.Url + "/api/broken", null, new { a = 1 });
+        yield return Wait(old);
+        Assert.That(old.Exception?.GetBaseException(), Is.InstanceOf<InvalidOperationException>());
+        Assert.That(old.Exception.GetBaseException().Message, Is.EqualTo("Taken é"));
+    }
+
+    [UnityTest] public IEnumerator NoAnswerIsOfflineAndTheOldClientStillThrowsItsNetworkError()
+    {
+        // A port nothing listens on.
+        var probe = new TcpListener(IPAddress.Loopback, 0);
+        probe.Start();
+        int port = ((IPEndPoint)probe.LocalEndpoint).Port;
+        probe.Stop();
+        string url = "http://127.0.0.1:" + port + "/api/x";
+        var task = OrbitersHttp.JsonAsync<object>(System.Net.Http.HttpMethod.Post, url, new { a = 1 });
+        yield return Wait(task);
+        var error = task.Exception?.GetBaseException() as OrbitersHttpException;
+        Assert.That(error, Is.Not.Null);
+        Assert.That(error.Offline, Is.True);
+        Assert.That(OrbitersHttp.Offline, Is.True);
+
+        var old = OrbitersApi.SendAsync<object>(url, null, new { a = 1 });
+        yield return Wait(old);
+        Assert.That(old.Exception?.GetBaseException(), Is.InstanceOf<System.Net.Http.HttpRequestException>());
+    }
+
+    [UnityTest] public IEnumerator ApiRedirectsKeepTheTokenOnlyOnTheSameServer()
+    {
+        server.Routes["/api/old"] = _ => Server.Redirect("/api/new");
+        server.Routes["/api/new"] = _ => Server.Answer(200, "{\"ok\":true}");
+        var task = OrbitersHttp.JsonAsync<Dictionary<string, bool>>(System.Net.Http.HttpMethod.Get, server.Url + "/api/old", null, "secret-token");
+        yield return Wait(task);
+        Assert.That(task.Exception, Is.Null);
+        Assert.That(task.Result["ok"], Is.True);
+        Assert.That(server.Authorization("/api/new"), Is.EqualTo("Bearer secret-token"));
+    }
+
+    [Test] public void ServerErrorsAreReadFromTheTopLevelOnly()
+    {
+        Assert.That(OrbitersHttp.ServerError("{\"error\":\"a \\\"quote\\\"\"}"), Is.EqualTo("a \"quote\""));
+        Assert.That(OrbitersHttp.ServerError("{\"data\":{\"error\":\"nested\"}}"), Is.Null);
+        Assert.That(OrbitersHttp.ServerError("<html>502</html>"), Is.Null);
+        Assert.That(OrbitersHttp.ServerError(null), Is.Null);
+    }
+
     // A minimal HTTP/1.1 server: one request per connection, answers from Routes, remembers each path's Authorization.
     private sealed class Server : IDisposable
     {
@@ -157,6 +246,16 @@ public sealed class OrbitersTransferTests
         public static byte[] Ok(byte[] body, bool announce = true)
         {
             var head = Encoding.ASCII.GetBytes("HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\n" + (announce ? "Content-Length: " + body.Length + "\r\n" : "") + "Connection: close\r\n\r\n");
+            var all = new byte[head.Length + body.Length];
+            Buffer.BlockCopy(head, 0, all, 0, head.Length);
+            Buffer.BlockCopy(body, 0, all, head.Length, body.Length);
+            return all;
+        }
+
+        public static byte[] Answer(int status, string json)
+        {
+            var body = Encoding.UTF8.GetBytes(json);
+            var head = Encoding.ASCII.GetBytes("HTTP/1.1 " + status + " Status\r\nContent-Type: application/json\r\nContent-Length: " + body.Length + "\r\nConnection: close\r\n\r\n");
             var all = new byte[head.Length + body.Length];
             Buffer.BlockCopy(head, 0, all, 0, head.Length);
             Buffer.BlockCopy(body, 0, all, head.Length, body.Length);

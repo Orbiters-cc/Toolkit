@@ -2,6 +2,7 @@
   "name": "Orbiters.Toolkit.Editor.Vpm",
   "rootNamespace": "Orbiters.Toolkit.Editor.Vpm",
   "references": [
+    "Orbiters.Toolkit",
     "Orbiters.Toolkit.Editor",
     "com.vrchat.core.vpm-resolver.Editor"
   ],

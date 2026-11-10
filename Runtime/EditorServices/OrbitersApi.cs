@@ -1,34 +1,33 @@
 #if UNITY_EDITOR
-using System;
 using System.Net.Http;
-using System.Net.Http.Headers;
-using System.Text;
+using System.Runtime.ExceptionServices;
 using System.Threading;
 using System.Threading.Tasks;
-using Newtonsoft.Json;
-using Newtonsoft.Json.Linq;
+using Orbiters.Toolkit;
 
+/// <summary>
+/// The Orbiters API as it was called before <see cref="OrbitersHttp"/>: kept for the packages that call it, as a thin call
+/// into <see cref="OrbitersHttp.JsonAsync{T}"/>. An error answer throws an InvalidOperationException (an
+/// <see cref="OrbitersHttpException"/>) with the server's message; no answer throws the HttpRequestException behind it, and a
+/// timeout a TaskCanceledException, as before.
+/// </summary>
 public static class OrbitersApi
 {
-    internal static readonly HttpClient Client = new HttpClient { Timeout = TimeSpan.FromSeconds(90) };
-
     /// <summary>GET without a payload, POST with one, unless <paramref name="method"/> says otherwise (e.g. PUT).</summary>
     /// <param name="failure">The message when the server gives no reason; {0} is the HTTP status code.</param>
     public static async Task<T> SendAsync<T>(string url, string token, object payload = null, CancellationToken cancellation = default, HttpMethod method = null,
         string failure = null)
     {
-        using var request = new HttpRequestMessage(method ?? (payload == null ? HttpMethod.Get : HttpMethod.Post), url);
-        if (!string.IsNullOrEmpty(token)) request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
-        if (payload != null) request.Content = new StringContent(JsonConvert.SerializeObject(payload), Encoding.UTF8, "application/json");
-        using var response = await Client.SendAsync(request, cancellation);
-        string body = await response.Content.ReadAsStringAsync();
-        if (!response.IsSuccessStatusCode)
+        try
         {
-            string message = string.Format(failure ?? "Orbiters returned HTTP {0}. Offline matching is still available.", (int)response.StatusCode);
-            try { message = JObject.Parse(body).Value<string>("error") ?? message; } catch (JsonException) { }
-            throw new InvalidOperationException(message);
+            return await OrbitersHttp.JsonAsync<T>(method ?? (payload == null ? HttpMethod.Get : HttpMethod.Post), url, payload, token, cancellation,
+                failure ?? "Orbiters returned HTTP {0}. Offline matching is still available.");
         }
-        return string.IsNullOrWhiteSpace(body) ? default : JsonConvert.DeserializeObject<T>(body);
+        catch (OrbitersHttpException error) when (error.Offline)
+        {
+            if (error.InnerException is HttpRequestException network) ExceptionDispatchInfo.Capture(network).Throw();
+            throw new TaskCanceledException(error.Message);
+        }
     }
 }
 #endif

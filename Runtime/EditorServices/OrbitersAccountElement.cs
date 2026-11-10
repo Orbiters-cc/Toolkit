@@ -81,11 +81,11 @@ public sealed class OrbitersAccountElement : VisualElement
                 catch (Exception) { if (source.IsCancellationRequested || current != revision) return; }
             string url = PictureUrl(auth.avatarUrl);
             if (picture || url == null) return;
-            using var req = UnityWebRequest.Get(url); req.timeout = 8;
-            var operation = req.SendWebRequest();
-            while (!operation.isDone) { if (source.IsCancellationRequested) { req.Abort(); return; } await System.Threading.Tasks.Task.Yield(); }
-            if (source.IsCancellationRequested || current != revision || req.result != UnityWebRequest.Result.Success) return;
-            picture = OrbitersAccountService.RememberPicture(url, req.downloadHandler.data);
+            byte[] bytes;
+            try { bytes = await Orbiters.Toolkit.OrbitersHttp.BytesAsync(url, null, source.Token, Orbiters.Toolkit.OrbitersHttpKind.Picture); }
+            catch (Orbiters.Toolkit.OrbitersHttpException) { return; }
+            if (source.IsCancellationRequested || current != revision) return;
+            picture = OrbitersAccountService.RememberPicture(url, bytes);
             if (picture) Draw(status.state);
         }
         catch (OperationCanceledException) { }

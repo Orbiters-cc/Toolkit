@@ -16,7 +16,6 @@ namespace Orbiters.Toolkit.Editor.Vpm
     /// </summary>
     public static class VpmListingReader
     {
-        private static readonly HttpClient Client = new HttpClient { Timeout = TimeSpan.FromSeconds(30) };
         private static readonly Dictionary<string, (DateTime at, List<VpmCandidate> packages)> Cache =
             new Dictionary<string, (DateTime, List<VpmCandidate>)>(StringComparer.OrdinalIgnoreCase);
 
@@ -28,11 +27,11 @@ namespace Orbiters.Toolkit.Editor.Vpm
             try
             {
                 if (!Uri.TryCreate(url, UriKind.Absolute, out var uri) || uri.Scheme != Uri.UriSchemeHttps) return packages;
-                using (var response = await Client.GetAsync(uri, cancellation))
-                {
-                    if (!response.IsSuccessStatusCode) return packages;
-                    packages = Parse(await response.Content.ReadAsStringAsync(), url);
-                }
+                string json;
+                // An error answer: nothing listed, and asked again next time.
+                try { json = await OrbitersHttp.TextAsync(uri.AbsoluteUri, null, cancellation, OrbitersHttpKind.Listing); }
+                catch (OrbitersHttpException error) when (!error.Offline) { return packages; }
+                packages = await Task.Run(() => Parse(json, url), cancellation);
             }
             catch (Exception ex) when (!(ex is OperationCanceledException))
             {
