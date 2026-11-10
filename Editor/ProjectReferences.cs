@@ -50,6 +50,8 @@ namespace Orbiters.Toolkit.Editor
         /// </summary>
         public static async Task<ProjectReferences> ScanAsync(Action<float, string> progress = null, CancellationToken cancellation = default)
         {
+            // A scan asked with a token already cancelled does nothing (kept readings can make the rest too quick to notice it).
+            cancellation.ThrowIfCancellationRequested();
             var total = Stopwatch.StartNew();
             var map = new ProjectReferences { roots = Roots() };
             ImportStamps.Load();
