@@ -164,17 +164,11 @@ namespace Orbiters.Toolkit.Editor.VRChat.Attachments
 
         public static string ShortHash(string text)
         {
-            using (var sha = SHA256.Create()) return string.Concat(sha.ComputeHash(Encoding.UTF8.GetBytes(text ?? "")).Take(4).Select(b => b.ToString("x2")));
+            return Orbiters.Toolkit.Hashing.Sha256(text ?? "").Substring(0, 8);
         }
 
         /// <summary>Makes an Assets/ folder and the folders above it.</summary>
-        public static void EnsureFolder(string folder)
-        {
-            if (AssetDatabase.IsValidFolder(folder)) return;
-            string parent = Path.GetDirectoryName(folder)?.Replace('\\', '/');
-            if (!string.IsNullOrEmpty(parent)) EnsureFolder(parent);
-            AssetDatabase.CreateFolder(parent, Path.GetFileName(folder));
-        }
+        public static void EnsureFolder(string folder) => AssetPaths.EnsureFolder(folder);
 
         /// <summary>Writes a file into an Assets/ folder and imports it (kept when it is already there with these bytes).</summary>
         public static string WriteAsset(string folder, string fileName, byte[] bytes)
@@ -415,7 +409,7 @@ namespace Orbiters.Toolkit.Editor.VRChat.Attachments
                 var bytes = variant.FileBytes(name);
                 text.Append('|').Append(name.ToLowerInvariant()).Append(':').Append(bytes == null ? "missing" : PartVariant.Hash(bytes));
             }
-            using (var sha = SHA256.Create()) return string.Concat(sha.ComputeHash(Encoding.UTF8.GetBytes(text.ToString())).Take(8).Select(b => b.ToString("x2")));
+            return Orbiters.Toolkit.Hashing.Sha256(text.ToString()).Substring(0, 16);
         }
 
         // The pictures a values variant names, copied in and imported.

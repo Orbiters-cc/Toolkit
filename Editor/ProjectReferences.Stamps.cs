@@ -4,7 +4,6 @@ using System.IO;
 using UnityEditor;
 using UnityEditor.Experimental;
 using UnityEngine;
-using PackageInfo = UnityEditor.PackageManager.PackageInfo;
 
 namespace Orbiters.Toolkit.Editor
 {
@@ -91,23 +90,12 @@ namespace Orbiters.Toolkit.Editor
             private static void Record(string path)
             {
                 if (!Wanted(path)) return;
-                string full = FullPath(path);
+                string full = Storage.AssetPaths.FullPath(path);
                 if (full == null) return;
                 var file = new FileInfo(full);
                 if (!file.Exists) { Forget(path); return; }
                 entries[path] = (Stamp.Of(file, new FileInfo(full + ".meta")), AssetDatabase.GetAssetDependencyHash(path).ToString());
                 MarkDirty();
-            }
-
-            internal static string FullPath(string path)
-            {
-                if (path.StartsWith("Packages/", StringComparison.Ordinal))
-                {
-                    var package = PackageInfo.FindForAssetPath(path);
-                    if (package == null || string.IsNullOrEmpty(package.resolvedPath) || string.IsNullOrEmpty(package.assetPath)) return null;
-                    return Path.Combine(package.resolvedPath, path.Substring(package.assetPath.TrimEnd('/').Length).TrimStart('/'));
-                }
-                return Path.Combine(ProjectFolder, path);
             }
 
             private static void MarkDirty()

@@ -98,12 +98,7 @@ namespace Orbiters.Toolkit.Editor.VRChat.Attachments
             if (copies.Count > 0) BlendShapeSync.Apply(avatarRoot, copies, "My Avatar accessories");
         }
 
-        private static int Depth(Transform t)
-        {
-            int depth = 0;
-            for (; t != null; t = t.parent) depth++;
-            return depth;
-        }
+        private static int Depth(Transform t) => Orbiters.Toolkit.HierarchyPaths.Depth(t);
     }
 
     internal sealed class AttachmentBuildHook : BuildStep

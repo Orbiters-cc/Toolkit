@@ -94,11 +94,7 @@ namespace Orbiters.Toolkit.Editor
 
         private static string ReceiptPath(string path) => Path.Combine(Path.GetDirectoryName(path), ".orbiters-toolkit-install.json");
 
-        private static string Hash(string content)
-        {
-            using (var sha = SHA256.Create())
-                return BitConverter.ToString(sha.ComputeHash(Encoding.UTF8.GetBytes(content))).Replace("-", "").ToLowerInvariant();
-        }
+        private static string Hash(string content) => Orbiters.Toolkit.Hashing.Sha256(content);
 
         private static void WriteAtomically(string path, string content)
         {

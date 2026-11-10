@@ -350,11 +350,6 @@ namespace Orbiters.Toolkit.Editor.VRChat.Posing
             return false;
         }
 
-        private static int Depth(Transform t)
-        {
-            int depth = 0;
-            for (; t != null; t = t.parent) depth++;
-            return depth;
-        }
+        private static int Depth(Transform t) => Orbiters.Toolkit.HierarchyPaths.Depth(t);
     }
 }

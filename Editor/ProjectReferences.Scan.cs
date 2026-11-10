@@ -21,7 +21,7 @@ namespace Orbiters.Toolkit.Editor
             public Root(string prefix, string folder, bool imported) { Prefix = prefix; Folder = folder; Imported = imported; }
         }
 
-        private static string ProjectFolder => Path.GetDirectoryName(Application.dataPath);
+        private static string ProjectFolder => Storage.ProjectPaths.Root;
 
         /// <summary>
         /// Assets/, ProjectSettings/ and every embedded or local package (the packages a user can edit; registry, Git and
