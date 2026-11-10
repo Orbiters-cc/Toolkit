@@ -394,46 +394,74 @@ public sealed class GeneratedAssetsTests
         finally { if (temporary.Contains("OrbitersEncodings-") && Directory.Exists(temporary)) Directory.Delete(temporary, true); }
     }
 
-    // The kept scan: after a script reload, a scan reads only the files whose stamp (size, write time, of the file and
-    // of its .meta) changed; one changed by size or by time alone is read again; a deleted file's entry goes.
+    // ---- The kept scan ----
+
+    private static string KeptPath() => Path.Combine(Path.GetTempPath(), "OrbitersKeptScan-" + Guid.NewGuid().ToString("N").Substring(0, 8) + ".bin");
+
+    private IEnumerator ScanAfterReload(Action<ProjectReferences> then)
+    {
+        ProjectReferences.KeptScan.ForgetMemory();
+        var scan = ProjectReferences.ScanAsync();
+        yield return Wait(scan);
+        var map = TaskResults.Done(scan, "the scan");
+        yield return Wait(ProjectReferences.KeptScan.Saving);
+        TaskResults.Done(ProjectReferences.KeptScan.Saving, "keeping the scan");
+        then(map);
+    }
+
+    private string Mesh(string name)
+    {
+        string path = folder + "/" + name + ".asset";
+        AssetDatabase.CreateAsset(new Mesh { name = name }, path);
+        return path;
+    }
+
+    private static void Text(string path, string text)
+    {
+        File.WriteAllText(path, text);
+        AssetDatabase.ImportAsset(path, ImportAssetOptions.ForceSynchronousImport);
+    }
+
+    // After a script reload, a scan reads only the files whose stamp changed, and finds what they now name: a file that
+    // names another GUID (another size), a .meta that does; one changed by its write time alone is read again; a deleted
+    // file's entry goes.
     [UnityTest] public IEnumerator AScanAfterAReloadReadsOnlyWhatChanged()
     {
-        string kept = Path.Combine(Path.GetTempPath(), "OrbitersKeptScan-" + Guid.NewGuid().ToString("N").Substring(0, 8) + ".bin");
+        string kept = KeptPath();
+        string x = Mesh("X"), y = Mesh("Y"), z = Mesh("Z");
         string a = folder + "/A.txt", b = folder + "/B.txt", c = folder + "/C.txt";
-        File.WriteAllText(a, "a");
-        File.WriteAllText(b, "b");
-        File.WriteAllText(c, "c");
-        AssetDatabase.Refresh(ImportAssetOptions.ForceSynchronousImport);
+        Text(a, "uses " + AssetDatabase.AssetPathToGUID(x));
+        Text(b, "b");
+        Text(c, "c");
         using (ProjectReferences.KeptScan.Use(kept))
         {
             try
             {
-                var first = ProjectReferences.ScanAsync();
-                yield return Wait(first);
-                TaskResults.Done(first);
-                yield return Wait(ProjectReferences.KeptScan.Saving);
-                Assert.That(TaskResults.Done(ProjectReferences.KeptScan.Saving), Is.True, "kept on disk");
+                yield return ScanAfterReload(map => Assert.That(map.UsersOf(x), Does.Contain(a)));
+                yield return ScanAfterReload(map =>
+                {
+                    var stats = ProjectReferences.LastScan;
+                    Assert.That(stats.KeptLoaded, Is.True);
+                    Assert.That(stats.ReadPaths, Does.Not.Contain(a).And.Not.Contain(b).And.Not.Contain(c), "unchanged: not read again");
+                    Assert.That(map.UsersOf(x), Does.Contain(a), "from the kept reading");
+                });
 
-                ProjectReferences.KeptScan.ForgetMemory();
-                var second = ProjectReferences.ScanAsync();
-                yield return Wait(second);
-                TaskResults.Done(second);
-                var stats = ProjectReferences.LastScan;
-                Assert.That(stats.KeptLoaded, Is.True);
-                Assert.That(stats.ReadPaths, Does.Not.Contain(a).And.Not.Contain(b).And.Not.Contain(c), "unchanged: not read again");
-                Assert.That(stats.FromKept, Is.GreaterThanOrEqualTo(3));
-                yield return Wait(ProjectReferences.KeptScan.Saving);
+                Text(a, "now uses " + AssetDatabase.AssetPathToGUID(y));
+                var importer = AssetImporter.GetAtPath(b);
+                importer.userData = AssetDatabase.AssetPathToGUID(z);
+                importer.SaveAndReimport();
+                File.SetLastWriteTimeUtc(c, File.GetLastWriteTimeUtc(c).AddSeconds(5));
+                yield return ScanAfterReload(map =>
+                {
+                    var stats = ProjectReferences.LastScan;
+                    Assert.That(stats.ReadPaths, Does.Contain(a).And.Contain(b).And.Contain(c), "another size, another .meta, another write time");
+                    Assert.That(map.UsersOf(y), Does.Contain(a), "the new GUID the file names");
+                    Assert.That(map.UsersOf(x), Does.Not.Contain(a), "and not the old one");
+                    Assert.That(map.UsersOf(z), Does.Contain(b), "the GUID its .meta now names");
+                });
 
-                File.WriteAllText(a, "a, longer now");
-                File.SetLastWriteTimeUtc(b, File.GetLastWriteTimeUtc(b).AddSeconds(5));
                 AssetDatabase.DeleteAsset(c);
-                ProjectReferences.KeptScan.ForgetMemory();
-                var third = ProjectReferences.ScanAsync();
-                yield return Wait(third);
-                TaskResults.Done(third);
-                Assert.That(ProjectReferences.LastScan.ReadPaths, Does.Contain(a), "another size");
-                Assert.That(ProjectReferences.LastScan.ReadPaths, Does.Contain(b), "another write time");
-                yield return Wait(ProjectReferences.KeptScan.Saving);
+                yield return ScanAfterReload(_ => { });
                 ProjectReferences.KeptScan.ForgetMemory();
                 var reloaded = ProjectReferences.KeptScan.Load(kept, new ProjectReferences.ScanStats());
                 Assert.That(reloaded.ContainsKey(a) && reloaded.ContainsKey(b), Is.True);
@@ -443,11 +471,39 @@ public sealed class GeneratedAssetsTests
         }
     }
 
-    // A cut or corrupt kept file is ignored (every file is read) and written anew; past its size bound it is not kept.
-    [Test] public void ACorruptOrTooLargeKeptScanIsIgnored()
+    // The cache's one stated assumption: a file rewritten with the same size and its write time put back is not read
+    // again (Unity's own change detection does not see it either, and does not import it again), so the scan keeps its
+    // old reading and Removable answers by it. Documented behaviour, not a wish.
+    [UnityTest] public IEnumerator ASameSizeSameTimeRewriteIsNotSeenAsUnitysIsNot()
     {
-        string kept = Path.Combine(Path.GetTempPath(), "OrbitersKeptScan-" + Guid.NewGuid().ToString("N").Substring(0, 8) + ".bin");
-        long bound = ProjectReferences.KeptScan.MaxBytes;
+        string kept = KeptPath();
+        string x = Mesh("X"), y = Mesh("Y");
+        string a = folder + "/A.txt";
+        Text(a, "uses " + AssetDatabase.AssetPathToGUID(x));
+        using (ProjectReferences.KeptScan.Use(kept))
+        {
+            try
+            {
+                yield return ScanAfterReload(map => Assert.That(map.UsersOf(x), Does.Contain(a)));
+                var time = File.GetLastWriteTimeUtc(a);
+                File.WriteAllText(a, "uses " + AssetDatabase.AssetPathToGUID(y));
+                File.SetLastWriteTimeUtc(a, time);
+                yield return ScanAfterReload(map =>
+                {
+                    Assert.That(ProjectReferences.LastScan.ReadPaths, Does.Not.Contain(a));
+                    Assert.That(map.UsersOf(y), Does.Not.Contain(a), "the rewrite is not seen");
+                    Assert.That(map.Removable(new[] { y }), Does.Contain(y), "and Removable answers by the old reading");
+                });
+            }
+            finally { if (File.Exists(kept)) File.Delete(kept); }
+        }
+    }
+
+    // A kept file in doubt is refused whole: one byte flipped anywhere (a GUID, a count, a path, a stamp, the checksum),
+    // another version, a cut. Any doubt means reading every file again.
+    [Test] public void AKeptScanInDoubtIsRefusedWhole()
+    {
+        string kept = KeptPath();
         try
         {
             using (ProjectReferences.KeptScan.Use(kept))
@@ -459,29 +515,81 @@ public sealed class GeneratedAssetsTests
                     return read;
                 }).ToList();
                 Assert.That(ProjectReferences.KeptScan.Save(kept, reads), Is.True);
-                ProjectReferences.KeptScan.ForgetMemory();
+                var whole = File.ReadAllBytes(kept);
                 var stats = new ProjectReferences.ScanStats();
+                ProjectReferences.KeptScan.ForgetMemory();
                 var loaded = ProjectReferences.KeptScan.Load(kept, stats);
                 Assert.That(stats.KeptLoaded, Is.True);
                 Assert.That(loaded["Assets/Kept/7.prefab"].Guids, Is.EquivalentTo(new[] { 7.ToString("x32") }));
                 Assert.That(loaded["Assets/Kept/7.prefab"].Stamp, Is.EqualTo(new ProjectReferences.Stamp(7, 70, 5, 50)));
 
-                var whole = File.ReadAllBytes(kept);
-                File.WriteAllBytes(kept, whole.Take(whole.Length / 2).ToArray());
+                int Find(string text)
+                {
+                    var needle = System.Text.Encoding.UTF8.GetBytes(text);
+                    for (int i = 0; i + needle.Length <= whole.Length; i++)
+                        if (whole.Skip(i).Take(needle.Length).SequenceEqual(needle)) return i;
+                    throw new InvalidOperationException(text + " is not in the kept file");
+                }
+                int path = Find("Assets/Kept/7.prefab");
+                var flips = new (string What, int At)[]
+                {
+                    ("a GUID's byte", Find(7.ToString("x32")) + 5),
+                    ("the GUID count", 16),
+                    ("a path's byte", path + 3),
+                    ("a stamp's byte", path + "Assets/Kept/7.prefab".Length + 1),
+                    ("the checksum", whole.Length - 1),
+                    ("the payload length", 9),
+                };
+                foreach (var (what, at) in flips)
+                {
+                    var changed = (byte[])whole.Clone();
+                    changed[at] ^= 0x01;
+                    Assert.That(ProjectReferences.KeptScan.Parse(changed), Is.Null, what + " flipped");
+                }
+                var otherVersion = (byte[])whole.Clone();
+                BitConverter.GetBytes(ProjectReferences.KeptScan.Version + 1).CopyTo(otherVersion, 4);
+                Assert.That(ProjectReferences.KeptScan.Parse(otherVersion), Is.Null, "another version");
+                Assert.That(ProjectReferences.KeptScan.Parse(whole.Take(whole.Length / 2).ToArray()), Is.Null, "cut");
+                Assert.That(ProjectReferences.KeptScan.Parse(whole.Concat(new byte[] { 0 }).ToArray()), Is.Null, "a byte more");
+
+                // Through Load, the same: refused, nothing loaded.
+                var flipped = (byte[])whole.Clone();
+                flipped[Find(7.ToString("x32")) + 5] ^= 0x01;
+                File.WriteAllBytes(kept, flipped);
                 ProjectReferences.KeptScan.ForgetMemory();
                 stats = new ProjectReferences.ScanStats();
-                Assert.That(ProjectReferences.KeptScan.Load(kept, stats), Is.Empty, "cut: ignored");
+                Assert.That(ProjectReferences.KeptScan.Load(kept, stats), Is.Empty);
                 Assert.That(stats.KeptLoaded, Is.False);
-                var garbage = (byte[])whole.Clone();
-                for (int i = 8; i < garbage.Length; i += 7) garbage[i] ^= 0x5A;
-                File.WriteAllBytes(kept, garbage);
-                ProjectReferences.KeptScan.ForgetMemory();
-                Assert.That(() => ProjectReferences.KeptScan.Load(kept, new ProjectReferences.ScanStats()), Throws.Nothing, "corrupt: ignored, never thrown");
+            }
+        }
+        finally { if (File.Exists(kept)) File.Delete(kept); }
+    }
 
-                Assert.That(ProjectReferences.KeptScan.Save(kept, reads), Is.True, "written anew");
-                ProjectReferences.KeptScan.ForgetMemory();
-                Assert.That(ProjectReferences.KeptScan.Load(kept, new ProjectReferences.ScanStats()), Has.Count.EqualTo(50));
+    // A count or a length larger than the bytes left is refused before anything is allocated for it.
+    [Test] public void CountsPastTheBytesLeftAreRefusedBeforeAllocating()
+    {
+        // Magic, version, a payload of 4 bytes declaring ten million GUIDs, and that payload's checksum.
+        var payload = BitConverter.GetBytes(10_000_000);
+        byte[] checksum;
+        using (var sha = System.Security.Cryptography.SHA256.Create()) checksum = sha.ComputeHash(payload);
+        var file = BitConverter.GetBytes(0x5250524Fu).Concat(BitConverter.GetBytes(ProjectReferences.KeptScan.Version))
+            .Concat(BitConverter.GetBytes((long)payload.Length)).Concat(payload).Concat(checksum).ToArray();
+        long before = GC.GetTotalMemory(false);
+        Assert.That(ProjectReferences.KeptScan.Parse(file), Is.Null);
+        Assert.That(GC.GetTotalMemory(false) - before, Is.LessThan(8L * 1024 * 1024), "no array for ten million GUIDs");
+    }
 
+    // Past its size bound nothing is kept on disk (and no old copy left), the bound checked while writing.
+    [Test] public void AKeptScanPastItsBoundIsNotKept()
+    {
+        string kept = KeptPath();
+        long bound = ProjectReferences.KeptScan.MaxBytes;
+        try
+        {
+            using (ProjectReferences.KeptScan.Use(kept))
+            {
+                var reads = Enumerable.Range(0, 500).Select(i => new ProjectReferences.FileRead { Path = "Assets/Kept/" + i + ".prefab", Stamp = new ProjectReferences.Stamp(i, i, -1, 0) }).ToList();
+                Assert.That(ProjectReferences.KeptScan.Save(kept, reads), Is.True);
                 ProjectReferences.KeptScan.MaxBytes = 512;
                 Assert.That(ProjectReferences.KeptScan.Save(kept, reads), Is.False, "past its bound");
                 Assert.That(File.Exists(kept), Is.False, "and no old copy left");
@@ -491,6 +599,41 @@ public sealed class GeneratedAssetsTests
         {
             ProjectReferences.KeptScan.MaxBytes = bound;
             if (File.Exists(kept)) File.Delete(kept);
+        }
+    }
+
+    // Deletion safety: a kept file whose reading of a user was damaged is refused, the scan reads the user again and
+    // Removable keeps the file it uses.
+    [UnityTest] public IEnumerator ADamagedKeptReadingNeverLetsAUsedFileGo()
+    {
+        string kept = KeptPath();
+        string x = Mesh("X");
+        string guid = AssetDatabase.AssetPathToGUID(x);
+        string a = folder + "/A.txt";
+        Text(a, "uses " + guid);
+        using (ProjectReferences.KeptScan.Use(kept))
+        {
+            try
+            {
+                yield return ScanAfterReload(map => Assert.That(map.UsersOf(x), Does.Contain(a)));
+                // One digit of the user's GUID changed in the kept file: without the checksum, the user would read as naming another file.
+                var bytes = File.ReadAllBytes(kept);
+                var needle = System.Text.Encoding.ASCII.GetBytes(guid);
+                int at = -1;
+                for (int i = 0; i + needle.Length <= bytes.Length && at < 0; i++)
+                    if (bytes.Skip(i).Take(needle.Length).SequenceEqual(needle)) at = i;
+                Assert.That(at, Is.GreaterThanOrEqualTo(0));
+                bytes[at] = (byte)(bytes[at] == (byte)'0' ? '1' : '0');
+                File.WriteAllBytes(kept, bytes);
+                yield return ScanAfterReload(map =>
+                {
+                    Assert.That(ProjectReferences.LastScan.KeptLoaded, Is.False, "refused");
+                    Assert.That(ProjectReferences.LastScan.FromKept, Is.Zero, "every file read as by a fresh scan");
+                    Assert.That(map.UsersOf(x), Does.Contain(a), "the user found again");
+                    Assert.That(map.Removable(new[] { x }), Is.Empty, "and the file it uses kept");
+                });
+            }
+            finally { if (File.Exists(kept)) File.Delete(kept); }
         }
     }
 }

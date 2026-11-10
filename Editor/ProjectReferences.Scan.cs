@@ -74,14 +74,17 @@ namespace Orbiters.Toolkit.Editor
             public bool UnityKnown;
             // Everything it uses: Guids and Dependencies, less its own GUID (what usedBy holds for it).
             public HashSet<string> Uses;
+            // Taken from the kept scan, with the listing entry it stands for (to read it again when Unity's hash moved).
+            public bool FromKept;
+            public Listing.Entry Entry;
 
             /// <summary>A copy of a kept reading for a new scan (Unity's part still checked against the dependency hash).</summary>
-            public FileRead Reuse()
+            public FileRead Reuse(Listing.Entry entry)
             {
                 var copy = new FileRead
                 {
                     Path = Path, Imported = Imported, Stamp = Stamp, ContentRead = ContentRead, Importer = Importer, OwnGuid = OwnGuid,
-                    DependencyHash = DependencyHash, Dependencies = Dependencies, UnityKnown = UnityKnown,
+                    DependencyHash = DependencyHash, Dependencies = Dependencies, UnityKnown = UnityKnown, FromKept = true, Entry = entry,
                 };
                 copy.Guids.UnionWith(Guids);
                 return copy;
@@ -121,9 +124,25 @@ namespace Orbiters.Toolkit.Editor
             if (read.Failure != null) throw new UncertainReferencesException(read.Path + " could not be read: " + read.Failure);
             if (read.Imported)
             {
-                // Unity's answers stand while the file's dependency hash does (its import and its importer's inputs).
-                string hash = AssetDatabase.GetAssetDependencyHash(read.Path).ToString();
-                if (!read.UnityKnown || read.DependencyHash != hash)
+                // Unity's answers stand while the file's dependency hash does (its import and its importer's inputs). A hash
+                // that cannot be had means asking Unity again, never reusing; one that moved since the kept reading also
+                // reads the file again, even with equal stamps.
+                string hash = null;
+                try
+                {
+                    var value = AssetDatabase.GetAssetDependencyHash(read.Path);
+                    if (value.isValid) hash = value.ToString();
+                }
+                catch (Exception ex) when (!(ex is UncertainReferencesException)) { hash = null; }
+                if (read.FromKept && (hash == null || read.DependencyHash != hash))
+                {
+                    var fresh = Reader.ReadOne(read.Entry, CancellationToken.None);
+                    Stats.Rereads++;
+                    if (fresh == null) return;
+                    if (fresh.Failure != null) throw new UncertainReferencesException(fresh.Path + " could not be read: " + fresh.Failure);
+                    read = fresh;
+                }
+                if (!read.UnityKnown || hash == null || read.DependencyHash != hash)
                 {
                     Stats.UnityAsked++;
                     var type = AssetDatabase.GetImporterType(read.Path);
@@ -287,7 +306,7 @@ namespace Orbiters.Toolkit.Editor
                     // version): the same bytes as far as Unity itself can tell, so the same GUIDs.
                     if (Kept != null && Kept.TryGetValue(entry.Path, out var known) && known.Stamp.Equals(entry.Stamp) && known.Imported == entry.Imported)
                     {
-                        one = known.Reuse();
+                        one = known.Reuse(entry);
                         Stats.FromKept++;
                     }
                     else

@@ -115,7 +115,8 @@ namespace Orbiters.Toolkit.Editor
 
         // Unity's part of reading each file, slice by slice: 12 ms while someone uses the editor, 100 ms when nobody does
         // (in the background, in batch mode), each slice on the next editor update rather than on a posted continuation
-        // (which the editor runs far less often than its updates when it is not in front).
+        // (which the editor runs far less often than its updates when it is not in front). A slice ends after the file
+        // that passes its budget: one file Unity takes long over (a large scene's dependencies) can make it longer.
         private async Task AddSlicedAsync(List<FileRead> found, float from, float span, Action<float, string> progress, CancellationToken cancellation)
         {
             var slice = Stopwatch.StartNew();
@@ -141,7 +142,9 @@ namespace Orbiters.Toolkit.Editor
             !UnityEngine.Application.isBatchMode && UnityEditorInternal.InternalEditorUtility.isApplicationActive ? 12 : 100;
 
         // Completes on the next EditorApplication.update, running the awaiting code inside it (the update runs on the main
-        // thread with Unity's context current, so the continuation is not posted again). Cancelled with the token.
+        // thread with Unity's context current, so the continuation is not posted again). Cancelled with the token: the
+        // handler is removed at once when the cancel comes on the main thread, else at the next update (which then does
+        // nothing more).
         private static Task NextUpdate(CancellationToken cancellation)
         {
             var next = new TaskCompletionSource<bool>();
@@ -154,8 +157,14 @@ namespace Orbiters.Toolkit.Editor
             }
             EditorApplication.update += Tick;
             if (cancellation.CanBeCanceled)
-                // Any thread: the update handler stays until the next update, which then does nothing.
-                registration = cancellation.Register(() => next.TrySetCanceled());
+            {
+                int main = Thread.CurrentThread.ManagedThreadId;
+                registration = cancellation.Register(() =>
+                {
+                    if (Thread.CurrentThread.ManagedThreadId == main) EditorApplication.update -= Tick;
+                    next.TrySetCanceled();
+                });
+            }
             return next.Task;
         }
 
