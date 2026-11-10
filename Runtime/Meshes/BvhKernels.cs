@@ -646,6 +646,21 @@ namespace Orbiters.Toolkit.Meshes
             }
         }
 
+        // ---- Which code runs ------------------------------------------------------------------------------------------------
+
+        /// <summary>1 when this entry runs as Burst code, 0 when as managed code (Burst off, not compiled, or failed).</summary>
+        [BurstCompile(FloatMode = FloatMode.Strict, FloatPrecision = FloatPrecision.Standard, CompileSynchronously = true)]
+        public static int CompiledProbe()
+        {
+            int managed = 0;
+            MarkManaged(ref managed);
+            return managed == 0 ? 1 : 0;
+        }
+
+        // Removed from the Burst code: only managed code sets the flag.
+        [BurstDiscard]
+        private static void MarkManaged(ref int managed) => managed = 1;
+
         public static float BoxDistance2(float3 p, float3 min, float3 max)
         {
             float3 d = math.max(math.max(min - p, p - max), 0f);
