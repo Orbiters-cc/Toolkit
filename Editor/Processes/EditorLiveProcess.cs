@@ -125,15 +125,20 @@ namespace Orbiters.Toolkit.Editor.Processes
         public bool DrainError()
         {
             if (error == null) return false;
+            // A bounded share per call (the pipe's own size, or so): a process that never stops writing to stderr must
+            // not keep the caller from its deadline, cancel and shutdown checks, or from stdout.
             bool any = false;
-            while (true)
+            for (int reads = 0; reads < MaxErrorReadsPerDrain; reads++)
             {
                 int count = error.Read(errorChunk);
                 if (count <= 0) return any;
                 any = true;
                 errorText.Add(errorChunk, 0, count);
             }
+            return any;
         }
+
+        private const int MaxErrorReadsPerDrain = 4;
 
         /// <summary>
         /// Waits until stdout has unread bytes. False at stdout's end, on timeout, on cancel and while the editor stops;

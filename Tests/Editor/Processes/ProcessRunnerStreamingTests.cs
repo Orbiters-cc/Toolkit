@@ -115,6 +115,24 @@ public sealed class ProcessRunnerStreamingTests
     }
 
     [Test]
+    public void EndlessStderrDoesNotKeepTheRunnerFromItsTimeout()
+    {
+        // stderr never runs dry and each line is slow to take: the runner still gets back to its deadline.
+        int lines = 0;
+        var elapsed = Stopwatch.StartNew();
+        var result = EditorProcessRunner.Run(new EditorProcessRequest
+        {
+            StartInfo = Command("stderr-flood"), TimeoutMilliseconds = 1000,
+            ErrorLine = line => { if (++lines % 64 == 0) Thread.Sleep(1); }
+        });
+        Assert.That(result.TimedOut, Is.True);
+        Assert.That(result.Success, Is.False);
+        Assert.That(elapsed.ElapsedMilliseconds, Is.LessThan(6000));
+        Assert.That(lines, Is.GreaterThan(0));
+        Assert.That(EditorProcessRunner.ActiveCount, Is.Zero);
+    }
+
+    [Test]
     public void KeptAliveProcessAnswersOneRequestAfterTheOther()
     {
         if (!EditorProcessRunner.CleanInput) Assert.Ignore("Stdin cannot be clean on this system.");

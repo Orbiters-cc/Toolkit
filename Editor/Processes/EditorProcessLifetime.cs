@@ -22,6 +22,8 @@ namespace Orbiters.Toolkit.Editor.Processes
         private static readonly Dictionary<Process, WindowsProcessJob> Active = new Dictionary<Process, WindowsProcessJob>();
         // Processes that change something: at a reload or quit they get time to finish before they are stopped.
         private static readonly HashSet<Process> Writes = new HashSet<Process>();
+        // Processes whose assignment to their job succeeded: only for them does an empty job mean nothing of theirs runs.
+        private static readonly HashSet<Process> Assigned = new HashSet<Process>();
         // Processes stopped while they still ran: a job closed under them makes them exit with code 0, which is no success.
         private static readonly ConditionalWeakTable<Process, object> StoppedRunning = new ConditionalWeakTable<Process, object>();
         private static readonly List<Action> StopListeners = new List<Action>();
@@ -92,11 +94,13 @@ namespace Orbiters.Toolkit.Editor.Processes
                 try
                 {
                     job?.Assign(process);
+                    if (job != null) lock (Sync) Assigned.Add(process);
                 }
                 catch (System.ComponentModel.Win32Exception) when (HasExited(process))
                 {
-                    // Windows refuses to assign a process that already ended (a quick command can end before this line):
-                    // there is nothing left to own, and its output is in its pipes.
+                    // Windows refuses to assign a process that already ended (a quick command can end before this line).
+                    // It may have started a child first, which is in no job: the job proves nothing about it (see
+                    // RunningInJob), so its output counts as complete only when its pipes close.
                 }
                 return true;
             }
@@ -138,11 +142,17 @@ namespace Orbiters.Toolkit.Editor.Processes
         /// <summary>
         /// How many processes of this one's job still run (it and everything it started); -1 when unknown (no job). Zero
         /// after it exited: everything it and its children wrote is in its pipes, whoever else may still hold them.
+        /// Unknown (-1) too when the process was not provably put in its job: a process that exited before its assignment may
+        /// have started a child that still writes, outside the job.
         /// </summary>
         internal static int RunningInJob(Process process)
         {
             WindowsProcessJob job;
-            lock (Sync) Active.TryGetValue(process, out job);
+            lock (Sync)
+            {
+                if (!Assigned.Contains(process)) return -1;
+                Active.TryGetValue(process, out job);
+            }
             return job == null ? -1 : job.ActiveProcesses();
         }
 
@@ -156,6 +166,7 @@ namespace Orbiters.Toolkit.Editor.Processes
                 Active.TryGetValue(process, out job);
                 Active.Remove(process);
                 Writes.Remove(process);
+                Assigned.Remove(process);
             }
             bool running;
             try { running = !process.HasExited; }

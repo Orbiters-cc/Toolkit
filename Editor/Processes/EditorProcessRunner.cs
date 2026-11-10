@@ -191,7 +191,7 @@ namespace Orbiters.Toolkit.Editor.Processes
                                     if (rest <= 0) break;
                                     if (!Deliver(request, text, process.Chunk, rest)) result.Stopped = true;
                                 }
-                                process.DrainError();
+                                while (process.DrainError()) { } // nothing of its job runs: what is left is finite
                                 if (process.WasStopped) result.Cancelled = true;
                                 else if (!result.Stopped) result.ExitCode = process.ExitCode;
                                 break;

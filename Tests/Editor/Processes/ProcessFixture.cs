@@ -55,6 +55,14 @@ internal static class ProcessFixture
                 while (true) output.Write(chunk, 0, chunk.Length);
             }
         }
+        if (mode == "stderr-flood")
+        {
+            using (var error = Console.OpenStandardError())
+            {
+                var line = Encoding.ASCII.GetBytes(new string('e', 63) + "\n");
+                while (true) error.Write(line, 0, line.Length);
+            }
+        }
         if (mode == "fail-early") { Console.Error.Write("refused"); Environment.Exit(3); }
         if (mode == "slow")
         {
