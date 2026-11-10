@@ -284,16 +284,16 @@ namespace Orbiters.Toolkit.Editor.VRChat.Parameters
                 // VRCFury gives each Full Controller its own namespace. Only explicit globals share names.
                 var localNames = new HashSet<string>();
                 var uses = new Dictionary<string, MenuUse>();
-                if (fullControllerType.GetField("menus")?.GetValue(content) is IEnumerable menus)
+                if (VrcFury.Field(content, "menus") is IEnumerable menus)
                     foreach (var entry in menus)
-                        if (VrcFury.ObjectReference(entry?.GetType().GetField("menu")?.GetValue(entry)) is VRCExpressionsMenu menu)
+                        if (VrcFury.ObjectReference(VrcFury.Field(entry, "menu")) is VRCExpressionsMenu menu)
                             foreach (var pair in MenuUses(menu))
                                 if (!uses.TryGetValue(pair.Key, out var previous) || pair.Value > previous) uses[pair.Key] = pair.Value;
-                if (!(fullControllerType.GetField("prms")?.GetValue(content) is IEnumerable entries)) continue;
+                if (!(VrcFury.Field(content, "prms") is IEnumerable entries)) continue;
                 var removed = RemovedByBuild(component);
                 foreach (var entry in entries)
                 {
-                    if (!(VrcFury.ObjectReference(entry?.GetType().GetField("parameters")?.GetValue(entry)) is VRCExpressionParameters asset)) continue;
+                    if (!(VrcFury.ObjectReference(VrcFury.Field(entry, "parameters")) is VRCExpressionParameters asset)) continue;
                     foreach (var parameter in SyncedParameters(asset))
                     {
                         if (removed != null && removed.Contains(parameter.name)) continue;
@@ -352,9 +352,9 @@ namespace Orbiters.Toolkit.Editor.VRChat.Parameters
                 if (component == null) continue;
                 var content = Content(component);
                 if (content == null || !toggleType.IsInstanceOfType(content) || ToggleRemovedByBuild(component)) continue;
-                bool slider = (bool)(toggleType.GetField("slider")?.GetValue(content) ?? false);
-                bool integer = (bool)(toggleType.GetField("useInt")?.GetValue(content) ?? false);
-                bool held = (bool)(toggleType.GetField("holdButton")?.GetValue(content) ?? false);
+                bool slider = (bool)(VrcFury.Field(content, "slider") ?? false);
+                bool integer = (bool)(VrcFury.Field(content, "useInt") ?? false);
+                bool held = (bool)(VrcFury.Field(content, "holdButton") ?? false);
                 int cost = slider || integer ? 8 : 1;
                 parameters.Add(new Synced { Cost = cost, Bool = cost == 1, Menu = held ? MenuUse.Button : slider ? MenuUse.Radial : MenuUse.Toggle });
                 raw += cost;
