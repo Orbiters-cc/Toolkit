@@ -79,6 +79,8 @@ namespace Orbiters.Toolkit.Editor.Processes
         {
             get
             {
+                // On Windows the runner makes the pipes itself and writes bytes: no preamble ever.
+                if (Path.DirectorySeparatorChar == '\\') return true;
                 if (InputEncoding != null && InputEncoding.CanWrite) return true;
                 try { return Console.InputEncoding.GetPreamble().Length == 0; }
                 catch (IOException) { return true; }
@@ -241,8 +243,9 @@ namespace Orbiters.Toolkit.Editor.Processes
                     input.Flush();
                     process.CloseInput();
                 }
-                catch (Exception ex) when (ex is IOException || ex is ObjectDisposedException || ex is InvalidOperationException)
+                catch (Exception ex) when (ex is IOException || ex is ObjectDisposedException || ex is InvalidOperationException || ex is UnauthorizedAccessException)
                 {
+                    // A closed pipe: the process stopped reading (Mono reports it on a raw handle as access denied).
                     failed();
                 }
             }) { IsBackground = true, Name = "Orbiters process stdin" };

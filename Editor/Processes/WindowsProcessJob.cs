@@ -32,9 +32,9 @@ namespace Orbiters.Toolkit.Editor.Processes
             catch { job.Dispose(); throw; }
         }
 
-        internal void Assign(Process process)
+        internal void Assign(IntPtr process)
         {
-            if (!AssignProcessToJobObject(this, process.Handle)) throw new Win32Exception(Marshal.GetLastWin32Error());
+            if (!AssignProcessToJobObject(this, process)) throw new Win32Exception(Marshal.GetLastWin32Error());
         }
 
         protected override bool ReleaseHandle() => CloseHandle(handle);
