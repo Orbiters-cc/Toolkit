@@ -2,8 +2,8 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
+using Orbiters.Toolkit.Editor.VRChat.Build;
 using UnityEngine;
-using VRC.SDKBase.Editor.BuildPipeline;
 
 namespace Orbiters.Toolkit.Editor.VRChat.Optimization
 {
@@ -62,12 +62,13 @@ namespace Orbiters.Toolkit.Editor.VRChat.Optimization
         public static bool Holding => held.Count > 0;
     }
 
-    internal sealed class LazyOptimiserOffHook : IVRCSDKPreprocessAvatarCallback
+    internal sealed class LazyOptimiserOffHook : BuildStep
     {
         // Lazy Optimiser's first pass is RemoveUnusedGameObjects at −100.
-        public int callbackOrder => -101;
-        public bool OnPreprocessAvatar(GameObject avatarGameObject)
+        public override BuildPhase Phase => BuildPhase.BeforeLazyOptimiser;
+        public override bool Run(BuildContext context)
         {
+            var avatarGameObject = context.Avatar;
             // A build stopped between the two hooks left it held: given back first.
             LazyOptimiser.Restore();
             if (LazyOptimiser.TurnOff(avatarGameObject))
@@ -76,11 +77,11 @@ namespace Orbiters.Toolkit.Editor.VRChat.Optimization
         }
     }
 
-    internal sealed class LazyOptimiserBackHook : IVRCSDKPreprocessAvatarCallback
+    internal sealed class LazyOptimiserBackHook : BuildStep
     {
         // After its last pass (MergeMeshes, −90).
-        public int callbackOrder => -89;
-        public bool OnPreprocessAvatar(GameObject avatarGameObject)
+        public override BuildPhase Phase => BuildPhase.AfterLazyOptimiser;
+        public override bool Run(BuildContext context)
         {
             LazyOptimiser.Restore();
             return true;

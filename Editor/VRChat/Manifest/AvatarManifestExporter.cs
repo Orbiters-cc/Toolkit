@@ -2,13 +2,13 @@ using System;
 using System.Globalization;
 using System.IO;
 using System.Reflection;
+using Orbiters.Toolkit.Editor.VRChat.Build;
 using Orbiters.Toolkit.Storage;
 using UnityEditor;
 using UnityEngine;
 using VRC.Core;
 using VRC.SDK3A.Editor;
 using VRC.SDKBase.Editor;
-using VRC.SDKBase.Editor.BuildPipeline;
 
 namespace Orbiters.Toolkit.Editor.VRChat.Manifest
 {
@@ -23,7 +23,7 @@ namespace Orbiters.Toolkit.Editor.VRChat.Manifest
     /// said in the Console: the build goes on. Android and iOS builds, Play Mode and Orbiters' hidden builds write nothing.
     /// </summary>
     [InitializeOnLoad]
-    internal sealed class AvatarManifestExporter : IVRCSDKPreprocessAvatarCallback
+    internal sealed class AvatarManifestExporter : BuildStep
     {
         // ActiveBuildType ("Test" or "Publish", "None" outside the SDK's builds) came with VRChat SDK 3.7.5.
         private static readonly PropertyInfo BuildType = typeof(VRC_SdkBuilder).GetProperty("ActiveBuildType", BindingFlags.Public | BindingFlags.Static);
@@ -38,11 +38,11 @@ namespace Orbiters.Toolkit.Editor.VRChat.Manifest
             HookBuilder();
         }
 
-        public int callbackOrder => int.MaxValue;
+        public override BuildPhase Phase => BuildPhase.Last;
 
-        public bool OnPreprocessAvatar(GameObject avatar)
+        public override bool Run(BuildContext context)
         {
-            try { Export(avatar); }
+            try { Export(context.Avatar); }
             catch (Exception ex) { Debug.LogWarning("Orbiters Toolkit could not write the avatar manifest Orbiters - N4N0 reads: " + ex.Message); }
             return true;
         }

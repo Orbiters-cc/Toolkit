@@ -1,8 +1,8 @@
 using System.Collections.Generic;
 using System.Linq;
+using Orbiters.Toolkit.Editor.VRChat.Build;
 using UnityEditor;
 using UnityEngine;
-using VRC.SDKBase.Editor.BuildPipeline;
 using Object = UnityEngine.Object;
 
 namespace Orbiters.Toolkit.Editor.VRChat.Attachments
@@ -12,13 +12,14 @@ namespace Orbiters.Toolkit.Editor.VRChat.Attachments
     /// followed accessories, resized texture copies...) become build data. The SDK saves the build copy as a prefab, which drops in-memory objects: the avatar would upload
     /// without them (invisible renderers). The build data of every step is written to the disk here, once.
     /// </summary>
-    internal sealed class BuildCopyAssetsHook : IVRCSDKPreprocessAvatarCallback
+    internal sealed class BuildCopyAssetsHook : BuildStep
     {
         // After every avatar tool, Poiyomi's material locking (4, 100) included.
-        public int callbackOrder => 10000;
+        public override BuildPhase Phase => BuildPhase.SaveBuildData;
 
-        public bool OnPreprocessAvatar(GameObject avatarRoot)
+        public override bool Run(BuildContext context)
         {
+            var avatarRoot = context.Avatar;
             // Play mode keeps the copy in memory; nothing is saved.
             if (EditorApplication.isPlayingOrWillChangePlaymode) return true;
             AttachmentAnimationBuild.Keep(avatarRoot, InMemory(avatarRoot));

@@ -2,6 +2,9 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
+using Orbiters.Toolkit.Editor.Animations;
+using Orbiters.Toolkit.Editor.VRChat.Build;
+using Orbiters.Toolkit.Editor.VRChat.Optimization;
 using UnityEngine;
 using VRC.SDK3.Avatars.Components;
 using VRC.SDKBase;
@@ -27,8 +30,9 @@ namespace Orbiters.Toolkit.Editor.VRChat.BlendShapes
 
         /// <summary>
         /// Blendshapes a caller needs on an avatar it is building, by the avatar's root (a VRM export keeps the shapes its
-        /// expressions set, which no VRChat animation may use): <see cref="Used"/> counts them, on any of its meshes, so no
-        /// build step removes them. Set before the build, removed after.
+        /// expressions set, which no VRChat animation may use): <see cref="Used(GameObject, SkinnedMeshRenderer, bool)"/>
+        /// counts them, on any of its meshes, so no build step removes them. Set before the build, removed after.
+        /// <see cref="BuildContext.KeepShapes"/> does the same for one build, and is forgotten with it.
         /// </summary>
         public static readonly Dictionary<GameObject, HashSet<string>> Keep = new Dictionary<GameObject, HashSet<string>>();
 
@@ -38,9 +42,23 @@ namespace Orbiters.Toolkit.Editor.VRChat.BlendShapes
         /// a standard MMD morph on Body. Every one counts on a renderer holding an optimizer's component that builds later
         /// (<see cref="AvatarOptimizers"/>: it names shapes, to remove the mesh they move, say). Call it once every build step
         /// that adds animations has run. With <paramref name="constantsUnused"/>, a shape every animation only ever sets to
-        /// the weight it already has never changes, and doesn't count.
+        /// the weight it already has never changes, and doesn't count. The animations are read from the build's index
+        /// (<see cref="BuildContext.Clips"/>) during a build, all of them otherwise.
         /// </summary>
         public static HashSet<string> Used(GameObject avatarRoot, SkinnedMeshRenderer renderer, bool constantsUnused = false)
+        {
+            var context = BuildContext.Of(avatarRoot);
+            return Used(avatarRoot, context != null ? context.Clips : AvatarUsage.AnimationsOf(avatarRoot), renderer, constantsUnused, context);
+        }
+
+        /// <summary>The same, with the animations of <paramref name="usage"/> (read again where they changed since).</summary>
+        public static HashSet<string> Used(AvatarUsage usage, SkinnedMeshRenderer renderer, bool constantsUnused = false)
+        {
+            usage.Animations.Sync();
+            return Used(usage.Root, usage.Animations, renderer, constantsUnused, BuildContext.Of(usage.Root));
+        }
+
+        private static HashSet<string> Used(GameObject avatarRoot, AnimationIndex animations, SkinnedMeshRenderer renderer, bool constantsUnused, BuildContext context)
         {
             var mesh = renderer.sharedMesh;
             var used = new HashSet<string>();
@@ -51,26 +69,27 @@ namespace Orbiters.Toolkit.Editor.VRChat.BlendShapes
             }
             string path = UnityEditor.AnimationUtility.CalculateTransformPath(renderer.transform, avatarRoot.transform);
             var changing = new HashSet<string>();
-            foreach (var (clip, animatorRoot) in Optimization.AvatarUsage.Clips(avatarRoot))
+            // A copy: asking a clip's curves may find it changed and file it again.
+            foreach (var use in animations.At(path).ToArray())
             {
-                // A nested animator's paths start at its own object.
-                if (!renderer.transform.IsChildOf(animatorRoot)) continue;
-                string relative = UnityEditor.AnimationUtility.CalculateTransformPath(renderer.transform, animatorRoot);
-                foreach (var binding in UnityEditor.AnimationUtility.GetCurveBindings(clip))
-                {
-                    if (binding.path != relative || binding.type != typeof(SkinnedMeshRenderer) || !binding.propertyName.StartsWith("blendShape.", StringComparison.Ordinal)) continue;
-                    string name = binding.propertyName.Substring("blendShape.".Length);
-                    used.Add(name);
-                    if (!constantsUnused || changing.Contains(name)) continue;
-                    int index = mesh.GetBlendShapeIndex(name);
-                    var curve = UnityEditor.AnimationUtility.GetEditorCurve(clip, binding);
-                    if (index < 0 || curve == null || curve.keys.Any(k => Mathf.Abs(k.value - renderer.GetBlendShapeWeight(index)) > .01f)) changing.Add(name);
-                }
+                var binding = use.Value;
+                if (use.IsObject || binding.type != typeof(SkinnedMeshRenderer) || !binding.propertyName.StartsWith("blendShape.", StringComparison.Ordinal)) continue;
+                // A nested animator's paths start at its own object, and reach only what is below it.
+                if (use.AnimatorRoot == null || !renderer.transform.IsChildOf(use.AnimatorRoot)) continue;
+                string name = binding.propertyName.Substring("blendShape.".Length);
+                used.Add(name);
+                if (!constantsUnused || changing.Contains(name)) continue;
+                int index = mesh.GetBlendShapeIndex(name);
+                // Some key away from the weight it has: then the lowest or the highest is (a curve without keys has none).
+                float weight = index >= 0 ? renderer.GetBlendShapeWeight(index) : 0;
+                if (index < 0 || !animations.Bindings(use.Clip).Range(use.Index, out float min, out float max) ||
+                    min <= max && (Mathf.Abs(max - weight) > .01f || Mathf.Abs(min - weight) > .01f)) changing.Add(name);
             }
             if (constantsUnused) used.IntersectWith(changing);
-            if (Keep.TryGetValue(avatarRoot, out var kept))
-                for (int i = 0; i < mesh.blendShapeCount; i++)
-                    if (kept.Contains(mesh.GetBlendShapeName(i))) used.Add(mesh.GetBlendShapeName(i));
+            foreach (var kept in new[] { Keep.TryGetValue(avatarRoot, out var set) ? set : null, context?.KeptShapes })
+                if (kept != null)
+                    for (int i = 0; i < mesh.blendShapeCount; i++)
+                        if (kept.Contains(mesh.GetBlendShapeName(i))) used.Add(mesh.GetBlendShapeName(i));
             foreach (var descriptor in avatarRoot.GetComponentsInChildren<VRCAvatarDescriptor>(true))
             {
                 if (descriptor.VisemeSkinnedMesh == renderer)
@@ -101,6 +120,14 @@ namespace Orbiters.Toolkit.Editor.VRChat.BlendShapes
             var mesh = renderer.sharedMesh;
             if (mesh == null || mesh.blendShapeCount == 0) return null;
             return Prune(avatarRoot, renderer, Used(avatarRoot, renderer, constantsUnused));
+        }
+
+        /// <summary>The same, with the animations of <paramref name="usage"/>.</summary>
+        public static Mesh Prune(AvatarUsage usage, SkinnedMeshRenderer renderer, bool constantsUnused = false)
+        {
+            var mesh = renderer.sharedMesh;
+            if (mesh == null || mesh.blendShapeCount == 0) return null;
+            return Prune(usage.Root, renderer, Used(usage, renderer, constantsUnused));
         }
 
         /// <summary>

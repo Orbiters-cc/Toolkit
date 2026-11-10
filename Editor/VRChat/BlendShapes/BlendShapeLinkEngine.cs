@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using Orbiters.Toolkit.Editor.VRChat.Build;
 using UnityEditor;
 using UnityEditor.Animations;
 using UnityEngine;
@@ -22,7 +23,9 @@ namespace Orbiters.Toolkit.Editor.VRChat.BlendShapes
         public static Action<string> Log;
 
         private static readonly Dictionary<int, List<AppliedBlendShapeLink>> applied = new Dictionary<int, List<AppliedBlendShapeLink>>();
-        // Layers already copied to FX during this build, across several Apply calls.
+        // Layers already copied to FX during this build, across several Apply calls: the build's (BuildContext), or outside
+        // a build, those of this editor frame.
+        private sealed class CopiedToFx : HashSet<string> { }
         private static readonly HashSet<string> layersCopiedToFx = new HashSet<string>();
         private static int buildFrame = -1;
 
@@ -31,7 +34,10 @@ namespace Orbiters.Toolkit.Editor.VRChat.BlendShapes
 
         public static void ClearApplied() => applied.Clear();
 
-        /// <summary>Starts a new build: forgets the layers copied to FX by the previous one.</summary>
+        /// <summary>
+        /// Starts a new build outside Orbiters' build (<see cref="BuildContext"/>, which keeps its own): forgets the layers
+        /// copied to FX by the previous one.
+        /// </summary>
         public static void BeginBuild()
         {
             layersCopiedToFx.Clear();
@@ -42,7 +48,9 @@ namespace Orbiters.Toolkit.Editor.VRChat.BlendShapes
         {
             if (avatarRoot == null) return BlendShapeLinkResult.Fail("Avatar root is null.");
             if (links == null || links.Count == 0) return BlendShapeLinkResult.Fail("No links to apply.");
-            if (Time.frameCount != buildFrame) BeginBuild();
+            var context = BuildContext.Of(avatarRoot);
+            if (context == null && Time.frameCount != buildFrame) BeginBuild();
+            var copiedToFx = context != null ? context.State<CopiedToFx>() : layersCopiedToFx;
 
             var controllers = CollectBuiltControllers(avatarRoot);
             if (controllers.Count == 0) return BlendShapeLinkResult.Fail("No privately owned build AnimatorController found on avatar descriptor.");
@@ -91,7 +99,7 @@ namespace Orbiters.Toolkit.Editor.VRChat.BlendShapes
                         if (fxController != null && controller != fxController)
                         {
                             string layerKey = $"{controller.name}:{i}:{layer.name}";
-                            if (!layersToCopyToFx.ContainsKey(layerKey) && !layersCopiedToFx.Contains(layerKey))
+                            if (!layersToCopyToFx.ContainsKey(layerKey) && !copiedToFx.Contains(layerKey))
                             {
                                 Trace($"Layer '{layer.name}' in '{controller.name}' contains blendshape animations - will copy to FX controller.");
                                 layersToCopyToFx[layerKey] = (controller, i, layer);
@@ -132,7 +140,7 @@ namespace Orbiters.Toolkit.Editor.VRChat.BlendShapes
 
             if (layersToCopyToFx.Count > 0 && fxController != null)
             {
-                CopyLayersToFx(layersToCopyToFx.Values.ToList(), fxController);
+                CopyLayersToFx(layersToCopyToFx.Values.ToList(), fxController, copiedToFx);
                 changedControllers.Add(fxController);
             }
 
@@ -216,13 +224,14 @@ namespace Orbiters.Toolkit.Editor.VRChat.BlendShapes
 
         // Copies (not moves) each layer: the original keeps driving bones/muscles in its playable layer, the FX copy shares
         // the same state machine and VRChat's FX layer only applies its non-transform curves.
-        private static void CopyLayersToFx(List<(AnimatorController controller, int index, AnimatorControllerLayer layer)> layers, AnimatorController fx)
+        private static void CopyLayersToFx(List<(AnimatorController controller, int index, AnimatorControllerLayer layer)> layers, AnimatorController fx,
+            HashSet<string> copiedToFx)
         {
             var fxLayerNames = new HashSet<string>(fx.layers.Select(l => l.name));
             foreach (var (source, index, layer) in layers)
             {
                 if (source == fx) continue;
-                layersCopiedToFx.Add($"{source.name}:{index}:{layer.name}");
+                copiedToFx.Add($"{source.name}:{index}:{layer.name}");
                 string name = FxLayerPrefix + layer.name;
                 if (fxLayerNames.Contains(name))
                 {

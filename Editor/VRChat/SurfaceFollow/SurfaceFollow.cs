@@ -1,12 +1,12 @@
 using System.Collections.Generic;
 using System.Linq;
 using Orbiters.Toolkit.Editor.VRChat.BlendShapes;
+using Orbiters.Toolkit.Editor.VRChat.Build;
 using Orbiters.Toolkit.VRChat;
 using UnityEditor;
 using UnityEngine;
 using UnityEngine.Rendering;
 using VRC.SDK3.Avatars.Components;
-using VRC.SDKBase.Editor.BuildPipeline;
 
 namespace Orbiters.Toolkit.Editor.VRChat.SurfaceFollow
 {
@@ -103,9 +103,9 @@ namespace Orbiters.Toolkit.Editor.VRChat.SurfaceFollow
 
         /// <summary>
         /// Build copy, after VRCFury built its controllers: adds the follow blendshapes and links them to the body.
-        /// Returns a message for the log, or null when the avatar has nothing to follow.
+        /// Returns a message for the log, or null when the avatar has nothing to follow. The meshes made join <paramref name="made"/>.
         /// </summary>
-        public static string Apply(GameObject avatarRoot)
+        public static string Apply(GameObject avatarRoot, ICollection<Mesh> made = null)
         {
             var follows = avatarRoot.GetComponentsInChildren<OrbitersSurfaceFollow>(true);
             if (follows.Length == 0) return null;
@@ -129,6 +129,7 @@ namespace Orbiters.Toolkit.Editor.VRChat.SurfaceFollow
                         continue;
                     }
                     var skinned = Bake(target, body);
+                    made?.Add(skinned.sharedMesh);
                     foreach (var shape in target.Shapes.Select(s => s.Name).Distinct())
                         if (skinned.sharedMesh.GetBlendShapeIndex(shape) >= 0)
                             copies.Add(new BlendShapeCopy { Source = body, SourceShape = shape, Destination = skinned, DestinationShape = shape });
@@ -399,13 +400,14 @@ namespace Orbiters.Toolkit.Editor.VRChat.SurfaceFollow
         }
     }
 
-    internal sealed class SurfaceFollowHook : IVRCSDKPreprocessAvatarCallback
+    internal sealed class SurfaceFollowHook : BuildStep
     {
-        // After VRCFury (-10000), MCB's blendshape links (-9000) and mode locks (-8970), before My Avatar's attachments finish (-8900).
-        public int callbackOrder => -8950;
-        public bool OnPreprocessAvatar(GameObject avatarRoot)
+        // After VRCFury (-10000), MCB's blendshape links (-9000) and mode locks (-8970) and ReFit's links and shrinks
+        // (-8956), before My Avatar's attachments finish (AttachmentFinishHook).
+        public override BuildPhase Phase => BuildPhase.AccessoryShapes;
+        public override bool Run(BuildContext context)
         {
-            string message = SurfaceFollow.Apply(avatarRoot);
+            string message = SurfaceFollow.Apply(context.Avatar, context.Meshes);
             if (message != null) Debug.Log("[Orbiters] " + message);
             return true;
         }

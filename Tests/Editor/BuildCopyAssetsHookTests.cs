@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using NUnit.Framework;
+using Orbiters.Toolkit.Editor.VRChat.Build;
 using Orbiters.Toolkit.Editor.VRChat.Attachments;
 using UnityEditor;
 using UnityEditor.SceneManagement;
@@ -48,7 +49,7 @@ public sealed class BuildCopyAssetsHookTests
         gizmo.sharedMesh = gizmoMesh;
         gizmo.bones = new[] { gizmo.transform };
 
-        Assert.That(new BuildCopyAssetsHook().OnPreprocessAvatar(avatar), Is.True);
+        Assert.That(new BuildCopyAssetsHook().Run(BuildContext.For(avatar)), Is.True);
 
         Assert.That(EditorUtility.IsPersistent(skinned.sharedMesh), Is.True);
         Assert.That(EditorUtility.IsPersistent(skinned.sharedMaterial), Is.True);

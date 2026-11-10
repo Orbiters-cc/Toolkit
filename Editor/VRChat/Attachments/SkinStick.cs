@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using Orbiters.Toolkit.Editor.Posing;
+using Orbiters.Toolkit.Editor.VRChat.Build;
 using Orbiters.Toolkit.Meshes;
 using Orbiters.Toolkit.VRChat;
 using UnityEditor;
@@ -9,7 +10,6 @@ using UnityEngine;
 using VRC.Dynamics;
 using VRC.SDK3.Avatars.Components;
 using VRC.SDK3.Dynamics.Constraint.Components;
-using VRC.SDKBase.Editor.BuildPipeline;
 using Object = UnityEngine.Object;
 
 namespace Orbiters.Toolkit.Editor.VRChat.Attachments
@@ -411,14 +411,14 @@ namespace Orbiters.Toolkit.Editor.VRChat.Attachments
         private static string Centimetres(float metres) => (metres * 100f).ToString(metres < .1f ? "0.0" : "0") + " cm";
     }
 
-    internal sealed class SkinStickHook : IVRCSDKPreprocessAvatarCallback
+    internal sealed class SkinStickHook : BuildStep
     {
-        // After VRCFury (-10000) placed the accessories and MCB's mode locks (-8970); before body blendshapes are followed
-        // (-8950), which it asks for, and before My Avatar's attachments finish (-8900).
-        public int callbackOrder => -8960;
-        public bool OnPreprocessAvatar(GameObject avatarRoot)
+        // After VRCFury (-10000) placed the accessories and MCB's mode locks (-8970); before ReFit's links (-8960), body
+        // blendshapes are followed (which it asks for) and My Avatar's attachments finish.
+        public override BuildPhase Phase => BuildPhase.Accessories;
+        public override bool Run(BuildContext context)
         {
-            string message = SkinStick.Apply(avatarRoot);
+            string message = SkinStick.Apply(context.Avatar);
             if (message != null) Debug.Log("[Orbiters] " + message);
             return true;
         }

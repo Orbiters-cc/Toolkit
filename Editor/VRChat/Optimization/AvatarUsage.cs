@@ -26,6 +26,13 @@ namespace Orbiters.Toolkit.Editor.VRChat.Optimization
     {
         public GameObject Root { get; }
 
+        /// <summary>
+        /// The avatar's animations, indexed (what each clip binds, what animates each object): read here once, and kept right
+        /// as steps change clips through it (<see cref="AnimationIndex.Sync"/> for others' changes). The facts below are
+        /// as the avatar was when this was read.
+        /// </summary>
+        public AnimationIndex Animations { get; }
+
         // Every animated property, by its path from the avatar's root, and whether some key sets it above one half (an
         // object shown, a component turned on).
         private readonly Dictionary<(string Path, string Property), List<(Type Type, bool On)>> animated =
@@ -52,19 +59,18 @@ namespace Orbiters.Toolkit.Editor.VRChat.Optimization
                 parameters.UnionWith(names);
                 if (playable) playableParameters.UnionWith(names);
             }
-            foreach (var (clip, animatorRoot) in Clips(root))
+            Animations = AnimationsOf(root);
+            foreach (var (clip, animatorRoot) in Animations.Clips)
             {
-                foreach (var binding in AnimationUtility.GetCurveBindings(clip))
+                var bindings = Animations.Bindings(clip);
+                for (int i = 0; i < bindings.Floats.Length; i++)
                 {
-                    bool on = false;
-                    if (binding.propertyName == "m_IsActive" || binding.propertyName == "m_Enabled")
-                    {
-                        var curve = AnimationUtility.GetEditorCurve(clip, binding);
-                        on = curve != null && curve.keys.Any(k => k.value > .5f);
-                    }
+                    var binding = bindings.Floats[i];
+                    // Some key above one half.
+                    bool on = (binding.propertyName == "m_IsActive" || binding.propertyName == "m_Enabled") && bindings.Range(i, out _, out float max) && max > .5f;
                     Add(PathOf(animatorRoot, binding.path), binding, on);
                 }
-                foreach (var binding in AnimationUtility.GetObjectReferenceCurveBindings(clip))
+                foreach (var binding in bindings.Objects)
                 {
                     string path = PathOf(animatorRoot, binding.path);
                     Add(path, binding, false);
@@ -145,6 +151,9 @@ namespace Orbiters.Toolkit.Editor.VRChat.Optimization
             foreach (var animator in root.GetComponentsInChildren<Animator>(true))
                 if (animator.runtimeAnimatorController != null) yield return (animator.runtimeAnimatorController, animator.transform, false);
         }
+
+        /// <summary>An index of the animations of <paramref name="root"/> (<see cref="Clips"/>), paths from the root.</summary>
+        public static AnimationIndex AnimationsOf(GameObject root) => new AnimationIndex(root.transform, () => Clips(root));
 
         /// <summary>The playable layers' controllers and those of Animator components below the root.</summary>
         public static IEnumerable<RuntimeAnimatorController> Controllers(GameObject root) => Animators(root).Select(a => a.Controller);

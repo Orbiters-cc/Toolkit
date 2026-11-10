@@ -2,9 +2,9 @@ using System.Collections.Generic;
 using System.Linq;
 using Orbiters.Toolkit.Armature;
 using Orbiters.Toolkit.Editor.VRChat.BlendShapes;
+using Orbiters.Toolkit.Editor.VRChat.Build;
 using Orbiters.Toolkit.VRChat;
 using UnityEngine;
-using VRC.SDKBase.Editor.BuildPipeline;
 
 namespace Orbiters.Toolkit.Editor.VRChat.Attachments
 {
@@ -18,15 +18,19 @@ namespace Orbiters.Toolkit.Editor.VRChat.Attachments
     {
         // Each attachment's skinned meshes, taken before Apply moves bones (and meshes under them) out of it: Finish runs
         // after VRCFury, on the same objects.
-        private static readonly Dictionary<OrbitersAttachment, SkinnedMeshRenderer[]> Skins = new Dictionary<OrbitersAttachment, SkinnedMeshRenderer[]>();
+        private sealed class Skins : Dictionary<OrbitersAttachment, SkinnedMeshRenderer[]> { }
 
-        public static void Apply(GameObject avatarRoot)
+        /// <summary>The build of <paramref name="avatarRoot"/>'s copy (<see cref="BuildContext.For"/>).</summary>
+        public static void Apply(GameObject avatarRoot) => Apply(BuildContext.For(avatarRoot));
+
+        public static void Apply(BuildContext context)
         {
+            var avatarRoot = context.Avatar;
             var attachments = avatarRoot.GetComponentsInChildren<OrbitersAttachment>(true);
             if (attachments.Length == 0) return;
             AttachmentInstaller.ConvertAtBuild(avatarRoot, attachments);
-            foreach (var gone in Skins.Keys.Where(a => a == null).ToList()) Skins.Remove(gone);
-            foreach (var attachment in attachments) Skins[attachment] = attachment.GetComponentsInChildren<SkinnedMeshRenderer>(true);
+            var skins = context.State<Skins>();
+            foreach (var attachment in attachments) skins[attachment] = attachment.GetComponentsInChildren<SkinnedMeshRenderer>(true);
             var creatorLinks = VrcFury.ArmatureLinks(avatarRoot).ToArray();
             var moves = Moves(avatarRoot, creatorLinks);
             bool reparent = VrcFury.Builds(avatarRoot);
@@ -36,7 +40,7 @@ namespace Orbiters.Toolkit.Editor.VRChat.Attachments
             foreach (var link in creatorLinks)
                 if (link.Recursive && link.From != null && fitted.Contains(link.From.transform))
                     Object.DestroyImmediate(link.Component);
-            var animations = reparent ? null : AttachmentAnimationBuild.Prepare(avatarRoot);
+            var animations = reparent ? null : context.Animations;
             foreach (var move in moves) move.Apply();
             if (reparent)
                 foreach (var move in moves) move.Follower.SetParent(move.Target, true);
@@ -76,15 +80,19 @@ namespace Orbiters.Toolkit.Editor.VRChat.Attachments
         /// After VRCFury built its controllers: body blendshape animations also drive the accessories' shapes, except those a
         /// refit already links (<see cref="Refit.RefitBuild"/>).
         /// </summary>
-        public static void Finish(GameObject avatarRoot)
+        public static void Finish(GameObject avatarRoot) => Finish(BuildContext.For(avatarRoot));
+
+        public static void Finish(BuildContext context)
         {
+            var avatarRoot = context.Avatar;
             var copies = new List<BlendShapeCopy>();
+            var skins = context.State<Skins>();
             foreach (var attachment in avatarRoot.GetComponentsInChildren<OrbitersAttachment>(true))
             {
                 if (attachment.syncBlendShapes)
-                    copies.AddRange(AttachmentInstaller.BlendShapeCopies(attachment, Skins.TryGetValue(attachment, out var skins) ? skins : null)
+                    copies.AddRange(AttachmentInstaller.BlendShapeCopies(attachment, skins.TryGetValue(attachment, out var own) ? own : null)
                         .Where(c => !Refit.RefitBuild.IsLinked(avatarRoot, c.Destination, c.DestinationShape)));
-                Skins.Remove(attachment);
+                skins.Remove(attachment);
                 Object.DestroyImmediate(attachment);
             }
             if (copies.Count > 0) BlendShapeSync.Apply(avatarRoot, copies, "My Avatar accessories");
@@ -98,24 +106,26 @@ namespace Orbiters.Toolkit.Editor.VRChat.Attachments
         }
     }
 
-    internal sealed class AttachmentBuildHook : IVRCSDKPreprocessAvatarCallback
+    internal sealed class AttachmentBuildHook : BuildStep
     {
-        // VRCFury applies its features at -10000.
-        public int callbackOrder => -10100;
-        public bool OnPreprocessAvatar(GameObject avatarRoot)
+        // Just before VRCFury applies its features (-10000).
+        public override BuildPhase Phase => BuildPhase.BeforeVrcFury;
+        public override bool Run(BuildContext context)
         {
-            AttachmentBuild.Apply(avatarRoot);
+            AttachmentBuild.Apply(context);
             return true;
         }
     }
 
-    internal sealed class AttachmentFinishHook : IVRCSDKPreprocessAvatarCallback
+    internal sealed class AttachmentFinishHook : BuildStep
     {
-        // After VRCFury (-10000) and MCB's blendshape links (-9000); before the SDK strips editor-only components (-1024).
-        public int callbackOrder => -8900;
-        public bool OnPreprocessAvatar(GameObject avatarRoot)
+        // After VRCFury (-10000), MCB's blendshape links (-9000), ReFit's links (-8960) and the accessories following body
+        // blendshapes; before MCB's versions (-8800) and the SDK strips editor-only components (-1024).
+        public override BuildPhase Phase => BuildPhase.AccessoryShapes;
+        public override IReadOnlyList<System.Type> After => new[] { typeof(SurfaceFollow.SurfaceFollowHook) };
+        public override bool Run(BuildContext context)
         {
-            AttachmentBuild.Finish(avatarRoot);
+            AttachmentBuild.Finish(context);
             return true;
         }
     }

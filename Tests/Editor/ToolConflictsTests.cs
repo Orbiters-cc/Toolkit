@@ -1,4 +1,5 @@
 using NUnit.Framework;
+using Orbiters.Toolkit.Editor.VRChat.Build;
 using Orbiters.Toolkit.Editor;
 using Orbiters.Toolkit.Editor.VRChat;
 using Orbiters.Toolkit.Editor.VRChat.Checks;
@@ -40,7 +41,7 @@ public sealed class ToolConflictsTests
             {
                 Assert.AreEqual("Lazy Optimiser deletes objects that animations switch on through a component", ToolConflicts.Find(avatar).Find(i => i.Title.Contains("Lazy Optimiser")).Title,
                     "an avatar without Orbiters components keeps Lazy Optimiser: a note");
-                Assert.IsFalse(new LazyOptimiserOffHook().OnPreprocessAvatar(avatar) && LazyOptimiser.Util.Switch == false, "not turned off for it");
+                Assert.IsFalse(new LazyOptimiserOffHook().Run(BuildContext.For(avatar)) && LazyOptimiser.Util.Switch == false, "not turned off for it");
                 Assert.IsNull(LazyOptimiser.Util.Switch);
 
                 item.AddComponent<OrbitersAttachment>();
@@ -49,18 +50,18 @@ public sealed class ToolConflictsTests
                 Assert.AreEqual(IssueLevel.Note, issue.Level);
 
                 // Around its passes (−100 … −90): off, then exactly what it held (unread here), its setting untouched.
-                Assert.IsTrue(new LazyOptimiserOffHook().OnPreprocessAvatar(avatar));
+                Assert.IsTrue(new LazyOptimiserOffHook().Run(BuildContext.For(avatar)));
                 Assert.AreEqual(false, LazyOptimiser.Util.Switch);
                 Assert.IsTrue(Orbiters.Toolkit.Editor.VRChat.Optimization.LazyOptimiser.Holding);
-                Assert.IsTrue(new LazyOptimiserBackHook().OnPreprocessAvatar(avatar));
+                Assert.IsTrue(new LazyOptimiserBackHook().Run(BuildContext.For(avatar)));
                 Assert.IsNull(LazyOptimiser.Util.Switch);
                 Assert.AreEqual(1, PlayerPrefs.GetInt(LazyKey, 1));
 
                 // A build stopped between the two gives it back at the next one.
                 LazyOptimiser.Util.Switch = true;
-                new LazyOptimiserOffHook().OnPreprocessAvatar(avatar);
-                new LazyOptimiserOffHook().OnPreprocessAvatar(avatar);
-                new LazyOptimiserBackHook().OnPreprocessAvatar(avatar);
+                new LazyOptimiserOffHook().Run(BuildContext.For(avatar));
+                new LazyOptimiserOffHook().Run(BuildContext.For(avatar));
+                new LazyOptimiserBackHook().Run(BuildContext.For(avatar));
                 Assert.AreEqual(true, LazyOptimiser.Util.Switch);
             }
             using (InstalledTools.Pretend((InstalledTools.VrcFuryId, "1.1434.0")))

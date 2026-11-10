@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using NUnit.Framework;
+using Orbiters.Toolkit.Editor.VRChat.Build;
 using Orbiters.Toolkit.Editor.VRChat.Attachments;
 using Orbiters.Toolkit.Editor.VRChat.BlendShapes;
 using Orbiters.Toolkit.VRChat;
@@ -192,7 +193,7 @@ public sealed class AttachmentAnimationBuildTests
         var expected = AnimationUtility.CalculateTransformPath(Sleeve(copy), copy.transform);
         AttachmentBuild.Finish(copy);
         // The build's last step writes its data before the SDK saves the copy as a prefab.
-        Assert.True(new BuildCopyAssetsHook().OnPreprocessAvatar(copy));
+        Assert.True(new BuildCopyAssetsHook().Run(BuildContext.For(copy)));
         var path = folder + "/built.prefab";
         PrefabUtility.SaveAsPrefabAsset(copy, path);
         AssetDatabase.ImportAsset(AssetDatabase.GetAssetPath(Controller(copy)), ImportAssetOptions.ForceSynchronousImport | ImportAssetOptions.ForceUpdate);

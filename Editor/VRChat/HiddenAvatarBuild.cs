@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
 using Orbiters.Toolkit.Editor.VRChat.Attachments;
+using Orbiters.Toolkit.Editor.VRChat.Build;
 using Orbiters.Toolkit.Editor.VRChat.Checks;
 using UnityEditor;
 using UnityEngine;
@@ -32,16 +33,20 @@ namespace Orbiters.Toolkit.Editor.VRChat
     /// </summary>
     public sealed class HiddenAvatarBuild
     {
-        /// <summary>One build step: the SDK's callback (or a test's), its order and how to run it on the copy.</summary>
+        /// <summary>
+        /// One build step: the SDK's callback, one of Orbiters' <see cref="BuildStep"/>s (or a test's), its order, how to run
+        /// it on the copy and who it belongs to (null: from its assembly).
+        /// </summary>
         internal readonly struct Step
         {
             public readonly Type Type;
             public readonly int Order;
             public readonly Func<GameObject, bool> Run;
+            public readonly string Owner;
 
-            public Step(Type type, int order, Func<GameObject, bool> run)
+            public Step(Type type, int order, Func<GameObject, bool> run, string owner = null)
             {
-                Type = type; Order = order; Run = run;
+                Type = type; Order = order; Run = run; Owner = owner;
             }
         }
 
@@ -146,7 +151,8 @@ namespace Orbiters.Toolkit.Editor.VRChat
         /// <summary>
         /// The SDK's own build steps as an upload runs them: its list (which tools change: VRCFury moves the SDK's
         /// EditorOnly removal to the end), sorted by order as the SDK sorts it, ties in list order, less
-        /// <see cref="LeftOut"/> and <paramref name="skip"/>.
+        /// <see cref="LeftOut"/> and <paramref name="skip"/>. Each phase of Orbiters' build (<see cref="AvatarBuildPipeline"/>)
+        /// stands for its steps, each one a step here: they are left out, skipped and shown one by one.
         /// </summary>
         internal static List<Step> SdkSteps(Func<Type, bool> skip = null)
         {
@@ -162,6 +168,19 @@ namespace Orbiters.Toolkit.Editor.VRChat
                 int order;
                 try { order = callback.callbackOrder; }
                 catch (Exception) { continue; }
+                if (callback is BuildPhaseCallback phase)
+                {
+                    bool first = true;
+                    foreach (var step in AvatarBuildPipeline.StepsIn(phase.Phase))
+                    {
+                        var stepType = step.GetType();
+                        if (LeftOut(stepType) || skip != null && skip(stepType)) continue;
+                        bool begins = first;
+                        first = false;
+                        steps.Add(new Step(stepType, order, avatar => AvatarBuildPipeline.RunStep(step, avatar, begins), step.Owner));
+                    }
+                    continue;
+                }
                 steps.Add(new Step(type, order, Runner(callback)));
             }
             return steps.OrderBy(s => s.Order).ToList();
@@ -252,7 +271,7 @@ namespace Orbiters.Toolkit.Editor.VRChat
                 {
                     if (Copy == null) throw new InvalidOperationException("a build step removed the copy");
                     var step = steps[Done];
-                    Building = Owner(step.Type);
+                    Building = step.Owner ?? Owner(step.Type);
                     if (EditorUtility.DisplayCancelableProgressBar("Building “" + Copy.name + "” as an upload would",
                             Building + " (" + (Done + 1) + " of " + steps.Count + ")", (float)Done / Math.Max(1, steps.Count)))
                     {
@@ -266,6 +285,8 @@ namespace Orbiters.Toolkit.Editor.VRChat
             finally
             {
                 EditorUtility.ClearProgressBar();
+                // What the steps shared is the build's: the copy is built (or the build stopped).
+                if (!ReferenceEquals(made, null)) BuildContext.End(made);
                 // Nothing else ran meanwhile: the new folders are this build's.
                 folders.AddRange(Folders().Where(f => !existing.Contains(f)));
             }
