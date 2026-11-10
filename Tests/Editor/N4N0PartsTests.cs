@@ -105,7 +105,7 @@ public sealed class N4N0PartsTests
         // Orbiters - N4N0 may draw the pages in the background.
         for (var until = DateTime.UtcNow.AddSeconds(150); !applying.IsCompleted && DateTime.UtcNow < until;) yield return null;
         Assert.IsTrue(applying.IsCompleted, "drawn within two and a half minutes");
-        Assert.IsTrue(applying.Result.Applied, string.Join("\n", applying.Result.Problems));
+        Assert.IsTrue(TaskResults.Done(applying).Applied, string.Join("\n", TaskResults.Done(applying).Problems));
         var screen = placed.transform.Find(N4N0Installer.ScreenObject).GetComponent<SkinnedMeshRenderer>();
         StringAssert.StartsWith(ItemParts.VariantsFolder + "/N4N0 parts test/N4N0 parts test/menu ", AssetDatabase.GetAssetPath(screen.sharedMaterial), "the screen's own materials");
         Assert.IsTrue(N4N0Installer.RetroOf(placed.transform));
@@ -119,7 +119,7 @@ public sealed class N4N0PartsTests
         Assert.IsTrue(current.Recorded);
         var thumbnail = ItemParts.ThumbnailAsync(placed.transform, theme.Definition, theme.PrefabPath, theme.PartsPath, theme.Part, retro);
         for (var until = DateTime.UtcNow.AddSeconds(150); !thumbnail.IsCompleted && DateTime.UtcNow < until;) yield return null;
-        Assert.IsTrue(ItemParts.PictureSize(thumbnail.Result, out int w, out int h) && w == 512 && h == 512, "the menu in that theme, 512 × 512");
+        Assert.IsTrue(ItemParts.PictureSize(TaskResults.Done(thumbnail), out int w, out int h) && w == 512 && h == 512, "the menu in that theme, 512 × 512");
 
         sandbox.PerformUndo();
         Assert.AreEqual("Modern", ItemParts.Of(placed).Single(p => p.Part.key == "theme").Current.name, "Undo brings back the screen as it was");

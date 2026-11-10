@@ -14,6 +14,8 @@ using UnityEngine.TestTools;
 using Object = UnityEngine.Object;
 
 // Generated files stay while something uses them, go once nothing does, and come back with the object an Undo brings back.
+// A scan reads the whole project: the first of a session takes minutes on a large one, past the framework's 180 s.
+[Timeout(900000)]
 public sealed class GeneratedAssetsTests
 {
     private Scene scene;
@@ -39,7 +41,7 @@ public sealed class GeneratedAssetsTests
     // A sweep reads every asset of the project: give it time.
     private static IEnumerator Wait(Task task)
     {
-        double deadline = EditorApplication.timeSinceStartup + 300;
+        double deadline = EditorApplication.timeSinceStartup + 840;
         while (!task.IsCompleted && EditorApplication.timeSinceStartup < deadline) yield return null;
         Assert.That(task.IsCompleted, Is.True, "Task did not finish.");
         if (task.IsFaulted) throw task.Exception.GetBaseException();
@@ -59,7 +61,7 @@ public sealed class GeneratedAssetsTests
 
         var sweep = GeneratedAssets.SweepAsync();
         yield return Wait(sweep);
-        Assert.That(sweep.Result, Does.Not.Contain(path), "Used by an object of a loaded scene.");
+        Assert.That(TaskResults.Done(sweep), Does.Not.Contain(path), "Used by an object of a loaded scene.");
         Assert.True(File.Exists(path));
 
         Undo.IncrementCurrentGroup();
@@ -67,7 +69,7 @@ public sealed class GeneratedAssetsTests
         Undo.IncrementCurrentGroup();
         sweep = GeneratedAssets.SweepAsync();
         yield return Wait(sweep);
-        Assert.That(sweep.Result, Does.Contain(path), "Nothing uses it any more.");
+        Assert.That(TaskResults.Done(sweep), Does.Contain(path), "Nothing uses it any more.");
         Assert.False(File.Exists(path));
 
         Undo.PerformUndo();
@@ -92,7 +94,7 @@ public sealed class GeneratedAssetsTests
         AssetDatabase.SaveAssets();
         var scan = ProjectReferences.ScanAsync();
         yield return Wait(scan);
-        Assert.That(scan.Result.UsersOf(folder + "/Wave.anim"), Does.Contain(folder + "/Override.overrideController"));
+        Assert.That(TaskResults.Done(scan).UsersOf(folder + "/Wave.anim"), Does.Contain(folder + "/Override.overrideController"));
     }
 
     // Review of TKV-28: a scan cancelled after an import never lets the map from before the import decide a sweep; a
@@ -105,7 +107,7 @@ public sealed class GeneratedAssetsTests
         GeneratedAssets.Track(path);
         var before = ProjectReferences.ScanAsync();
         yield return Wait(before);
-        Assert.That(before.Result.UsersOf(path), Is.Empty);
+        Assert.That(TaskResults.Done(before).UsersOf(path), Is.Empty);
 
         var go = new GameObject("Generated mesh user");
         go.AddComponent<MeshFilter>().sharedMesh = mesh;
@@ -120,7 +122,7 @@ public sealed class GeneratedAssetsTests
         }
         var sweep = GeneratedAssets.SweepAsync();
         yield return Wait(sweep);
-        Assert.That(sweep.Result, Does.Not.Contain(path), "the prefab saved before the cancelled scan uses it");
+        Assert.That(TaskResults.Done(sweep), Does.Not.Contain(path), "the prefab saved before the cancelled scan uses it");
         Assert.True(File.Exists(path));
     }
 
@@ -140,7 +142,7 @@ public sealed class GeneratedAssetsTests
         Object.DestroyImmediate(go);
         var before = ProjectReferences.ScanAsync();
         yield return Wait(before);
-        Assert.That(before.Result.UsersOf(path), Is.Empty);
+        Assert.That(TaskResults.Done(before).UsersOf(path), Is.Empty);
 
         string text = File.ReadAllText(prefab);
         StringAssert.Contains("m_Mesh: {fileID: 0}", text);
@@ -148,7 +150,7 @@ public sealed class GeneratedAssetsTests
         AssetDatabase.ImportAsset(prefab, ImportAssetOptions.ForceSynchronousImport);
         var sweep = GeneratedAssets.SweepAsync();
         yield return Wait(sweep);
-        Assert.That(sweep.Result, Does.Not.Contain(path), "the prefab uses it now");
+        Assert.That(TaskResults.Done(sweep), Does.Not.Contain(path), "the prefab uses it now");
         Assert.True(File.Exists(path));
     }
 
@@ -162,7 +164,7 @@ public sealed class GeneratedAssetsTests
         {
             var settle = GeneratedAssets.SweepIfChangedAsync();
             yield return Wait(settle);
-            ran = settle.Result;
+            ran = TaskResults.Done(settle);
         }
         Assert.That(ran, Is.False, "nothing changed since the last complete sweep");
 
@@ -177,10 +179,10 @@ public sealed class GeneratedAssetsTests
             EditorChangeBus.Report(report);
             var after = GeneratedAssets.SweepIfChangedAsync();
             yield return Wait(after);
-            Assert.That(after.Result, Is.True, "runs after a change: " + name);
+            Assert.That(TaskResults.Done(after), Is.True, "runs after a change: " + name);
             var again = GeneratedAssets.SweepIfChangedAsync();
             yield return Wait(again);
-            Assert.That(again.Result, Is.False, "skipped once it stands: " + name);
+            Assert.That(TaskResults.Done(again), Is.False, "skipped once it stands: " + name);
         }
 
         // A tracked file a loaded object uses (so the sweep keeps it and changes nothing).
@@ -195,7 +197,7 @@ public sealed class GeneratedAssetsTests
         GeneratedAssets.Track(path);
         var tracked = GeneratedAssets.SweepIfChangedAsync();
         yield return Wait(tracked);
-        Assert.That(tracked.Result, Is.True, "runs after a file is tracked");
+        Assert.That(TaskResults.Done(tracked), Is.True, "runs after a file is tracked");
         Assert.True(File.Exists(path));
     }
 
@@ -219,9 +221,9 @@ public sealed class GeneratedAssetsTests
 
         var scan = ProjectReferences.ScanAsync();
         yield return Wait(scan);
-        Assert.That(scan.Result.UsersOf(path), Does.Contain(json), "its .meta names the mesh");
-        Assert.That(scan.Result.UsersOf(path), Does.Contain(notes), "its text names the mesh");
-        Assert.That(scan.Result.UsersOf(path), Does.Not.Contain(path), "a file is not its own user");
+        Assert.That(TaskResults.Done(scan).UsersOf(path), Does.Contain(json), "its .meta names the mesh");
+        Assert.That(TaskResults.Done(scan).UsersOf(path), Does.Contain(notes), "its text names the mesh");
+        Assert.That(TaskResults.Done(scan).UsersOf(path), Does.Not.Contain(path), "a file is not its own user");
     }
 
     // Round 2 (b): what users can edit outside Assets/ counts: ProjectSettings/ and the embedded and local packages.
@@ -288,7 +290,7 @@ public sealed class GeneratedAssetsTests
 
         var fresh = ProjectReferences.ScanAsync();
         yield return Wait(fresh);
-        Assert.That(fresh.Result.UsersOf(path), Is.Empty);
+        Assert.That(TaskResults.Done(fresh).UsersOf(path), Is.Empty);
 
         File.SetLastWriteTimeUtc(binary, DateTime.UtcNow.AddMinutes(5));
         var stale = ProjectReferences.ScanAsync();
@@ -296,13 +298,13 @@ public sealed class GeneratedAssetsTests
         Assert.That(stale.Exception?.GetBaseException(), Is.InstanceOf<UncertainReferencesException>());
         var sweep = GeneratedAssets.SweepAsync();
         yield return Wait(sweep);
-        Assert.That(sweep.Result, Is.Empty, "nothing goes while a file's import is out of date");
+        Assert.That(TaskResults.Done(sweep), Is.Empty, "nothing goes while a file's import is out of date");
         Assert.True(File.Exists(path));
 
         AssetDatabase.ImportAsset(binary, ImportAssetOptions.ForceSynchronousImport | ImportAssetOptions.ForceUpdate);
         sweep = GeneratedAssets.SweepAsync();
         yield return Wait(sweep);
-        Assert.That(sweep.Result, Does.Contain(path), "imported again: what it uses is known, and nothing uses the mesh");
+        Assert.That(TaskResults.Done(sweep), Does.Contain(path), "imported again: what it uses is known, and nothing uses the mesh");
     }
 
     // Round 2 (c, text): a prefab edited on disk and not imported yet already counts with what it now uses.
@@ -322,7 +324,7 @@ public sealed class GeneratedAssetsTests
         File.WriteAllText(prefab, text.Replace("m_Mesh: {fileID: 0}", "m_Mesh: {fileID: 4300000, guid: " + guid + ", type: 2}"));
         var sweep = GeneratedAssets.SweepAsync();
         yield return Wait(sweep);
-        Assert.That(sweep.Result, Does.Not.Contain(path), "the prefab's text uses it");
+        Assert.That(TaskResults.Done(sweep), Does.Not.Contain(path), "the prefab's text uses it");
         Assert.True(File.Exists(path));
     }
 
@@ -341,7 +343,7 @@ public sealed class GeneratedAssetsTests
         {
             var sweep = GeneratedAssets.SweepAsync();
             yield return Wait(sweep);
-            Assert.That(sweep.Result, Does.Not.Contain(path), "the prefab written after the scan uses it");
+            Assert.That(TaskResults.Done(sweep), Does.Not.Contain(path), "the prefab written after the scan uses it");
             Assert.True(File.Exists(path));
         }
         finally { GeneratedAssets.AfterScan = null; }
@@ -360,7 +362,7 @@ public sealed class GeneratedAssetsTests
 
         var scan = ProjectReferences.ScanAsync();
         yield return Wait(scan);
-        var map = scan.Result;
+        var map = TaskResults.Done(scan);
         Assert.That(map.UsersOf(picture), Does.Contain(look));
         Assert.That(map.Removable(new[] { picture }), Is.Empty, "the material outside the candidates uses it");
         Assert.That(map.Removable(new[] { picture, look }), Is.EquivalentTo(new[] { picture, look }), "used only by a candidate: both go");
