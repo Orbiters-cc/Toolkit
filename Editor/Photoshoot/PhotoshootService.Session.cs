@@ -60,6 +60,9 @@ namespace Orbiters.Toolkit.Editor.Photoshoot
             private readonly List<Transform> appearanceTransforms = new List<Transform>();
             private readonly List<Renderer> appearanceRenderers = new List<Renderer>();
             private readonly List<Material> appearanceMaterials = new List<Material>();
+            // A baked mesh's vertices and its source's weights while posed geometry is measured (kept, not one array per mesh).
+            private readonly List<Vector3> bakedVertices = new List<Vector3>();
+            private readonly List<BoneWeight> bakedWeights = new List<BoneWeight>();
             private int bodyPoseRevision;
             private bool hasHeadRegion, hasTorsoRegion, hasBodyRegion;
             private Bounds headRegion, torsoRegion, bodyRegion;
@@ -494,18 +497,20 @@ namespace Orbiters.Toolkit.Editor.Photoshoot
                         renderer.updateWhenOffscreen = true;
                         if (!renderer.enabled || !renderer.gameObject.activeInHierarchy) continue;
                         renderer.BakeMesh(baked);
-                        var vertices = baked.vertices;
-                        if (vertices.Length == 0) continue;
+                        var vertices = bakedVertices;
+                        baked.GetVertices(vertices);
+                        if (vertices.Count == 0) continue;
                         Matrix4x4 matrix = toAvatar * SkinnedMeshBounds.BakedToWorld(renderer);
-                        for (int i = 0; i < vertices.Length; i++) Include(ref bodyRegion, ref hasBodyRegion, matrix.MultiplyPoint3x4(vertices[i]));
+                        for (int i = 0; i < vertices.Count; i++) Include(ref bodyRegion, ref hasBodyRegion, matrix.MultiplyPoint3x4(vertices[i]));
                         if (!human) continue;
 
                         var bones = renderer.bones;
-                        var weights = renderer.sharedMesh.boneWeights;
-                        if (weights.Length != vertices.Length || bones.Length == 0) continue;
+                        var weights = bakedWeights;
+                        renderer.sharedMesh.GetBoneWeights(weights);
+                        if (weights.Count != vertices.Count || bones.Length == 0) continue;
                         var boneRegions = new int[bones.Length];
                         for (int i = 0; i < bones.Length; i++) boneRegions[i] = RegionOf(bones[i]);
-                        for (int i = 0; i < vertices.Length; i++)
+                        for (int i = 0; i < vertices.Count; i++)
                         {
                             int bone = weights[i].boneIndex0;
                             int region = bone >= 0 && bone < boneRegions.Length ? boneRegions[bone] : 0;
@@ -530,6 +535,8 @@ namespace Orbiters.Toolkit.Editor.Photoshoot
                 finally
                 {
                     UnityEngine.Object.DestroyImmediate(baked);
+                    bakedVertices.Clear();
+                    bakedWeights.Clear();
                 }
             }
 
