@@ -20,7 +20,7 @@ namespace Orbiters.Toolkit.Editor.VRChat
     /// Docs/capture-strip.md, Docs/skeleton-band.md and Docs/depth-frames.md): what lets Orbiters - N4N0 record a VRChat
     /// world through VRChat's camera, for 3D pictures and recordings. In the frames VRChat's camera renders, never in
     /// anyone's view, mirrors or other players' pictures, the kit draws the capture strip (the camera's exact pose), the
-    /// skeleton band (the avatar's pose) and depth frames; the rig, six square 90° cameras around one point, makes about
+    /// skeleton band (the avatar's pose) and depth frames; the rig, six cameras around one point, makes about
     /// every other frame a rig frame of six more views while it is on. Orbiters - N4N0 drives them over OSC through local,
     /// unsynced parameters (no synced bits): <see cref="CaptureRecord"/> (N4N0 › Record sets it too),
     /// <see cref="CaptureDepth"/>, <see cref="CaptureFollow"/>, <see cref="CaptureRig"/> and where the rig stands.
@@ -69,8 +69,27 @@ namespace Orbiters.Toolkit.Editor.VRChat
         };
         /// <summary>The face cameras' near and far planes (the rig's shader tells their renders by the near plane).</summary>
         internal const float RigNear = 0.0479f, RigFar = 1000f;
-        /// <summary>Each face's render texture, square: a little more than a face takes in a 1080p frame (420 px).</summary>
-        internal const int RigFaceSize = 512;
+        /// <summary>Each face's render texture: exactly a tile of a 1920 x 1080 frame, which shows it pixel for pixel, and
+        /// which fills the frame under the strip (contracts' <c>rig::FACE_RENDER</c>).</summary>
+        internal const int RigFaceWidth = 640, RigFaceHeight = 420;
+        /// <summary>The faces' projection across and down (contracts' <c>rig::PROJECTION</c>): the cube's 90° and a little more,
+        /// stretched over a texture of this shape.</summary>
+        internal const float RigP00 = 0.990625f, RigP11 = 0.96f;
+
+        /// <summary>
+        /// A face's camera as the contracts' projection says, through Unity's physical camera: with gate fit None the sensor
+        /// is stretched onto the texture, so the camera sees the cube's face (a plain camera would see what the texture's shape
+        /// gives, 90° across and 67° down).
+        /// </summary>
+        internal static void SetRigProjection(Camera camera)
+        {
+            camera.usePhysicalProperties = true;
+            camera.gateFit = Camera.GateFitMode.None;
+            camera.lensShift = Vector2.zero;
+            camera.focalLength = 18f;
+            camera.sensorSize = new Vector2(36f / RigP00, 36f / RigP11);
+        }
+
         // Triangle kinds (uv0.x) the kit's shader reads; bones are 0..54.
         internal const float StripKind = 64f, FillKind = 65f, HeaderKind = 66f;
         internal const int CaptureBones = 55;
@@ -135,20 +154,11 @@ namespace Orbiters.Toolkit.Editor.VRChat
             for (int face = 1; face <= RigFaceNames.Count; face++)
             {
                 string path = folder + "/N4N0 capture face " + RigFaceNames[face - 1] + ".renderTexture";
-                var texture = AssetDatabase.LoadAssetAtPath<RenderTexture>(path);
-                if (texture == null)
-                {
-                    texture = new RenderTexture(RigFaceSize, RigFaceSize, 24, RenderTextureFormat.ARGBHalf)
-                    {
-                        name = System.IO.Path.GetFileNameWithoutExtension(path), antiAliasing = 1, useMipMap = false, autoGenerateMips = false,
-                        wrapMode = TextureWrapMode.Clamp, filterMode = FilterMode.Bilinear,
-                    };
-                    AssetDatabase.CreateAsset(texture, path);
-                }
+                var texture = RigFaceTexture(path);
                 var holder = Child(rig, "Face " + RigFaceNames[face - 1]);
                 holder.localRotation = Quaternion.LookRotation(RigBases[face - 1, 2], RigBases[face - 1, 1]);
                 var camera = holder.gameObject.AddComponent<Camera>();
-                camera.fieldOfView = 90f;
+                SetRigProjection(camera);
                 camera.nearClipPlane = RigNear;
                 camera.farClipPlane = RigFar;
                 // Before VRChat's camera, which draws their pictures in the same frame.
@@ -190,6 +200,45 @@ namespace Orbiters.Toolkit.Editor.VRChat
         /// Writes a contracts shader into N4N0's folder under its own name, its includes written into it (a gallery
         /// package carries the shader, not what it includes), and imports it.
         /// </summary>
+        // A face's render texture at path, of the faces' size (one of another size, from an older N4N0, is replaced).
+        private static RenderTexture RigFaceTexture(string path)
+        {
+            var texture = AssetDatabase.LoadAssetAtPath<RenderTexture>(path);
+            if (texture != null && texture.width == RigFaceWidth && texture.height == RigFaceHeight) return texture;
+            if (texture != null) AssetDatabase.DeleteAsset(path);
+            texture = new RenderTexture(RigFaceWidth, RigFaceHeight, 24, RenderTextureFormat.ARGBHalf)
+            {
+                name = System.IO.Path.GetFileNameWithoutExtension(path), antiAliasing = 1, useMipMap = false, autoGenerateMips = false,
+                wrapMode = TextureWrapMode.Clamp, filterMode = FilterMode.Bilinear,
+            };
+            AssetDatabase.CreateAsset(texture, path);
+            return texture;
+        }
+
+        /// <summary>
+        /// The rig of a build copy as this Toolkit's layout wants it (contracts' Docs/rig-frames.md), whichever N4N0 release
+        /// placed it: its cameras' projection and render textures, its renderer's shader. Uploading the avatar again is
+        /// all it takes to fill the frame. An N4N0 from before keeps its 512 px square faces until then, which Orbiters - N4N0
+        /// goes on reading: the frame's strip says which it is.
+        /// </summary>
+        private static void BuildRigFaces(Transform n4n0, string folder)
+        {
+            var renderer = n4n0.Find(RigRendererPath)?.GetComponent<MeshRenderer>();
+            if (renderer == null || renderer.sharedMaterial == null) return;
+            var shader = CopyCaptureShader(RigShaderTemplate, folder + "/N4N0 capture rig.shader", RigShaderName);
+            var material = new Material(renderer.sharedMaterial) { shader = shader };
+            for (int face = 1; face <= RigFaceNames.Count; face++)
+            {
+                var camera = n4n0.Find(RigFacePath(face))?.GetComponent<Camera>();
+                if (camera == null) continue;
+                var texture = RigFaceTexture(folder + "/N4N0 capture face " + RigFaceNames[face - 1] + ".renderTexture");
+                SetRigProjection(camera);
+                camera.targetTexture = texture;
+                material.SetTexture("_OrbitersRigFace" + face, texture);
+            }
+            renderer.sharedMaterial = SaveInPlace(material, folder + "/N4N0 capture rig.mat");
+        }
+
         private static Shader CopyCaptureShader(string template, string path, string name)
         {
             var text = AssetDatabase.LoadAssetAtPath<TextAsset>(template);
@@ -376,6 +425,7 @@ namespace Orbiters.Toolkit.Editor.VRChat
             var constraint = rig.GetComponent<VRCParentConstraint>();
             // The hips, as they are: at rest the rig stands at them, following it stands where the animator's offsets say.
             if (constraint != null && constraint.Sources.Count >= 1) constraint.Sources[0] = new VRCConstraintSource(bones[0], 1f, Vector3.zero, Vector3.zero);
+            BuildRigFaces(n4n0, folder);
             return smr;
         }
 

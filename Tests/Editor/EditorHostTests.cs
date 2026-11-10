@@ -292,7 +292,7 @@ public sealed class EditorHostTests
         point.Add(x => x + 1);
         using (point.Register("Broken", broken))
         {
-            UnityEngine.TestTools.LogAssert.Expect(LogType.Exception, new System.Text.RegularExpressions.Regex(@"Test extensions \(Broken\) failed: broken"));
+            UnityEngine.TestTools.LogAssert.Expect(LogType.Exception, new System.Text.RegularExpressions.Regex("InvalidOperationException: broken"));
             Assert.That(point.Each(f => f(5), -1), Is.EqualTo(new[] { 10, 6, -1 }));
         }
         Assert.That(point.Count, Is.EqualTo(2));

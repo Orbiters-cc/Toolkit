@@ -66,11 +66,12 @@ public class N4N0CaptureTests
         {
             var camera = root.Find(N4N0Installer.RigFacePath(face)).GetComponent<Camera>();
             Assert.IsFalse(camera.enabled, "off until the rig layer");
-            Assert.AreEqual((90f, N4N0Installer.RigNear, N4N0Installer.RigFar, -100f), (camera.fieldOfView, camera.nearClipPlane, camera.farClipPlane, camera.depth));
+            Assert.AreEqual((N4N0Installer.RigNear, N4N0Installer.RigFar, -100f), (camera.nearClipPlane, camera.farClipPlane, camera.depth));
+            AssertFaceProjection(camera, face);
             Assert.Less(Vector3.Distance(camera.transform.localRotation * Vector3.forward, N4N0Installer.RigBases[face - 1, 2]), 1e-5f, "face " + face + " forward");
             Assert.Less(Vector3.Distance(camera.transform.localRotation * Vector3.up, N4N0Installer.RigBases[face - 1, 1]), 1e-5f, "face " + face + " up");
             Assert.AreSame(camera.targetTexture, renderer.sharedMaterial.GetTexture("_OrbitersRigFace" + face));
-            Assert.AreEqual((RenderTextureFormat.ARGBHalf, 512), (camera.targetTexture.format, camera.targetTexture.width), "HDR: the world's tonemapping treats the faces as the scene");
+            Assert.AreEqual(RenderTextureFormat.ARGBHalf, camera.targetTexture.format, "HDR: the world's tonemapping treats the faces as the scene");
             StringAssert.StartsWith(folder + "/", AssetDatabase.GetAssetPath(camera.targetTexture));
         }
         var kit = root.Find(N4N0Installer.CaptureKitPath).GetComponent<SkinnedMeshRenderer>();
@@ -80,6 +81,130 @@ public class N4N0CaptureTests
         Assert.IsTrue(kit.sharedMaterial.shader.isSupported, "the kit's shader compiles");
         // Nothing from the Toolkit's package: a gallery package carries it all.
         Assert.IsFalse(AssetDatabase.GetDependencies(AssetDatabase.GetAssetPath(prefab), true).Any(p => p.StartsWith("Packages/orbiters.", StringComparison.Ordinal)));
+    }
+
+    /// <summary>
+    /// A face's camera projects as the contracts say (their <c>rig::PROJECTION</c>, the strip's words and what training's
+    /// cameras are made from), through Unity's own matrix on the render texture, not a formula of ours.
+    /// </summary>
+    private static void AssertFaceProjection(Camera camera, int face)
+    {
+        Assert.AreEqual((N4N0Installer.RigFaceWidth, N4N0Installer.RigFaceHeight), (camera.targetTexture.width, camera.targetTexture.height), "face " + face);
+        Assert.IsTrue(camera.usePhysicalProperties && camera.gateFit == Camera.GateFitMode.None, "face " + face + " stretches its sensor onto the texture");
+        Assert.AreEqual(0.990625f, camera.projectionMatrix[0, 0], 2e-5f, "face " + face + " P00");
+        Assert.AreEqual(0.96f, camera.projectionMatrix[1, 1], 2e-5f, "face " + face + " P11");
+        Assert.AreEqual(0f, camera.projectionMatrix[0, 2], 1e-6f, "face " + face + " P02");
+        Assert.AreEqual(0f, camera.projectionMatrix[1, 2], 1e-6f, "face " + face + " P12");
+    }
+
+    /// <summary>
+    /// An N4N0 of an older release carries 512 px square faces at 90°, an older shader in its folder. An upload with this
+    /// Toolkit gives its build copy the frame-filling layout, and the placed N4N0's own files stay as they are.
+    /// </summary>
+    [Test]
+    public void AnUploadBringsAnOlderN4N0sRigToTheFillingLayout()
+    {
+        if (VrcFury.Writer == null) Assert.Ignore("Requires the VRCFury integration.");
+        var (avatar, n4n0) = Placed();
+        // As N4N0 up to 1.0.x was built.
+        var old = new RenderTexture(512, 512, 24, RenderTextureFormat.ARGBHalf);
+        AssetDatabase.CreateAsset(old, folder + "/old face.renderTexture");
+        for (int face = 1; face <= 6; face++)
+        {
+            var camera = n4n0.Find(N4N0Installer.RigFacePath(face)).GetComponent<Camera>();
+            camera.usePhysicalProperties = false;
+            camera.fieldOfView = 90f;
+            camera.targetTexture = old;
+        }
+        var copy = Object.Instantiate(avatar.gameObject);
+        SceneManager.MoveGameObjectToScene(copy, scene);
+        var built = copy.transform.Find(n4n0.name);
+        var before = built.Find(N4N0Installer.RigRendererPath).GetComponent<MeshRenderer>().sharedMaterial;
+        N4N0Installer.BuildCaptureKit(built, copy.GetComponent<Animator>(), "Older N4N0 avatar", folder + "/Kits");
+        var renderer = built.Find(N4N0Installer.RigRendererPath).GetComponent<MeshRenderer>();
+        Assert.AreNotSame(before, renderer.sharedMaterial, "the upload's own material");
+        Assert.AreEqual(N4N0Installer.RigShaderName, renderer.sharedMaterial.shader.name);
+        Assert.IsTrue(renderer.sharedMaterial.shader.isSupported, "the copy of the shader compiles");
+        for (int face = 1; face <= 6; face++)
+        {
+            var camera = built.Find(N4N0Installer.RigFacePath(face)).GetComponent<Camera>();
+            AssertFaceProjection(camera, face);
+            Assert.AreSame(camera.targetTexture, renderer.sharedMaterial.GetTexture("_OrbitersRigFace" + face));
+            StringAssert.StartsWith(folder + "/Kits/Older N4N0 avatar/", AssetDatabase.GetAssetPath(camera.targetTexture));
+            // The placed one is untouched: this is a build copy's business.
+            Assert.AreEqual(512, n4n0.Find(N4N0Installer.RigFacePath(face)).GetComponent<Camera>().targetTexture.width);
+        }
+        // Built again (another upload): the same files.
+        var first = renderer.sharedMaterial;
+        N4N0Installer.BuildCaptureKit(built, copy.GetComponent<Animator>(), "Older N4N0 avatar", folder + "/Kits");
+        Assert.AreSame(first, renderer.sharedMaterial);
+    }
+
+    /// <summary>
+    /// What a real render does with the contracts' geometry: a marker placed where the contracts' projection says a
+    /// tile pixel looks ends up on that pixel of the camera's render texture, on Unity's own rasteriser.
+    /// </summary>
+    [Test]
+    public void AFaceCamerasRenderPutsAPointWhereTheContractsProjectionSays()
+    {
+        var holder = new GameObject("Face camera test");
+        var marker = GameObject.CreatePrimitive(PrimitiveType.Cube);
+        var target = new RenderTexture(N4N0Installer.RigFaceWidth, N4N0Installer.RigFaceHeight, 24, RenderTextureFormat.ARGB32);
+        try
+        {
+            var camera = holder.AddComponent<Camera>();
+            camera.targetTexture = target;
+            camera.clearFlags = CameraClearFlags.SolidColor;
+            camera.backgroundColor = Color.black;
+            camera.nearClipPlane = N4N0Installer.RigNear;
+            camera.farClipPlane = N4N0Installer.RigFar;
+            var shader = Shader.Find("Unlit/Color");
+            Assume.That(shader, Is.Not.Null);
+            marker.GetComponent<MeshRenderer>().sharedMaterial = new Material(shader) { color = Color.white };
+            N4N0Installer.SetRigProjection(camera);
+            const float p00 = 0.990625f, p11 = 0.96f;
+            {
+                // Pixel (500, 90) of the picture (top-down), 8 m along the camera's axis.
+                float depth = 8f, x = 500f, y = 90f;
+                float nx = 2f * (x + 0.5f) / target.width - 1f, ny = 1f - 2f * (y + 0.5f) / target.height;
+                marker.transform.position = new Vector3(nx / p00 * depth, ny / p11 * depth, depth);
+                marker.transform.localScale = Vector3.one * (depth * 6f / (target.height * 0.5f * p11));
+                camera.Render();
+                RenderTexture.active = target;
+                var read = new Texture2D(target.width, target.height, TextureFormat.RGBA32, false);
+                read.ReadPixels(new Rect(0, 0, target.width, target.height), 0, 0);
+                RenderTexture.active = null;
+                float sumX = 0, sumY = 0, n = 0;
+                for (int j = 0; j < target.height; j++)
+                    for (int i = 0; i < target.width; i++)
+                        if (read.GetPixel(i, j).r > 0.5f) { sumX += i; sumY += target.height - 1 - j; n++; }
+                Object.DestroyImmediate(read);
+                Assert.Greater(n, 4f, "the marker is in the picture");
+                Assert.AreEqual(x, sumX / n, 1f, "column, P00 " + p00);
+                Assert.AreEqual(y, sumY / n, 1f, "row, P11 " + p11);
+            }
+            // Stretched pixels: a large cube straight ahead, its front face seen square-on, is as much wider than high as fx over fy.
+            marker.transform.position = new Vector3(0f, 0f, 8f);
+            marker.transform.localScale = Vector3.one * 4f;
+            camera.Render();
+            RenderTexture.active = target;
+            var whole = new Texture2D(target.width, target.height, TextureFormat.RGBA32, false);
+            whole.ReadPixels(new Rect(0, 0, target.width, target.height), 0, 0);
+            RenderTexture.active = null;
+            int wide = 0, high = 0;
+            for (int i = 0; i < target.width; i++) if (whole.GetPixel(i, target.height / 2).r > 0.5f) wide++;
+            for (int j = 0; j < target.height; j++) if (whole.GetPixel(target.width / 2, j).r > 0.5f) high++;
+            Object.DestroyImmediate(whole);
+            Assert.AreEqual((0.5f * target.width * p00) / (0.5f * target.height * p11), (float)wide / high, 0.03f, "wider than high by fx over fy");
+        }
+        finally
+        {
+            RenderTexture.active = null;
+            Object.DestroyImmediate(holder);
+            Object.DestroyImmediate(marker);
+            target.Release();
+            Object.DestroyImmediate(target);
+        }
     }
 
     [Test]

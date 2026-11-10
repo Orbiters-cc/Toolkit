@@ -58,6 +58,89 @@ namespace Orbiters.Toolkit.Meshes
         public bool Mirrored { get; set; }
 
         public int TriangleCount => triangles.Length / 3;
+
+        // ---- Burst or managed: one path for every result of a session ----------------------------------------------------
+
+        private static readonly object warmLock = new object();
+        private static volatile int compiled = -1;
+
+        /// <summary>
+        /// Compiles every query entry (<see cref="BvhKernels"/>) on this thread before anything uses them, and says whether the
+        /// queries now run as Burst code. Every query calls it first (a volatile read once done), so the first query of a
+        /// session, on whichever thread, compiles them all while the others wait. The entries compile synchronously, but only for the thread that first calls one: in
+        /// the editor, threads calling an entry while it compiles run it as managed code, which rounds floats otherwise (Mono
+        /// evaluates float expressions in double). So the first parallel batch of a session could mix the two paths. Callers
+        /// whose results are cached or compared call this first (once per domain it compiles: a one-time stall of the
+        /// order of a second or two per entry the first time, near nothing once Burst's cache has them; later calls are a read).
+        /// Thread safe.
+        /// </summary>
+        public static bool WarmUp()
+        {
+            if (exercising) return false;
+            int known = compiled;
+            if (known >= 0) return known == 1 && !RunManaged;
+            lock (warmLock)
+            {
+                if (compiled < 0) compiled = Exercise() ? 1 : 0;
+                return compiled == 1 && !RunManaged;
+            }
+        }
+
+        /// <summary>
+        /// Whether this session's queries run as Burst code (after <see cref="WarmUp"/>): the path a cached or compared result
+        /// must be keyed by. False with Burst compilation off, a failed compilation or <see cref="RunManaged"/>.
+        /// </summary>
+        public static bool QueriesCompiled => WarmUp();
+
+        /// <summary>
+        /// Tests only: every query of every tree runs the walks as managed code (the path an editor without Burst takes), to
+        /// check that results of the two paths are never mixed in a cache. Never set in tools.
+        /// </summary>
+        public static bool RunManaged { get; set; }
+
+        [ThreadStatic] private static bool exercising;
+
+        // The warm-up always runs the Burst entries, so they are compiled whatever the test seam says.
+        private static bool ManagedNow => RunManaged && !exercising;
+
+        // Every entry once on a two-triangle tree (on this thread, so each compiles before any other thread calls it), then
+        // the probe.
+        private static bool Exercise()
+        {
+            exercising = true;
+            try { return ExerciseEntries(); }
+            finally { exercising = false; }
+        }
+
+        private static unsafe bool ExerciseEntries()
+        {
+            var vertices = new[] { new Vector3(0, 0, 0), new Vector3(1, 0, 0), new Vector3(0, 1, 0), new Vector3(0, 0, 1) };
+            var tree = Build(vertices, new[] { 0, 1, 2, 0, 3, 1 });
+            tree.Refit();
+            fixed (BvhNode* n = tree.nodes)
+            fixed (int* p = tree.parents)
+            fixed (BvhTriangle* c = tree.corners)
+            fixed (Vector3* v = vertices)
+            fixed (int3* sv = tree.slotVertices)
+            {
+                int leaf = 0;
+                for (int i = 0; i < tree.nodeCount; i++) if (n[i].Count > 0) { leaf = i; break; }
+                float widen = tree.slack;
+                BvhKernels.RefitLeaves(n, p, c, (float3*)v, sv, &leaf, 1, &widen);
+            }
+            var point = new Vector3(.2f, .2f, .5f);
+            tree.ClosestPoint(point, 2f);
+            tree.Raycast(point, Vector3.back, 2f);
+            tree.ClosestPoints(new[] { point }, 2f, new Hit[1], 1);
+            tree.Raycasts(new[] { point }, new[] { Vector3.back }, 2f, true, new Hit[1], 1);
+            var normals = new[] { Vector3.forward, Vector3.down };
+            var rule = TriangleRule.All.Facing(normals, Vector3.forward, 0f);
+            tree.Query(QueryKind.Closest, point, default, 2f, false, rule, 0, default, Span<Hit>.Empty);
+            tree.Query(QueryKind.Ray, point, Vector3.back, 2f, true, rule, -1, default, Span<Hit>.Empty);
+            var hits = new Hit[2];
+            tree.Query(QueryKind.Classes, point, default, 2f, false, rule, -1, new TriangleClasses(rule, TriangleTests.None, TriangleTests.Facing), hits);
+            return BvhKernels.CompiledProbe() == 1;
+        }
         public Vector3[] Vertices => vertices;
         public int[] Triangles => triangles;
 
@@ -500,6 +583,7 @@ namespace Orbiters.Toolkit.Meshes
         public unsafe Hit Raycast(Vector3 origin, Vector3 direction, float maxDistance, bool backfaces = true)
         {
             if (nodeCount == 0) return new Hit { Distance = maxDistance };
+            WarmUp();
             direction.Normalize();
             float3 o = origin, d = direction;
             BvhHit hit;
@@ -508,7 +592,8 @@ namespace Orbiters.Toolkit.Meshes
             fixed (int* t = triangleOfSlot)
             {
                 var view = ViewOf(n, c, t);
-                BvhKernels.Raycast(view, o, d, maxDistance, backfaces ? 1 : 0, out hit);
+                if (ManagedNow) { var all = new AcceptAllTriangles(); BvhKernels.Raycast(view, o, d, maxDistance, backfaces, ref all, out hit); }
+                else BvhKernels.Raycast(view, o, d, maxDistance, backfaces ? 1 : 0, out hit);
             }
             return ToHit(hit);
         }
@@ -529,6 +614,7 @@ namespace Orbiters.Toolkit.Meshes
         public unsafe Hit ClosestPoint(Vector3 point, float maxDistance)
         {
             if (nodeCount == 0) return new Hit { Distance = maxDistance };
+            WarmUp();
             float3 p = point;
             BvhHit hit;
             fixed (BvhNode* n = nodes)
@@ -536,7 +622,8 @@ namespace Orbiters.Toolkit.Meshes
             fixed (int* t = triangleOfSlot)
             {
                 var view = ViewOf(n, c, t);
-                BvhKernels.ClosestPoint(view, p, maxDistance, out hit);
+                if (ManagedNow) { var all = new AcceptAllTriangles(); BvhKernels.ClosestPoint(view, p, maxDistance, ref all, out hit); }
+                else BvhKernels.ClosestPoint(view, p, maxDistance, out hit);
             }
             return ToHit(hit);
         }
@@ -595,6 +682,7 @@ namespace Orbiters.Toolkit.Meshes
                 return new Hit { Distance = maxDistance };
             }
             rule.Check(slotOfTriangle.Length);
+            WarmUp();
             if (kind == QueryKind.Ray || kind == QueryKind.RayFromContact) direction.Normalize();
             BvhHit hit;
             var found = stackalloc BvhHit[TriangleClasses.Max];
@@ -650,15 +738,18 @@ namespace Orbiters.Toolkit.Meshes
                 switch (kind)
                 {
                     case QueryKind.Closest:
-                        BvhKernels.ClosestPointByRule(view, p, maxDistance, filter, seed, out hit);
+                        if (ManagedNow) BvhKernels.ClosestPoint(view, p, maxDistance, ref filter, seed, out hit);
+                        else BvhKernels.ClosestPointByRule(view, p, maxDistance, filter, seed, out hit);
                         return ToHit(hit);
                     case QueryKind.Ray:
                     case QueryKind.RayFromContact:
                         float3 d = direction;
-                        BvhKernels.RaycastByRule(view, p, d, maxDistance, backfaces ? 1 : 0, kind == QueryKind.RayFromContact ? 1 : 0, filter, out hit);
+                        if (ManagedNow) BvhKernels.Raycast(view, p, d, maxDistance, backfaces, kind == QueryKind.RayFromContact, ref filter, out hit);
+                        else BvhKernels.RaycastByRule(view, p, d, maxDistance, backfaces ? 1 : 0, kind == QueryKind.RayFromContact ? 1 : 0, filter, out hit);
                         return ToHit(hit);
                     default:
-                        BvhKernels.ClosestPointsByClass(view, p, maxDistance, filter, found);
+                        if (ManagedNow) BvhKernels.ClosestPoints(view, p, maxDistance, ref filter, classes.Count, found);
+                        else BvhKernels.ClosestPointsByClass(view, p, maxDistance, filter, found);
                         for (int i = 0; i < classes.Count; i++) hits[i] = ToHit(found[i]);
                         return default;
                 }
@@ -675,6 +766,9 @@ namespace Orbiters.Toolkit.Meshes
             if (results == null || results.Length < points.Length) throw new ArgumentException("A result per point.", nameof(results));
             int blocks = (points.Length + BatchBlock - 1) / BatchBlock;
             var options = new ParallelOptions { MaxDegreeOfParallelism = maxThreads > 0 ? maxThreads : Environment.ProcessorCount };
+            // Compiled before the blocks run in parallel: never a batch half managed, half Burst (see WarmUp).
+            WarmUp();
+            bool managed = ManagedNow;
             using (var pinned = Pin())
             {
                 var view = pinned.View;
@@ -682,8 +776,14 @@ namespace Orbiters.Toolkit.Meshes
                 {
                     int start = block * BatchBlock, count = Math.Min(BatchBlock, points.Length - start);
                     var hits = stackalloc BvhHit[BatchBlock];
-                    fixed (Vector3* p = &points[start])
-                        BvhKernels.ClosestPoints(view, (float3*)p, count, maxDistance, hits);
+                    if (managed)
+                    {
+                        var all = new AcceptAllTriangles();
+                        for (int i = 0; i < count; i++) BvhKernels.ClosestPoint(view, points[start + i], maxDistance, ref all, out hits[i]);
+                    }
+                    else
+                        fixed (Vector3* p = &points[start])
+                            BvhKernels.ClosestPoints(view, (float3*)p, count, maxDistance, hits);
                     for (int i = 0; i < count; i++) results[start + i] = ToHit(hits[i]);
                 });
             }
@@ -697,6 +797,8 @@ namespace Orbiters.Toolkit.Meshes
             if (results == null || results.Length < origins.Length) throw new ArgumentException("A result per ray.", nameof(results));
             int blocks = (origins.Length + BatchBlock - 1) / BatchBlock;
             var options = new ParallelOptions { MaxDegreeOfParallelism = maxThreads > 0 ? maxThreads : Environment.ProcessorCount };
+            WarmUp();
+            bool managed = ManagedNow;
             using (var pinned = Pin())
             {
                 var view = pinned.View;
@@ -704,9 +806,15 @@ namespace Orbiters.Toolkit.Meshes
                 {
                     int start = block * BatchBlock, count = Math.Min(BatchBlock, origins.Length - start);
                     var hits = stackalloc BvhHit[BatchBlock];
-                    fixed (Vector3* o = &origins[start])
-                    fixed (Vector3* d = &directions[start])
-                        BvhKernels.Raycasts(view, (float3*)o, (float3*)d, count, maxDistance, backfaces ? 1 : 0, hits);
+                    if (managed)
+                    {
+                        var all = new AcceptAllTriangles();
+                        for (int i = 0; i < count; i++) BvhKernels.Raycast(view, origins[start + i], directions[start + i], maxDistance, backfaces, ref all, out hits[i]);
+                    }
+                    else
+                        fixed (Vector3* o = &origins[start])
+                        fixed (Vector3* d = &directions[start])
+                            BvhKernels.Raycasts(view, (float3*)o, (float3*)d, count, maxDistance, backfaces ? 1 : 0, hits);
                     for (int i = 0; i < count; i++) results[start + i] = ToHit(hits[i]);
                 });
             }

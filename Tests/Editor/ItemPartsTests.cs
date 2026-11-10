@@ -496,8 +496,8 @@ public sealed class ItemPartsTests
         drawing.SetResult(true);
         double deadline = EditorApplication.timeSinceStartup + 30;
         while (!(first.IsCompleted && second.IsCompleted) && EditorApplication.timeSinceStartup < deadline) yield return null;
-        Assert.IsTrue(first.Result.Applied, string.Join("\n", first.Result.Problems));
-        Assert.IsTrue(second.Result.Applied, string.Join("\n", second.Result.Problems));
+        Assert.IsTrue(TaskResults.Done(first).Applied, string.Join("\n", TaskResults.Done(first).Problems));
+        Assert.IsTrue(TaskResults.Done(second).Applied, string.Join("\n", TaskResults.Done(second).Problems));
         Assert.AreEqual(Color.red, placed.transform.Find("Body").GetComponent<Renderer>().sharedMaterials[0].GetColor("_Color"));
     }
 

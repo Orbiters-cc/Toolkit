@@ -1,10 +1,12 @@
 // The capture rig's renderer on a VRChat avatar (Docs/rig-frames.md). It sits at the rig's origin, under the rig root
-// with no offset, so its object-to-world is the rig's pose; six square 90° cameras around it render the faces into
+// with no offset, so its object-to-world is the rig's pose; six cameras with 640 x 420 pictures around it render the faces into
 // _OrbitersRigFace1..6. It draws on the wearer's own client only (_OrbitersLocal, set from IsLocal by the kit's
 // animator), in two kinds of render:
-//   - VRChat's camera renders, on rig frames (OrbitersRigFrame): the six faces under the strip, and the strip again with
+//   - VRChat's camera renders, on rig frames (OrbitersRigFrame): the six faces filling the frame under the strip, a tile of
+//     a 1080p frame showing its render pixel for pixel, and the strip again with
 //     the rig's pose and kind 2 (it draws after the capture kit, over the kit's strip and skeleton band);
-//   - each face camera's own render (near plane ORBITERS_RIG_NEAR, square target): the face's stamp, the frame's time.
+//   - each face camera's own render (near plane ORBITERS_RIG_NEAR, a target of the faces' shape): the face's stamp, the
+//     frame's time.
 // Its mesh: three triangles whose uv0.x says what they draw (0 the faces, 1 the strip, 2 the stamp), with bounds large
 // enough that the face cameras and VRChat's camera around the rig never cull it.
 // Contracts: Docs/rig-frames.md, Docs/capture-strip.md. Test: Rust~/tests/shaders.rs.
@@ -43,6 +45,11 @@ Shader "Hidden/Orbiters/CaptureRig"
             #define ORBITERS_RIG_NEAR 0.0479
             #define ORBITERS_RIG_FAR 1000.0
             #define ORBITERS_RIG_MIN_FACE 64u
+            // The faces' projection, which names this layout in the strip; the faces' shape, width : height.
+            #define ORBITERS_RIG_P00 0.990625
+            #define ORBITERS_RIG_P11 0.96
+            #define ORBITERS_RIG_SHAPE_W 32u
+            #define ORBITERS_RIG_SHAPE_H 21u
             #define ORBITERS_STAMP_DIVISOR 64u
             #define ORBITERS_STAMP_BLOCKS 34u
             #define PART_FACES 0u
@@ -65,7 +72,7 @@ Shader "Hidden/Orbiters/CaptureRig"
             struct appdata { float4 vertex : POSITION; float2 uv : TEXCOORD0; };
             struct v2g { float2 uv : TEXCOORD0; };
             // run: mode, value (a tile's face number), first pixel column and row of the run (top-down pixels).
-            // w0..w5: the strip's 23 payload words (and the face side in w0.x for tiles).
+            // w0..w5: the strip's 23 payload words (and the tile's size in w0.xy for tiles).
             struct g2f
             {
                 float4 pos : SV_POSITION;
@@ -85,13 +92,13 @@ Shader "Hidden/Orbiters/CaptureRig"
                 return o;
             }
 
-            // Faces under the strip (Docs/rig-frames.md): side, first tile's corner; side 0 when the frame has none.
-            uint3 OrbitersRigFaces(OrbitersStripLayout s, uint width, uint height)
+            // Faces under the strip (Docs/rig-frames.md): a tile's size, first tile's corner; size 0 when the frame has none.
+            uint4 OrbitersRigFaces(OrbitersStripLayout s, uint width, uint height)
             {
                 uint top = s.reserved.w;
-                uint face = min((height - top) / 2u, width / 3u);
-                if (!s.valid || face < ORBITERS_RIG_MIN_FACE) return uint3(0u, 0u, 0u);
-                return uint3(face, (width - 3u * face) / 2u, top + (height - top - 2u * face) / 2u);
+                uint w = width / 3u, h = (height - top) / 2u;
+                if (!s.valid || min(w, h) < ORBITERS_RIG_MIN_FACE) return uint4(0u, 0u, 0u, 0u);
+                return uint4(w, h, (width - 3u * w) / 2u, top + (height - top - 2u * h) / 2u);
             }
 
             // The face tile t shows: -X, +Z, +X, -Z, +Y, -Y.
@@ -139,7 +146,8 @@ Shader "Hidden/Orbiters/CaptureRig"
                 else if (i == 1u) word = flags;
                 else if (i == 2u) word = asuint(OrbitersTime());
                 else if (i < 15u) word = OrbitersRigPoseBits(i - 3u);
-                else if (i < 17u) word = asuint(1.0);
+                else if (i == 15u) word = asuint(ORBITERS_RIG_P00);
+                else if (i == 16u) word = asuint(ORBITERS_RIG_P11);
                 else if (i < 19u) word = 0u;
                 else if (i == 19u) word = asuint(ORBITERS_RIG_NEAR);
                 else if (i == 20u) word = asuint(ORBITERS_RIG_FAR);
@@ -157,27 +165,30 @@ Shader "Hidden/Orbiters/CaptureRig"
                 g2f o = (g2f)0;
                 if (part == PART_STAMP)
                 {
-                    // Only in a face camera's own render: its near plane and its square target say so.
-                    if (_VRChatCameraMode > 0.5 || _VRChatMirrorMode > 0.5 || abs(_ProjectionParams.y - ORBITERS_RIG_NEAR) > 1e-6 || width != height) return;
+                    // Only in a face camera's own render: its near plane and the shape of its target say so.
+                    if (_VRChatCameraMode > 0.5 || _VRChatMirrorMode > 0.5 || abs(_ProjectionParams.y - ORBITERS_RIG_NEAR) > 1e-6 || width * ORBITERS_RIG_SHAPE_H != height * ORBITERS_RIG_SHAPE_W) return;
+                    // A camera that does not project as the strip will say (its physical properties lost on the way to VRChat)
+                    // stamps nothing: readers leave its face out rather than train on the wrong rays.
+                    if (abs(unity_CameraProjection[0][0] - ORBITERS_RIG_P00) > 1e-3 || abs(abs(unity_CameraProjection[1][1]) - ORBITERS_RIG_P11) > 1e-3) return;
                     o.run = uint4(RUN_STAMP, 0u, 0u, 0u);
                     uint y = (height * (ORBITERS_STAMP_DIVISOR - 1u) + ORBITERS_STAMP_DIVISOR - 1u) / ORBITERS_STAMP_DIVISOR;
-                    EmitRun(stream, o, 0u, y, (width * ORBITERS_STAMP_BLOCKS + ORBITERS_STAMP_DIVISOR - 1u) / ORBITERS_STAMP_DIVISOR, height - y);
+                    EmitRun(stream, o, 0u, y, width, height - y);
                     return;
                 }
                 if (!camera || !OrbitersRigFrame()) return;
                 OrbitersStripLayout s = OrbitersComputeStripLayout(width, height);
-                uint3 f = OrbitersRigFaces(s, width, height);
+                uint4 f = OrbitersRigFaces(s, width, height);
                 if (f.x == 0u) return;
                 if (part == PART_FACES)
                 {
                     o.run = uint4(RUN_FILL, 0u, 0u, s.reserved.w);
                     EmitRun(stream, o, 0u, s.reserved.w, width, height - s.reserved.w);
-                    o.w0 = uint4(f.x, 0u, 0u, 0u);
+                    o.w0 = uint4(f.x, f.y, 0u, 0u);
                     [unroll] for (uint t = 0u; t < 6u; t++)
                     {
-                        uint2 at = uint2(f.y + (t % 3u) * f.x, f.z + (t / 3u) * f.x);
+                        uint2 at = uint2(f.z + (t % 3u) * f.x, f.w + (t / 3u) * f.y);
                         o.run = uint4(RUN_TILE, OrbitersRigTileFace(t), at);
-                        EmitRun(stream, o, at.x, at.y, f.x, f.x);
+                        EmitRun(stream, o, at.x, at.y, f.x, f.y);
                     }
                 }
                 else if (part == PART_STRIP)
@@ -232,14 +243,14 @@ Shader "Hidden/Orbiters/CaptureRig"
                 if (i.run.x == RUN_FILL) return float4(0.0, 0.0, 0.0, 1.0);
                 if (i.run.x == RUN_TILE)
                 {
-                    float side = (float)i.w0.x;
-                    float2 uv = float2((p.x - i.run.z + 0.5) / side, 1.0 - (p.y - i.run.w + 0.5) / side);
+                    float2 size = float2(i.w0.xy);
+                    float2 uv = float2((p.x - i.run.z + 0.5) / size.x, 1.0 - (p.y - i.run.w + 0.5) / size.y);
                     return float4(OrbitersRigFace(i.run.y, uv), 1.0);
                 }
                 if (i.run.x == RUN_STAMP)
                 {
-                    uint block = p.x * ORBITERS_STAMP_DIVISOR / width;
-                    if (block >= ORBITERS_STAMP_BLOCKS || p.y * ORBITERS_STAMP_DIVISOR / height != ORBITERS_STAMP_DIVISOR - 1u) discard;
+                    uint block = p.x * ORBITERS_STAMP_BLOCKS / width;
+                    if (p.y * ORBITERS_STAMP_DIVISOR / height != ORBITERS_STAMP_DIVISOR - 1u) discard;
                     bool on = block == 1u || (block >= 2u && ((asuint(OrbitersTime()) >> (31u - (block - 2u))) & 1u) != 0u);
                     return float4((on ? ORBITERS_BIT_LEVEL : 0.0).xxx, 1.0);
                 }

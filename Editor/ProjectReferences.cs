@@ -50,47 +50,122 @@ namespace Orbiters.Toolkit.Editor
         /// </summary>
         public static async Task<ProjectReferences> ScanAsync(Action<float, string> progress = null, CancellationToken cancellation = default)
         {
+            var total = Stopwatch.StartNew();
             var map = new ProjectReferences { roots = Roots() };
             ImportStamps.Load();
+            string keptPath = KeptScan.FilePath;
             var reader = new Reader(map.roots, cancellation);
-            var reading = Task.Run(reader.Run, cancellation);
-            while (!reading.IsCompleted)
+            map.Stats = reader.Stats;
+            LastScan = map.Stats;
+            try
             {
-                progress?.Invoke(0.5f * reader.Fraction, $"Reading the project's files… {reader.Read} of {reader.Found}");
-                await Task.Yield();
+                // Each file is read again only when its stamp changed since the kept scan (KeptScan).
+                var reading = Task.Run(() =>
+                {
+                    reader.Kept = KeptScan.Load(keptPath, reader.Stats);
+                    return reader.Run();
+                }, cancellation);
+                if (progress != null)
+                {
+                    var shown = Stopwatch.StartNew();
+                    void Report()
+                    {
+                        if (reading.IsCompleted) { EditorApplication.update -= Report; return; }
+                        if (shown.ElapsedMilliseconds < 100) return;
+                        shown.Restart();
+                        progress(0.5f * reader.Fraction, $"Reading the project's files… {reader.Read} of {reader.Found}");
+                    }
+                    EditorApplication.update += Report;
+                }
+                var found = await reading;
+                await map.AddSlicedAsync(found, 0.5f, 0.45f, progress, cancellation);
+                // Files changed while the scan ran are read again, until a listing finds nothing new.
+                var checking = Stopwatch.StartNew();
+                for (int round = 0; ; round++)
+                {
+                    var known = map.files.ToDictionary(p => p.Key, p => p.Value.Stamp, StringComparer.OrdinalIgnoreCase);
+                    var roots = map.roots;
+                    var diff = await Task.Run(() => Diff(roots, known, null, cancellation, true), cancellation);
+                    if (diff.Uncertain != null) throw new UncertainReferencesException(diff.Uncertain);
+                    if (diff.Changed.Count == 0 && diff.Gone.Count == 0) break;
+                    if (round >= 4) throw new UncertainReferencesException("Files kept changing while the project was checked.");
+                    foreach (string gone in diff.Gone) map.Remove(gone);
+                    foreach (var read in diff.Changed) map.Remove(read.Path);
+                    map.Stats.Rereads += diff.Changed.Count;
+                    await map.AddSlicedAsync(diff.Changed, 0.95f, 0f, progress, cancellation);
+                }
+                map.Stats.RecheckMilliseconds = checking.Elapsed.TotalMilliseconds;
+                if (!SameRoots(Roots(), map.roots)) throw new UncertainReferencesException("The project's packages changed while it was checked.");
+                progress?.Invoke(1f, "Checked " + map.files.Count + " files");
+                return map;
             }
-            await map.AddSlicedAsync(await reading, 0.5f, 0.45f, progress, cancellation);
-            // Files changed while the scan ran are read again, until a listing finds nothing new.
-            for (int round = 0; ; round++)
+            finally
             {
-                var known = map.files.ToDictionary(p => p.Key, p => p.Value.Stamp, StringComparer.OrdinalIgnoreCase);
-                var roots = map.roots;
-                var diff = await Task.Run(() => Diff(roots, known, null, cancellation, true), cancellation);
-                if (diff.Uncertain != null) throw new UncertainReferencesException(diff.Uncertain);
-                if (diff.Changed.Count == 0 && diff.Gone.Count == 0) break;
-                if (round >= 4) throw new UncertainReferencesException("Files kept changing while the project was checked.");
-                foreach (string gone in diff.Gone) map.Remove(gone);
-                foreach (var read in diff.Changed) map.Remove(read.Path);
-                await map.AddSlicedAsync(diff.Changed, 0.95f, 0f, progress, cancellation);
+                map.Stats.TotalMilliseconds = total.Elapsed.TotalMilliseconds;
+                // What was read whole is kept, also from a scan that stopped: the next one reads only what changed.
+                if (map.files.Count > 0)
+                {
+                    var reads = map.files.Values.ToList();
+                    KeptScan.Saving = Task.Run(() => KeptScan.Save(keptPath, reads));
+                }
             }
-            if (!SameRoots(Roots(), map.roots)) throw new UncertainReferencesException("The project's packages changed while it was checked.");
-            progress?.Invoke(1f, "Checked " + map.files.Count + " files");
-            return map;
         }
 
-        // Unity's part of reading each file, a slice per editor frame.
+        internal ScanStats Stats = new ScanStats();
+
+        // Unity's part of reading each file, slice by slice: 12 ms while someone uses the editor, 100 ms when nobody does
+        // (in the background, in batch mode), each slice on the next editor update rather than on a posted continuation
+        // (which the editor runs far less often than its updates when it is not in front). A slice ends after the file
+        // that passes its budget: one file Unity takes long over (a large scene's dependencies) can make it longer.
         private async Task AddSlicedAsync(List<FileRead> found, float from, float span, Action<float, string> progress, CancellationToken cancellation)
         {
             var slice = Stopwatch.StartNew();
+            var work = Stopwatch.StartNew();
+            double budget = SliceMilliseconds();
             for (int i = 0; i < found.Count; i++)
             {
                 cancellation.ThrowIfCancellationRequested();
                 Add(found[i]);
-                if (slice.Elapsed.TotalMilliseconds <= 12) continue;
+                if (slice.Elapsed.TotalMilliseconds <= budget) continue;
+                Stats.UnityMilliseconds += work.Elapsed.TotalMilliseconds;
                 progress?.Invoke(from + span * (i + 1f) / found.Count, $"Checking what uses what… {i + 1} of {found.Count}");
-                await Task.Yield();
+                Stats.Continuations++;
+                await NextUpdate(cancellation);
+                work.Restart();
                 slice.Restart();
+                budget = SliceMilliseconds();
             }
+            Stats.UnityMilliseconds += work.Elapsed.TotalMilliseconds;
+        }
+
+        private static double SliceMilliseconds() =>
+            !UnityEngine.Application.isBatchMode && UnityEditorInternal.InternalEditorUtility.isApplicationActive ? 12 : 100;
+
+        // Completes on the next EditorApplication.update, running the awaiting code inside it (the update runs on the main
+        // thread with Unity's context current, so the continuation is not posted again). Cancelled with the token: the
+        // handler is removed at once when the cancel comes on the main thread, else at the next update (which then does
+        // nothing more).
+        private static Task NextUpdate(CancellationToken cancellation)
+        {
+            var next = new TaskCompletionSource<bool>();
+            CancellationTokenRegistration registration = default;
+            void Tick()
+            {
+                EditorApplication.update -= Tick;
+                registration.Dispose();
+                next.TrySetResult(true);
+            }
+            EditorApplication.update += Tick;
+            if (cancellation.CanBeCanceled)
+            {
+                int main = Thread.CurrentThread.ManagedThreadId;
+                registration = cancellation.Register(() =>
+                {
+                    if (Thread.CurrentThread.ManagedThreadId == main) EditorApplication.update -= Tick;
+                    next.TrySetCanceled();
+                });
+            }
+            return next.Task;
         }
 
         /// <summary>
@@ -204,7 +279,7 @@ namespace Orbiters.Toolkit.Editor
         {
             if (!files.TryGetValue(path, out var read)) return;
             files.Remove(path);
-            foreach (string guid in read.Guids)
+            foreach (string guid in read.Uses ?? read.Guids)
                 if (usedBy.TryGetValue(guid, out var users)) users.Remove(path);
         }
 
