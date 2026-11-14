@@ -5,6 +5,9 @@
 - Issue reporting: a tool can share its diagnostics until the person turns them off
   (`IssueReporterOptions.SharedByDefault`; `OrbitersIssueReporter.HasChoice` says whether they chose, for the notice
   such a tool shows first). `ConsentText` says which of the two the tool does. My Avatar and ReFit stay opt-in.
+- Animation paths: a shared clip copied for an avatar is kept as one copy per avatar and source file (marked in the
+  copy's import settings) and reused by later plans, instead of "Walk (Avatar) (Avatar)" copies of copies. MCB's going
+  back on a migrated avatar copied the stock toe clips again each time.
 
 ## 0.4.20 — 2026-11-06
 
