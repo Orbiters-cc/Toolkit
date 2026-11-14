@@ -713,10 +713,13 @@ namespace Orbiters.Toolkit.Editor.Animations
                     .Select(BaseController).Where(c => c != null).Distinct().ToList();
                 var changed = new List<Object>();
                 // Each clip a controller plays rebuilds it when it changes: detached meanwhile, one rebuild each.
+                var planned = new HashSet<Object>(todo.Select(a => a.Asset));
                 using (ControllerEdits.Batch(controllers))
                     foreach (var entry in todo)
                     {
                         var asset = map.TryGetValue(entry.Asset, out var copy) ? copy : entry.Asset;
+                        // The avatar's earlier copy of this asset, changed by its own entry of the plan.
+                        if (asset != entry.Asset && planned.Contains(asset)) continue;
                         int n = Rewrite(asset, entry.Changes.Where(c => c.Fixable).ToList(), undoName ?? "Update animation paths", result.Skipped);
                         if (n == 0) continue;
                         result.Paths += n;
@@ -806,18 +809,20 @@ namespace Orbiters.Toolkit.Editor.Animations
         }
 
         // Copies of the shared assets for this avatar, then every controller and component of the avatar leading to them
-        // points at the copies (a shared controller on the way is copied too). Returns the files made.
+        // points at the copies (a shared controller on the way is copied too). One copy per avatar and source file: a later
+        // plan reuses it. Returns the files made.
         private static int OwnCopies(RepathPlan plan, List<RepathAsset> shared, Dictionary<Object, Object> map)
         {
             int made = 0;
             string suffix = " (" + Sanitize(plan.Avatar.name) + ")";
+            var others = OtherUses(plan.Avatar);
+            var planned = new HashSet<Object>(plan.Assets.Where(a => a.Fixable && a.Asset != null).Select(a => a.Asset));
             foreach (var entry in shared)
             {
-                if (map.ContainsKey(entry.Asset)) continue;
-                if (CopyFile(entry.Asset, suffix, map)) made++;
+                if (map.ContainsKey(entry.Asset) || OwnCopy(entry.Asset, suffix, others)) continue;
+                if (CopyFile(entry.Asset, suffix, map, others, planned)) made++;
             }
-            if (made == 0) return 0;
-            var others = OtherUses(plan.Avatar);
+            if (map.Count == 0) return 0;
             var ours = OurFiles(plan.Sources);
             // The avatar's own controllers and blend trees: those its sources hold, and the files they play.
             var holders = plan.Sources.Select(s => s.Asset).Where(a => a is RuntimeAnimatorController || a is BlendTree)
@@ -833,8 +838,12 @@ namespace Orbiters.Toolkit.Editor.Animations
                 {
                     if (map.ContainsKey(holder) || !Refers(holder, map)) continue;
                     string path = AssetDatabase.GetAssetPath(holder);
-                    bool sharedHolder = others.ContainsKey(holder) || dependents.ContainsKey(path);
-                    if (sharedHolder && Locked(holder) == null && CopyFile(holder, suffix, map)) { made++; changedAny = true; }
+                    bool sharedHolder = (others.ContainsKey(holder) || dependents.ContainsKey(path)) && !OwnCopy(holder, suffix, others);
+                    if (sharedHolder && Locked(holder) == null)
+                    {
+                        if (CopyFile(holder, suffix, map, others, planned)) made++;
+                        changedAny |= map.ContainsKey(holder);
+                    }
                     var target = map.TryGetValue(holder, out var copy) ? copy : holder;
                     if (Locked(target) == null) Replace(target, map);
                 }
@@ -850,8 +859,26 @@ namespace Orbiters.Toolkit.Editor.Animations
             return name.Length > 40 ? name.Substring(0, 40) : name;
         }
 
-        // Copies the asset's file beside it; its objects (the asset, its sub-assets) map to the copy's.
-        private static bool CopyFile(Object asset, string suffix, Dictionary<Object, Object> map)
+        // A copy made for an avatar says so in its import settings: its source file and the avatar's suffix.
+        private const string CopyMark = "Orbiters Toolkit animation copy of ";
+
+        private static string CopyKey(string path, string suffix) => CopyMark + AssetDatabase.AssetPathToGUID(path) + suffix;
+
+        // The asset is a copy made for this avatar that no other object of the open scenes plays (only files no avatar plays
+        // there, such as a controller an earlier install left, still hold it): changed in place, never copied again.
+        private static bool OwnCopy(Object asset, string suffix, Dictionary<Object, List<string>> others)
+        {
+            string path = AssetDatabase.GetAssetPath(asset);
+            string data = path.Length == 0 ? null : AssetImporter.GetAtPath(path)?.userData;
+            if (data == null || !data.StartsWith(CopyMark, StringComparison.Ordinal) || !data.EndsWith(suffix, StringComparison.Ordinal)) return false;
+            var main = AssetDatabase.LoadMainAssetAtPath(path);
+            return !others.ContainsKey(asset) && (main == null || !others.ContainsKey(main));
+        }
+
+        // Copies the asset's file beside it; its objects (the asset, its sub-assets) map to the copy's. The copy this avatar
+        // already has of that file is reused when nothing else in the open scenes plays it: as it is when the plan changes it
+        // itself, else made the source's again (a single-object file; Undo restores it). Returns whether a file was made.
+        private static bool CopyFile(Object asset, string suffix, Dictionary<Object, Object> map, Dictionary<Object, List<string>> others, HashSet<Object> planned)
         {
             string path = AssetDatabase.GetAssetPath(asset);
             if (path.Length == 0) return false;
@@ -861,9 +888,40 @@ namespace Orbiters.Toolkit.Editor.Animations
                 MapSubAssets(path, AssetDatabase.GetAssetPath(map[main]), map);
                 return false;
             }
-            string target = AssetDatabase.GenerateUniqueAssetPath(Path.GetDirectoryName(path).Replace('\\', '/') + "/" + Path.GetFileNameWithoutExtension(path) + suffix + Path.GetExtension(path));
+            string key = CopyKey(path, suffix);
+            string stem = Path.GetDirectoryName(path).Replace('\\', '/') + "/" + Path.GetFileNameWithoutExtension(path) + suffix;
+            string extension = Path.GetExtension(path);
+            string target = stem + extension;
+            // The names Unity gives a copy when the first is taken ("Walk (Avatar) 1.anim"), in order: the first free one is the new copy's.
+            for (int n = 1; AssetDatabase.LoadMainAssetAtPath(target) != null; target = stem + " " + n++ + extension)
+                if (AssetImporter.GetAtPath(target)?.userData == key && Reuse(main, AssetDatabase.LoadMainAssetAtPath(target), others, planned))
+                {
+                    MapSubAssets(path, target, map);
+                    return false;
+                }
             if (!AssetDatabase.CopyAsset(path, target)) return false;
+            var importer = AssetImporter.GetAtPath(target);
+            if (importer != null)
+            {
+                importer.userData = key;
+                EditorUtility.SetDirty(importer);
+                AssetDatabase.WriteImportSettingsIfDirty(target);
+            }
             MapSubAssets(path, target, map);
+            return true;
+        }
+
+        private static bool Reuse(Object source, Object copy, Dictionary<Object, List<string>> others, HashSet<Object> planned)
+        {
+            if (source == null || copy == null || others.ContainsKey(copy) || Locked(copy) != null) return false;
+            string from = AssetDatabase.GetAssetPath(source), to = AssetDatabase.GetAssetPath(copy);
+            if (AssetDatabase.LoadAllAssetsAtPath(from).Length != 1 || AssetDatabase.LoadAllAssetsAtPath(to).Length != 1 || source.GetType() != copy.GetType()) return false;
+            if (planned.Contains(copy)) return true;
+            Undo.RegisterCompleteObjectUndo(copy, "Update animation paths");
+            string name = copy.name;
+            EditorUtility.CopySerialized(source, copy);
+            copy.name = name;
+            EditorUtility.SetDirty(copy);
             return true;
         }
 

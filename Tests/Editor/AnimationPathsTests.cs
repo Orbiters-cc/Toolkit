@@ -210,6 +210,37 @@ public sealed class AnimationPathsTests
         Assert.AreSame(clip, state.motion);
     }
 
+    [Test] public void ASharedClipKeepsOneCopyForThisAvatarAcrossPlans()
+    {
+        var other = AnimatorController.CreateAnimatorControllerAtPath(folder + "/other.controller");
+        other.layers[0].stateMachine.AddState("Also").motion = clip;
+        AssetDatabase.SaveAssets();
+        Assert.AreEqual(1, AnimationPaths.Apply(Rename(jacket, "Coat")).Copies);
+        var copy = (AnimationClip)state.motion;
+        Assert.AreNotSame(clip, copy);
+        // A controller no avatar plays still holds the copy (one an earlier install left): going back changes the copy in place.
+        var left = AnimatorController.CreateAnimatorControllerAtPath(folder + "/left.controller");
+        left.layers[0].stateMachine.AddState("Left").motion = copy;
+        AssetDatabase.SaveAssets();
+        var back = Rename(jacket, "Jacket");
+        Assert.IsTrue(back.Shared, back.ToString());
+        Assert.AreEqual(0, AnimationPaths.Apply(back).Copies);
+        Assert.AreSame(copy, state.motion);
+        CollectionAssert.AreEqual(new[] { "Jacket", "Jacket/Sleeve" }, Paths(copy));
+        // The avatar plays the original again: the next plan reuses the same copy, made the original's again first.
+        state.motion = clip;
+        Undo.IncrementCurrentGroup();
+        var again = AnimationPaths.Apply(Rename(jacket, "Coat"), undoName: "Paths test");
+        Assert.AreEqual(0, again.Copies);
+        CollectionAssert.IsEmpty(again.Skipped);
+        Assert.AreSame(copy, state.motion);
+        CollectionAssert.AreEqual(new[] { "Coat", "Coat/Sleeve" }, Paths(copy));
+        CollectionAssert.AreEqual(new[] { "Jacket", "Jacket/Sleeve" }, Paths(clip));
+        Assert.AreEqual(2, AssetDatabase.FindAssets("t:AnimationClip", new[] { folder }).Length);
+        Undo.PerformUndo();
+        CollectionAssert.AreEqual(new[] { "Jacket", "Jacket/Sleeve" }, Paths(copy));
+    }
+
     [Test] public void LockedAssetsAreListedNeverChanged()
     {
         var packaged = AssetDatabase.LoadAssetAtPath<AnimationClip>("Packages/orbiters.toolkit/Editor/Photoshoot/BodyPoses/bow_pose.anim");
