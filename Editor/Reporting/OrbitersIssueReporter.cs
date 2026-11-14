@@ -40,6 +40,13 @@ namespace Orbiters.Toolkit.Editor
 
         /// <summary>Whether reports may be sent now (e.g. not while the tool knows the server is unreachable); always when null.</summary>
         public Func<bool> CanSend;
+
+        /// <summary>
+        /// True for a tool whose diagnostics are sent until the person turns them off (its owner's decision: the tool
+        /// must then tell the person so before anything is sent, see <see cref="OrbitersIssueReporter.HasChoice"/>);
+        /// false, the default, for a tool whose diagnostics are sent only once the person turns them on.
+        /// </summary>
+        public bool SharedByDefault;
     }
 
     /// <summary>
@@ -121,10 +128,13 @@ namespace Orbiters.Toolkit.Editor
 
         public string ToolName => options.ToolName;
 
-        /// <summary>Whether the tool's diagnostics are sent. Off until the person turns it on; kept for every project on this computer.</summary>
+        /// <summary>
+        /// Whether the tool's diagnostics are sent: the person's choice, kept for every project on this computer; until
+        /// they make one, off, or on for a tool that shares by default (<see cref="IssueReporterOptions.SharedByDefault"/>).
+        /// </summary>
         public bool ShareIssueLogs
         {
-            get => EditorPrefs.GetBool(shareKey, false);
+            get => EditorPrefs.GetBool(shareKey, options.SharedByDefault);
             set
             {
                 EditorPrefs.SetBool(shareKey, value);
@@ -143,10 +153,14 @@ namespace Orbiters.Toolkit.Editor
             }
         }
 
-        /// <summary>What the tool's opt-in must say: what is sent, with what, where it applies and what is removed first.</summary>
+        /// <summary>Whether the person turned sharing on or off themselves on this computer (in any project).</summary>
+        public bool HasChoice => EditorPrefs.HasKey(shareKey);
+
+        /// <summary>What the tool's switch must say: what is sent, with what, where it applies and what is removed first.</summary>
         public string ConsentText =>
-            "Sends " + ToolName + "'s own warnings and errors to Orbiters, with their stack traces, so they can be fixed. Off by default; once on, it " +
-            "applies to every Unity project on this computer. While you are signed in, reports are linked to your Orbiters account. Before anything is " +
+            "Sends " + ToolName + "'s own warnings and errors to Orbiters, with their stack traces, so they can be fixed. " +
+            (options.SharedByDefault ? "On until you turn it off; your choice" : "Off by default; once on, it") +
+            " applies to every Unity project on this computer. While you are signed in, reports are linked to your Orbiters account. Before anything is " +
             "sent, tokens, keys, passwords, cookies, e-mail addresses, web links (Orbiters' own aside), VRChat ids and account names, your user and " +
             "computer names and folder paths are removed. Repeats are folded and reports are rate limited; Unity's and other packages' logs are never sent.";
 

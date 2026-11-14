@@ -415,6 +415,29 @@ namespace Orbiters.Toolkit.Editor.Tests
         }
 
         [Test]
+        public void AToolThatSharesByDefaultSendsUntilThePersonTurnsItOffAndSaysSo()
+        {
+            string key = "OrbitersIssueReportingTests_" + Guid.NewGuid().ToString("N");
+            keys.Add(key);
+            var reporter = new OrbitersIssueReporter(new IssueReporterOptions
+            {
+                ToolName = "Test Tool", SettingsKey = key, Namespaces = new[] { "Orbiters.TestTool." }, SharedByDefault = true,
+                Endpoint = () => "http://127.0.0.1:1/bugs"
+            }) { Redactor = Redactor, Token = () => CurrentToken, IsQuiet = _ => false, TestsSeen = _ => { }, Transport = (url, token, payload, cancel) => Task.CompletedTask };
+            reporter.Refresh();
+            Assert.False(reporter.HasChoice, "Nobody chose yet.");
+            Assert.True(reporter.ShareIssueLogs, "On until the person turns it off.");
+            Assert.True(reporter.Accept("A warning", "Orbiters.TestTool.X:Y ()", LogType.Warning, DateTime.UtcNow));
+            StringAssert.Contains("On until you turn it off", reporter.ConsentText);
+            StringAssert.DoesNotContain("Off by default", reporter.ConsentText);
+            reporter.ShareIssueLogs = false;
+            Assert.True(reporter.HasChoice);
+            Assert.False(reporter.ShareIssueLogs, "The person's choice is kept.");
+            Assert.False(reporter.Accept("Another warning", "Orbiters.TestTool.X:Z ()", LogType.Warning, DateTime.UtcNow));
+            Assert.AreEqual(0, reporter.Queue.PendingCount, "What waited goes with the choice.");
+        }
+
+        [Test]
         public void TheOptInSaysWhatIsSent()
         {
             string text = Reporter(null, share: false).ConsentText;
