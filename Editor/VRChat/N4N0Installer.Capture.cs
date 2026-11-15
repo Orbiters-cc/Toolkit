@@ -407,7 +407,9 @@ namespace Orbiters.Toolkit.Editor.VRChat
             string folder = root + "/" + SafeFolderName(avatarName);
             EnsureFolder(folder);
             var mesh = SaveInPlace(CaptureMesh(animator, kit, out var bones, out ulong mask), folder + "/Capture kit mesh.asset");
-            var material = new Material(template);
+            // The kit's shader as this Toolkit has it (contracts' Shaders/OrbitersCaptureKit.shader), whichever N4N0 release
+            // placed it: uploading again is all an avatar needs for a newer kit (the depth probe of Toolkit 0.5.2 among them).
+            var material = new Material(template) { shader = CopyCaptureShader(KitShaderTemplate, folder + "/N4N0 capture kit.shader", KitShaderName) };
             material.SetVector(BoneMaskId, MaskWords(mask));
             material.SetFloat(AvatarIdId, CaptureIdentity(avatarName));
             material = SaveInPlace(material, folder + "/Capture kit.mat");

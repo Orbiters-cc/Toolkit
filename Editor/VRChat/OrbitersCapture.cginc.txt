@@ -251,13 +251,109 @@ bool OrbitersRigFrame()
     return !OrbitersKitDepthFrame() && ((OrbitersHash(asuint(OrbitersTime())) >> 16) & 1u) != 0u;
 }
 
-// Eye depth (metres) of a top-down pixel from _CameraDepthTexture; +inf where nothing was drawn.
+// ---- The depth probe (Docs/depth-frames.md, "Where the depth texture is empty") ----
+// A world whose shaders draw no shadow-caster pass leaves its surfaces out of _CameraDepthTexture, though they write the
+// depth buffer as they are drawn. An avatar's shader cannot read that buffer, but its draws are tested against it: on a
+// depth frame the capture kit draws planes that cover the picture at known eye depths, nearest first, with ZTest LEqual,
+// each writing its number as a colour; a pixel keeps the number of the farthest plane still in front of the scene there.
+// Round 1 (coarse): 33 planes, 0.1 m to 1000 m, 8 a decade. A grab of the picture keeps the answer. Round 2 (fine): 31
+// planes inside that pixel's coarse step, through SV_Depth. A second grab keeps it. The depth symbols then read both
+// grabs at a sample's pixel wherever the depth texture says nothing is there. 32 x 32 steps over four decades: each is
+// 0.9 % of the depth, so a probed depth is within 0.45 % of the surface's (the depth buffer's own precision aside).
+#define ORBITERS_PROBE_COARSE 32u
+#define ORBITERS_PROBE_FINE 32u
+#define ORBITERS_PROBE_PER_DECADE 8.0
+
+// Eye depth of coarse plane i (0..ORBITERS_PROBE_COARSE): 0.1 m x 10^(i / 8).
+float OrbitersProbePlane(float i)
+{
+    return 0.1 * exp2(i * (3.32192809 / ORBITERS_PROBE_PER_DECADE));
+}
+
+// How many coarse planes the camera draws: those nearer than its far plane (a farther one is clipped away).
+uint OrbitersProbePlanes()
+{
+    uint n = 0u;
+    [unroll] for (uint i = 0u; i <= ORBITERS_PROBE_COARSE; i++)
+        n += OrbitersProbePlane((float)i) < _ProjectionParams.z * 0.999 ? 1u : 0u;
+    return n;
+}
+
+// Clip-space z of a point at eye depth d (w = d) through the projection the GPU uses (reversed or not).
+float OrbitersProbeClipZ(float d)
+{
+    return UNITY_MATRIX_P[2][2] * -d + UNITY_MATRIX_P[2][3];
+}
+
+// SV_Depth of eye depth d.
+float OrbitersProbeDeviceDepth(float d)
+{
+    float ndc = OrbitersProbeClipZ(d) / d;
+#if defined(SHADER_API_GLCORE) || defined(SHADER_API_GLES3) || defined(SHADER_API_OPENGL)
+    return ndc * 0.5 + 0.5;
+#else
+    return ndc;
+#endif
+}
+
+// A plane's number k (0..63) as the colour it writes (linear): eighths in red and green, blue 1 marks the probe's own.
+float4 OrbitersProbeColour(uint k)
+{
+    return float4((k >> 3) / 8.0, (k & 7u) / 8.0, 1.0, 1.0);
+}
+
+// The number a probe colour carries; false when it is no probe colour (nothing drawn, or a pixel's samples disagreed).
+bool OrbitersProbeNumber(float4 c, out uint k)
+{
+    float2 e = c.rg * 8.0;
+    float2 r = round(e);
+    k = (uint)r.x * 8u + (uint)r.y;
+    return c.b > 0.75 && all(abs(e - r) < 0.3) && r.x <= 7.0 && r.y <= 7.0;
+}
+
+// The render target's pixel of a top-down pixel (OrbitersTopDownPixel's inverse): where a grab of the picture holds it.
+uint2 OrbitersRenderPixel(uint2 p)
+{
+    if (_ProjectionParams.x < 0)
+        p.y = (uint)_ScreenParams.y - 1u - p.y;
+    return p;
+}
+
+#ifdef ORBITERS_DEPTH_PROBE
+Texture2D<float4> _OrbitersProbeCoarse;
+Texture2D<float4> _OrbitersProbeFine;
+
+// The probe's eye depth at top-down pixel p: +inf where nothing is there (every plane the camera draws passed), 0 for a
+// surface nearer than 0.1 m (code "unknown"), -1 when the probe left no answer there (no grab, a pixel at an edge).
+float OrbitersProbeDepthAt(uint2 p)
+{
+    int3 at = int3(OrbitersRenderPixel(p), 0);
+    uint n, m;
+    if (!OrbitersProbeNumber(_OrbitersProbeCoarse.Load(at), n)) return -1.0;
+    if (n == 0u) return 0.0;
+    if (n >= OrbitersProbePlanes()) return asfloat(0x7F800000u);
+    float fine = OrbitersProbeNumber(_OrbitersProbeFine.Load(at), m) && m < ORBITERS_PROBE_FINE ? (m + 0.5) / ORBITERS_PROBE_FINE : 0.5;
+    return OrbitersProbePlane((float)(n - 1u) + fine);
+}
+#endif
+
+// Eye depth (metres) of a top-down pixel from _CameraDepthTexture; +inf where nothing was drawn. With the depth probe,
+// where the texture has nothing the probe's depth answers (when it has one).
 float OrbitersEyeDepthAt(uint2 p, uint width, uint height)
 {
     float2 uv = float2((p.x + 0.5) / width, 1.0 - (p.y + 0.5) / height);
     float raw = SAMPLE_DEPTH_TEXTURE_LOD(_CameraDepthTexture, float4(uv, 0, 0));
     float z = LinearEyeDepth(raw);
-    return z >= _ProjectionParams.z * 0.999 ? asfloat(0x7F800000u) : z;
+    float inf = asfloat(0x7F800000u);
+    z = z >= _ProjectionParams.z * 0.999 ? inf : z;
+#ifdef ORBITERS_DEPTH_PROBE
+    if (z == inf)
+    {
+        float probed = OrbitersProbeDepthAt(p);
+        if (probed >= 0.0) z = probed;
+    }
+#endif
+    return z;
 }
 
 // 16-bit depth code (Docs/depth-frames.md): 0 nothing there (beyond 1000 m: sky, far plane), 65535 unknown (nearer than
@@ -329,6 +425,19 @@ bool OrbitersDepthBlockGrows(uint2 b, uint level, uint tilePx, uint2 tiles, uint
     return OrbitersAberrationReach((float)(r.x + mid), (float)(r.y + mid), width, height) >= ORBITERS_DEPTH_REACH[level - 1u];
 }
 
+// The probe's stamp, in a depth frame's pixels beyond the tile grid (its right and bottom leftovers): squares of 32
+// pixels, every other one level 2 where the probe left an answer in the first grab, the others black. A kit without
+// the probe, or a probe that did not run, leaves them all black (Docs/depth-frames.md).
+float3 OrbitersProbeStamp(uint2 p)
+{
+#ifdef ORBITERS_DEPTH_PROBE
+    uint k;
+    bool ran = OrbitersProbeNumber(_OrbitersProbeCoarse.Load(int3(OrbitersRenderPixel(p), 0)), k);
+    if (ran && ((p.x / 32u + p.y / 32u) & 1u) == 0u) return OrbitersLevelLinear(2u);
+#endif
+    return 0;
+}
+
 // Depth symbol colour of pixel p (top-down) in a depth frame. Call after OrbitersStripPixel returned false.
 float3 OrbitersDepthPixel(uint2 p, uint width, uint height)
 {
@@ -337,7 +446,8 @@ float3 OrbitersDepthPixel(uint2 p, uint width, uint height)
     uint tilePx = 16u * cell;
     uint2 tiles = uint2(width / tilePx, height / tilePx) & ~1u;
     uint2 t = p / tilePx;
-    if (!l.valid || t.x >= tiles.x || t.y >= tiles.y) return 0;
+    if (!l.valid) return 0;
+    if (t.x >= tiles.x || t.y >= tiles.y) return OrbitersProbeStamp(p);
     // The layout's tile holding p: the largest growing block, else the grid tile itself.
     uint level = 0u;
     uint2 origin = t;

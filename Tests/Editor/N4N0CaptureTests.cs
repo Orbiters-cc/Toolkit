@@ -325,6 +325,11 @@ public class N4N0CaptureTests
         Assert.AreEqual(N4N0Installer.CaptureIdentity("Kit test avatar"), Mathf.RoundToInt(material.GetFloat("_OrbitersAvatarId")));
         StringAssert.StartsWith(folder + "/Kits/Kit test avatar/", AssetDatabase.GetAssetPath(material));
         StringAssert.StartsWith(folder + "/Kits/Kit test avatar/", AssetDatabase.GetAssetPath(mesh));
+        // The kit's shader is this Toolkit's, written for the upload (an older N4N0's own copy gets the newer kit).
+        Assert.AreEqual(N4N0Installer.KitShaderName, material.shader.name);
+        Assert.IsTrue(material.shader.isSupported, "the copy of the kit's shader compiles");
+        Assert.AreEqual(folder + "/Kits/Kit test avatar/N4N0 capture kit.shader", AssetDatabase.GetAssetPath(material.shader));
+        StringAssert.Contains("_OrbitersProbeCoarse", System.IO.File.ReadAllText(AssetDatabase.GetAssetPath(material.shader)), "with the depth probe");
         Assert.AreSame(built.Find(N4N0Installer.CaptureRigPath), smr.rootBone, "its bounds stand around the rig");
         Assert.AreEqual(4f, smr.localBounds.size.x * Mathf.Abs(smr.rootBone.lossyScale.x), 1e-3f, "4 m in the world");
         var constraint = built.Find(N4N0Installer.CaptureRigPath).GetComponent<VRCParentConstraint>();

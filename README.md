@@ -1,5 +1,13 @@
 # Orbiters Toolkit
 
+## 0.5.2 — 2026-11-15
+
+- N4N0's capture kit measures depth where a world leaves Unity's depth texture empty (contracts' depth probe,
+  `Docs/depth-frames.md`): worlds whose shaders have no shadow-caster pass (冥滩酒吧｜DeathStranding) no longer come out
+  of a 3D picture as a flat backdrop. Each upload now writes the kit's shader from this Toolkit, as it already did the
+  rig's, so uploading an avatar again is all it takes, whichever N4N0 release placed it. No material, mesh or component
+  is added: the avatar's performance rank does not change.
+
 ## 0.5.1 — 2026-11-14
 
 - Issue reporting: a tool can share its diagnostics until the person turns them off

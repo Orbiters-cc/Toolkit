@@ -26,6 +26,130 @@ Shader "Hidden/Orbiters/CaptureKit"
     SubShader
     {
         Tags { "Queue" = "Overlay+100" "RenderType" = "Overlay" "IgnoreProjector" = "True" "DisableBatching" = "True" }
+        CGINCLUDE
+        #define ORBITERS_DEPTH_PROBE
+        #include "UnityCG.cginc"
+        #include "OrbitersCapture.cginc"
+
+        #define KIT_STRIP 64u
+        #define KIT_FILL 65u
+        #define KIT_HEADER 66u
+
+        float _OrbitersOnlyInCamera;
+        float _OrbitersLocal;
+
+        struct appdata { float4 vertex : POSITION; float2 uv : TEXCOORD0; };
+        struct v2g { float3 world : TEXCOORD0; float2 uv : TEXCOORD1; };
+
+        v2g vert(appdata v)
+        {
+            v2g o;
+            o.world = mul(unity_ObjectToWorld, float4(v.vertex.xyz, 1.0)).xyz;
+            o.uv = v.uv;
+            return o;
+        }
+
+        // Whether this draw is the wearer's own, in a frame of VRChat's camera (never a view or a mirror).
+        bool KitDraws()
+        {
+            if (_OrbitersLocal < 0.5) return false;
+            return !(_OrbitersOnlyInCamera > 0.5 && (_VRChatCameraMode < 0.5 || _VRChatMirrorMode > 0.5));
+        }
+
+        // The depth probe's planes (OrbitersCapture.cginc): only from the strip's triangle, on depth frames.
+        struct p2f { float4 pos : SV_POSITION; nointerpolation uint plane : TEXCOORD0; };
+
+        // A plane covering the picture at eye depth d, numbered k.
+        void EmitPlane(inout TriangleStream<p2f> stream, float d, uint k)
+        {
+            float z = OrbitersProbeClipZ(d);
+            p2f o;
+            o.plane = k;
+            o.pos = float4(-d, -d, z, d);
+            stream.Append(o);
+            o.pos = float4(d, -d, z, d);
+            stream.Append(o);
+            o.pos = float4(-d, d, z, d);
+            stream.Append(o);
+            o.pos = float4(d, d, z, d);
+            stream.Append(o);
+            stream.RestartStrip();
+        }
+
+        bool ProbeDraws(v2g v[3])
+        {
+            return KitDraws() && (uint)round(v[0].uv.x) == KIT_STRIP && OrbitersKitDepthFrame();
+        }
+        ENDCG
+
+        // Depth probe, round 1: number 0 just past the near plane (every scene pixel is behind it), then coarse plane i
+        // as number i + 1, nearest first: a pixel keeps the number of the farthest plane in front of the scene.
+        Pass
+        {
+            ZTest LEqual
+            ZWrite Off
+            Cull Off
+            CGPROGRAM
+            #pragma vertex vert
+            #pragma geometry geomCoarse
+            #pragma fragment fragPlane
+            #pragma target 4.0
+
+            [maxvertexcount(136)]
+            void geomCoarse(triangle v2g v[3], inout TriangleStream<p2f> stream)
+            {
+                if (!ProbeDraws(v)) return;
+                EmitPlane(stream, _ProjectionParams.y * 1.001, 0u);
+                [unroll] for (uint i = 0u; i <= ORBITERS_PROBE_COARSE; i++)
+                    EmitPlane(stream, OrbitersProbePlane((float)i), i + 1u);
+            }
+
+            float4 fragPlane(p2f i) : SV_Target
+            {
+                return OrbitersProbeColour(i.plane);
+            }
+            ENDCG
+        }
+        GrabPass { "_OrbitersProbeCoarse" }
+
+        // Depth probe, round 2: inside each pixel's coarse step (from the first grab), 31 finer planes through SV_Depth.
+        Pass
+        {
+            ZTest LEqual
+            ZWrite Off
+            Cull Off
+            CGPROGRAM
+            #pragma vertex vert
+            #pragma geometry geomFine
+            #pragma fragment fragFine
+            #pragma target 4.0
+
+            [maxvertexcount(128)]
+            void geomFine(triangle v2g v[3], inout TriangleStream<p2f> stream)
+            {
+                if (!ProbeDraws(v)) return;
+                // Each plane's depth is the fragment's own; the quads only cover the picture, in front of everything.
+                float d = _ProjectionParams.y * 1.001;
+                [unroll] for (uint j = 0u; j < ORBITERS_PROBE_FINE; j++)
+                    EmitPlane(stream, d, j);
+            }
+
+            float4 fragFine(p2f i, out float depth : SV_Depth) : SV_Target
+            {
+                depth = OrbitersProbeDeviceDepth(_ProjectionParams.y * 1.001);
+                if (i.plane > 0u)
+                {
+                    uint n;
+                    if (!OrbitersProbeNumber(_OrbitersProbeCoarse.Load(int3(i.pos.xy, 0)), n) || n == 0u || n >= OrbitersProbePlanes()) discard;
+                    depth = OrbitersProbeDeviceDepth(OrbitersProbePlane((float)(n - 1u) + (float)i.plane / ORBITERS_PROBE_FINE));
+                }
+                return OrbitersProbeColour(i.plane);
+            }
+            ENDCG
+        }
+        GrabPass { "_OrbitersProbeFine" }
+
+        // Strip, skeleton band and depth symbols.
         Pass
         {
             ZTest Always
@@ -36,13 +160,7 @@ Shader "Hidden/Orbiters/CaptureKit"
             #pragma geometry geom
             #pragma fragment frag
             #pragma target 4.0
-            #include "UnityCG.cginc"
-            #include "OrbitersCapture.cginc"
             #include "OrbitersSkeletonBand.cginc"
-
-            #define KIT_STRIP 64u
-            #define KIT_FILL 65u
-            #define KIT_HEADER 66u
             // What a run of pixels shows: band cells (a sample's levels), the strip, or the strip and depth symbols.
             #define RUN_CELLS 0u
             #define RUN_STRIP 1u
@@ -50,21 +168,9 @@ Shader "Hidden/Orbiters/CaptureKit"
 
             float4 _OrbitersBoneMask;
             float _OrbitersAvatarId;
-            float _OrbitersOnlyInCamera;
-            float _OrbitersLocal;
 
-            struct appdata { float4 vertex : POSITION; float2 uv : TEXCOORD0; };
-            struct v2g { float3 world : TEXCOORD0; float2 uv : TEXCOORD1; };
             // run: mode, sample value, first pixel column of the run (top-down pixels).
             struct g2f { float4 pos : SV_POSITION; nointerpolation uint3 run : TEXCOORD0; };
-
-            v2g vert(appdata v)
-            {
-                v2g o;
-                o.world = mul(unity_ObjectToWorld, float4(v.vertex.xyz, 1.0)).xyz;
-                o.uv = v.uv;
-                return o;
-            }
 
             // A rectangle of pixels (top-down, half-open) as a quad.
             void EmitRun(inout TriangleStream<g2f> stream, uint mode, uint value, uint x, uint y, uint w, uint h)
@@ -88,9 +194,8 @@ Shader "Hidden/Orbiters/CaptureKit"
             [maxvertexcount(104)]
             void geom(triangle v2g v[3], inout TriangleStream<g2f> stream)
             {
-                // A remote copy of the avatar: nothing, in any render.
-                if (_OrbitersLocal < 0.5) return;
-                if (_OrbitersOnlyInCamera > 0.5 && (_VRChatCameraMode < 0.5 || _VRChatMirrorMode > 0.5)) return;
+                // A remote copy of the avatar: nothing, in any render; nor in views and mirrors.
+                if (!KitDraws()) return;
                 uint width = (uint)_ScreenParams.x, height = (uint)_ScreenParams.y;
                 uint kind = (uint)round(v[0].uv.x);
                 bool depthFrame = OrbitersKitDepthFrame();
