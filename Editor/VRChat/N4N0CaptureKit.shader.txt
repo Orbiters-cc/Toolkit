@@ -83,7 +83,8 @@ Shader "Hidden/Orbiters/CaptureKit"
         ENDCG
 
         // Depth probe, round 1: number 0 just past the near plane (every scene pixel is behind it), then coarse plane i
-        // as number i + 1, nearest first: a pixel keeps the number of the farthest plane in front of the scene.
+        // as number i + 1, nearest first: a pixel keeps the number of the farthest plane in front of the scene. Only the depth
+        // layout's grid cell pixels are written (OrbitersProbePixel): the symbols read nothing else.
         Pass
         {
             ZTest LEqual
@@ -106,6 +107,7 @@ Shader "Hidden/Orbiters/CaptureKit"
 
             float4 fragPlane(p2f i) : SV_Target
             {
+                if (!OrbitersProbePixel(OrbitersTopDownPixel(i.pos))) discard;
                 return OrbitersProbeColour(i.plane);
             }
             ENDCG
@@ -136,6 +138,7 @@ Shader "Hidden/Orbiters/CaptureKit"
 
             float4 fragFine(p2f i, out float depth : SV_Depth) : SV_Target
             {
+                if (!OrbitersProbePixel(OrbitersTopDownPixel(i.pos))) discard;
                 depth = OrbitersProbeDeviceDepth(_ProjectionParams.y * 1.001);
                 if (i.plane > 0u)
                 {
