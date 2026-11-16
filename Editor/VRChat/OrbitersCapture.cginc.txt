@@ -296,19 +296,22 @@ float OrbitersProbeDeviceDepth(float d)
 #endif
 }
 
-// A plane's number k (0..63) as the colour it writes (linear): eighths in red and green, blue 1 marks the probe's own.
+// A plane's number k (0..ORBITERS_PROBE_LEVELS - 1) as the colour it writes (linear): k / 40 in red, blue 1 marks the
+// probe's own. One rising channel, read to the nearest number: where MSAA resolves a pixel whose samples kept two
+// neighbouring planes (a plane crossing the pixel), the mean reads as one of the two, a step off at most. (Two digits
+// would read as neither: measured in Unity on 2026-11-16, an 8-bit target with MSAA lost 3 to 10 % of the fine answers.)
+#define ORBITERS_PROBE_LEVELS 40.0
 float4 OrbitersProbeColour(uint k)
 {
-    return float4((k >> 3) / 8.0, (k & 7u) / 8.0, 1.0, 1.0);
+    return float4(k / ORBITERS_PROBE_LEVELS, 0.0, 1.0, 1.0);
 }
 
-// The number a probe colour carries; false when it is no probe colour (nothing drawn, or a pixel's samples disagreed).
+// The number a probe colour carries; false when it is no probe colour (nothing the probe drew).
 bool OrbitersProbeNumber(float4 c, out uint k)
 {
-    float2 e = c.rg * 8.0;
-    float2 r = round(e);
-    k = (uint)r.x * 8u + (uint)r.y;
-    return c.b > 0.75 && all(abs(e - r) < 0.3) && r.x <= 7.0 && r.y <= 7.0;
+    float e = c.r * ORBITERS_PROBE_LEVELS;
+    k = (uint)round(e);
+    return c.b > 0.75 && c.g < 0.25 && e < ORBITERS_PROBE_LEVELS - 0.5;
 }
 
 // The render target's pixel of a top-down pixel (OrbitersTopDownPixel's inverse): where a grab of the picture holds it.
