@@ -296,22 +296,36 @@ float OrbitersProbeDeviceDepth(float d)
 #endif
 }
 
-// A plane's number k (0..ORBITERS_PROBE_LEVELS - 1) as the colour it writes (linear): k / 40 in red, blue 1 marks the
-// probe's own. One rising channel, read to the nearest number: where MSAA resolves a pixel whose samples kept two
-// neighbouring planes (a plane crossing the pixel), the mean reads as one of the two, a step off at most. (Two digits
-// would read as neither: measured in Unity on 2026-11-16, an 8-bit target with MSAA lost 3 to 10 % of the fine answers.)
+// A plane's number k (0..ORBITERS_PROBE_LEVELS - 1) as the colour it writes (linear): k / 40 in red, its square in green,
+// blue 1 marks the probe's own. One rising channel, read to the nearest number: where MSAA resolves a pixel whose samples
+// kept two neighbouring planes (a plane crossing the pixel), the mean reads as one of the two, a step off at most. (Two
+// digits would read as neither: measured in Unity on 2026-11-16, an 8-bit target with MSAA lost 3 to 10 % of the fine
+// answers.) Where the samples kept numbers far apart (a silhouette against what lies far behind it), green stands above
+// red squared by their variance: such a pixel has no single depth.
 #define ORBITERS_PROBE_LEVELS 40.0
+// The variance (in numbers squared) beyond which a pixel's samples disagree: neighbours give at most 0.25, an 8-bit target
+// blurs green by up to about 13 near the top.
+#define ORBITERS_PROBE_SPREAD 25.0
 float4 OrbitersProbeColour(uint k)
 {
-    return float4(k / ORBITERS_PROBE_LEVELS, 0.0, 1.0, 1.0);
+    float v = k / ORBITERS_PROBE_LEVELS;
+    return float4(v, v * v, 1.0, 1.0);
 }
 
-// The number a probe colour carries; false when it is no probe colour (nothing the probe drew).
-bool OrbitersProbeNumber(float4 c, out uint k)
+// The number a probe colour carries; false when it is no probe colour (nothing the probe drew). spread: whether the pixel's
+// samples disagreed (MSAA at a silhouette).
+bool OrbitersProbeNumber(float4 c, out uint k, out bool spread)
 {
     float e = c.r * ORBITERS_PROBE_LEVELS;
     k = (uint)round(e);
-    return c.b > 0.75 && c.g < 0.25 && e < ORBITERS_PROBE_LEVELS - 0.5;
+    spread = (c.g - c.r * c.r) * ORBITERS_PROBE_LEVELS * ORBITERS_PROBE_LEVELS > ORBITERS_PROBE_SPREAD;
+    return c.b > 0.75 && e < ORBITERS_PROBE_LEVELS - 0.5;
+}
+
+bool OrbitersProbeNumber(float4 c, out uint k)
+{
+    bool spread;
+    return OrbitersProbeNumber(c, k, spread) && !spread;
 }
 
 // The render target's pixel of a top-down pixel (OrbitersTopDownPixel's inverse): where a grab of the picture holds it.
@@ -327,13 +341,15 @@ Texture2D<float4> _OrbitersProbeCoarse;
 Texture2D<float4> _OrbitersProbeFine;
 
 // The probe's eye depth at top-down pixel p: +inf where nothing is there (every plane the camera draws passed), 0 for a
-// surface nearer than 0.1 m (code "unknown"), -1 when the probe left no answer there (no grab, a pixel at an edge).
+// surface nearer than 0.1 m or a pixel whose samples disagree (code "unknown"), -1 when the probe left no answer there (no grab, a pixel at an edge).
 float OrbitersProbeDepthAt(uint2 p)
 {
     int3 at = int3(OrbitersRenderPixel(p), 0);
     uint n, m;
-    if (!OrbitersProbeNumber(_OrbitersProbeCoarse.Load(at), n)) return -1.0;
-    if (n == 0u) return 0.0;
+    bool spread;
+    if (!OrbitersProbeNumber(_OrbitersProbeCoarse.Load(at), n, spread)) return -1.0;
+    // A silhouette against what lies far behind it: no single depth, unknown.
+    if (n == 0u || spread) return 0.0;
     if (n >= OrbitersProbePlanes()) return asfloat(0x7F800000u);
     float fine = OrbitersProbeNumber(_OrbitersProbeFine.Load(at), m) && m < ORBITERS_PROBE_FINE ? (m + 0.5) / ORBITERS_PROBE_FINE : 0.5;
     return OrbitersProbePlane((float)(n - 1u) + fine);
