@@ -38,7 +38,12 @@ namespace Orbiters.Toolkit.Editor.Tests
             var schedule = Manager.GetMethod("ScheduleExecutionJobs", Static);
             var stage = schedule.GetParameters()[0].ParameterType;
             foreach (string name in new[] { "PrePhysBone", "PostPhysBone", "PostLocalAvatarProcess" })
-                ((JobHandle)schedule.Invoke(null, new[] { Enum.Parse(stage, name), (object)default(JobHandle) })).Complete();
+            {
+                // SDK 3.10.6 added a "resolve at once" flag between the stage and the job to wait for.
+                var arguments = schedule.GetParameters().Select(p => p.ParameterType == stage ? Enum.Parse(stage, name)
+                    : p.ParameterType == typeof(bool) ? true : (object)default(JobHandle)).ToArray();
+                ((JobHandle)schedule.Invoke(null, arguments)).Complete();
+            }
             Manager.GetMethod("PostUpdateConstraints", Static).Invoke(null, null);
         }
 

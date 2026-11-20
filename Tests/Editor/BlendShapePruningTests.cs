@@ -84,6 +84,88 @@ public sealed class BlendShapePruningTests
         Assert.That(BlendShapePruning.Prune(root, body), Is.Null, "Nothing left to remove.");
     }
 
+    // VRCFury 1.1475 gives an avatar whose visemes a linked mesh shares a lip sync mode older SDKs do not know (face
+    // tracking visemes): the shapes VRChat moves by name left the uploaded body, and the mouth stayed closed.
+    [Test] public void KeepsTheShapesTheDescriptorNamesInAnyLipSyncMode()
+    {
+        var root = New("Avatar");
+        var descriptor = root.AddComponent<VRCAvatarDescriptor>();
+        var body = New("Body").AddComponent<SkinnedMeshRenderer>();
+        body.transform.SetParent(root.transform, false);
+        var other = New("Hair").AddComponent<SkinnedMeshRenderer>();
+        other.transform.SetParent(root.transform, false);
+        var mesh = Own(new Mesh { vertices = new[] { Vector3.zero, Vector3.up, Vector3.right }, triangles = new[] { 0, 1, 2 } });
+        foreach (var name in new[] { "viseme aa", "jaw", "unused" }) mesh.AddBlendShapeFrame(name, 100, new[] { Vector3.forward, Vector3.zero, Vector3.zero }, new Vector3[3], new Vector3[3]);
+        body.sharedMesh = mesh;
+        other.sharedMesh = mesh;
+        descriptor.VisemeSkinnedMesh = body;
+        descriptor.VisemeBlendShapes = new[] { "viseme aa", "", "not on the mesh" };
+        descriptor.MouthOpenBlendShapeName = "jaw";
+
+        foreach (int mode in new[] { (int)VRC_AvatarDescriptor.LipSyncStyle.VisemeBlendShape, (int)VRC_AvatarDescriptor.LipSyncStyle.JawFlapBlendShape, 99 })
+        {
+            descriptor.lipSync = (VRC_AvatarDescriptor.LipSyncStyle)mode;
+            Assert.That(BlendShapePruning.Used(root, body), Is.EquivalentTo(new[] { "viseme aa", "jaw" }), "Lip sync mode " + mode);
+        }
+        Assert.That(BlendShapePruning.Used(root, other), Is.Empty, "A renderer the descriptor does not refer to keeps nothing for it.");
+        var copy = Own(BlendShapePruning.Prune(root, body));
+        Assert.That(Enumerable.Range(0, copy.blendShapeCount).Select(copy.GetBlendShapeName), Is.EqualTo(new[] { "viseme aa", "jaw" }));
+    }
+
+    // The face tracking fields of SDK 3.10.6, set by name (older SDKs do not have them): what VRCFury 1.1475 leaves on a
+    // built avatar. Nothing is animated and the classic viseme fields are empty.
+    [Test] public void KeepsTheShapesOfTheFaceTrackingSetsOnTheMeshesTheyList()
+    {
+        var root = New("Avatar");
+        var descriptor = root.AddComponent<VRCAvatarDescriptor>();
+        var serialized = new SerializedObject(descriptor);
+        var meshes = serialized.FindProperty("faceTrackingMeshes");
+        var sets = serialized.FindProperty("faceTrackingBlendshapesSetList");
+        var behaviors = serialized.FindProperty("faceTrackingParameterBehaviors");
+        if (meshes == null || sets == null || behaviors == null) Assert.Ignore("This VRChat SDK has no face tracking fields.");
+
+        var mesh = Own(new Mesh { vertices = new[] { Vector3.zero, Vector3.up, Vector3.right }, triangles = new[] { 0, 1, 2 } });
+        foreach (var name in new[] { "viseme aa", "blink", "tracked", "behavior", "unused" }) mesh.AddBlendShapeFrame(name, 100, new[] { Vector3.forward, Vector3.zero, Vector3.zero }, new Vector3[3], new Vector3[3]);
+        SkinnedMeshRenderer Renderer(string name)
+        {
+            var renderer = New(name).AddComponent<SkinnedMeshRenderer>();
+            renderer.transform.SetParent(root.transform, false);
+            renderer.sharedMesh = mesh;
+            return renderer;
+        }
+        var body = Renderer("Body");
+        var cheeks = Renderer("Cheeks");
+        var hair = Renderer("Hair");
+
+        serialized.FindProperty("lipSync").intValue = 5;
+        serialized.FindProperty("enableFaceTracking").boolValue = true;
+        meshes.arraySize = 2;
+        meshes.GetArrayElementAtIndex(0).objectReferenceValue = body;
+        meshes.GetArrayElementAtIndex(1).objectReferenceValue = cheeks;
+        sets.arraySize = 1;
+        var set = sets.GetArrayElementAtIndex(0);
+        void Names(string field, params string[] names)
+        {
+            var list = set.FindPropertyRelative(field);
+            Assert.That(list, Is.Not.Null, field);
+            list.arraySize = names.Length;
+            for (int i = 0; i < names.Length; i++) list.GetArrayElementAtIndex(i).stringValue = names[i];
+        }
+        Names("visemeBlendshapeNames", "viseme aa", "");
+        Names("faceTrackingBlendshapeNames", "blink", "tracked", "not on the mesh");
+        behaviors.arraySize = 1;
+        behaviors.GetArrayElementAtIndex(0).FindPropertyRelative("targetBlendshapeName").stringValue = "behavior";
+        serialized.ApplyModifiedPropertiesWithoutUndo();
+
+        var expected = new[] { "viseme aa", "blink", "tracked", "behavior" };
+        Assert.That(BlendShapePruning.Used(root, body), Is.EquivalentTo(expected));
+        Assert.That(BlendShapePruning.Used(root, cheeks), Is.EquivalentTo(expected), "Every listed mesh keeps the names it has.");
+        Assert.That(BlendShapePruning.Used(root, hair), Is.Empty, "A mesh the descriptor does not list keeps nothing for it.");
+        var copy = Own(BlendShapePruning.Prune(root, body));
+        Assert.That(Enumerable.Range(0, copy.blendShapeCount).Select(copy.GetBlendShapeName), Is.EqualTo(expected));
+        Assert.That(serialized.FindProperty("faceTrackingMeshes").GetArrayElementAtIndex(0).objectReferenceValue, Is.SameAs(body), "The renderer stays: only its mesh changes.");
+    }
+
     [Test] public void ShapesAnimationsOnlySetToTheirWeightCanBeBaked()
     {
         var root = New("Avatar");

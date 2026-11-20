@@ -33,6 +33,8 @@ public sealed class AvatarBuildPipelineTests
         (null, "NDMF preprocess", -11000),
         ("Orbiters.Toolkit", "Orbiters.Toolkit.Editor.VRChat.N4N0PlatformHook", -10200),
         ("mcb", "NativeMeshAvatarBuildHook", -10200),
+        // MCB 1.14.2: a version's logic drops the scripts this project doesn't have, before VRCFury reads it.
+        ("mcb", "LogicScriptsBuildHook", -10200),
         ("Orbiters.Toolkit", "Orbiters.Toolkit.Editor.VRChat.N4N0CaptureHook", -10150),
         ("Orbiters.Toolkit", "Orbiters.Toolkit.Editor.VRChat.N4N0MirrorHook", -10140),
         ("Orbiters.Toolkit", "Orbiters.Toolkit.Editor.VRChat.N4N0PicturesHook", -10140),
@@ -264,6 +266,7 @@ public sealed class AvatarBuildPipelineTests
     {
         ("Orbiters.MyAvatar.Editor.Expressions.MenuUploadBuild+Capture", BuildPhase.BeforeNdmf),
         ("NativeMeshAvatarBuildHook", BuildPhase.AfterNdmf),
+        ("LogicScriptsBuildHook", BuildPhase.AfterNdmf),
         ("VersionCustomizationCaptureHook", BuildPhase.BeforeRefitKeptFits),
         ("Orbiters.MyAvatar.Editor.LookPreviews+Restore", BuildPhase.LastBeforeVrcFury),
         ("Orbiters.MyAvatar.Editor.FaceTracking.FaceTrackingBuild+Capture", BuildPhase.LastBeforeVrcFury),
@@ -281,6 +284,7 @@ public sealed class AvatarBuildPipelineTests
     private static readonly (string Landing, string Other, int Side)[] FormerTies =
     {
         ("NativeMeshAvatarBuildHook", "Orbiters.Toolkit.Editor.VRChat.N4N0PlatformHook", -1),
+        ("LogicScriptsBuildHook", "Orbiters.Toolkit.Editor.VRChat.N4N0PlatformHook", -1),
         ("VersionCustomizationCaptureHook", "Orbiters.Toolkit.Editor.VRChat.Refit.RefitKeptFitsHook", -1),
     };
 

@@ -1,5 +1,15 @@
 # Orbiters Toolkit
 
+## 0.5.3 — 2026-11-20
+
+- **An uploaded avatar's mouth and blink move again with a recent VRCFury.** VRCFury 1.1475 with the VRChat SDK 3.10.6
+  turns an avatar's visemes and eyelids into face tracking sets when an accessory's BlendShape Link shares one of their
+  names (a cheek fluff following the body's visemes, say), with a lip sync mode of its own. The blendshape pruning that
+  runs after it (MCB's versions, My Avatar's optimizer) only kept the visemes of the classic mode: the uploaded body
+  lost all of them and its blink, and the mouth stayed closed in VRChat. `BlendShapePruning.Used` now keeps every shape
+  the avatar descriptor names on a mesh it refers to, in whatever field and lip sync mode.
+- Tests: the constraint solver helper follows SDK 3.10.6, and the build order test knows MCB 1.14.2's logic step.
+
 ## 0.5.2 — 2026-11-15
 
 - N4N0's capture kit measures depth where a world leaves Unity's depth texture empty (contracts' depth probe,

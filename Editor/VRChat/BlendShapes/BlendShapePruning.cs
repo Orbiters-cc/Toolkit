@@ -92,13 +92,7 @@ namespace Orbiters.Toolkit.Editor.VRChat.BlendShapes
                         if (kept.Contains(mesh.GetBlendShapeName(i))) used.Add(mesh.GetBlendShapeName(i));
             foreach (var descriptor in avatarRoot.GetComponentsInChildren<VRCAvatarDescriptor>(true))
             {
-                if (descriptor.VisemeSkinnedMesh == renderer)
-                {
-                    if (descriptor.lipSync == VRC_AvatarDescriptor.LipSyncStyle.VisemeBlendShape && descriptor.VisemeBlendShapes != null)
-                        used.UnionWith(descriptor.VisemeBlendShapes.Where(n => !string.IsNullOrEmpty(n)));
-                    if (descriptor.lipSync == VRC_AvatarDescriptor.LipSyncStyle.JawFlapBlendShape && !string.IsNullOrEmpty(descriptor.MouthOpenBlendShapeName))
-                        used.Add(descriptor.MouthOpenBlendShapeName);
-                }
+                used.UnionWith(NamedBy(descriptor, renderer, mesh));
                 var eyes = descriptor.customEyeLookSettings;
                 if (descriptor.enableEyeLook && eyes.eyelidType == VRCAvatarDescriptor.EyelidType.Blendshapes && eyes.eyelidsSkinnedMesh == renderer && eyes.eyelidsBlendshapes != null)
                     foreach (int index in eyes.eyelidsBlendshapes)
@@ -108,6 +102,32 @@ namespace Orbiters.Toolkit.Editor.VRChat.BlendShapes
                 for (int i = 0; i < mesh.blendShapeCount; i++)
                     if (MmdMorphs.Contains(Normalize(mesh.GetBlendShapeName(i)))) used.Add(mesh.GetBlendShapeName(i));
             return used;
+        }
+
+        // The renderer's shapes the descriptor names, in whatever field: the visemes and the jaw flap shape in every lip
+        // sync mode, and the face tracking sets of newer SDKs, which this one may not know. VRChat drives those by name,
+        // with no animation. VRCFury 1.1475 moves an avatar's visemes into such a set, with a lip sync mode of its own,
+        // when a linked mesh shares one of their names: keeping them only in the classic mode left the mouth still.
+        private static IEnumerable<string> NamedBy(VRCAvatarDescriptor descriptor, SkinnedMeshRenderer renderer, Mesh mesh)
+        {
+            var names = new List<string>();
+            bool refers = false;
+            using (var serialized = new UnityEditor.SerializedObject(descriptor))
+            {
+                var property = serialized.GetIterator();
+                bool children = true;
+                while (property.Next(children))
+                {
+                    children = property.propertyType != UnityEditor.SerializedPropertyType.String;
+                    if (property.propertyType == UnityEditor.SerializedPropertyType.ObjectReference) refers |= property.objectReferenceValue == renderer;
+                    else if (property.propertyType == UnityEditor.SerializedPropertyType.String)
+                    {
+                        string name = property.stringValue;
+                        if (name.Length > 0 && mesh.GetBlendShapeIndex(name) >= 0) names.Add(name);
+                    }
+                }
+            }
+            return refers ? names : Enumerable.Empty<string>();
         }
 
         /// <summary>
