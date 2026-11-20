@@ -106,7 +106,8 @@ namespace Orbiters.Toolkit.Editor.VRChat
 
         private static void Build(GameObject root, string folder, int textSync, int thumbnailBytes)
         {
-            // Everything turns off with N4N0/Visible.
+            // Everything N4N0 has. N4N0/Visible turns off the bot alone (its Stay frame below: N4N0 on its tether) and its
+            // beams; the menu's screen, contacts and place stay (N4N0Installer.Controller, BotLayer).
             var shown = Child(root.transform, Shown);
             // On the head bone, turned like the avatar (sources set by Bind), and as large as the avatar's eyes are high.
             var head = Child(shown, "Head");

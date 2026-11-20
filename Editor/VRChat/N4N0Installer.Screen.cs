@@ -79,8 +79,16 @@ namespace Orbiters.Toolkit.Editor.VRChat
         /// mirror (page 38, <see cref="AddMirror"/>): what N4N0's camera sees before a world's video screen, Aim, Zoom in, Zoom
         /// out, Stop; More with its card among seven (page 39). 15 the 3D picture page with its two pictures as buttons (page 40):
         /// 3D picture of people and 3D picture of the world where versions 12 to 14 have one Take and a line that changes it.
+        /// 16 the contact room, Stay here and the screen's place synced. 17 (<see cref="ScreenWithoutBot"/>) the menu without
+        /// the bot: N4N0/Visible hides the bot alone, the screen opens and presses with it hidden; no new page.
         /// </summary>
-        public const int ScreenVersion = 16;
+        public const int ScreenVersion = ScreenWithoutBot;
+        /// <summary>
+        /// The first screen version whose menu shows without the bot: Show N4N0 (<see cref="Visible"/>) off hides N4N0 on its
+        /// tether, its beams and its speech panel, and the screen still opens where it always does, before the eyes, with its
+        /// contacts, pointers and place. Before it, Visible off hid the screen too.
+        /// </summary>
+        public const int ScreenWithoutBot = 17;
         /// <summary>
         /// Local, not saved, set by no menu: the screen's version (<see cref="ScreenVersion"/>), which Orbiters - N4N0 reads
         /// to know the pages the screen has. Screens before version 3 lack it.
@@ -227,6 +235,9 @@ namespace Orbiters.Toolkit.Editor.VRChat
             return screen != null && screen.TryGetComponent(out SkinnedMeshRenderer renderer) ? renderer : null;
         }
 
+        /// <summary>The screen beam's brightness (its material's <c>_Beam</c>; the bot's layer sets it, 0 while the bot is hidden).</summary>
+        internal const float ScreenBeamLevel = .6f;
+
         /// <summary>
         /// N4N0's beam towards the screen in <paramref name="folder"/> (made once), in Orbiters' green or the retro
         /// look's phosphor.
@@ -240,7 +251,7 @@ namespace Orbiters.Toolkit.Editor.VRChat
             beam = new Material(shader) { name = "N4N0 screen beam" + (retro ? " retro" : "") };
             if (retro) beam.SetColor("_EdgeColor", RetroColours.First(c => c.name == "_Accent").colour);
             // Softer than the speech panel's: the menu is larger and nearer its owner's eyes, and stays open.
-            beam.SetFloat("_Beam", .6f);
+            beam.SetFloat("_Beam", ScreenBeamLevel);
             // Under the screen, which is drawn over its end.
             beam.renderQueue = (int)RenderQueue.Transparent - 1;
             AssetDatabase.DeleteAsset(path);

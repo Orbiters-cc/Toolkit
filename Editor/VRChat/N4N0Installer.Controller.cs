@@ -116,11 +116,12 @@ namespace Orbiters.Toolkit.Editor.VRChat
             // Read by Orbiters - N4N0 over OSC only: no layer uses it.
             if (walkBoost) controller.AddParameter(WalkBoost, AnimatorControllerParameterType.Float);
 
-            Toggled(controller, controller.layers[0].stateMachine, Visible, Shown);
+            // N4N0/Visible shows the bot; its menu (the screen, its contacts and place) opens and works without it.
+            BotLayer(controller, controller.layers[0].stateMachine);
             ModelStates(controller, "State", Body, Hop, Anger, beam: true);
             TintLayer(controller, "Colour", Body, Anger);
             FacingLayer(controller, "Facing", Body);
-            Toggled(controller, Layer(controller, "Text visible"), TextVisible, Panel);
+            TextPanelLayer(controller, Layer(controller, "Text visible"));
             Blocks(controller, textSync);
             Text(controller, textSync);
 
@@ -236,6 +237,44 @@ namespace Orbiters.Toolkit.Editor.VRChat
             machine.defaultState = parameter == Visible ? on : off;
             Transition(off, on, (parameter, AnimatorConditionMode.If, 0));
             Transition(on, off, (parameter, AnimatorConditionMode.IfNot, 0));
+        }
+
+        /// <summary>
+        /// The bot, shown while <see cref="Visible"/> is on (its default): N4N0 on its tether (<see cref="StayFrame"/>: the
+        /// ball, its touch, its light, the PhysBone that carries it) and its beam towards the screen. Off hides only the bot:
+        /// the menu's screen, its contacts and its place are no part of it, so the menu opens, presses and stays where it
+        /// is without the bot (the screen then hangs before the eyes alone, no beam reaching it). Before screen version
+        /// <see cref="ScreenWithoutBot"/> the whole of N4N0 (<see cref="Shown"/>) turned off.
+        /// </summary>
+        private static void BotLayer(AnimatorController controller, AnimatorStateMachine machine)
+        {
+            var hidden = new AnimationClip { name = "Bot hidden" };
+            Curve(hidden, StayFrame, typeof(GameObject), "m_IsActive", 0);
+            Curve(hidden, ScreenObject, typeof(SkinnedMeshRenderer), "material._Beam", 0);
+            var shown = new AnimationClip { name = "Bot shown" };
+            Curve(shown, StayFrame, typeof(GameObject), "m_IsActive", 1);
+            Curve(shown, ScreenObject, typeof(SkinnedMeshRenderer), "material._Beam", ScreenBeamLevel);
+            var off = HeldPropRig.State(controller, machine, "Hidden", hidden);
+            var on = HeldPropRig.State(controller, machine, "Shown", shown);
+            machine.defaultState = on;
+            Transition(off, on, (Visible, AnimatorConditionMode.If, 0));
+            Transition(on, off, (Visible, AnimatorConditionMode.IfNot, 0));
+        }
+
+        /// <summary>
+        /// The speech panel: shown while <see cref="TextVisible"/> is on and the bot is (what N4N0 says, its beam from N4N0);
+        /// the text channel keeps writing its cells (and everyone else's screen) either way.
+        /// </summary>
+        private static void TextPanelLayer(AnimatorController controller, AnimatorStateMachine machine)
+        {
+            var hidden = new AnimationClip(); Curve(hidden, Panel, typeof(GameObject), "m_IsActive", 0);
+            var shown = new AnimationClip(); Curve(shown, Panel, typeof(GameObject), "m_IsActive", 1);
+            var off = HeldPropRig.State(controller, machine, "Hidden", hidden);
+            var on = HeldPropRig.State(controller, machine, "Shown", shown);
+            machine.defaultState = off;
+            Transition(off, on, (TextVisible, AnimatorConditionMode.If, 0), (Visible, AnimatorConditionMode.If, 0));
+            Transition(on, off, (TextVisible, AnimatorConditionMode.IfNot, 0));
+            Transition(on, off, (Visible, AnimatorConditionMode.IfNot, 0));
         }
 
         // ---- What N4N0 is doing ----

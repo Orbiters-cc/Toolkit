@@ -301,9 +301,12 @@ public class N4N0Tests
         Assert.Less(Quaternion.Angle(N4N0Installer.OwnerFacing, body.localRotation), .01f, "At its owner on its owner's client");
 
         playable.SetBool(N4N0Installer.Visible, false); Tick(3);
-        Assert.IsFalse(root.transform.Find(N4N0Installer.Shown).gameObject.activeSelf, "N4N0/Visible off hides N4N0 and its panel");
+        Assert.IsFalse(root.transform.Find(N4N0Installer.StayFrame).gameObject.activeSelf, "N4N0/Visible off hides the bot");
+        Assert.IsFalse(screen.gameObject.activeSelf, "and its panel, N4N0/Text/Visible on");
+        Assert.IsTrue(root.transform.Find(N4N0Installer.Shown).gameObject.activeSelf, "The rest of N4N0 (its menu) stays");
         playable.SetBool(N4N0Installer.Visible, true); Tick(3);
-        Assert.IsTrue(root.transform.Find(N4N0Installer.Shown).gameObject.activeSelf);
+        Assert.IsTrue(root.transform.Find(N4N0Installer.StayFrame).gameObject.activeSelf);
+        Assert.IsTrue(screen.gameObject.activeSelf, "The panel again");
     }
 
     // A recording or a 3D picture (N4N0/Capture/Record, local) hides N4N0's screen, handle, link card, text panel and desktop
@@ -636,6 +639,100 @@ public class N4N0Tests
         Assert.AreEqual(N4N0Installer.LookAwayTime, away.motion.averageDuration, 1e-3f, "Out of sight that long first");
     }
 
+    // The bot and the menu are two choices (screen version 17): Show N4N0 (N4N0/Visible) off hides the bot alone, and the
+    // menu opens before the eyes where it does with the bot, its contacts and pointers there to press it, no beam reaching
+    // it; the four combinations of the two toggles each show what they say.
+    [Test]
+    public void TheMenuShowsAndPressesWithoutTheBot()
+    {
+        if (VrcFury.Writer == null) Assert.Ignore("Requires the VRCFury integration.");
+        var prefab = AssetDatabase.LoadAssetAtPath<GameObject>(N4N0Installer.CreatePrefab(folder));
+        var (avatar, head) = Humanoid(eyes: 1.4f);
+        var n4n0 = ((GameObject)PrefabUtility.InstantiatePrefab(prefab, avatar)).transform;
+        AttachmentHooks.Prepare(n4n0.gameObject, avatar);
+        var screen = n4n0.Find(N4N0Installer.ScreenObject);
+        var renderer = screen.GetComponent<SkinnedMeshRenderer>();
+        var bot = n4n0.Find(N4N0Installer.StayFrame);
+        var panel = n4n0.Find(N4N0Installer.Panel);
+        // What presses the menu: in desktop mode the eyes' and the gaze point's senders and their receivers; in VR the
+        // fingertips' and their aims' (in the contact room under the avatar) and their receivers.
+        var shown = n4n0.Find(N4N0Installer.Shown);
+        bool Receives(ContactBase c, params string[] prefixes) => c is VRCContactReceiver r && prefixes.Any(p => r.parameter.StartsWith(p, StringComparison.Ordinal));
+        bool Sends(ContactBase c, params string[] prefixes) => c is VRCContactSender s && s.collisionTags.Any(t => prefixes.Any(p => t.StartsWith(p, StringComparison.Ordinal)));
+        var contacts = shown.GetComponentsInChildren<ContactBase>(true).ToList();
+        var looking = contacts.Where(c => Receives(c, N4N0Installer.ScreenEyePrefix, N4N0Installer.ScreenGazePrefix) || Sends(c, N4N0Installer.EyeTag, N4N0Installer.GazeTag)).ToList();
+        var pointing = contacts.Where(c => Receives(c, N4N0Installer.ScreenTouchPrefix, N4N0Installer.ScreenAimPrefix) || Sends(c, N4N0Installer.TipTagPrefix, N4N0Installer.AimTagPrefix)).ToList();
+        Assert.AreEqual((2 * N4N0Installer.ScreenTouchPoints.Length, 2), (looking.Count(c => c is VRCContactReceiver), looking.Count(c => c is VRCContactSender)), "The eyes' receivers and senders");
+        Assert.AreEqual((4 * N4N0Installer.ScreenTouchPoints.Length, 4), (pointing.Count(c => c is VRCContactReceiver), pointing.Count(c => c is VRCContactSender)), "The fingers'");
+        var presses = looking;
+        Assert.IsTrue(shown.GetComponentsInChildren<ContactBase>(true).Where(c => c.transform.IsChildOf(bot)).All(c => c is VRCContactReceiver r && r.parameter == N4N0Installer.Touch),
+            "Only N4N0's own touch goes with the bot");
+        Assert.IsFalse(screen.IsChildOf(bot) || n4n0.Find(N4N0Installer.ContactRoom).IsChildOf(bot) || n4n0.Find(N4N0Installer.Pointers).IsChildOf(bot) ||
+            n4n0.Find(N4N0Installer.ScreenGlide).IsChildOf(bot), "The menu, its contacts, pointers and place are no part of the bot");
+
+        graph = PlayableGraph.Create("N4N0 bot and menu test");
+        playable = AnimatorControllerPlayable.Create(graph, AssetDatabase.LoadAssetAtPath<AnimatorController>(folder + "/N4N0.controller"));
+        AnimationPlayableOutput.Create(graph, "N4N0", n4n0.gameObject.AddComponent<Animator>()).SetSourcePlayable(playable);
+        graph.SetTimeUpdateMode(DirectorUpdateMode.Manual); graph.Play();
+        playable.SetBool("IsLocal", true);
+        playable.SetInteger(N4N0Installer.VRMode, 0);
+        var solver = new ConstraintSolver();
+        void Step(int updates) { for (int i = 0; i < updates; i++) { graph.Evaluate(.02f); solver.Solve(); } }
+        float Beam() { var block = new MaterialPropertyBlock(); renderer.GetPropertyBlock(block); return block.GetFloat("_Beam"); }
+        float size = 1.4f / N4N0Installer.ReferenceEyes;
+        var eyesFromHead = Quaternion.Inverse(head.rotation) * (avatar.TransformPoint(avatar.GetComponent<VRCAvatarDescriptor>().ViewPosition) - head.position);
+        Vector3 Home() => head.position + head.rotation * eyesFromHead + head.rotation * Quaternion.Inverse(avatar.rotation) * (avatar.rotation * N4N0Installer.ScreenHomeFromEyes * size);
+        void Expect(bool visible, bool menu)
+        {
+            playable.SetBool(N4N0Installer.Visible, visible);
+            playable.SetBool(N4N0Installer.Menu, menu);
+            playable.SetBool(N4N0Installer.TextVisible, true);
+            Step(4);
+            string which = (visible ? "bot on" : "bot off") + ", " + (menu ? "menu on" : "menu off");
+            Assert.AreEqual(visible, bot.gameObject.activeInHierarchy, which + ": the bot");
+            Assert.AreEqual(visible, panel.gameObject.activeInHierarchy, which + ": its speech panel");
+            Assert.AreEqual(menu, screen.gameObject.activeInHierarchy, which + ": the menu");
+            if (!menu) return;
+            Assert.IsTrue(renderer.enabled, which);
+            Assert.AreEqual(visible ? N4N0Installer.ScreenBeamLevel : 0, Beam(), 1e-4f, which + ": the beam to the menu");
+            Assert.Less(Vector3.Distance(Home(), screen.position), 1e-3f, which + ": the menu before the eyes");
+            Assert.IsTrue(presses.All(c => c.gameObject.activeInHierarchy && c.enabled), which + ": everything that presses it is there");
+        }
+        try
+        {
+            solver.Track(n4n0.gameObject);
+            Step(2);
+            Assert.IsTrue(bot.gameObject.activeInHierarchy && !screen.gameObject.activeInHierarchy, "By default: the bot, the menu closed");
+            Expect(true, true);
+            Expect(false, true);
+            Expect(false, false);
+            Expect(true, false);
+            Expect(false, true);
+            // Hiding the bot with the menu open leaves the menu where it is.
+            playable.SetBool(N4N0Installer.ScreenPlaced, true);
+            Step(3);
+            var there = screen.position;
+            playable.SetBool(N4N0Installer.Visible, true);
+            Step(3);
+            playable.SetBool(N4N0Installer.Visible, false);
+            Step(3);
+            Assert.Less(Vector3.Distance(there, screen.position), 1e-3f, "The bot comes and goes; the menu stays where it is");
+            Assert.IsTrue(screen.gameObject.activeInHierarchy);
+            // In VR, with the screen replacing the overlay: pressed with the fingers, the bot hidden.
+            playable.SetBool(N4N0Installer.ScreenPlaced, false);
+            playable.SetInteger(N4N0Installer.VRMode, 1);
+            playable.SetBool(N4N0Installer.ScreenReplace, true);
+            presses = pointing;
+            Expect(false, true);
+            Expect(true, true);
+        }
+        finally { solver.Release(); }
+
+        // Saved and on by default, synced as before: an avatar updated keeps its bot, and no bit is added.
+        var visibleParameter = AssetDatabase.LoadAssetAtPath<VRCExpressionParameters>(folder + "/Parameters.asset").parameters.Single(p => p.name == N4N0Installer.Visible);
+        Assert.AreEqual((true, true, 1f), (visibleParameter.saved, visibleParameter.networkSynced, visibleParameter.defaultValue));
+    }
+
     [Test]
     public void GrabbingThenRecenteringLeavesTheScreenStillInFrontOfTheEyes()
     {
@@ -818,6 +915,16 @@ public class N4N0Tests
         playable.SetBool(N4N0Installer.CardOut, false);
         Tick(3);
         Assert.IsFalse(model.gameObject.activeSelf, "Taken back");
+
+        // With the bot hidden there is no beam: the card comes out alone.
+        playable.SetBool(N4N0Installer.Visible, false);
+        playable.SetBool(N4N0Installer.CardOut, true);
+        Tick(3);
+        Assert.IsTrue(model.gameObject.activeSelf, "Out without the bot");
+        Assert.AreEqual(0, Beam(), 1e-3f, "no beam from a hidden bot");
+        playable.SetBool(N4N0Installer.CardOut, false);
+        playable.SetBool(N4N0Installer.Visible, true);
+        Tick(3);
     }
 
     [Test]
@@ -1257,7 +1364,7 @@ public class N4N0Tests
         var parameters = AssetDatabase.LoadAssetAtPath<VRCExpressionParameters>(N4N0Installer.OptionsFolder + "Text slots 8 + screen in VR/Parameters.asset");
         var version = parameters.parameters.Single(p => p.name == N4N0Installer.ScreenVersionParameter);
         Assert.AreEqual((VRCExpressionParameters.ValueType.Int, false, false, (float)N4N0Installer.ScreenVersion), (version.valueType, version.networkSynced, version.saved, version.defaultValue));
-        Assert.AreEqual(16, N4N0Installer.ScreenVersion);
+        Assert.AreEqual(17, N4N0Installer.ScreenVersion);
     }
 
     // The Action Menu has room for eight: the two 3D pictures cost one more place, so with both options Walk boost and Light

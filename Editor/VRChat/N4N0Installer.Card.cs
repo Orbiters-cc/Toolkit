@@ -309,7 +309,8 @@ namespace Orbiters.Toolkit.Editor.VRChat
             }
         }
 
-        // N4N0's beam projects the card as it appears, fading out, then the card stands alone.
+        // N4N0's beam projects the card as it appears, fading out, then the card stands alone; with the bot hidden
+        // (N4N0/Visible off) there is no beam: the card appears alone.
         private static void CardBeamLayer(AnimatorController controller)
         {
             var machine = Layer(controller, "Card beam");
@@ -324,7 +325,9 @@ namespace Orbiters.Toolkit.Editor.VRChat
             var alone = HeldPropRig.State(controller, machine, "Alone", none);
             foreach (var state in new[] { hidden, projecting, alone }) state.writeDefaultValues = true;
             machine.defaultState = hidden;
-            Transition(hidden, projecting, (CardOut, AnimatorConditionMode.If, 0));
+            Transition(hidden, projecting, (CardOut, AnimatorConditionMode.If, 0), (Visible, AnimatorConditionMode.If, 0));
+            Transition(hidden, alone, (CardOut, AnimatorConditionMode.If, 0), (Visible, AnimatorConditionMode.IfNot, 0));
+            Transition(projecting, alone, (Visible, AnimatorConditionMode.IfNot, 0));
             Exit(projecting, alone);
             Transition(projecting, hidden, (CardOut, AnimatorConditionMode.IfNot, 0));
             Transition(alone, hidden, (CardOut, AnimatorConditionMode.IfNot, 0));
