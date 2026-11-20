@@ -1,5 +1,17 @@
 # Orbiters Toolkit
 
+## 0.5.4 — 2026-11-20
+
+- **N4N0's bot and its menu are two choices** (`N4N0Installer.Controller`, Orbiters contracts' `Docs/n4n0.md`; screen version
+  17, `N4N0Installer.ScreenWithoutBot`). **Show N4N0** (`N4N0/Visible`) hid the whole of N4N0, its menu's screen with it, so the
+  menu could not show without the bot beside the head. It now hides the bot alone: N4N0 on its tether (its touch, its light and
+  the PhysBone that carries it), its beam to the screen and the link card, and its speech panel. The screen, its contact room,
+  pointers and place are no part of it: the Menu toggle opens the menu before the eyes as ever, pressed with the eyes in desktop
+  mode and the fingers in VR, with the bot on or off. No new parameter, no synced bit, no new component: performance rank and
+  parameter budget as before. Show N4N0 stays saved and on by default, so an updated avatar keeps its bot. Options folder
+  Menu 24. Upload the avatar with the new N4N0 to get it; until then Orbiters - N4N0 opens the menu in its overlay while
+  the bot is hidden. Tests: `N4N0Tests.TheMenuShowsAndPressesWithoutTheBot`.
+
 ## 0.5.3 — 2026-11-20
 
 - **An uploaded avatar's mouth and blink move again with a recent VRCFury.** VRCFury 1.1475 with the VRChat SDK 3.10.6
