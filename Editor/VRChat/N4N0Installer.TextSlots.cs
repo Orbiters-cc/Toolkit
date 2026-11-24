@@ -33,7 +33,7 @@ namespace Orbiters.Toolkit.Editor.VRChat
         // The controller, parameters and menu of each choice of options, shared by every N4N0 switched to it (they name no
         // object of their own: their curves follow paths below N4N0).
         // A new menu or parameters get a new folder: N4N0s switched earlier keep the files they use.
-        internal const string OptionsFolder = "Assets/Orbiters/N4N0/Menu 24/";
+        internal const string OptionsFolder = "Assets/Orbiters/N4N0/Menu 25/";
 
         [InitializeOnLoadMethod]
         private static void RegisterN4N0Options() => AttachmentHooks.RegisterOptions(root => FindAll(root).SelectMany(n4n0 =>
@@ -175,11 +175,11 @@ namespace Orbiters.Toolkit.Editor.VRChat
             SetScreenThumbnails(n4n0, thumbnailBytes);
             SetLightObject(n4n0, light);
             var (controller, parameters, menu) = Shared(textSync, walkBoost, replace, thumbnailBytes, light);
-            component = OwnComponent(component);
+            component = VrcFury.OwnComponent(component);
             var serialized = new SerializedObject(component);
-            Reference(serialized.FindProperty("content.controllers").GetArrayElementAtIndex(found.controllerIndex).FindPropertyRelative("controller"), controller);
-            Reference(serialized.FindProperty("content.prms").GetArrayElementAtIndex(found.parametersIndex).FindPropertyRelative("parameters"), parameters);
-            Reference(serialized.FindProperty("content.menus").GetArrayElementAtIndex(found.menuIndex).FindPropertyRelative("menu"), menu);
+            VrcFury.Reference(serialized.FindProperty("content.controllers").GetArrayElementAtIndex(found.controllerIndex).FindPropertyRelative("controller"), controller);
+            VrcFury.Reference(serialized.FindProperty("content.prms").GetArrayElementAtIndex(found.parametersIndex).FindPropertyRelative("parameters"), parameters);
+            VrcFury.Reference(serialized.FindProperty("content.menus").GetArrayElementAtIndex(found.menuIndex).FindPropertyRelative("menu"), menu);
             var globals = serialized.FindProperty("content.globalParams");
             var names = parameters.parameters.Select(p => p.name).ToList();
             globals.arraySize = names.Count;
@@ -194,16 +194,6 @@ namespace Orbiters.Toolkit.Editor.VRChat
         {
             var renderer = ScreenRenderer(n4n0);
             return renderer != null && ScreenCurrent(renderer.sharedMaterial, thumbnailBytes);
-        }
-
-        // The component itself, or (part of a prefab instance) a copy of it in its place, the prefab's removed.
-        private static Component OwnComponent(Component component)
-        {
-            if (!PrefabUtility.IsPartOfPrefabInstance(component)) return component;
-            var copy = Undo.AddComponent(component.gameObject, component.GetType());
-            EditorUtility.CopySerialized(component, copy);
-            Undo.DestroyObjectImmediate(component);
-            return copy;
         }
 
         private sealed class Found
@@ -245,14 +235,6 @@ namespace Orbiters.Toolkit.Editor.VRChat
                 }
             }
             return null;
-        }
-
-        // A VRCFury asset reference (GuidWrapper): the object and its "guid:fileID".
-        private static void Reference(SerializedProperty wrapper, Object asset)
-        {
-            wrapper.FindPropertyRelative("objRef").objectReferenceValue = asset;
-            var id = wrapper.FindPropertyRelative("id");
-            if (id != null && AssetDatabase.TryGetGUIDAndLocalFileIdentifier(asset, out string guid, out long local)) id.stringValue = guid + ":" + local;
         }
 
         // The controller, parameters and menu for a choice of options, made once in their shared folder.

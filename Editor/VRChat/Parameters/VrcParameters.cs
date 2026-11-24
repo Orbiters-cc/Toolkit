@@ -30,7 +30,7 @@ namespace Orbiters.Toolkit.Editor.VRChat.Parameters
 
         // Parameters apps set over OSC from outside the avatar (heart rate, text and chatbox displays, OSCmooth, VRCOSC,
         // N4N0…), by the names those apps use: nothing in the avatar setting them doesn't make them unused.
-        private static readonly string[] OscPrefixes = { "OSC", "VRCOSC/", "KAT_", "BFI/", "bHaptics", "Heartrate", "HeartRate", "isHR", "ChatBox", "Chatbox", "MagicChatbox", "N4N0/" };
+        private static readonly string[] OscPrefixes = { "OSC", "VRCOSC/", "KAT_", "BFI/", "bHaptics", "Heartrate", "HeartRate", "isHR", "ChatBox", "Chatbox", "MagicChatbox", "N4N0/", "AvatarGun/" };
         private static readonly HashSet<string> OscNames = new HashSet<string>(StringComparer.Ordinal) { "HR", "onesHR", "tensHR", "hundredsHR", "HRPercent", "FullHRPercent" };
 
         /// <summary>Whether apps commonly set <paramref name="name"/> over OSC (by the names they use).</summary>

@@ -115,6 +115,8 @@ namespace Orbiters.Toolkit.Editor.VRChat
             controller.AddParameter(new AnimatorControllerParameter { name = One, type = AnimatorControllerParameterType.Float, defaultFloat = 1 });
             // Read by Orbiters - N4N0 over OSC only: no layer uses it.
             if (walkBoost) controller.AddParameter(WalkBoost, AnimatorControllerParameterType.Float);
+            // Written by the avatar gun's receiver, read by Orbiters - N4N0 over OSC only.
+            controller.AddParameter(AvatarGunInstaller.Hit, AnimatorControllerParameterType.Bool);
 
             // N4N0/Visible shows the bot; its menu (the screen, its contacts and place) opens and works without it.
             BotLayer(controller, controller.layers[0].stateMachine);
@@ -168,6 +170,8 @@ namespace Orbiters.Toolkit.Editor.VRChat
             FitActionMenu(folder, controls);
             InputParametersOf(parameters);
             MirrorController(controller, parameters);
+            // The avatar gun's receiver's: local, no synced bit.
+            parameters.Add(Parameter(AvatarGunInstaller.Hit, synced: false));
             Install(root, folder, controller, MenuPath, "N4N0 menu", controls, parameters.ToArray(), parameters.Select(p => p.name), MenuIcon(folder));
         }
 

@@ -472,7 +472,7 @@ namespace Orbiters.Toolkit.Editor.VRChat
         }
 
         // A 4 × 4 picture, its left half `left` and its right half `right`: sharp, without mipmaps, never compressed.
-        private static Texture2D Palette(string path, Color left, Color right)
+        internal static Texture2D Palette(string path, Color left, Color right)
         {
             var texture = new Texture2D(4, 4, TextureFormat.RGB24, false);
             try

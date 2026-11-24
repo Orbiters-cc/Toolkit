@@ -81,8 +81,9 @@ public class N4N0Tests
         Assert.IsTrue(parameters.parameters.Skip(expected.Count).All(p => p.name.StartsWith("N4N0/Screen/", StringComparison.Ordinal) || p.name.StartsWith("N4N0/Card/", StringComparison.Ordinal) ||
                                                                       p.name.StartsWith("N4N0/Capture/", StringComparison.Ordinal) || p.name.StartsWith("N4N0/Picture/", StringComparison.Ordinal) ||
                                                                       p.name.StartsWith("N4N0/Touchpad/", StringComparison.Ordinal) || p.name.StartsWith("N4N0/Stick/", StringComparison.Ordinal) ||
-                                                                      p.name.StartsWith("N4N0/Mirror/", StringComparison.Ordinal)),
-            "then the screen's, the link card's, the capture kit's (N4N0CaptureTests), the full pictures' (N4N0PictureTests), the controller input's and the screen mirror's (N4N0MirrorTests)");
+                                                                      p.name.StartsWith("N4N0/Mirror/", StringComparison.Ordinal) || p.name == AvatarGunInstaller.Hit),
+            "then the screen's, the link card's, the capture kit's (N4N0CaptureTests), the full pictures' (N4N0PictureTests), the controller input's, the screen mirror's (N4N0MirrorTests) " +
+            "and the avatar gun receiver's (AvatarGunTests)");
         Assert.AreEqual(1 + 8 + 1 + 8 + 8 * 8 + 3 + 8 + 3 + 25, parameters.CalcTotalCost(), "Synced bits: 1 + 8 + 1 + 8 + 8·N, the screen's 3 + 8, the card's 3, the screen's place 24 + 1");
 
         // Global in the Full Controller, so VRCFury keeps the names OSC looks for; its own parameters are renamed as usual.
@@ -1532,8 +1533,11 @@ public class N4N0Tests
         Assert.AreEqual(0, renderer.bones.Length, "No bone: its blendshapes move it");
         Assert.IsEmpty(copy.GetComponentsInChildren<VRCPhysBone>(true), "Quest's Excellent rank allows no PhysBone");
         var receivers = copy.GetComponentsInChildren<VRCContactReceiver>(true);
-        Assert.AreEqual(N4N0Installer.Touch, receivers.Single().parameter, "Its owner touches it");
-        Assert.IsTrue(receivers.Single().localOnly && !receivers.Single().allowOthers, "Local: no contact counts in the rank");
+        var touch = receivers.Single(r => r.parameter != AvatarGunInstaller.Hit);
+        Assert.AreEqual(N4N0Installer.Touch, touch.parameter, "Its owner touches it");
+        Assert.IsTrue(touch.localOnly && !touch.allowOthers, "Local: no contact counts in the rank");
+        // The avatar gun's receiver stays on phones too (AvatarGunTests), local as well.
+        Assert.IsTrue(receivers.Single(r => r.parameter == AvatarGunInstaller.Hit).localOnly, "The avatar gun's receiver: local, no contact counts in the rank");
         Assert.IsEmpty(copy.GetComponentsInChildren<VRCContactSender>(true));
         Assert.LessOrEqual(copy.GetComponentsInChildren<VRCConstraintBase>(true).Length, 2, "On the head, turned like the avatar");
 

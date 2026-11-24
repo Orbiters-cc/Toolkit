@@ -221,6 +221,28 @@ namespace Orbiters.Toolkit.Editor.VRChat
         public static UnityEngine.Object ObjectReference(object wrapper) =>
             wrapper == null ? null : FieldOf(wrapper.GetType(), "objRef", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance, true)?.GetValue(wrapper) as UnityEngine.Object;
 
+        /// <summary>Points a VRCFury asset reference (a GuidWrapper property) at <paramref name="asset"/>: the object and its "guid:fileID".</summary>
+        internal static void Reference(SerializedProperty wrapper, UnityEngine.Object asset)
+        {
+            wrapper.FindPropertyRelative("objRef").objectReferenceValue = asset;
+            var id = wrapper.FindPropertyRelative("id");
+            if (id != null && AssetDatabase.TryGetGUIDAndLocalFileIdentifier(asset, out string guid, out long local)) id.stringValue = guid + ":" + local;
+        }
+
+        /// <summary>
+        /// The VRCFury component itself, or (part of a prefab instance) a copy of it in its place, the prefab's removed, with
+        /// Undo: VRCFury reverts every override of its components in a prefab instance when an upload starts, so a prop's
+        /// options written on the prefab's component would come back off after each upload.
+        /// </summary>
+        internal static Component OwnComponent(Component component)
+        {
+            if (!PrefabUtility.IsPartOfPrefabInstance(component)) return component;
+            var copy = Undo.AddComponent(component.gameObject, component.GetType());
+            EditorUtility.CopySerialized(component, copy);
+            Undo.DestroyObjectImmediate(component);
+            return copy;
+        }
+
         /// <summary>An Armature Link as VRCFury will apply it.</summary>
         public sealed class Link
         {

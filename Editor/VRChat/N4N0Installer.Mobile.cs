@@ -104,7 +104,7 @@ namespace Orbiters.Toolkit.Editor.VRChat
                 var entries = serialized.FindProperty(list);
                 // The new entry copies the last one (an FX controller), then takes its own asset.
                 entries.arraySize++;
-                Reference(entries.GetArrayElementAtIndex(entries.arraySize - 1).FindPropertyRelative(field), asset);
+                VrcFury.Reference(entries.GetArrayElementAtIndex(entries.arraySize - 1).FindPropertyRelative(field), asset);
             }
             Append("content.controllers", "controller", controller);
             Append("content.prms", "parameters", parameters);
@@ -210,8 +210,9 @@ namespace Orbiters.Toolkit.Editor.VRChat
             var controller = AnimatorController.CreateAnimatorControllerAtPath(folder + "/N4N0 mobile.controller");
             controller.AddParameter(new AnimatorControllerParameter { name = Visible, type = AnimatorControllerParameterType.Bool, defaultBool = true });
             controller.AddParameter(State, AnimatorControllerParameterType.Int);
-            // Written by the touch receiver: no PC controller declares it in a mobile build.
+            // Written by the touch receiver and the avatar gun's: no PC controller declares them in a mobile build.
             controller.AddParameter(Touch, AnimatorControllerParameterType.Bool);
+            controller.AddParameter(AvatarGunInstaller.Hit, AnimatorControllerParameterType.Bool);
             controller.AddParameter(Light, AnimatorControllerParameterType.Bool);
             controller.AddParameter(LightColor, AnimatorControllerParameterType.Int);
             controller.AddParameter(new AnimatorControllerParameter { name = LightLevel, type = AnimatorControllerParameterType.Float, defaultFloat = LightLevelDefault });

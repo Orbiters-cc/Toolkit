@@ -1,5 +1,21 @@
 # Orbiters Toolkit
 
+## 0.5.5 — 2026-11-24
+
+- **The avatar gun** (`AvatarGunInstaller`, Orbiters contracts' `Docs/avatar-gun.md`; see Avatar gun below), a new gallery
+  item: a toy ray gun in N4N0's look that its wearer points at another player; with Orbiters - N4N0 on both sides, the hit
+  player's avatar changes to the public avatar the gun is loaded with. Its menu (**Avatar gun**, **Choose avatar**),
+  the right palm or, through the card's **Hand** option, the left one, before the eyes in desktop mode; the fist (or
+  Orbiters - N4N0's `AvatarGun/Pull`) fires a loaded gun for 0.25 s, then 0.75 s before the next; every copy of the
+  avatar casts the ray and shows the beam from the synced `AvatarGun/Fire`. 3 synced bits, 2 contacts and a raycast
+  that count. Tests: `AvatarGunTests`.
+- **N4N0 carries the avatar gun's receiver** (around the body, on N4N0's root, in PC and phone builds): a player wearing
+  N4N0 can be changed by a shot. It raises `AvatarGun/Hit` (local, no synced bit; declared by both of N4N0's controllers
+  for OSC). A build with the gun and N4N0 keeps one receiver. Options folder Menu 25. Upload the avatar with the next N4N0
+  release to get it.
+- `VrcParameters` leaves `AvatarGun/` parameters to OSC apps (optimizers do not touch them). `VrcFury.Reference` and
+  `VrcFury.OwnComponent` are shared by N4N0's options and the gun's Hand option.
+
 ## 0.5.4 — 2026-11-20
 
 - **N4N0's bot and its menu are two choices** (`N4N0Installer.Controller`, Orbiters contracts' `Docs/n4n0.md`; screen version
@@ -1406,6 +1422,47 @@ sync value.
   Pointer L, Pointer R). `Bind` holds them to the index fingertips (the last finger bone's child, else as far past it as
   that bone is long); N4N0's options changing gives an older screen its pointers. Finger contacts no longer touch the
   screen. Shared files in `N4N0/Screen 6` (revision 6), options in `N4N0/Menu 10`.
+
+## Avatar gun
+
+`AvatarGunInstaller` builds the avatar gun (Orbiters contracts' `Docs/avatar-gun.md`), a My Avatar gallery item:
+`CreatePrefab(folder)` writes the prefab, its controller, menu, parameters, mesh, materials, beam shader and icons into a
+fresh folder, and `Bind` (an attachment hook) fits it to the avatar it is placed on. Its wearer points it at another
+player and pulls the trigger; that player's Orbiters - N4N0 changes their avatar to the public avatar the gun is loaded
+with (Orbiters - N4N0 picks it, reports the shot and the hit, and asks the hit player's settings).
+
+- **The model**: a small toy ray gun in N4N0's look, one mesh in VRChat's mobile Standard Lite: black, thin white strokes,
+  N4N0's black ball at the back with its two eyes on the wearer, three finned rings, a flared bell and an emitter (a ring
+  and a lens) that is dim while unloaded and glows N4N0's green while `AvatarGun/Loaded` is on (the second material slot,
+  swapped by the animator). The beam is a second, skinned mesh from the muzzle to the ray's end (shader "Avatar gun beam",
+  copied into the item's folder; viewers who hide custom shaders see none). No light, no sound.
+- **Holding**: `AvatarGun/Out` (the menu's **Avatar gun** toggle, or Orbiters - N4N0) puts it in the right palm, its
+  barrel along the hand (wrist to middle knuckle) and its top on the index's side, sized by the hand; in desktop mode
+  (`VRMode` 0) it hangs low and to the right before the eyes, on the head bone, so it aims where its owner looks. The
+  card's **Hand** option holds it in the left hand (its Full Controller takes the left hand's controller from
+  `Assets/Orbiters/Avatar gun/Hands 1`; no synced bit).
+- **Trigger**: the gun hand's fist (`GestureRight` 1) squeezed past 0.5, let go below 0.4 (or `AvatarGun/Pull`, set by
+  Orbiters - N4N0 in desktop mode). Taking the gun out, and each shot, want the trigger let go first. A loaded gun raises
+  `AvatarGun/Fire` (synced, the owner's local parameter driver) for 0.25 s, then keeps it off for 0.75 s; an unloaded one
+  only clicks (a twitch, its owner's alone).
+- **The shot**: every copy of the avatar follows the synced Fire, with nothing on the way reading IsLocal: the hit is
+  seen on the hit player's client, by the shooter's copy. A `VRCRaycast` (component version 1.1, which also meets remote
+  players' trigger colliders and the local player's capsule) from the muzzle, 20 m, worlds and players, unscaled, moves
+  `Gun/Muzzle/Hit`, whose 5 cm sphere sender (tag `OrbitersAvatarGun`, not local) is on during Fire; a capsule sender
+  covers the muzzle's first 1.5 m for a ray that starts inside the other player. A miss leaves the end at full range.
+  The beam fades out over the shot, the muzzle flashes, the end bursts and the gun kicks.
+- **The receiver** (`AddReceiver`, `BindReceiver`): a local capsule (0.45 m wide and 2.3 m tall at 1.6 m eye height,
+  scaled with the avatar's eye height, upright from its feet) that refuses its own avatar's senders and raises
+  `AvatarGun/Hit` (local) while another player's touches it. The gun carries one, and so does N4N0 from its release with
+  it (on N4N0's root: neither the bot's choice nor a phone build drops it); a build keeps one of them
+  (`AvatarGunReceiverStep`, before VRCFury).
+- **Parameters**: `AvatarGun/Out`, `Loaded`, `Fire` synced (3 bits), `Pull`, `Choose` (the menu's **Choose avatar**
+  button, which opens Orbiters - N4N0's picker) and `Hit` local; none saved, all global in the Full Controller and left
+  alone by optimizers (`VrcParameters`).
+- **Costs**: 3 synced bits; 2 contacts that count (the senders; the receiver is local), 1 raycast, 2 VRChat
+  constraints, a mesh and a skinned mesh (the beam), 3 material slots and about 3,300 triangles (the SDK's stats on
+  MasculineCanine with and without it, PC and Quest). On a lean PC avatar the material slots and the second skinned mesh
+  are what can cost a rank step; the raycast stays within Excellent (1).
 
 ## Avatar manifests
 

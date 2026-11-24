@@ -215,6 +215,9 @@ namespace Orbiters.Toolkit.Editor.VRChat
             // The screen mirror's camera (N4N0Installer.Mirror).
             AddMirror(root.transform, folder);
             AddParts(root.transform, folder);
+            // The avatar gun's receiver (Docs/avatar-gun.md): whoever wears N4N0 can be changed by a shot. Around the body,
+            // not the bot, and kept in both platforms' builds.
+            AvatarGunInstaller.AddReceiver(root.transform);
         }
 
         /// <summary>
@@ -293,11 +296,12 @@ namespace Orbiters.Toolkit.Editor.VRChat
             BindCardHands(n4n0, animator, size);
             FitLight(n4n0);
             BindMobile(n4n0, avatar, bone, eyes, size);
+            AvatarGunInstaller.BindReceiver(n4n0, avatar);
             EditorUtility.SetDirty(follow); EditorUtility.SetDirty(level); EditorUtility.SetDirty(sight);
         }
 
         // Where the avatar sees from: its view position, else a little above and before the head bone.
-        private static Vector3 Eyes(Transform avatar, Transform head)
+        internal static Vector3 Eyes(Transform avatar, Transform head)
         {
             var descriptor = avatar.GetComponent<VRCAvatarDescriptor>();
             if (descriptor != null) return avatar.TransformPoint(descriptor.ViewPosition);
